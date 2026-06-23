@@ -18,6 +18,10 @@ function sb_http($method, $url, $headers, $body = null) {
         CURLOPT_SSL_VERIFYHOST => 2,
     ]);
     if ($body !== null) curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+    // Em dev local (atrás de proxy/antivírus que intercepta SSL) usa o CA do php.ini.
+    // No servidor o ini fica vazio e o curl usa o CA do sistema normalmente.
+    $ca = ini_get('curl.cainfo');
+    if ($ca && is_file($ca)) curl_setopt($ch, CURLOPT_CAINFO, $ca);
     $res  = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $err  = curl_error($ch);

@@ -13,13 +13,19 @@ try {
     $obra = $pdo->query("SELECT * FROM obra WHERE id=1")->fetch();
 
     $rows = $pdo->query("
-        SELECT s.ordem, s.nome, s.fase, s.curva, s.unidade, s.forma_contratacao,
-               s.lead_dias, s.marco_cronograma, s.termos_cronograma, s.quantitativo,
+        SELECT s.ordem, s.nome, s.fase, s.grupo, s.grupo_ordem, s.curva, s.unidade, s.forma_contratacao,
+               s.lead_dias, s.marco_cronograma, s.termos_cronograma, s.quantitativo AS quantitativo_txt,
+               s.escopo, s.variaveis_cotar, s.licoes, s.documentos, s.verba_linhas,
+               s.responsavel_padrao,
                r.status, r.responsavel, r.fornecedor, r.inicio_cotacao, r.fim_cotacao,
-               r.verba_estim, r.observacoes, r.validado
+               r.verba_estim, r.observacoes, r.validado,
+               r.verba_override, r.lead_override, r.crono_marco_override,
+               r.data_necessaria_override, r.orcamento_refs,
+               r.quantitativo_valor, r.quantitativo_unidade, r.quantitativo_refs, r.quantitativo_fonte,
+               r.tipo, r.verba_metodo, r.verba_material, r.verba_mo, r.composicao_id, r.area_base
         FROM servico s
         JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = 1
-        ORDER BY s.ordem
+        ORDER BY s.grupo_ordem, s.ordem
     ")->fetchAll();
 
     // datas vivas do cronograma (com cache); se falhar, segue sem datas
@@ -33,9 +39,44 @@ try {
     $itens = [];
     $verba_total = 0;
     foreach ($rows as $r) {
-        $d = $tasks ? crono_resolver($r, $tasks)
+        $auto = $tasks ? crono_resolver($r, $tasks)
                     : ['data_necessaria'=>null,'data_gatilho'=>null,'marco_casado'=>null,'confianca'=>'cronograma indisponível'];
-        $verba_total += (float)$r['verba_estim'];
+
+        // overrides da curadoria têm prioridade sobre o automático
+        $lead = ($r['lead_override'] !== null && $r['lead_override'] !== '')
+                ? (int)$r['lead_override'] : $r['lead_dias'];
+        $data_nec = $r['data_necessaria_override'] ?: $auto['data_necessaria'];
+        $marco    = $r['crono_marco_override'] ?: $auto['marco_casado'];
+        $crono_pct = $r['crono_marco_override']
+                   ? crono_percent_por_nome($r['crono_marco_override'], $tasks)
+                   : ($auto['percent'] ?? null);
+        $gatilho  = ($data_nec && $lead)
+                ? date('Y-m-d', strtotime($data_nec . ' -' . (int)$lead . ' days')) : null;
+        $verba    = ($r['verba_override'] !== null && $r['verba_override'] !== '')
+                ? (float)$r['verba_override'] : (float)$r['verba_estim'];
+
+        $d = [
+            'data_necessaria' => $data_nec,
+            'data_gatilho'    => $gatilho,
+            'marco_casado'    => $marco,
+            'cronograma_pct'  => $crono_pct,
+            'confianca'       => $r['data_necessaria_override'] ? 'curado (manual)' : $auto['confianca'],
+            'lead_efetivo'    => $lead,
+            'verba'           => $verba,
+            'curado_verba'    => $r['verba_override'] !== null,
+            'curado_data'     => (bool)$r['data_necessaria_override'],
+            'orcamento_refs'  => $r['orcamento_refs'] ? json_decode($r['orcamento_refs'], true) : [],
+            'quantitativo'         => $r['quantitativo_valor'] !== null ? (float)$r['quantitativo_valor'] : null,
+            'quantitativo_unidade' => $r['quantitativo_unidade'],
+            'quantitativo_fonte'   => $r['quantitativo_fonte'],
+            'quantitativo_refs'    => $r['quantitativo_refs'] ? json_decode($r['quantitativo_refs'], true) : [],
+            'curado_quant'         => $r['quantitativo_valor'] !== null,
+            'verba_material'       => $r['verba_material'] !== null ? (float)$r['verba_material'] : null,
+            'verba_mo'             => $r['verba_mo'] !== null ? (float)$r['verba_mo'] : null,
+            'verba_metodo'         => $r['verba_metodo'],
+        ];
+        $verba_total += $verba;
+        $r['obra_nome'] = $obra['nome']; // p/ identificação e busca multi-obra futura
         $itens[] = array_merge($r, $d);
     }
 

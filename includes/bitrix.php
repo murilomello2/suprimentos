@@ -16,6 +16,8 @@ function bx_call($method, $params = []) {
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_SSL_VERIFYHOST => 2,
     ]);
+    $ca = ini_get('curl.cainfo'); // dev local atrás de proxy/AV; no servidor o ini é vazio
+    if ($ca && is_file($ca)) curl_setopt($ch, CURLOPT_CAINFO, $ca);
     $res  = curl_exec($ch);
     $err  = curl_error($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);

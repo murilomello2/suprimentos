@@ -21,7 +21,7 @@ function crono_tasks($cronograma_id) {
     }
     // tarefas de resumo: poucas centenas, o suficiente para casar fases/marcos
     $path = 'obra_cronograma_tarefas?cronograma_id=eq.' . rawurlencode($cronograma_id)
-          . '&outline_level=lte.3&select=nome,wbs,start,finish,is_milestone,outline_level&order=ordem&limit=600';
+          . '&outline_level=lte.3&select=nome,wbs,start,finish,is_milestone,outline_level,percent_complete&order=ordem&limit=600';
     $rows = sb_get($path);
     @file_put_contents($cache, json_encode($rows));
     return $rows;
@@ -46,19 +46,19 @@ function crono_resolver($servico, $tasks) {
 
     // Casa por PRIORIDADE: o De-Para lista os termos do marco principal primeiro.
     // Usa o primeiro termo que encontrar tarefa(s); entre elas, a menor data de início.
-    $melhor = null; $marco = null; $idxTermo = null;
+    $melhor = null; $marco = null; $idxTermo = null; $pct = null;
     foreach ($termos as $ti => $t) {
         foreach ($tasks as $tk) {
             $st = $tk['start'] ?? null;
             if (!$st) continue;
             if (strpos(_norm_txt($tk['nome']), $t) !== false) {
-                if (!$melhor || $st < $melhor) { $melhor = $st; $marco = $tk['nome']; }
+                if (!$melhor || $st < $melhor) { $melhor = $st; $marco = $tk['nome']; $pct = $tk['percent_complete'] ?? null; }
             }
         }
         if ($melhor) { $idxTermo = $ti; break; } // achou no termo de maior prioridade
     }
     if (!$melhor) {
-        return ['data_necessaria'=>null, 'data_gatilho'=>null, 'marco_casado'=>null, 'confianca'=>'sem match'];
+        return ['data_necessaria'=>null, 'data_gatilho'=>null, 'marco_casado'=>null, 'confianca'=>'sem match', 'percent'=>null];
     }
     $gatilho = null;
     if (!empty($servico['lead_dias'])) {
@@ -70,5 +70,15 @@ function crono_resolver($servico, $tasks) {
         'data_gatilho'    => $gatilho,
         'marco_casado'    => $marco,
         'confianca'       => $idxTermo === 0 ? 'auto (marco principal)' : 'auto (termo secundário)',
+        'percent'         => $pct !== null ? (float)$pct : null,
     ];
+}
+
+/** % de conclusão de uma tarefa (por nome) buscada no conjunto de tarefas em cache. */
+function crono_percent_por_nome($nome, $tasks) {
+    $alvo = _norm_txt($nome);
+    foreach ($tasks as $tk) {
+        if (_norm_txt($tk['nome']) === $alvo && isset($tk['percent_complete'])) return (float)$tk['percent_complete'];
+    }
+    return null;
 }

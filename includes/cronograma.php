@@ -28,10 +28,11 @@ function crono_tasks($cronograma_id) {
 }
 
 function _norm_txt($s) {
-    $s = mb_strtolower($s, 'UTF-8');
-    $s = strtr($s, ['á'=>'a','à'=>'a','â'=>'a','ã'=>'a','é'=>'e','ê'=>'e','í'=>'i',
-                    'ó'=>'o','ô'=>'o','õ'=>'o','ú'=>'u','ç'=>'c']);
-    return $s;
+    // sem dependência de mbstring (servidor não tem a extensão):
+    // mapeia acentos (maiúsc. e minúsc.) para ascii e depois minúscula A-Z.
+    $map = ['Á'=>'a','À'=>'a','Â'=>'a','Ã'=>'a','É'=>'e','Ê'=>'e','Í'=>'i','Ó'=>'o','Ô'=>'o','Õ'=>'o','Ú'=>'u','Ç'=>'c',
+            'á'=>'a','à'=>'a','â'=>'a','ã'=>'a','é'=>'e','ê'=>'e','í'=>'i','ó'=>'o','ô'=>'o','õ'=>'o','ú'=>'u','ç'=>'c'];
+    return strtolower(strtr((string)$s, $map));
 }
 
 /** Resolve datas de um serviço. Retorna [data_necessaria, data_gatilho, marco_casado, confianca]. */
@@ -39,7 +40,7 @@ function crono_resolver($servico, $tasks) {
     $termos = [];
     foreach (preg_split('/[;,\/]/', (string)$servico['termos_cronograma']) as $t) {
         $t = trim(_norm_txt($t));
-        if (mb_strlen($t) >= 4) $termos[] = $t;
+        if (strlen($t) >= 4) $termos[] = $t;
     }
     if (!$termos && $servico['nome']) $termos[] = _norm_txt($servico['nome']);
 
@@ -47,7 +48,7 @@ function crono_resolver($servico, $tasks) {
     foreach ($tasks as $tk) {
         $nome = _norm_txt($tk['nome']);
         foreach ($termos as $t) {
-            if (mb_strpos($nome, $t) !== false) {
+            if (strpos($nome, $t) !== false) {
                 $st = $tk['start'] ?? null;
                 if ($st && (!$melhor || $st < $melhor)) { $melhor = $st; $marco = $tk['nome']; }
             }

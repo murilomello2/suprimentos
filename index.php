@@ -1,75 +1,180 @@
-<?php /* Front-end — NUNCA contém o webhook. Apenas consome actions/test.php. */ ?>
+<?php /* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php. */ ?>
 <!doctype html>
 <html lang="pt-br">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Teste MCP Bitrix — Suprimentos</title>
-<link rel="stylesheet" href="https://app.capremconstrutora.com.br/estilo/style.css">
+<title>Cockpit de Suprimentos — Caprem</title>
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 <style>
-  body{background:#f7f8fa;font-family:Arial,Helvetica,sans-serif;margin:0;padding:16px;color:#222}
-  .card{background:#fff;border:1px solid #e3e6ea;border-radius:10px;padding:18px 20px;max-width:680px;margin:0 auto 14px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
-  .title{display:flex;align-items:center;gap:8px;font-size:18px;font-weight:700;margin:0 0 4px}
-  .muted{color:#6b7280;font-size:13px;margin:0 0 14px}
-  button{background:#1f6b3b;color:#fff;border:0;border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
-  button:disabled{opacity:.6;cursor:default}
-  .row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f1f3;font-size:14px}
-  .row b{color:#374151}
-  .chip{display:inline-block;background:#eef6f0;color:#1f6b3b;border-radius:999px;padding:3px 10px;margin:3px 4px 0 0;font-size:12px}
-  .ok{color:#1f6b3b}.err{color:#b91c1c}
-  pre{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;overflow:auto;font-size:12px;max-height:260px}
-  .status{font-weight:700;margin-bottom:10px}
-  .material-icons{vertical-align:middle}
+  :root{
+    --verde:#1f6b3b; --verde-d:#16502c; --dourado:#c9a227;
+    --bg:#f5f7f6; --card:#fff; --line:#e6e9e7; --txt:#1f2937; --muted:#6b7280;
+    --ok:#1f8f4e; --okbg:#e9f6ee; --and:#c8821a; --andbg:#fdf3e3;
+    --pend:#c0392b; --pendbg:#fbeae8; --neu:#9aa3ab; --neubg:#f1f3f4;
+    --cot:#2563eb; --cotbg:#e8effe;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--txt)}
+  .app{display:flex;min-height:100vh}
+  /* sidebar */
+  .side{width:240px;background:var(--verde);color:#eafaef;flex-shrink:0;display:flex;flex-direction:column}
+  .brand{padding:18px 18px 8px;font-size:17px;font-weight:800;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
+  .brand .material-icons{color:var(--dourado)}
+  .navlabel{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:#bfe6cd;padding:16px 18px 6px;opacity:.85}
+  .nav a{display:flex;align-items:center;gap:10px;padding:10px 18px;color:#eafaef;text-decoration:none;font-size:14px;border-left:3px solid transparent}
+  .nav a .material-icons{font-size:19px}
+  .nav a:hover{background:rgba(255,255,255,.06)}
+  .nav a.active{background:rgba(255,255,255,.12);border-left-color:var(--dourado);font-weight:700}
+  /* main */
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .top{padding:20px 26px 6px}
+  .h1{font-size:24px;font-weight:800;color:var(--verde-d);margin:0;display:flex;align-items:center;gap:10px}
+  .sub{color:var(--muted);font-size:13px;margin:4px 0 0}
+  .kpis{display:flex;gap:12px;flex-wrap:wrap;padding:14px 26px 6px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:140px}
+  .kpi .v{font-size:22px;font-weight:800;color:var(--verde-d)}
+  .kpi .l{font-size:12px;color:var(--muted);margin-top:2px}
+  .bar{padding:12px 26px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .search{flex:1;min-width:200px;display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 12px}
+  .search input{border:0;outline:0;flex:1;font-size:14px;background:transparent}
+  select{border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13px;background:var(--card);color:var(--txt)}
+  .wrap{padding:6px 26px 30px;overflow:auto}
+  table{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13px}
+  thead th{background:#fafbfb;text-align:left;padding:11px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);border-bottom:1px solid var(--line);position:sticky;top:0;white-space:nowrap}
+  tbody td{padding:10px 12px;border-bottom:1px solid #f1f3f2;vertical-align:middle}
+  tbody tr:hover{background:#fafdfb}
+  .svc{font-weight:600;color:#111827}
+  .fase{display:inline-block;font-size:11px;color:var(--muted);margin-top:2px}
+  .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
+  .p-ok{background:var(--okbg);color:var(--ok)} .p-and{background:var(--andbg);color:var(--and)}
+  .p-pend{background:var(--pendbg);color:var(--pend)} .p-neu{background:var(--neubg);color:var(--neu)}
+  .p-cot{background:var(--cotbg);color:var(--cot)}
+  .dot{width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block}
+  .money{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .muted{color:var(--muted)}
+  .date{white-space:nowrap;font-variant-numeric:tabular-nums}
+  .date.alert{color:var(--pend);font-weight:700}
+  .curva{display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;border-radius:6px;font-size:11px;font-weight:800;color:#fff}
+  .c-A{background:#c0392b}.c-B{background:#c8821a}.c-C{background:#1f8f4e}
+  .empty{padding:40px;text-align:center;color:var(--muted)}
+  .badge{font-size:11px;color:var(--muted)}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;display:none}
 </style>
 </head>
 <body>
-<div class="card">
-  <p class="title"><span class="material-icons">inventory_2</span> Teste de Conexão — MCP Bitrix24</p>
-  <p class="muted">App de validação do projeto <b>Suprimentos</b>. Testa a cadeia: front → PHP (actions) → webhook → Bitrix24. O webhook fica somente no servidor.</p>
-  <button id="btn"><span class="material-icons" style="font-size:18px">sync</span> Testar conexão</button>
-</div>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span class="material-icons">inventory_2</span> Cockpit de Suprimentos</div>
+    <div class="navlabel">Aquisições</div>
+    <nav class="nav">
+      <a href="#" class="active"><span class="material-icons">radar</span> Radar de Aquisições</a>
+      <a href="#" onclick="toast('Mapa de Cotações — em breve (Fase 3)');return false"><span class="material-icons">request_quote</span> Mapa de Cotações</a>
+    </nav>
+    <div class="navlabel">Planejamento</div>
+    <nav class="nav">
+      <a href="#" onclick="toast('Puxado do Cockpit de Obras (Supabase)');return false"><span class="material-icons">event</span> Cronograma</a>
+      <a href="#" onclick="toast('Em breve');return false"><span class="material-icons">payments</span> Orçamento</a>
+    </nav>
+  </aside>
 
-<div class="card" id="result" style="display:none">
-  <p class="title"><span class="material-icons">verified</span> Resultado</p>
-  <div id="status" class="status"></div>
-  <div id="profile"></div>
-  <div id="scopes" style="margin-top:10px"></div>
-  <details style="margin-top:12px"><summary class="muted">Resposta bruta (JSON)</summary><pre id="raw"></pre></details>
+  <main class="main">
+    <div class="top">
+      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">radar</span> Radar de Aquisições</h1>
+      <p class="sub" id="sub">Carregando obra…</p>
+    </div>
+
+    <div class="kpis" id="kpis"></div>
+
+    <div class="bar">
+      <div class="search"><span class="material-icons" style="color:var(--muted)">search</span>
+        <input id="q" placeholder="Buscar serviço…" oninput="render()"></div>
+      <select id="ffase" onchange="render()"><option value="">Todas as fases</option></select>
+      <select id="fstatus" onchange="render()"><option value="">Todos os status</option></select>
+    </div>
+
+    <div class="wrap">
+      <table>
+        <thead><tr>
+          <th>#</th><th>Serviço</th><th>Cv</th><th>Status</th>
+          <th>Início cotação<br><span class="badge">(gatilho)</span></th>
+          <th>Necessário em obra</th><th>Lead</th><th>Verba estim.</th>
+          <th>Responsável</th><th>Fornecedor</th>
+        </tr></thead>
+        <tbody id="tb"><tr><td colspan="10" class="empty">Carregando…</td></tr></tbody>
+      </table>
+    </div>
+  </main>
 </div>
+<div class="toast" id="toastEl"></div>
 
 <script>
-const btn = document.getElementById('btn');
-btn.addEventListener('click', async () => {
-  btn.disabled = true;
-  const icon = btn.querySelector('.material-icons'); icon.textContent = 'hourglass_top';
-  const box = document.getElementById('result'); box.style.display = 'block';
-  const st = document.getElementById('status');
-  try {
-    const r = await fetch('actions/test.php', { method: 'POST' });
-    const data = await r.json();
-    document.getElementById('raw').textContent = JSON.stringify(data, null, 2);
-    const p = data.profile && data.profile.result;
-    if (p) {
-      st.innerHTML = '<span class="ok"><span class="material-icons">check_circle</span> Conexão OK</span>';
-      document.getElementById('profile').innerHTML =
-        '<div class="row"><span>Usuário</span><b>' + (p.NAME||'') + ' ' + (p.LAST_NAME||'') + '</b></div>' +
-        '<div class="row"><span>ID</span><b>' + (p.ID||'') + '</b></div>' +
-        '<div class="row"><span>Admin</span><b>' + (p.ADMIN ? 'Sim' : 'Não') + '</b></div>' +
-        '<div class="row"><span>Fuso</span><b>' + (p.TIME_ZONE||'') + '</b></div>';
-    } else {
-      st.innerHTML = '<span class="err"><span class="material-icons">error</span> Falha na conexão</span>';
-    }
-    const sc = data.scope && data.scope.result;
-    if (Array.isArray(sc)) {
-      document.getElementById('scopes').innerHTML = '<div class="muted">Escopos liberados:</div>' + sc.map(s => '<span class="chip">' + s + '</span>').join('');
-    }
-  } catch (e) {
-    st.innerHTML = '<span class="err">Erro: ' + e.message + '</span>';
-  } finally {
-    btn.disabled = false; icon.textContent = 'sync';
-  }
-});
+let DATA = {itens:[]};
+const BRL = n => n ? n.toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0}) : '—';
+const fmtDate = s => { if(!s) return '—'; const p=String(s).split('-'); return p.length===3? p[2]+'/'+p[1]+'/'+p[0] : s; };
+function toast(m){const t=document.getElementById('toastEl');t.textContent=m;t.style.display='block';clearTimeout(t._);t._=setTimeout(()=>t.style.display='none',2600);}
+
+const STATUS_CLASS = {
+  'Finalizado':'p-ok','Cotação Iniciada':'p-cot','Com Pendências':'p-pend',
+  'Em Andamento':'p-and','Não Iniciado':'p-neu'
+};
+function statusPill(s){ const c=STATUS_CLASS[s]||'p-neu'; return `<span class="pill ${c}"><span class="dot"></span>${s||'Não Iniciado'}</span>`; }
+
+async function load(){
+  try{
+    const r = await fetch('actions/matriz.php'); const d = await r.json();
+    if(d.error){ document.getElementById('tb').innerHTML=`<tr><td colspan="10" class="empty">Erro: ${d.error}</td></tr>`; return; }
+    DATA = d;
+    const o=d.obra, rs=d.resumo;
+    document.getElementById('sub').innerHTML =
+      `Obra <b>${o.nome}</b> <span class="muted">(${o.codinome})</span> · ${rs.total} serviços`
+      + (rs.crono_erro? ` · <span style="color:var(--pend)">cronograma offline</span>`:` · datas do cronograma ao vivo`);
+    // KPIs
+    const conc = rs.por_status['Finalizado']||0;
+    const pct = Math.round(conc/rs.total*100);
+    const cot = rs.por_status['Cotação Iniciada']||0;
+    document.getElementById('kpis').innerHTML = `
+      <div class="kpi"><div class="v">${rs.total}</div><div class="l">Serviços</div></div>
+      <div class="kpi"><div class="v">${pct}%</div><div class="l">${conc} finalizados</div></div>
+      <div class="kpi"><div class="v">${cot}</div><div class="l">Cotações iniciadas</div></div>
+      <div class="kpi"><div class="v">${BRL(rs.verba_total)}</div><div class="l">Verba estimada</div></div>`;
+    // filtros
+    const fases=[...new Set(d.itens.map(i=>i.fase).filter(Boolean))];
+    document.getElementById('ffase').innerHTML='<option value="">Todas as fases</option>'+fases.map(f=>`<option>${f}</option>`).join('');
+    const sts=[...new Set(d.itens.map(i=>i.status||'Não Iniciado'))];
+    document.getElementById('fstatus').innerHTML='<option value="">Todos os status</option>'+sts.map(s=>`<option>${s}</option>`).join('');
+    render();
+  }catch(e){ document.getElementById('tb').innerHTML=`<tr><td colspan="10" class="empty">Falha: ${e.message}</td></tr>`; }
+}
+
+function render(){
+  const q=(document.getElementById('q').value||'').toLowerCase();
+  const ff=document.getElementById('ffase').value;
+  const fs=document.getElementById('fstatus').value;
+  const today=new Date().toISOString().slice(0,10);
+  const rows = DATA.itens.filter(i=>
+    (!q || i.nome.toLowerCase().includes(q)) &&
+    (!ff || i.fase===ff) &&
+    (!fs || (i.status||'Não Iniciado')===fs)
+  );
+  if(!rows.length){ document.getElementById('tb').innerHTML='<tr><td colspan="10" class="empty">Nenhum serviço.</td></tr>'; return; }
+  document.getElementById('tb').innerHTML = rows.map(i=>{
+    const gatAlert = i.data_gatilho && i.data_gatilho < today && (i.status||'')!=='Finalizado';
+    return `<tr>
+      <td class="muted">${i.ordem}</td>
+      <td><div class="svc">${i.nome}</div><div class="fase">${i.fase||''}</div></td>
+      <td><span class="curva c-${i.curva||'C'}">${i.curva||'—'}</span></td>
+      <td>${statusPill(i.status)}</td>
+      <td class="date ${gatAlert?'alert':''}">${fmtDate(i.data_gatilho)}</td>
+      <td class="date">${fmtDate(i.data_necessaria)}</td>
+      <td class="muted">${i.lead_dias?i.lead_dias+'d':'—'}</td>
+      <td class="money">${BRL(i.verba_estim)}</td>
+      <td>${i.responsavel||'<span class="muted">—</span>'}</td>
+      <td>${i.fornecedor||'<span class="muted">—</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+load();
 </script>
 </body>
 </html>

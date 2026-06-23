@@ -3,3 +3,12 @@ vendor/
 .DS_Store
 *.log
 .claude/
+data/cockpit.sqlite
+data/.token_cache.json
+data/.crono_*.json
+_deploy.json
+# Fontes de build — NUNCA vão ao servidor (contêm orçamento/De-Para reais)
+Bases/
+tools/
+*.xlsx
+~$*

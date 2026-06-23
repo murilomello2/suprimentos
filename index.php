@@ -137,7 +137,7 @@ async function load(){
       <div class="kpi"><div class="v">${rs.total}</div><div class="l">Serviços</div></div>
       <div class="kpi"><div class="v">${pct}%</div><div class="l">${conc} finalizados</div></div>
       <div class="kpi"><div class="v">${cot}</div><div class="l">Cotações iniciadas</div></div>
-      <div class="kpi"><div class="v">${BRL(rs.verba_total)}</div><div class="l">Verba estimada</div></div>`;
+      <div class="kpi"><div class="v">${BRL(o.orcamento_total)}</div><div class="l">Orçamento da obra</div></div>`;
     // filtros
     const fases=[...new Set(d.itens.map(i=>i.fase).filter(Boolean))];
     document.getElementById('ffase').innerHTML='<option value="">Todas as fases</option>'+fases.map(f=>`<option>${f}</option>`).join('');

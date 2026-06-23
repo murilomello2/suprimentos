@@ -44,13 +44,19 @@ function crono_resolver($servico, $tasks) {
     }
     if (!$termos && $servico['nome']) $termos[] = _norm_txt($servico['nome']);
 
-    $melhor = null; $marco = null;
+    // escolhe o match mais ESPECÍFICO (termo mais longo casado); desempata pela
+    // menor data de início. Evita que um token genérico (ex.: 'limpeza') sequestre.
+    $melhor = null; $marco = null; $melhorScore = -1;
     foreach ($tasks as $tk) {
         $nome = _norm_txt($tk['nome']);
+        $st = $tk['start'] ?? null;
+        if (!$st) continue;
         foreach ($termos as $t) {
             if (strpos($nome, $t) !== false) {
-                $st = $tk['start'] ?? null;
-                if ($st && (!$melhor || $st < $melhor)) { $melhor = $st; $marco = $tk['nome']; }
+                $score = strlen($t);
+                if ($score > $melhorScore || ($score === $melhorScore && $st < $melhor)) {
+                    $melhorScore = $score; $melhor = $st; $marco = $tk['nome'];
+                }
             }
         }
     }

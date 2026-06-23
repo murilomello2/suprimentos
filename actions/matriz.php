@@ -3,8 +3,6 @@
  * Retorna a matriz do Radar de Aquisições (JSON) para o front.
  * Junta a base (serviço + radar_item) com as datas vivas do cronograma (Supabase).
  */
-ini_set('display_errors', '1');
-error_reporting(E_ALL);
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/cronograma.php';
@@ -51,7 +49,7 @@ try {
             'crono_erro' => $crono_erro,
         ],
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-} catch (Exception $e) {
+} catch (Throwable $e) {
     http_response_code(500);
     echo json_encode(['error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
 }

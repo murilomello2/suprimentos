@@ -3,6 +3,8 @@
  * Retorna a matriz do Radar de Aquisições (JSON) para o front.
  * Junta a base (serviço + radar_item) com as datas vivas do cronograma (Supabase).
  */
+ini_set('display_errors', '1');
+error_reporting(E_ALL);
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/cronograma.php';

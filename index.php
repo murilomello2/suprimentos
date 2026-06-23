@@ -166,7 +166,9 @@ function render(){
       <td><span class="curva c-${i.curva||'C'}">${i.curva||'—'}</span></td>
       <td>${statusPill(i.status)}</td>
       <td class="date ${gatAlert?'alert':''}">${fmtDate(i.data_gatilho)}</td>
-      <td class="date">${fmtDate(i.data_necessaria)}</td>
+      <td class="date" title="${i.marco_casado? 'Marco: '+i.marco_casado.replace(/"/g,'')+' · '+(i.confianca||'') : 'Sem match no cronograma'}">
+        ${fmtDate(i.data_necessaria)}${i.marco_casado?` <span class="material-icons mk" style="font-size:13px;color:${i.confianca&&i.confianca.includes('secund')?'var(--and)':'var(--neu)'}">info</span>`:''}
+      </td>
       <td class="muted">${i.lead_dias?i.lead_dias+'d':'—'}</td>
       <td class="money">${BRL(i.verba_estim)}</td>
       <td>${i.responsavel||'<span class="muted">—</span>'}</td>

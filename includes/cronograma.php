@@ -44,21 +44,18 @@ function crono_resolver($servico, $tasks) {
     }
     if (!$termos && $servico['nome']) $termos[] = _norm_txt($servico['nome']);
 
-    // escolhe o match mais ESPECÍFICO (termo mais longo casado); desempata pela
-    // menor data de início. Evita que um token genérico (ex.: 'limpeza') sequestre.
-    $melhor = null; $marco = null; $melhorScore = -1;
-    foreach ($tasks as $tk) {
-        $nome = _norm_txt($tk['nome']);
-        $st = $tk['start'] ?? null;
-        if (!$st) continue;
-        foreach ($termos as $t) {
-            if (strpos($nome, $t) !== false) {
-                $score = strlen($t);
-                if ($score > $melhorScore || ($score === $melhorScore && $st < $melhor)) {
-                    $melhorScore = $score; $melhor = $st; $marco = $tk['nome'];
-                }
+    // Casa por PRIORIDADE: o De-Para lista os termos do marco principal primeiro.
+    // Usa o primeiro termo que encontrar tarefa(s); entre elas, a menor data de início.
+    $melhor = null; $marco = null; $idxTermo = null;
+    foreach ($termos as $ti => $t) {
+        foreach ($tasks as $tk) {
+            $st = $tk['start'] ?? null;
+            if (!$st) continue;
+            if (strpos(_norm_txt($tk['nome']), $t) !== false) {
+                if (!$melhor || $st < $melhor) { $melhor = $st; $marco = $tk['nome']; }
             }
         }
+        if ($melhor) { $idxTermo = $ti; break; } // achou no termo de maior prioridade
     }
     if (!$melhor) {
         return ['data_necessaria'=>null, 'data_gatilho'=>null, 'marco_casado'=>null, 'confianca'=>'sem match'];
@@ -72,6 +69,6 @@ function crono_resolver($servico, $tasks) {
         'data_necessaria' => $melhor,
         'data_gatilho'    => $gatilho,
         'marco_casado'    => $marco,
-        'confianca'       => 'auto (cronograma)',
+        'confianca'       => $idxTermo === 0 ? 'auto (marco principal)' : 'auto (termo secundário)',
     ];
 }

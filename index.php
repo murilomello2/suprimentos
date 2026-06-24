@@ -45,6 +45,10 @@
   .wrap{margin:0 26px 30px;overflow-x:auto}
   table{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
   thead th{background:#fafbfb;text-align:left;padding:10px 12px;font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap}
+  thead th.srt{cursor:pointer;user-select:none}
+  thead th.srt:hover{color:var(--verde)}
+  thead th.srt.on{color:var(--verde-d)}
+  .sar{color:var(--verde);font-size:11px;font-weight:800}
   tbody td{padding:9px 12px;border-bottom:1px solid #f1f3f2;vertical-align:middle}
   tbody tr.item{cursor:pointer}
   tbody tr.item:hover{background:#f7fbf8}
@@ -196,13 +200,7 @@
           <input id="q" placeholder="Buscar item, contratação ou responsável…" oninput="render()"></div>
         <label class="toggle" style="gap:6px">Ver
           <select id="fview" onchange="render()"><option value="agrupado">Agrupado</option><option value="lista">Lista</option></select></label>
-        <label class="toggle" style="gap:6px">Ordenar
-          <select id="fsort" onchange="render()">
-            <option value="gatilho">Início cotação ↑</option>
-            <option value="fim">Fim cotação ↑</option>
-            <option value="obra">Data em obra ↑</option>
-            <option value="verba">Verba ↓</option>
-          </select></label>
+        <span class="toggle" style="gap:4px;color:var(--muted)"><span class="material-icons" style="font-size:15px">swap_vert</span>clique numa coluna p/ ordenar</span>
         <button class="btn-ghost" id="filtBtn" onclick="toggleFiltros()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">tune</span> Filtros<span id="filtBadge"></span></button>
         <button class="btn-ghost" id="collapseBtn" onclick="toggleAllGroups()" style="margin-left:auto"></button>
       </div>
@@ -219,8 +217,17 @@
     <div class="wrap">
       <table>
         <thead><tr>
-          <th>Item</th><th>Cv</th><th>Resp.</th><th>Verba (R$)</th><th>Quant.</th>
-          <th>Data em obra</th><th>% obra</th><th>Início cotação</th><th>Fim cotação</th><th>Status</th><th>Mapa</th><th></th>
+          <th class="srt" onclick="sortBy('nome')">Item<span class="sar" id="sar-nome"></span></th>
+          <th class="srt" onclick="sortBy('curva')">Cv<span class="sar" id="sar-curva"></span></th>
+          <th class="srt" onclick="sortBy('resp')">Resp.<span class="sar" id="sar-resp"></span></th>
+          <th class="srt" onclick="sortBy('verba')">Verba (R$)<span class="sar" id="sar-verba"></span></th>
+          <th class="srt" onclick="sortBy('quant')">Quant.<span class="sar" id="sar-quant"></span></th>
+          <th class="srt" onclick="sortBy('obra')">Data em obra<span class="sar" id="sar-obra"></span></th>
+          <th class="srt" onclick="sortBy('pct')">% obra<span class="sar" id="sar-pct"></span></th>
+          <th class="srt" onclick="sortBy('gatilho')">Início cotação<span class="sar" id="sar-gatilho"></span></th>
+          <th class="srt" onclick="sortBy('fim')">Fim cotação<span class="sar" id="sar-fim"></span></th>
+          <th class="srt" onclick="sortBy('status')">Status<span class="sar" id="sar-status"></span></th>
+          <th>Mapa</th><th></th>
         </tr></thead>
         <tbody id="tb"><tr><td colspan="12" class="empty">Carregando…</td></tr></tbody>
       </table>
@@ -409,19 +416,40 @@ function grupoOptions(current){
   return gs.map(g=>`<option ${g===current?'selected':''}>${esc(g)}</option>`).join('')
        + `<option value="__novo__">➕ Novo grupo…</option>`;
 }
-/* ordenação dos itens (dentro do grupo ou na lista) */
-function sortVal(i,k){
-  if(k==='verba') return (i.verba!=null && i.verba!==0)?i.verba:null;
-  if(k==='fim')   return i.fim_cotacao||null;
-  if(k==='obra')  return i.data_necessaria||null;
-  return i.data_gatilho||null;                 // 'gatilho' = início da cotação
+/* ordenação por coluna (clicável). def = sentido padrão no 1º clique (1=asc, -1=desc) */
+const COLS={
+  nome:   {val:i=>(i.nome||'').toLowerCase(),                         def:1},   // texto A→Z
+  curva:  {val:i=>i.curva||'',                                        def:1},   // A→C
+  resp:   {val:i=>(i.responsavel||'').toLowerCase(),                  def:1},
+  verba:  {val:i=>(i.verba!=null&&i.verba!==0)?i.verba:null,          def:-1},  // maior→menor
+  quant:  {val:i=>i.quantitativo!=null?i.quantitativo:null,           def:-1},
+  obra:   {val:i=>i.data_necessaria||null,                            def:1},   // mais antiga→recente
+  pct:    {val:i=>i.cronograma_pct!=null?i.cronograma_pct:null,       def:-1},
+  gatilho:{val:i=>i.data_gatilho||null,                               def:1},   // início cotação
+  fim:    {val:i=>i.fim_cotacao||null,                                def:1},
+  status: {val:i=>i.status||'',                                       def:1},
+};
+let SORT={key:'gatilho', dir:1};               // padrão: início da cotação, mais antiga primeiro
+function cmpItems(a,b){
+  const c=COLS[SORT.key]; if(!c) return 0;
+  const va=c.val(a), vb=c.val(b);
+  const na=(va==null||va===''), nb=(vb==null||vb==='');
+  if(na&&nb) return 0; if(na) return 1; if(nb) return -1;   // vazio sempre por último
+  return va<vb?-1*SORT.dir:(va>vb?1*SORT.dir:0);
 }
-function cmpItems(a,b,k){
-  const dir=(k==='verba')?-1:1;                // verba: maior→menor; datas: mais antiga→recente
-  const va=sortVal(a,k), vb=sortVal(b,k);
-  const na=(va==null), nb=(vb==null);
-  if(na&&nb) return 0; if(na) return 1; if(nb) return -1;   // sem valor vai pro fim
-  return va<vb?-1*dir:(va>vb?1*dir:0);
+function sortBy(key){
+  if(!COLS[key]) return;
+  if(SORT.key===key) SORT.dir=-SORT.dir;       // mesmo: inverte o sentido
+  else { SORT.key=key; SORT.dir=COLS[key].def; }
+  render();
+}
+function updateSortArrows(){
+  Object.keys(COLS).forEach(k=>{
+    const e=document.getElementById('sar-'+k); if(e) e.textContent='';
+    const th=e?e.parentElement:null; if(th) th.classList.remove('on');
+  });
+  const e=document.getElementById('sar-'+SORT.key);
+  if(e){ e.textContent=SORT.dir>0?' ▲':' ▼'; if(e.parentElement) e.parentElement.classList.add('on'); }
 }
 /* recolher / expandir */
 function toggleGroup(idx){ const g=GORDER[idx]; if(g==null)return; COLLAPSED.has(g)?COLLAPSED.delete(g):COLLAPSED.add(g); saveCollapsed(); render(); }
@@ -482,7 +510,6 @@ function render(){
   const fc=document.getElementById('fcurva').value;
   const fs=document.getElementById('fstatus').value,fr=document.getElementById('fresp').value;
   const oa=document.getElementById('onlyalert').checked;
-  const key=document.getElementById('fsort').value||'gatilho';
   const flat=document.getElementById('fview').value==='lista';
   const _naf=[fo,fg,fc,fs,fr].filter(Boolean).length+(oa?1:0);
   const _fb=document.getElementById('filtBadge'); if(_fb) _fb.textContent=_naf?` ·${_naf}`:'';
@@ -496,19 +523,19 @@ function render(){
   if(!rows.length){ tb.innerHTML='<tr><td colspan="12" class="empty">Nenhum item.</td></tr>'; updateCollapseBtn(); return; }
   let html='';
   if(flat){
-    html=rows.slice().sort((a,b)=>cmpItems(a,b,key)).map(rowHtml).join('');
+    html=rows.slice().sort(cmpItems).map(rowHtml).join('');
   } else {
     const map=new Map();
     for(const i of rows){ const g=i.grupo||'—'; if(!map.has(g))map.set(g,[]); map.get(g).push(i); }
     GORDER.forEach((g,idx)=>{
       if(!map.has(g))return;
-      const items=map.get(g).slice().sort((a,b)=>cmpItems(a,b,key));
+      const items=map.get(g).slice().sort(cmpItems);
       html+=groupHeaderHtml(g,items,idx);
       if(!COLLAPSED.has(g)) html+=items.map(rowHtml).join('');
     });
   }
   tb.innerHTML=html;
-  updateCollapseBtn();
+  updateCollapseBtn(); updateSortArrows();
 }
 function rowHtml(i){
   const st=i.status||'Não Iniciado';
@@ -1022,8 +1049,13 @@ function resumoTab(i){
   const verbaLbl = (i.verba_material!=null||i.verba_mo!=null)
     ? `Material ${BRL(i.verba_material||0)} + MO ${BRL(i.verba_mo||0)}` : BRL(i.verba);
   return `
-    ${IS_ADMIN?`<div class="fld"><label>Grupo <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— mova este item de grupo ou crie um novo</span></label>
-      <select onchange="modalGrupo(this.value)">${grupoOptions(i.grupo)}</select></div>`:''}
+    ${IS_ADMIN?`<div class="box" style="border-left:3px solid var(--dourado);display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <span class="material-icons" style="color:var(--dourado)">drive_file_move</span>
+      <div style="flex:1">
+        <div class="bl" style="margin-bottom:4px">Grupo deste item — mover de grupo ou criar um novo</div>
+        <select onchange="modalGrupo(this.value)" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13.5px;background:#fff">${grupoOptions(i.grupo)}</select>
+      </div>
+    </div>`:''}
     <div class="grid2">
       <div class="fld"><label>Tipo do item</label>
         <select onchange="modalSave('tipo',this.value)">${TIPOS.map(t=>`<option value="${t}" ${t===tp?'selected':''}>${t||'— a classificar —'}</option>`).join('')}</select></div>

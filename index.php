@@ -49,7 +49,16 @@
   tbody tr.item{cursor:pointer}
   tbody tr.item:hover{background:#f7fbf8}
   .grp td{background:#eef4f0;font-weight:800;color:var(--verde-d);font-size:12px;text-transform:uppercase;letter-spacing:.5px;padding:8px 12px}
+  .grp{cursor:pointer}
   .grp .gcount{font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0}
+  .gwrap{display:flex;align-items:center;gap:8px}
+  .gcaret{font-size:18px;color:var(--verde-d);flex:0 0 auto}
+  .gctl{margin-left:auto;display:flex;gap:4px;align-items:center}
+  .gbtn{border:1px solid var(--line);background:#fff;border-radius:6px;min-width:24px;height:22px;cursor:pointer;font-size:11px;color:var(--muted);line-height:1;display:inline-flex;align-items:center;justify-content:center;padding:0 4px}
+  .gbtn:hover:not([disabled]){border-color:var(--verde);color:var(--verde)}
+  .gbtn[disabled]{opacity:.35;cursor:default}
+  .resp-miss{background:var(--pendbg);color:var(--pend);border:0;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;cursor:pointer}
+  .resp-miss:hover{filter:brightness(.96)}
   .svc{font-weight:600;color:#111827}
   .svc-sub{font-size:11.5px;color:var(--muted);margin-top:1px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .money{font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -194,15 +203,27 @@
           <input id="q" placeholder="Buscar por item, forma de contratação ou responsável…" oninput="render()"></div>
         <label class="toggle"><input type="checkbox" id="onlyalert" onchange="render()"> Somente em alerta (gatilho vencido)</label>
       </div>
+      <div class="bar" style="padding-top:0">
+        <label class="toggle" style="gap:6px">Visualização
+          <select id="fview" onchange="render()"><option value="agrupado">Agrupado</option><option value="lista">Lista (tudo junto)</option></select></label>
+        <label class="toggle" style="gap:6px">Ordenar por
+          <select id="fsort" onchange="render()">
+            <option value="gatilho">Início da cotação (mais antiga primeiro)</option>
+            <option value="fim">Fim da cotação</option>
+            <option value="obra">Data em obra</option>
+            <option value="verba">Verba (maior → menor)</option>
+          </select></label>
+        <button class="btn-ghost" id="collapseBtn" onclick="toggleAllGroups()" style="margin-left:auto"></button>
+      </div>
     </div>
 
     <div class="wrap">
       <table>
         <thead><tr>
-          <th>Ordem</th><th>Item</th><th>Cv</th><th>Resp.</th><th>Verba (R$)</th><th>Quant.</th>
+          <th>Item</th><th>Cv</th><th>Resp.</th><th>Verba (R$)</th><th>Quant.</th>
           <th>Data em obra</th><th>% obra</th><th>Início cotação</th><th>Fim cotação</th><th>Status</th><th>Mapa</th><th></th>
         </tr></thead>
-        <tbody id="tb"><tr><td colspan="13" class="empty">Carregando…</td></tr></tbody>
+        <tbody id="tb"><tr><td colspan="12" class="empty">Carregando…</td></tr></tbody>
       </table>
     </div>
    </section>
@@ -249,7 +270,7 @@
       <div class="bar" style="flex-wrap:wrap;gap:14px;font-size:12.5px">
         <span><b>Administrador</b> — tudo + esta tela</span>
         <span><b>Diretor</b> — vê todas as obras (leitura)</span>
-        <span><b>Comprador</b> — vê todas, edita as obras liberadas</span>
+        <span><b>Suprimentos</b> — pode ser responsável por itens; vê todas, edita as obras liberadas</span>
         <span><b>Coordenador</b> — vê só as obras liberadas (leitura)</span>
         <span><b>Personalizado</b> — você define tudo</span>
       </div>
@@ -267,6 +288,11 @@
 
 <script>
 let DATA={itens:[],obra:{}}, CUR=null, TAB='Resumo';
+let RESP=[];                       // responsáveis possíveis (papel "comprador" = Suprimentos)
+let GORDER=[];                     // ordem atual dos grupos (preenchida no render)
+let COLLAPSED=new Set();           // grupos recolhidos (persistido em localStorage)
+try{ COLLAPSED=new Set(JSON.parse(localStorage.getItem('sup_collapsed')||'[]')); }catch(e){}
+function saveCollapsed(){ try{ localStorage.setItem('sup_collapsed',JSON.stringify([...COLLAPSED])); }catch(e){} }
 const BRL=n=>n?Number(n).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0}):'—';
 const D=s=>{if(!s)return'—';const p=String(s).split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:s;};
 const esc=s=>(s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -280,7 +306,7 @@ const isAlert=i=>i.data_gatilho&&i.data_gatilho<today&&i.status!=='Finalizado';
 async function load(){
   try{
     const d=await (await fetch('actions/matriz.php')).json();
-    if(d.error){document.getElementById('tb').innerHTML=`<tr><td colspan="13" class="empty">Erro: ${esc(d.error)}</td></tr>`;return;}
+    if(d.error){document.getElementById('tb').innerHTML=`<tr><td colspan="12" class="empty">Erro: ${esc(d.error)}</td></tr>`;return;}
     DATA=d; const o=d.obra,rs=d.resumo;
     const obras=[...new Set(d.itens.map(i=>i.obra_nome).filter(Boolean))];
     const obraTxt=obras.length>1?`${obras.length} obras`:`<b>${esc(o.nome)}</b> · ${esc(o.codinome)} — ${esc(o.local||'')}`;
@@ -304,7 +330,7 @@ async function load(){
     fillOrdered('mgrupo',[...new Set(d.itens.map(i=>i.grupo).filter(Boolean))]);
     fillMulti('mobra',obras);
     render(); renderMatriz();
-  }catch(e){document.getElementById('tb').innerHTML=`<tr><td colspan="13" class="empty">Falha: ${esc(e.message)}</td></tr>`;}
+  }catch(e){document.getElementById('tb').innerHTML=`<tr><td colspan="12" class="empty">Falha: ${esc(e.message)}</td></tr>`;}
 }
 function fill(id,arr){const el=document.getElementById(id);const keep=el.value;el.innerHTML=el.children[0].outerHTML+arr.slice().sort().map(v=>`<option>${esc(v)}</option>`).join('');el.value=keep;}
 function fillOrdered(id,arr){const el=document.getElementById(id);const keep=el.value;el.innerHTML=el.children[0].outerHTML+arr.map(v=>`<option>${esc(v)}</option>`).join('');el.value=keep;}
@@ -366,33 +392,129 @@ function renderMatriz(){
   document.getElementById('mwrap').innerHTML=html;
 }
 
+/* ---------- responsáveis / grupos / ordenação (ajuste 1) ---------- */
+async function loadResponsaveis(){
+  try{ const d=await (await fetch('actions/usuarios.php?responsaveis=1')).json(); RESP=d.responsaveis||[]; }
+  catch(e){ RESP=[]; }
+}
+function respOptions(current){
+  const names=RESP.map(r=>r.nome);
+  let o=`<option value="">— escolher responsável —</option>`;
+  if(current && !names.includes(current)) o+=`<option value="${esc(current)}" selected>${esc(current)} (não cadastrado)</option>`;
+  o+=RESP.map(r=>`<option value="${esc(r.nome)}" ${r.nome===current?'selected':''}>${esc(r.nome)}</option>`).join('');
+  return o;
+}
+function grupoOptions(current){
+  const gs=[...new Set(DATA.itens.map(i=>i.grupo).filter(Boolean))];
+  if(current && !gs.includes(current)) gs.unshift(current);
+  return gs.map(g=>`<option ${g===current?'selected':''}>${esc(g)}</option>`).join('')
+       + `<option value="__novo__">➕ Novo grupo…</option>`;
+}
+/* ordenação dos itens (dentro do grupo ou na lista) */
+function sortVal(i,k){
+  if(k==='verba') return (i.verba!=null && i.verba!==0)?i.verba:null;
+  if(k==='fim')   return i.fim_cotacao||null;
+  if(k==='obra')  return i.data_necessaria||null;
+  return i.data_gatilho||null;                 // 'gatilho' = início da cotação
+}
+function cmpItems(a,b,k){
+  const dir=(k==='verba')?-1:1;                // verba: maior→menor; datas: mais antiga→recente
+  const va=sortVal(a,k), vb=sortVal(b,k);
+  const na=(va==null), nb=(vb==null);
+  if(na&&nb) return 0; if(na) return 1; if(nb) return -1;   // sem valor vai pro fim
+  return va<vb?-1*dir:(va>vb?1*dir:0);
+}
+/* recolher / expandir */
+function toggleGroup(idx){ const g=GORDER[idx]; if(g==null)return; COLLAPSED.has(g)?COLLAPSED.delete(g):COLLAPSED.add(g); saveCollapsed(); render(); }
+function toggleAllGroups(){
+  const groups=[...new Set(DATA.itens.map(i=>i.grupo||'—'))];
+  const anyOpen=groups.some(g=>!COLLAPSED.has(g));
+  if(anyOpen) groups.forEach(g=>COLLAPSED.add(g)); else COLLAPSED.clear();
+  saveCollapsed(); render();
+}
+function updateCollapseBtn(){
+  const b=document.getElementById('collapseBtn'); if(!b)return;
+  const flat=document.getElementById('fview').value==='lista';
+  b.style.display=flat?'none':'';
+  const groups=[...new Set(DATA.itens.map(i=>i.grupo||'—'))];
+  const anyOpen=groups.some(g=>!COLLAPSED.has(g));
+  b.innerHTML=`<span class="material-icons" style="font-size:16px;vertical-align:-3px">${anyOpen?'unfold_less':'unfold_more'}</span> ${anyOpen?'Recolher tudo':'Expandir tudo'}`;
+}
+/* reordenar / renomear grupos (admin) */
+async function grupoMover(idx,dir){
+  const arr=GORDER.slice(); const j=idx+dir;
+  if(j<0||j>=arr.length)return;
+  [arr[idx],arr[j]]=[arr[j],arr[idx]];
+  const order=arr.filter(g=>g!=='—');   // não envia o pseudo-grupo "sem grupo" ao reorder
+  try{ await fetch('actions/grupos.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'reorder',ordem:order})}); }
+  catch(e){ toast('Falha ao reordenar'); return; }
+  await load();
+}
+async function grupoRenomear(idx){
+  const g=GORDER[idx]; if(g==null)return;
+  const to=(prompt('Renomear grupo:',g)||'').trim();
+  if(!to||to===g)return;
+  try{ await fetch('actions/grupos.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'rename',from:g,to})}); }
+  catch(e){ toast('Falha ao renomear'); return; }
+  if(COLLAPSED.has(g)){ COLLAPSED.delete(g); COLLAPSED.add(to); saveCollapsed(); }
+  await load(); toast('Grupo renomeado');
+}
+function groupHeaderHtml(g,items,idx){
+  const collapsed=COLLAPSED.has(g);
+  const n=items.length;
+  const verba=items.reduce((s,i)=>s+(i.verba||0),0);
+  const datas=items.map(i=>i.data_gatilho).filter(Boolean).sort();
+  const prox=datas.length?` · próx. início ${D(datas[0])}`:'';
+  const adm=(IS_ADMIN && g!=='—')?`<span class="gctl">
+      <button class="gbtn" title="subir grupo" ${idx<=0?'disabled':''} onclick="event.stopPropagation();grupoMover(${idx},-1)">▲</button>
+      <button class="gbtn" title="descer grupo" ${idx>=GORDER.length-1?'disabled':''} onclick="event.stopPropagation();grupoMover(${idx},1)">▼</button>
+      <button class="gbtn" title="renomear grupo" onclick="event.stopPropagation();grupoRenomear(${idx})"><span class="material-icons" style="font-size:14px">edit</span></button>
+    </span>`:'';
+  return `<tr class="grp" onclick="toggleGroup(${idx})"><td colspan="12"><span class="gwrap">
+      <span class="material-icons gcaret">${collapsed?'chevron_right':'expand_more'}</span>
+      <span>${esc(g)}</span>
+      <span class="gcount">· ${n} ${n>1?'itens':'item'} · ${BRL(verba)}${prox}</span>${adm}
+    </span></td></tr>`;
+}
 function render(){
   const q=(document.getElementById('q').value||'').toLowerCase();
   const fg=document.getElementById('fgrupo').value,fo=document.getElementById('fobra').value;
   const fc=document.getElementById('fcurva').value;
   const fs=document.getElementById('fstatus').value,fr=document.getElementById('fresp').value;
   const oa=document.getElementById('onlyalert').checked;
+  const key=document.getElementById('fsort').value||'gatilho';
+  const flat=document.getElementById('fview').value==='lista';
   const rows=DATA.itens.filter(i=>
     (!q||(i.nome+' '+(i.forma_contratacao||'')+' '+(i.responsavel||'')).toLowerCase().includes(q))&&
     (!fg||i.grupo===fg)&&(!fo||i.obra_nome===fo)&&(!fc||i.curva===fc)&&
     (!fs||(i.status||'Não Iniciado')===fs)&&(!fr||i.responsavel===fr)&&(!oa||isAlert(i)));
-  if(!rows.length){document.getElementById('tb').innerHTML='<tr><td colspan="13" class="empty">Nenhum item.</td></tr>';return;}
-  let html='',grupo=null;
-  for(const i of rows){
-    if(i.grupo!==grupo){grupo=i.grupo;const n=rows.filter(x=>x.grupo===grupo).length;
-      html+=`<tr class="grp"><td colspan="13">${esc(grupo)} <span class="gcount">· ${n} ${n>1?'itens':'item'}</span></td></tr>`;}
-    html+=rowHtml(i);
+  // ordem completa dos grupos (segue grupo_ordem do backend) — base p/ reordenar
+  GORDER=[...new Set(DATA.itens.map(i=>i.grupo||'—'))];
+  const tb=document.getElementById('tb');
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="12" class="empty">Nenhum item.</td></tr>'; updateCollapseBtn(); return; }
+  let html='';
+  if(flat){
+    html=rows.slice().sort((a,b)=>cmpItems(a,b,key)).map(rowHtml).join('');
+  } else {
+    const map=new Map();
+    for(const i of rows){ const g=i.grupo||'—'; if(!map.has(g))map.set(g,[]); map.get(g).push(i); }
+    GORDER.forEach((g,idx)=>{
+      if(!map.has(g))return;
+      const items=map.get(g).slice().sort((a,b)=>cmpItems(a,b,key));
+      html+=groupHeaderHtml(g,items,idx);
+      if(!COLLAPSED.has(g)) html+=items.map(rowHtml).join('');
+    });
   }
-  document.getElementById('tb').innerHTML=html;
+  tb.innerHTML=html;
+  updateCollapseBtn();
 }
 function rowHtml(i){
   const st=i.status||'Não Iniciado';
   const venc=isAlert(i)?`<span class="tag-venc">vencido</span>`:'';
   return `<tr class="item" onclick="openModal(${i.ordem})">
-    <td class="muted">${i.ordem}</td>
     <td><div class="svc">${esc(i.nome)} ${tipoChip(i.tipo)}</div><div class="svc-sub">${esc(i.forma_contratacao||'')}</div></td>
     <td><span class="curva c-${i.curva||'C'}">${esc(i.curva||'—')}</span></td>
-    <td>${i.responsavel?esc(i.responsavel):'<span class="muted">—</span>'}</td>
+    <td>${i.responsavel?esc(i.responsavel):`<button class="resp-miss" onclick="event.stopPropagation();openModal(${i.ordem})">definir</button>`}</td>
     <td class="money">${BRL(i.verba)}${i.curado_verba?' <span class="material-icons" title="verba curada" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':''}</td>
     <td>${i.quantitativo!=null?`<div class="qcell" title="${esc(QNUM(i.quantitativo)+' '+(i.quantitativo_unidade||''))}"><b>${QNUM(i.quantitativo)}</b> <span class="muted">${esc(i.quantitativo_unidade||'')}</span></div>`:'<span class="muted">—</span>'}</td>
     <td class="date">${D(i.data_necessaria)}${i.curado_data?' <span class="material-icons" title="data curada" style="font-size:12px;color:var(--ok);vertical-align:-2px">verified</span>':''}</td>
@@ -430,7 +552,7 @@ async function saveField(ordem,campo,valor){
 
 /* ---------- modal ---------- */
 let EDITC=false, EDITO=false, EDITQ=false, EDITD=false; // modos "Editar" (cronograma/orçamento/quantitativo/dicionário)
-let IS_ADMIN=true;                        // definido pelas permissões do usuário logado (Bitrix)
+let IS_ADMIN=false;                       // fail-closed; vira true só quando getCurrentUser confirma perm_admin
 let EU=null;                             // usuário logado + permissões efetivas
 function openModal(o){CUR=byOrdem(o);TAB='Resumo';EDITC=EDITO=EDITQ=EDITD=false;drawModal();document.getElementById('ov').classList.add('open');}
 function closeModal(){document.getElementById('ov').classList.remove('open');render();renderMatriz();}
@@ -898,13 +1020,15 @@ function resumoTab(i){
   const verbaLbl = (i.verba_material!=null||i.verba_mo!=null)
     ? `Material ${BRL(i.verba_material||0)} + MO ${BRL(i.verba_mo||0)}` : BRL(i.verba);
   return `
+    ${IS_ADMIN?`<div class="fld"><label>Grupo (organização do radar)</label>
+      <select onchange="modalGrupo(this.value)">${grupoOptions(i.grupo)}</select></div>`:''}
     <div class="grid2">
       <div class="fld"><label>Tipo do item</label>
         <select onchange="modalSave('tipo',this.value)">${TIPOS.map(t=>`<option value="${t}" ${t===tp?'selected':''}>${t||'— a classificar —'}</option>`).join('')}</select></div>
       <div class="fld"><label>Status</label>
         <select onchange="modalSave('status',this.value)">${STATUSES.map(s=>`<option ${s===st?'selected':''}>${s}</option>`).join('')}</select></div>
-      <div class="fld"><label>Responsável</label>
-        <input value="${esc(i.responsavel||'')}" onchange="modalSave('responsavel',this.value)" placeholder="quem conduz"></div>
+      <div class="fld"><label>Responsável <span style="color:var(--pend)">*</span></label>
+        <select onchange="modalSaveResp(this.value)">${respOptions(i.responsavel)}</select></div>
       <div class="fld"><label>Fornecedor</label>
         <input value="${esc(i.fornecedor||'')}" onchange="modalSave('fornecedor',this.value)" placeholder="fornecedor cotado/contratado"></div>
     </div>
@@ -931,6 +1055,16 @@ async function modalSave(campo,valor){
   if(ok){const t=document.getElementById('savedTag');if(t){t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1400);}}
 }
 async function modalSaveReload(campo,valor){ await saveAndReload({[campo]:valor}); }
+async function modalSaveResp(v){
+  if(!v){ toast('Responsável é obrigatório'); drawModal(); return; }  // drawModal restaura o select ao valor atual
+  await modalSave('responsavel',v);
+}
+async function modalGrupo(v){
+  let g=v;
+  if(v==='__novo__'){ g=(prompt('Nome do novo grupo')||'').trim(); if(!g){ drawModal(); return; } }
+  await saveAndReload({grupo:g});
+  toast('Grupo atualizado');
+}
 // salva campos e recarrega a matriz (recalcula verba/datas/gatilho no servidor), mantendo o modal aberto
 async function saveAndReload(campos){
   try{
@@ -951,13 +1085,14 @@ function novoItem(){
     <div class="tabbody">
       <div class="fld"><label>Nome do serviço</label><input id="niNome" placeholder="ex.: Contrapiso"></div>
       <div class="grid2">
-        <div class="fld"><label>Grupo</label><select id="niGrupo">${grupos.map(g=>`<option>${esc(g)}</option>`).join('')}</select></div>
+        <div class="fld"><label>Grupo</label><select id="niGrupo">${grupos.map(g=>`<option>${esc(g)}</option>`).join('')}<option value="__novo__">➕ Novo grupo…</option></select></div>
         <div class="fld"><label>Tipo</label><select id="niTipo"><option value="">— a classificar —</option>${TIPOS.map(t=>`<option>${t}</option>`).join('')}</select></div>
       </div>
       <div class="grid2">
+        <div class="fld"><label>Responsável <span style="color:var(--pend)">*</span></label><select id="niResp">${respOptions('')}</select></div>
         <div class="fld"><label>Curva (opcional)</label><select id="niCurva"><option value="">auto</option><option>A</option><option>B</option><option>C</option></select></div>
-        <div class="fld"><label>Copiar dicionário de (opcional)</label><select id="niCopy"><option value="">— nenhum —</option>${DATA.itens.map(i=>`<option value="${i.ordem}">${esc(i.nome)}</option>`).join('')}</select></div>
       </div>
+      <div class="fld"><label>Copiar dicionário de (opcional)</label><select id="niCopy"><option value="">— nenhum —</option>${DATA.itens.map(i=>`<option value="${i.ordem}">${esc(i.nome)}</option>`).join('')}</select></div>
       <div class="note">O sufixo (MAT)/(MO)/(MAT + MO) é adicionado conforme o tipo. Copiar dicionário herda escopo, variáveis a cotar, lições e termos de match.</div>
       <div style="display:flex;gap:8px"><button class="btn-prim" onclick="novoItemSalvar()">Criar item</button>
         <button class="btn-ghost" onclick="closeModal()">Cancelar</button></div>
@@ -965,8 +1100,12 @@ function novoItem(){
   document.getElementById('ov').classList.add('open');
 }
 async function novoItemSalvar(){
-  const body={acao:'novo', nome:val('niNome'), grupo:val('niGrupo'), tipo:val('niTipo'), curva:val('niCurva'), copy_from:val('niCopy')||null};
+  let grupo=val('niGrupo');
+  if(grupo==='__novo__'){ grupo=(prompt('Nome do novo grupo')||'').trim(); if(!grupo){toast('Informe o grupo');return;} }
+  const resp=val('niResp');
+  const body={acao:'novo', nome:val('niNome'), grupo, tipo:val('niTipo'), curva:val('niCurva'), responsavel:resp, copy_from:val('niCopy')||null};
   if(!body.nome){toast('Informe o nome');return;}
+  if(!resp){toast('Responsável é obrigatório');return;}
   const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
   if(d.error){toast('Erro: '+d.error);return;}
   closeModal(); await load(); toast('Item criado');
@@ -987,7 +1126,7 @@ async function excluirItem(){
 /* ===== Configuração / Permissões (Bloco 2) ===== */
 let CFG={usuarios:[],obras:[]}, NUSER=null;
 const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Mapa de Cotações'],['config','Configurações']];
-const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',comprador:'Comprador',coordenador:'Coordenador',personalizado:'Personalizado'};
+const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',comprador:'Suprimentos',coordenador:'Coordenador',personalizado:'Personalizado'};
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},
   diretor:{ver:'todas',edit:'nenhuma',menus:['dashboard','radar','matriz','cotacoes'],adm:0},
@@ -1015,10 +1154,9 @@ async function renderConfig(){
   const box=document.getElementById('cfgwrap'); box.innerHTML='<div class="empty">Carregando…</div>';
   CFG=await (await fetch('actions/usuarios.php')).json();
   if(!CFG.usuarios.length){ box.innerHTML='<div class="empty">Nenhum usuário autorizado ainda. Clique em "Adicionar usuário".</div>'; return; }
-  box.innerHTML=`<table><thead><tr><th>Usuário</th><th>Cargo</th><th>Papel</th><th>Vê obras</th><th>Edita</th><th>Menus</th><th>Ativo</th><th></th></tr></thead><tbody>`+
+  box.innerHTML=`<table><thead><tr><th>Usuário</th><th>Papel</th><th>Vê obras</th><th>Edita</th><th>Menus</th><th>Ativo</th><th></th></tr></thead><tbody>`+
     CFG.usuarios.map(u=>`<tr>
       <td><b>${esc(u.nome)}</b> <span class="muted">#${esc(u.bitrix_id)}</span></td>
-      <td class="muted">${esc(u.cargo||'')}</td>
       <td><span class="tp-chip tp-mat-mo">${esc(PAPEL_LABEL[u.papel]||u.papel)}</span></td>
       <td>${u.ver_escopo==='todas'?'Todas':((u.obras_ver||[]).length+' selec.')}</td>
       <td>${u.editar_escopo==='todas'?'Todas':u.editar_escopo==='nenhuma'?'—':((u.obras_editar||[]).length+' selec.')}</td>
@@ -1042,10 +1180,10 @@ function userForm(bid){
     <div class="mhead"><button class="mclose" onclick="closeModal()">×</button>
       <div class="crumb">Configurações</div><div class="mt">${u?'Editar usuário':'Novo usuário'}</div></div>
     <div class="tabbody">
-      ${u?`<div class="box"><div class="bv"><b>${esc(u.nome)}</b> <span class="muted">#${esc(u.bitrix_id)} · ${esc(u.cargo||'')}</span></div></div>`
+      ${u?`<div class="box"><div class="bv"><b>${esc(u.nome)}</b> <span class="muted">#${esc(u.bitrix_id)}</span></div></div>`
          :`<div class="fld"><label>Buscar usuário no Bitrix</label>
             <div class="search" style="border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
-              <input id="uQ" placeholder="nome, cargo ou ID…" oninput="userBuscar()"></div></div>
+              <input id="uQ" placeholder="nome ou ID…" oninput="userBuscar()"></div></div>
           <div id="uRes"></div>
           <div id="uSel" class="box" style="display:none"></div>`}
       <div class="grid2">
@@ -1084,13 +1222,13 @@ async function userBuscar(){
   const d=await (await fetch('actions/bx_users.php?q='+encodeURIComponent(q))).json();
   box.innerHTML='<div class="srbox">'+(d.usuarios||[]).map(u=>`<div class="pickrow" onclick="userPick('${esc(u.id)}','${esc((u.nome||'').replace(/'/g,'’'))}','${esc((u.cargo||'').replace(/'/g,'’'))}')">
     <span class="material-icons" style="font-size:16px;color:var(--verde)">person</span>
-    <div><div>${esc(u.nome)} <span class="muted">#${esc(u.id)}</span></div><small class="muted">${esc(u.cargo||'')}</small></div></div>`).join('')+'</div>';
+    <div><div>${esc(u.nome)} <span class="muted">#${esc(u.id)}</span></div></div></div>`).join('')+'</div>';
 }
 function userPick(id,nome,cargo){
   NUSER={bitrix_id:id,nome,cargo};
   document.getElementById('uRes').innerHTML=''; document.getElementById('uQ').value='';
   const s=document.getElementById('uSel'); s.style.display='block';
-  s.innerHTML=`<div class="bv">Selecionado: <b>${esc(nome)}</b> <span class="muted">#${esc(id)} · ${esc(cargo)}</span></div>`;
+  s.innerHTML=`<div class="bv">Selecionado: <b>${esc(nome)}</b> <span class="muted">#${esc(id)}</span></div>`;
 }
 async function userSave(){
   if(!NUSER){toast('Escolha um usuário do Bitrix');return;}
@@ -1112,7 +1250,8 @@ async function userDelete(bid){
 }
 
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
-getCurrentUser(); load();
+// serializa: define IS_ADMIN + carrega responsáveis ANTES do 1º render (evita vazar controles admin / select vazio)
+(async()=>{ try{ await Promise.all([getCurrentUser(), loadResponsaveis()]); }catch(e){} await load(); })();
 </script>
 </body>
 </html>

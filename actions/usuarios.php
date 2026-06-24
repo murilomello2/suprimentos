@@ -30,6 +30,14 @@ function jrow($r) {
 try {
     $pdo = db();
 
+    // lista de RESPONSÁVEIS possíveis p/ o Radar = usuários ativos com o papel 'comprador'
+    // (rotulado "Suprimentos" na UI). Sem cargo — só id + nome.
+    if (isset($_GET['responsaveis'])) {
+        $rs = $pdo->query("SELECT bitrix_id, nome FROM usuario
+                           WHERE ativo=1 AND papel='comprador' AND TRIM(COALESCE(nome,''))<>'' ORDER BY nome")->fetchAll();
+        echo json_encode(['responsaveis' => $rs], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     // permissões efetivas de um usuário (enforcement). Não cadastrado => nega tudo.
     if (isset($_GET['me'])) {
         $st = $pdo->prepare("SELECT * FROM usuario WHERE bitrix_id=? AND ativo=1");

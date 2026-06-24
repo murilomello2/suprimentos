@@ -160,7 +160,8 @@ function criar_item($pdo, $nome, $grupo, $tipo = '', $curva = '', $copy_from = n
     $go = $pdo->prepare("SELECT grupo_ordem FROM servico WHERE grupo=? LIMIT 1");
     $go->execute([$grupo]);
     $grupo_ordem = $go->fetchColumn();
-    if ($grupo_ordem === false || $grupo_ordem === null) $grupo_ordem = 50;
+    if ($grupo_ordem === false || $grupo_ordem === null)
+        $grupo_ordem = (int)$pdo->query("SELECT COALESCE(MAX(grupo_ordem),0)+1 FROM servico")->fetchColumn();
 
     $src = null;
     if ($copy_from) {

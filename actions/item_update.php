@@ -69,6 +69,23 @@ try {
         }
     }
 
+    // MOVER o item de GRUPO (admin) — atualiza o catálogo (servico), não a curadoria.
+    // Grupo existente herda a ordem do destino; grupo novo vai pro fim.
+    if (array_key_exists('grupo', $campos)) {
+        $g = trim((string)$campos['grupo']);
+        if ($g !== '') {
+            $go = $pdo->prepare("SELECT grupo_ordem FROM servico WHERE grupo=? AND id<>? LIMIT 1");
+            $go->execute([$g, $ordem]);
+            $gord = $go->fetchColumn();
+            if ($gord === false || $gord === null) {
+                $gord = (int)$pdo->query("SELECT COALESCE(MAX(grupo_ordem),0)+1 FROM servico")->fetchColumn();
+            }
+            $pdo->prepare("UPDATE servico SET grupo=?, grupo_ordem=? WHERE id=?")->execute([$g, $gord, $ordem]);
+        }
+        unset($campos['grupo']);
+        if (!$campos) { echo json_encode(['ok'=>true, 'grupo'=>$g], JSON_UNESCAPED_UNICODE); exit; }
+    }
+
     // composição de QUANTITATIVO: linhas do orçamento -> soma das quantidades + unidade dominante
     if (array_key_exists('quant_refs', $campos)) {
         $refs = array_values(array_filter(array_map('intval', (array)$campos['quant_refs'])));

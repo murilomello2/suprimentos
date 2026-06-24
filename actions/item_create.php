@@ -47,6 +47,12 @@ try {
         $nome .= ' ' . $SUFIXO[$tipo];
     }
     $ordem = criar_item($pdo, $nome, $grupo, $tipo, $curva, $in['copy_from'] ?? null);
+    $resp = trim($in['responsavel'] ?? '');
+    if ($resp !== '') {
+        if (stripos($resp, 'camila') !== false) throw new Exception('responsável inválido'); // mesma regra do item_update
+        $pdo->prepare("UPDATE radar_item SET responsavel=? WHERE obra_id=1 AND servico_id=?")
+            ->execute([$resp, $ordem]);
+    }
     echo json_encode(['ok'=>true, 'ordem'=>$ordem]);
 } catch (Throwable $e) {
     http_response_code(400);

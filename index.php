@@ -338,7 +338,7 @@ async function load(){
       <div class="kpi"><div class="v">${comData} / ${rs.total}</div><div class="l">Com data definida</div></div>
       <div class="kpi"><div class="v ${alerta?'alert':''}">${alerta}</div><div class="l">Em alerta (disparar já)</div></div>
       <div class="kpi"><div class="v">${cv('A')} · ${cv('B')} · ${cv('C')}</div><div class="l">Curva A / B / C</div></div>
-      <div class="kpi"><div class="v gold">${o.cobertura_orcamento?o.cobertura_orcamento.toLocaleString('pt-BR')+'%':'—'}</div><div class="l">Cobertura do orçamento</div></div>`;
+      <div class="kpi" title="${rs.cobertura_real!=null?`Cobertura REAL, sem contar verba em dobro: ${rs.cobertura_analitico}% por vínculo analítico (linhas distintas) + ${rs.cobertura_composicao}% por composição. Coberto ${BRL(rs.cobertura_valor)} de ${BRL(rs.cobertura_total_leaf)} em folhas.`:'sem dados'}"><div class="v gold">${rs.cobertura_real!=null?rs.cobertura_real.toLocaleString('pt-BR')+'%':'—'}</div><div class="l">Cobertura real do orçamento</div></div>`;
     // filtros dinâmicos (grupos em ordem lógica = ordem de aparição; demais ordenados)
     fillOrdered('fgrupo',[...new Set(d.itens.map(i=>i.grupo).filter(Boolean))]);
     fill('fobra',obras);

@@ -43,6 +43,9 @@
   .search input{border:0;outline:0;flex:1;font-size:13px;background:transparent}
   .toggle{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);cursor:pointer}
   .wrap{margin:0 26px 30px;overflow-x:auto}
+  #view-radar .wrap{overflow:auto;margin-bottom:14px;border:1px solid var(--line);border-radius:12px}
+  #view-radar table{overflow:visible;border:0;border-radius:0}
+  #view-radar thead th{position:sticky;top:0;z-index:5;box-shadow:inset 0 -1px 0 var(--line)}
   table{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
   thead th{background:#fafbfb;text-align:left;padding:10px 12px;font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap}
   thead th.srt{cursor:pointer;user-select:none}
@@ -350,6 +353,7 @@ function showView(v){
   });
   if(v==='matriz') renderMatriz();
   if(v==='config') renderConfig();
+  if(v==='radar') fitRadarHeight();
 }
 
 /* ---------- matriz ---------- */
@@ -467,7 +471,14 @@ function updateCollapseBtn(){
   const anyOpen=groups.some(g=>!COLLAPSED.has(g));
   b.innerHTML=`<span class="material-icons" style="font-size:16px;vertical-align:-3px">${anyOpen?'unfold_less':'unfold_more'}</span> ${anyOpen?'Recolher tudo':'Expandir tudo'}`;
 }
-function toggleFiltros(){ const a=document.getElementById('advFilters'); if(a) a.style.display=(a.style.display==='none'?'flex':'none'); }
+function toggleFiltros(){ const a=document.getElementById('advFilters'); if(a) a.style.display=(a.style.display==='none'?'flex':'none'); fitRadarHeight(); }
+// dá altura à área da tabela do radar pra o cabeçalho poder ficar fixo (sticky) ao rolar
+function fitRadarHeight(){
+  const w=document.querySelector('#view-radar .wrap'); if(!w) return;
+  const top=w.getBoundingClientRect().top;
+  if(top<=0) return;                 // view do radar oculta — ajusta quando voltar
+  w.style.maxHeight=Math.max(window.innerHeight-top-24,220)+'px';
+}
 /* reordenar / renomear grupos (admin) */
 async function grupoMover(idx,dir){
   const arr=GORDER.slice(); const j=idx+dir;
@@ -535,7 +546,7 @@ function render(){
     });
   }
   tb.innerHTML=html;
-  updateCollapseBtn(); updateSortArrows();
+  updateCollapseBtn(); updateSortArrows(); fitRadarHeight();
 }
 function rowHtml(i){
   const st=i.status||'Não Iniciado';
@@ -1284,6 +1295,7 @@ async function userDelete(bid){
 }
 
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+window.addEventListener('resize',fitRadarHeight);
 // serializa: define IS_ADMIN + carrega responsáveis ANTES do 1º render (evita vazar controles admin / select vazio)
 (async()=>{ try{ await Promise.all([getCurrentUser(), loadResponsaveis()]); }catch(e){} await load(); })();
 </script>

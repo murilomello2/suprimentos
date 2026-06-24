@@ -183,6 +183,7 @@
     <div class="navlabel">Administração</div>
     <nav class="nav">
       <a id="nav-config" data-menu="config" onclick="showView('config')"><span class="material-icons">settings</span> Configurações</a>
+      <a id="nav-audit" data-menu="audit" onclick="showView('audit')"><span class="material-icons">fact_check</span> Auditoria <span style="font-size:9px;background:var(--dourado);color:#fff;padding:1px 5px;border-radius:5px;margin-left:auto">temp</span></a>
     </nav>
   </aside>
 
@@ -286,6 +287,14 @@
     </div>
     <div class="wrap" id="cfgwrap"></div>
    </section>
+
+   <section id="view-audit" style="display:none">
+    <div class="top">
+      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">fact_check</span> Auditoria de Orçamento</h1>
+      <p class="sub">Linhas do orçamento usadas em <b>2+ itens</b> (verba contada em dobro). Cronograma não entra aqui — datas/marcos podem ser compartilhados. <b>Ferramenta temporária</b> de limpeza desta obra.</p>
+    </div>
+    <div id="auditwrap" style="margin:8px 26px 30px"><div class="empty">Carregando…</div></div>
+   </section>
   </main>
 </div>
 
@@ -347,13 +356,62 @@ function fillMulti(id,arr){const el=document.getElementById(id);el.innerHTML=arr
 
 /* ---------- view switch ---------- */
 function showView(v){
-  ['radar','matriz','config'].forEach(x=>{
+  ['radar','matriz','config','audit'].forEach(x=>{
     document.getElementById('view-'+x).style.display=v===x?'':'none';
     document.getElementById('nav-'+x).classList.toggle('active',v===x);
   });
   if(v==='matriz') renderMatriz();
   if(v==='config') renderConfig();
   if(v==='radar') fitRadarHeight();
+  if(v==='audit') renderAudit();
+}
+
+/* ===== Auditoria de Orçamento (temporária) — duplicação de vínculo de verba ===== */
+async function renderAudit(){
+  const box=document.getElementById('auditwrap');
+  box.innerHTML='<div class="empty">Rodando auditoria na base…</div>';
+  let d;
+  try{ d=await (await fetch('actions/audit_orcamento.php')).json(); }
+  catch(e){ box.innerHTML='<div class="empty">Falha: '+esc(e.message)+'</div>'; return; }
+  if(d.error){ box.innerHTML='<div class="empty">Erro: '+esc(d.error)+'</div>'; return; }
+  const pct=d.cobertura_distinta_pct_folhas;
+  let html=`<div class="kpis" style="padding:0 0 14px">
+    <div class="kpi"><div class="v gold">${pct}%</div><div class="l">Cobertura real (analítico, distinto)</div></div>
+    <div class="kpi"><div class="v">${BRL(d.valor_coberto_distinto)}</div><div class="l">de ${BRL(d.total_leaf)} em folhas</div></div>
+    <div class="kpi"><div class="v ${d.linhas_duplicadas?'alert':''}">${d.linhas_duplicadas}</div><div class="l">Linhas duplicadas</div></div>
+    <div class="kpi"><div class="v ${d.valor_inflado_por_dup?'alert':''}">${BRL(d.valor_inflado_por_dup)}</div><div class="l">Verba inflada por duplicação</div></div>
+    <div class="kpi"><div class="v">${d.composicao_itens}</div><div class="l">Itens por composição (à parte)</div></div>
+  </div>`;
+  if(!d.duplicatas.length){
+    html+='<div class="panel" style="padding:18px 16px"><b style="color:var(--ok)">✓ Sem duplicação.</b> Cada linha do orçamento está em no máximo um item — a verba não está contada em dobro.</div>';
+  } else {
+    html+='<div class="note">Cada linha abaixo compõe a verba de 2+ itens (double-count). Deixe em <b>um</b> item e clique <b>“remover daqui”</b> nos outros — a verba do item recalcula na hora.</div>';
+    html+='<div class="wrap" style="margin:0"><table><thead><tr><th>Linha do orçamento</th><th>R$ × usos</th><th>Itens que a usam</th></tr></thead><tbody>';
+    for(const dup of d.duplicatas){
+      html+=`<tr>
+        <td><div class="svc">${esc((dup.descricao||'').slice(0,90))}</div><div class="svc-sub">${esc(dup.path||'')}</div></td>
+        <td class="money">${BRL(dup.valor)} <span class="muted">×${dup.n}</span></td>
+        <td>${dup.itens.map(it=>`<div style="display:flex;align-items:center;gap:8px;padding:3px 0">
+          <span class="tp-chip tp-mat-mo">${esc(it.grupo||'')}</span><span style="flex:1">${esc(it.nome)}</span>
+          <button class="btn-ghost" style="padding:3px 9px;font-size:12px;color:var(--pend)" onclick="auditRemover(${it.ordem},${dup.id})">remover daqui</button>
+        </div>`).join('')}</td></tr>`;
+    }
+    html+='</tbody></table></div>';
+  }
+  box.innerHTML=html;
+}
+async function auditRemover(ordem,lineId){
+  const it=byOrdem(ordem); if(!it){toast('item não encontrado — recarregue');return;}
+  const cur=(it.orcamento_refs||[]).map(Number);
+  const novo=cur.filter(x=>x!==Number(lineId));
+  if(novo.length===cur.length){toast('essa linha não está mais nesse item');renderAudit();return;}
+  if(!confirm(`Remover esta linha do orçamento de "${it.nome}"?\nA verba dele será recalculada sem essa linha.`))return;
+  try{
+    const d=await (await fetch('actions/item_update.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ordem,campos:{orcamento_refs:novo}})})).json();
+    if(d.error){toast('Erro: '+d.error);return;}
+  }catch(e){toast('Falha ao salvar');return;}
+  await load(); renderAudit(); toast('Linha removida de '+it.nome);
 }
 
 /* ---------- matriz ---------- */

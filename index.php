@@ -53,7 +53,9 @@
   .grp .gcount{font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0}
   .gwrap{display:flex;align-items:center;gap:8px}
   .gcaret{font-size:18px;color:var(--verde-d);flex:0 0 auto}
-  .gctl{margin-left:auto;display:flex;gap:4px;align-items:center}
+  .gctl{display:inline-flex;gap:4px;align-items:center;margin:0 2px 0 8px}
+  #filtBadge{font-weight:800;color:var(--verde)}
+  .grp .gname{cursor:pointer}
   .gbtn{border:1px solid var(--line);background:#fff;border-radius:6px;min-width:24px;height:22px;cursor:pointer;font-size:11px;color:var(--muted);line-height:1;display:inline-flex;align-items:center;justify-content:center;padding:0 4px}
   .gbtn:hover:not([disabled]){border-color:var(--verde);color:var(--verde)}
   .gbtn[disabled]{opacity:.35;cursor:default}
@@ -188,32 +190,29 @@
     </div>
     <div class="kpis" id="kpis"></div>
 
-    <div class="panel">
-      <h3>Filtros</h3>
-      <div class="hint">Filtre os itens do radar por critérios específicos</div>
-      <div class="bar">
+    <div class="panel" style="margin-top:8px">
+      <div class="bar" style="padding:8px 12px;gap:8px">
+        <div class="search" style="min-width:180px"><span class="material-icons" style="color:var(--muted)">search</span>
+          <input id="q" placeholder="Buscar item, contratação ou responsável…" oninput="render()"></div>
+        <label class="toggle" style="gap:6px">Ver
+          <select id="fview" onchange="render()"><option value="agrupado">Agrupado</option><option value="lista">Lista</option></select></label>
+        <label class="toggle" style="gap:6px">Ordenar
+          <select id="fsort" onchange="render()">
+            <option value="gatilho">Início cotação ↑</option>
+            <option value="fim">Fim cotação ↑</option>
+            <option value="obra">Data em obra ↑</option>
+            <option value="verba">Verba ↓</option>
+          </select></label>
+        <button class="btn-ghost" id="filtBtn" onclick="toggleFiltros()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">tune</span> Filtros<span id="filtBadge"></span></button>
+        <button class="btn-ghost" id="collapseBtn" onclick="toggleAllGroups()" style="margin-left:auto"></button>
+      </div>
+      <div class="bar" id="advFilters" style="padding:0 12px 10px;gap:8px;display:none">
         <select id="fobra" onchange="render()"><option value="">Todas as obras</option></select>
         <select id="fgrupo" onchange="render()"><option value="">Todos os grupos</option></select>
         <select id="fcurva" onchange="render()"><option value="">Todas as curvas</option><option>A</option><option>B</option><option>C</option></select>
         <select id="fstatus" onchange="render()"><option value="">Todos os status</option></select>
         <select id="fresp" onchange="render()"><option value="">Todos os responsáveis</option></select>
-      </div>
-      <div class="bar" style="padding-top:0">
-        <div class="search"><span class="material-icons" style="color:var(--muted)">search</span>
-          <input id="q" placeholder="Buscar por item, forma de contratação ou responsável…" oninput="render()"></div>
-        <label class="toggle"><input type="checkbox" id="onlyalert" onchange="render()"> Somente em alerta (gatilho vencido)</label>
-      </div>
-      <div class="bar" style="padding-top:0">
-        <label class="toggle" style="gap:6px">Visualização
-          <select id="fview" onchange="render()"><option value="agrupado">Agrupado</option><option value="lista">Lista (tudo junto)</option></select></label>
-        <label class="toggle" style="gap:6px">Ordenar por
-          <select id="fsort" onchange="render()">
-            <option value="gatilho">Início da cotação (mais antiga primeiro)</option>
-            <option value="fim">Fim da cotação</option>
-            <option value="obra">Data em obra</option>
-            <option value="verba">Verba (maior → menor)</option>
-          </select></label>
-        <button class="btn-ghost" id="collapseBtn" onclick="toggleAllGroups()" style="margin-left:auto"></button>
+        <label class="toggle"><input type="checkbox" id="onlyalert" onchange="render()"> Somente em alerta</label>
       </div>
     </div>
 
@@ -440,6 +439,7 @@ function updateCollapseBtn(){
   const anyOpen=groups.some(g=>!COLLAPSED.has(g));
   b.innerHTML=`<span class="material-icons" style="font-size:16px;vertical-align:-3px">${anyOpen?'unfold_less':'unfold_more'}</span> ${anyOpen?'Recolher tudo':'Expandir tudo'}`;
 }
+function toggleFiltros(){ const a=document.getElementById('advFilters'); if(a) a.style.display=(a.style.display==='none'?'flex':'none'); }
 /* reordenar / renomear grupos (admin) */
 async function grupoMover(idx,dir){
   const arr=GORDER.slice(); const j=idx+dir;
@@ -472,8 +472,8 @@ function groupHeaderHtml(g,items,idx){
     </span>`:'';
   return `<tr class="grp" onclick="toggleGroup(${idx})"><td colspan="12"><span class="gwrap">
       <span class="material-icons gcaret">${collapsed?'chevron_right':'expand_more'}</span>
-      <span>${esc(g)}</span>
-      <span class="gcount">· ${n} ${n>1?'itens':'item'} · ${BRL(verba)}${prox}</span>${adm}
+      <span class="gname">${esc(g)}</span>${adm}
+      <span class="gcount">· ${n} ${n>1?'itens':'item'} · ${BRL(verba)}${prox}</span>
     </span></td></tr>`;
 }
 function render(){
@@ -484,6 +484,8 @@ function render(){
   const oa=document.getElementById('onlyalert').checked;
   const key=document.getElementById('fsort').value||'gatilho';
   const flat=document.getElementById('fview').value==='lista';
+  const _naf=[fo,fg,fc,fs,fr].filter(Boolean).length+(oa?1:0);
+  const _fb=document.getElementById('filtBadge'); if(_fb) _fb.textContent=_naf?` ·${_naf}`:'';
   const rows=DATA.itens.filter(i=>
     (!q||(i.nome+' '+(i.forma_contratacao||'')+' '+(i.responsavel||'')).toLowerCase().includes(q))&&
     (!fg||i.grupo===fg)&&(!fo||i.obra_nome===fo)&&(!fc||i.curva===fc)&&
@@ -1020,7 +1022,7 @@ function resumoTab(i){
   const verbaLbl = (i.verba_material!=null||i.verba_mo!=null)
     ? `Material ${BRL(i.verba_material||0)} + MO ${BRL(i.verba_mo||0)}` : BRL(i.verba);
   return `
-    ${IS_ADMIN?`<div class="fld"><label>Grupo (organização do radar)</label>
+    ${IS_ADMIN?`<div class="fld"><label>Grupo <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— mova este item de grupo ou crie um novo</span></label>
       <select onchange="modalGrupo(this.value)">${grupoOptions(i.grupo)}</select></div>`:''}
     <div class="grid2">
       <div class="fld"><label>Tipo do item</label>

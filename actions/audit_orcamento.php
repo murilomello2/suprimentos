@@ -32,15 +32,10 @@ try {
         }
     }
 
+    // carrega TODAS as linhas num mapa (sem IN gigante — evita o limite de variáveis do SQLite)
     $val = []; $desc = []; $path = [];
-    $ids = array_keys($uso);
-    if ($ids) {
-        $inq = implode(',', array_fill(0, count($ids), '?'));
-        $st = $pdo->prepare("SELECT id, valor, descricao, path_str FROM orcamento_linha WHERE id IN ($inq)");
-        $st->execute($ids);
-        foreach ($st->fetchAll() as $l) {
-            $val[$l['id']] = (float)$l['valor']; $desc[$l['id']] = $l['descricao']; $path[$l['id']] = $l['path_str'];
-        }
+    foreach ($pdo->query("SELECT id, valor, descricao, path_str FROM orcamento_linha") as $l) {
+        $val[$l['id']] = (float)$l['valor']; $desc[$l['id']] = $l['descricao']; $path[$l['id']] = $l['path_str'];
     }
 
     $cov_dist = 0; $cov_dups = 0; $inflado = 0; $dups = [];

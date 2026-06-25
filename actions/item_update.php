@@ -127,7 +127,55 @@ try {
         unset($campos['quant_refs']);
     }
 
-    // ----- VERBA/QUANTITATIVO por COMPOSIÇÃO -----
+    // ----- VERBA por COMPOSIÇÃO: cesta de insumos selecionados (de 1+ composições) -----
+    if (array_key_exists('composicao_sel', $campos)) {
+        $sel = $campos['composicao_sel'];
+        $vmat = 0; $vmo = 0; $qval = 0; $qun = ''; $clean = []; $cache = [];
+        if (is_array($sel)) foreach ($sel as $s) {
+            $cid = (int)($s['cid'] ?? 0); $idx = (int)($s['idx'] ?? -1); $area = (float)($s['area'] ?? 0);
+            if ($cid <= 0 || $idx < 0 || $area <= 0) continue;
+            if (!isset($cache[$cid])) {
+                $q = $pdo->prepare("SELECT descricao,unidade,coef,rs_unit,tipo FROM composicao_insumo WHERE composicao_id=? ORDER BY id");
+                $q->execute([$cid]); $cache[$cid] = $q->fetchAll();
+            }
+            if (!isset($cache[$cid][$idx])) continue;
+            $ins = $cache[$cid][$idx];
+            $custo = $area * (float)$ins['coef'] * (float)$ins['rs_unit'];
+            if ($ins['tipo'] === 'mo') $vmo += $custo; else $vmat += $custo;
+            if (!empty($s['q'])) { $qval += $area * (float)$ins['coef']; if ($qun === '') $qun = $ins['unidade']; }
+            $clean[] = ['cid'=>$cid,'idx'=>$idx,'area'=>$area,'q'=>!empty($s['q']),
+                        'desc'=>$ins['descricao'],'tipo'=>$ins['tipo'],'unidade'=>$ins['unidade'],
+                        'coef'=>(float)$ins['coef'],'rs_unit'=>(float)$ins['rs_unit']];
+        }
+        if ($clean) {
+            $verba = $vmat + $vmo;
+            $set[]="verba_metodo = ?";    $vals[]='composicao';
+            $set[]="composicao_sel = ?";  $vals[]=json_encode($clean, JSON_UNESCAPED_UNICODE);
+            $set[]="composicao_id = ?";   $vals[]=null;
+            $set[]="area_base = ?";       $vals[]=null;
+            $set[]="verba_material = ?";  $vals[]=$vmat ?: null;
+            $set[]="verba_mo = ?";        $vals[]=$vmo ?: null;
+            $set[]="verba_override = ?";  $vals[]=$verba;
+            $set[]="orcamento_refs = ?";  $vals[]=null;
+            if ($qval > 0) {
+                $set[]="quantitativo_valor = ?";   $vals[]=$qval;
+                $set[]="quantitativo_unidade = ?"; $vals[]=$qun;
+                $set[]="quantitativo_fonte = ?";   $vals[]='composicao';
+                $set[]="quantitativo_refs = ?";    $vals[]=null;
+            }
+            $h('Verba (composição)', '', 'R$ '.number_format($verba,2,',','.').' · '.count($clean).' insumo(s)');
+        } else {
+            $set[]="composicao_sel = ?"; $vals[]=null;
+            $set[]="verba_metodo = ?";   $vals[]=null;
+            $set[]="verba_override = ?"; $vals[]=null;
+            $set[]="verba_material = ?"; $vals[]=null;
+            $set[]="verba_mo = ?";       $vals[]=null;
+            $h('Verba (composição)', '', 'limpo');
+        }
+        unset($campos['composicao_sel']);
+    }
+
+    // ----- VERBA/QUANTITATIVO por COMPOSIÇÃO (modelo antigo, 1 composição) -----
     if (array_key_exists('composicao', $campos)) {
         $cfg  = $campos['composicao'];
         $cid  = (int)($cfg['id'] ?? 0); $area = (float)($cfg['area'] ?? 0);

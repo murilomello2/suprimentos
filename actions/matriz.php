@@ -22,7 +22,7 @@ try {
                r.verba_override, r.lead_override, r.crono_marco_override,
                r.data_necessaria_override, r.orcamento_refs,
                r.quantitativo_valor, r.quantitativo_unidade, r.quantitativo_refs, r.quantitativo_fonte,
-               r.tipo, r.verba_metodo, r.verba_material, r.verba_mo, r.composicao_id, r.area_base
+               r.tipo, r.verba_metodo, r.verba_material, r.verba_mo, r.composicao_id, r.area_base, r.composicao_sel
         FROM servico s
         JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = 1
         ORDER BY s.grupo_ordem, s.ordem
@@ -74,6 +74,7 @@ try {
             'verba_material'       => $r['verba_material'] !== null ? (float)$r['verba_material'] : null,
             'verba_mo'             => $r['verba_mo'] !== null ? (float)$r['verba_mo'] : null,
             'verba_metodo'         => $r['verba_metodo'],
+            'composicao_sel'       => $r['composicao_sel'] ? json_decode($r['composicao_sel'], true) : [],
         ];
         $verba_total += $verba;
         $r['obra_nome'] = $obra['nome']; // p/ identificação e busca multi-obra futura

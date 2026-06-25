@@ -104,6 +104,10 @@ function db_schema($pdo) {
         updated_at TEXT,
         UNIQUE(obra_id, servico_id)
     )");
+    // coluna ADITIVA (não dropa radar_item): cesta de insumos de composição p/ compor a verba
+    $hasSel = false;
+    foreach ($pdo->query("PRAGMA table_info(radar_item)") as $c) if ($c['name'] === 'composicao_sel') $hasSel = true;
+    if (!$hasSel) $pdo->exec("ALTER TABLE radar_item ADD COLUMN composicao_sel TEXT");
     $pdo->exec("CREATE TABLE IF NOT EXISTS orcamento_linha (
         id INTEGER PRIMARY KEY,
         obra_id INTEGER NOT NULL DEFAULT 1,

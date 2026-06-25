@@ -939,18 +939,21 @@ function orcTab(i){
   return h;
 }
 let ORCFONTE='analitico';
-function orcEditar(){ EDITO=true; ORCFONTE=(CUR.verba_metodo==='composicao'?'composicao':'analitico'); drawModal(); }
+function orcEditar(){ EDITO=true; ORCFONTE=(CUR.verba_metodo==='composicao'?'composicao':'analitico'); COMP_SEL=(CUR.composicao_sel||[]).map(s=>({...s})); COMP_DATA=null; drawModal(); }
 function orcCancelar(){ EDITO=false; drawModal(); }
 function orcSetFonte(v){ ORCFONTE=v; orcRenderFonte(); }
 function orcRenderFonte(){
   const box=document.getElementById('orcFonteBox'); if(!box)return;
   if(ORCFONTE==='composicao'){
     box.innerHTML=`
-      <div class="fld"><label>Buscar composição (ex.: contrapiso, alvenaria, concreto)</label>
+      <div class="fld"><label>Buscar composição (ex.: contrapiso, alvenaria, concreto) — marque os insumos que entram na verba</label>
         <div class="search" style="border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
           <input id="compQ" placeholder="digite o serviço…" oninput="compBuscar()"></div></div>
       <div id="compSearch"></div>
-      <div id="compDetail"></div>`;
+      <div id="compDetail"></div>
+      <div id="compBasket" style="margin-top:8px"></div>
+      <div id="compTotals"></div>`;
+    compRenderBasket();
   } else {
     box.innerHTML=`
       <div class="fld"><label>Buscar item por nome</label>
@@ -965,6 +968,17 @@ function orcRenderFonte(){
   }
 }
 async function orcShowCurrent(i){
+  // composição: mostra a cesta de insumos (read-only)
+  if(i.verba_metodo==='composicao' && (i.composicao_sel||[]).length){
+    const el=document.getElementById('orcSel'); if(el){
+      let vmat=0,vmo=0;
+      el.innerHTML=i.composicao_sel.map(s=>{const c=(s.area||0)*(s.coef||0)*(s.rs_unit||0); if(s.tipo==='mo')vmo+=c;else vmat+=c;
+        return `<div class="pickrow"><span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
+          <div><div>${esc(s.desc)}</div><small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} × R$${QNUM(s.rs_unit)} = ${BRL(c)}${s.q?' · define quantitativo':''}</small></div></div>`;}).join('');
+      const t=document.getElementById('orcTotal'); if(t) t.textContent='Material '+BRL(vmat)+' · MO '+BRL(vmo);
+    }
+    return;
+  }
   ORC_SEL=new Set((i.orcamento_refs||[]).map(Number));
   await orcRenderSel();
 }
@@ -1029,8 +1043,8 @@ function orcRenderSearch(){
 async function orcSalvar(){ EDITO=false; await saveAndReload({orcamento_refs:[...ORC_SEL]}); toast('Verba composta ('+ORC_SEL.size+' itens)'); }
 async function orcLimpar(){ EDITO=false; ORC_SEL.clear(); await saveAndReload({orcamento_refs:[]}); toast('Composição limpa'); }
 
-/* ----- Composição (separa material × MO + quantitativo por coeficiente) ----- */
-let COMP_DATA=null, COMP_AREA=0, COMP_QIDX=0, COMP_LAST=[];
+/* ----- Composição — CESTA de insumos (de 1+ composições): verba = soma do que você marcar ----- */
+let COMP_DATA=null, COMP_AREA=0, COMP_LAST=[], COMP_SEL=[];
 async function compBuscar(){
   const q=document.getElementById('compQ').value.trim();
   const box=document.getElementById('compSearch'); if(!box)return;
@@ -1046,51 +1060,65 @@ async function compBuscar(){
 async function compEscolher(id){
   COMP_DATA=await (await fetch('actions/composicao.php?id='+id)).json();
   COMP_AREA=COMP_DATA.qtde_total||0;
-  COMP_QIDX=COMP_DATA.insumos.findIndex(x=>x.tipo==='material'); if(COMP_QIDX<0)COMP_QIDX=0;
   document.getElementById('compSearch').innerHTML='';
   compRenderDetail();
 }
-function compCalc(){
-  let vmat=0,vmo=0;
-  COMP_DATA.insumos.forEach(in_=>{ const c=COMP_AREA*(in_.coef||0)*(in_.rs_unit||0); if(in_.tipo==='mo')vmo+=c; else vmat+=c; });
-  const q=COMP_DATA.insumos[COMP_QIDX];
-  return {vmat,vmo,total:vmat+vmo, q_val:q?COMP_AREA*(q.coef||0):null, q_un:q?q.unidade:''};
-}
 function compRenderDetail(){
   const box=document.getElementById('compDetail'); if(!box||!COMP_DATA)return;
-  const r=compCalc();
+  const c=COMP_DATA;
   box.innerHTML=`
-    <div class="box"><div class="bl">${esc(COMP_DATA.descricao)}</div>
-      <div class="bv muted" style="font-size:12px">unidade ${esc(COMP_DATA.unidade||'')} · total no orçamento ${QNUM(COMP_DATA.qtde_total)} ${esc(COMP_DATA.unidade||'')}</div></div>
-    <div class="fld"><label>Área / quantidade a considerar (padrão = total; ajuste por trecho)</label>
-      <input id="compArea" type="number" step="any" value="${COMP_AREA}" oninput="compAreaCh(this.value)"></div>
-    <div class="tree" style="max-height:220px">
-      <div class="tnode tparent"><span class="caret-sp"></span><span class="tname">Insumo</span><span class="tval">consumo/un · valor</span><span style="width:48px;text-align:center;font-size:10px;color:var(--muted)">qtd?</span></div>
-      ${COMP_DATA.insumos.map((in_,ix)=>`<div class="tnode">
+    <div class="box"><div class="bl">${esc(c.descricao)}</div>
+      <div class="bv muted" style="font-size:12px">unidade ${esc(c.unidade||'')} · total no orçamento ${QNUM(c.qtde_total)} ${esc(c.unidade||'')}</div></div>
+    <div class="fld"><label>Área/quantidade desta composição (vale para os insumos que marcar; padrão = total)</label>
+      <input id="compArea" type="number" step="any" value="${COMP_AREA}" oninput="COMP_AREA=parseFloat(this.value)||0"></div>
+    <div class="tree" style="max-height:200px">
+      ${c.insumos.map((in_,ix)=>{ const on=COMP_SEL.some(s=>s.cid===c.id&&s.idx===ix);
+        return `<div class="tnode">
+        <span class="material-icons chk" onclick="compToggleInsumo(${ix})" style="color:${on?'var(--ok)':'var(--muted)'}">${on?'check_box':'check_box_outline_blank'}</span>
         <span class="badge-tp ${in_.tipo}">${in_.tipo==='mo'?'MO':'MAT'}</span>
         <span class="tname">${esc(in_.descricao)}</span>
         <span class="tval">${QNUM(in_.coef)} ${esc(in_.unidade||'')} × R$${QNUM(in_.rs_unit)}</span>
-        <span style="width:48px;text-align:center"><input type="radio" name="qidx" ${ix===COMP_QIDX?'checked':''} onclick="compSetQ(${ix})" title="define o quantitativo"></span>
-      </div>`).join('')}
+      </div>`;}).join('')}
     </div>
-    <div class="box" style="margin-top:10px"><div class="bv">
-      <b>Material:</b> ${BRL(r.vmat)} &nbsp;·&nbsp; <b>MO:</b> ${BRL(r.vmo)} &nbsp;·&nbsp; <b>Total:</b> ${BRL(r.total)}<br>
-      <span class="muted" style="font-size:12px">Quantitativo: ${r.q_val!=null?QNUM(r.q_val)+' '+esc(r.q_un):'—'}</span>
-    </div></div>
+    <div class="muted" style="font-size:11.5px;margin-top:4px">Marque os insumos que entram na verba deste item (ex.: só o bloco). Pode abrir outra composição e marcar mais.</div>`;
+}
+function compToggleInsumo(ix){
+  const c=COMP_DATA; const in_=c&&c.insumos[ix]; if(!in_)return;
+  const i=COMP_SEL.findIndex(s=>s.cid===c.id&&s.idx===ix);
+  if(i>=0) COMP_SEL.splice(i,1);
+  else COMP_SEL.push({cid:c.id, idx:ix, area:COMP_AREA||c.qtde_total||0, q:(in_.tipo==='material'),
+    desc:in_.descricao, tipo:in_.tipo, unidade:in_.unidade, coef:+in_.coef, rs_unit:+in_.rs_unit, compdesc:c.descricao});
+  compRenderDetail(); compRenderBasket();
+}
+function compRenderBasket(){
+  const box=document.getElementById('compBasket'), tot=document.getElementById('compTotals');
+  if(!box)return;
+  if(!COMP_SEL.length){ box.innerHTML='<div class="muted" style="font-size:12px;padding:6px 2px">Nenhum insumo na verba ainda — marque insumos das composições acima (de quantas composições quiser).</div>'; if(tot)tot.innerHTML=''; return; }
+  let vmat=0,vmo=0,qval=0,qun='';
+  box.innerHTML='<div class="bl" style="margin-bottom:4px">Verba composta destes insumos</div>'+COMP_SEL.map((s,k)=>{
+    const custo=(s.area||0)*(s.coef||0)*(s.rs_unit||0); if(s.tipo==='mo')vmo+=custo; else vmat+=custo;
+    if(s.q){ qval+=(s.area||0)*(s.coef||0); if(!qun)qun=s.unidade; }
+    return `<div class="pickrow" style="gap:8px;align-items:center">
+      <span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
+      <div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.desc)}</div>
+        <small class="muted">${esc((s.compdesc||'').slice(0,38))} · ${QNUM(s.coef)}×R$${QNUM(s.rs_unit)}</small></div>
+      <input type="number" step="any" style="width:84px;border:1px solid var(--line);border-radius:7px;padding:4px 6px" value="${s.area}" oninput="COMP_SEL[${k}].area=parseFloat(this.value)||0;compRenderBasket()" title="área/quantidade">
+      <span class="money" style="min-width:88px;text-align:right">${BRL(custo)}</span>
+      <label class="ckl" style="font-size:11px" title="usar pro quantitativo"><input type="checkbox" ${s.q?'checked':''} onchange="COMP_SEL[${k}].q=this.checked;compRenderBasket()"> qtd</label>
+      <span class="material-icons" style="cursor:pointer;color:var(--pend);font-size:18px" onclick="COMP_SEL.splice(${k},1);compRenderDetail();compRenderBasket()" title="remover">close</span>
+    </div>`;
+  }).join('');
+  if(tot) tot.innerHTML=`<div class="box" style="margin-top:8px"><div class="bv">
+      <b>Material:</b> ${BRL(vmat)} &nbsp;·&nbsp; <b>MO:</b> ${BRL(vmo)} &nbsp;·&nbsp; <b>Total verba:</b> ${BRL(vmat+vmo)}<br>
+      <span class="muted" style="font-size:12px">Quantitativo: ${qval>0?QNUM(qval)+' '+esc(qun):'— (marque "qtd" em algum insumo)'}</span></div></div>
     <div style="margin-top:10px;display:flex;gap:8px"><button class="btn-prim" onclick="compSalvar()">Salvar verba por composição</button>
       <button class="btn-ghost" onclick="orcCancelar()">Cancelar</button></div>`;
 }
-function compAreaCh(v){ COMP_AREA=parseFloat(v)||0; const r=compCalc();
-  // atualiza só o resumo sem redesenhar tudo (mantém foco no input)
-  const b=document.querySelector('#compDetail .box:last-of-type .bv');
-  if(b) b.innerHTML=`<b>Material:</b> ${BRL(r.vmat)} &nbsp;·&nbsp; <b>MO:</b> ${BRL(r.vmo)} &nbsp;·&nbsp; <b>Total:</b> ${BRL(r.total)}<br><span class="muted" style="font-size:12px">Quantitativo: ${r.q_val!=null?QNUM(r.q_val)+' '+esc(r.q_un):'—'}</span>`;
-}
-function compSetQ(ix){ COMP_QIDX=ix; compAreaCh(COMP_AREA); }
 async function compSalvar(){
-  if(!COMP_DATA||COMP_AREA<=0){toast('Escolha a composição e a área');return;}
+  if(!COMP_SEL.length){toast('Marque ao menos um insumo');return;}
   EDITO=false;
-  await saveAndReload({composicao:{id:COMP_DATA.id, area:COMP_AREA, quant_idx:COMP_QIDX}});
-  toast('Verba por composição salva (material × MO + quantitativo)');
+  await saveAndReload({composicao_sel: COMP_SEL.map(s=>({cid:s.cid, idx:s.idx, area:s.area, q:s.q?1:0}))});
+  toast('Verba por composição salva ('+COMP_SEL.length+' insumo(s))');
 }
 
 /* ----- Dicionário (template/aprendizado, editável → reflete em obra nova) ----- */

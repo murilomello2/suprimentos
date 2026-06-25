@@ -152,16 +152,20 @@
   .tname{flex:1;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
   .tval,.tdate{flex:0 0 auto;color:var(--muted);font-variant-numeric:tabular-nums;font-size:11.5px;margin-left:8px}
   .tval{color:var(--verde-d);font-weight:600}
-  .pin{font-size:15px;color:var(--muted);cursor:pointer;opacity:0}
+  .pin{font-size:17px;color:var(--muted);cursor:pointer;opacity:0;flex:0 0 auto}
   .tnode:hover .pin{opacity:1}
   .pin:hover{color:var(--verde)}
+  .pin.pinon{opacity:1;color:var(--ok)}                 /* tarefa selecionada: check verde sempre visível */
+  .selflag{color:var(--ok);font-weight:700;font-size:11px;margin-left:6px;white-space:nowrap}
   .mk-tag{font-size:10px;background:var(--cotbg);color:var(--cot);padding:1px 5px;border-radius:5px;margin-left:4px}
   .srbox{border:1px solid var(--line);border-radius:10px;max-height:200px;overflow:auto;margin-bottom:8px;background:#fbfdfb}
-  .tnode.tsel{background:#e9f6ee;outline:1px solid var(--ok);border-radius:6px}
+  .tnode.tsel{background:var(--okbg);outline:2px solid var(--ok);border-radius:6px;font-weight:600}
   .ckl{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
   .chkbox{margin-top:6px;display:flex;flex-direction:column;gap:5px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fafbfa}
   .pctw{display:inline-flex;align-items:center;gap:6px} .pctbar{width:42px;height:6px;border-radius:4px;background:#e6e9e7;overflow:hidden;display:inline-block} .pctfill{display:block;height:100%} .pctn{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
-  .pendbar{margin-top:8px;font-size:12.5px;color:var(--verde-d);min-height:18px;display:flex;align-items:center;gap:5px}
+  .pendbar{font-size:13px;color:var(--verde-d);display:flex;align-items:center;gap:6px}
+  .pendbar:empty{display:none}
+  .pendbar:not(:empty){background:var(--okbg);border:1px solid var(--ok);border-radius:8px;padding:8px 12px;font-weight:600;margin:6px 0}
   .badge-tp{flex:0 0 auto;font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:5px;width:34px;text-align:center}
   .badge-tp.material{background:var(--cotbg);color:var(--cot)} .badge-tp.mo{background:var(--andbg);color:var(--and)}
   .tp-chip{display:inline-block;font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:5px;vertical-align:1px;letter-spacing:.3px}
@@ -837,13 +841,13 @@ function cronoTab(i){
     h+=`</div>`;
   } else {
     h+=`
+    <div id="cronoPending" class="pendbar"></div>
     <div class="fld" style="margin-top:8px"><label>Buscar tarefa por nome</label>
       <div class="search" style="border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
         <input id="cronoQ" placeholder="ex.: sondagem, pilar 5º pav, contenção…" oninput="cronoBuscar()"></div></div>
     <div id="cronoSearch"></div>
     <div class="fld" style="margin-bottom:4px"><label>Ou navegue a árvore (WBS)</label></div>
     <div class="tree" id="cronoTree">Carregando…</div>
-    <div id="cronoPending" class="pendbar"></div>
     <div style="margin-top:10px;display:flex;gap:8px">
       <button class="btn-prim" id="cronoSave" onclick="cronoSalvar()" disabled>Salvar vínculo</button>
       <button class="btn-ghost" onclick="cronoCancelar()">Cancelar</button>
@@ -866,13 +870,13 @@ function cronoRenderTree(){
     const ind=(n.nivel-1)*16;
     const car=n.expansivel?`<span class="caret material-icons" onclick="cronoExpand(${ix})">${n.expanded?'expand_more':'chevron_right'}</span>`:'<span class="caret-sp"></span>';
     const tag=n.is_milestone?'<span class="mk-tag">marco</span>':'';
-    const selo=(CRONO_PENDING&&CRONO_PENDING.outline===n.outline)?' tsel':'';
-    return `<div class="tnode${selo}" style="padding-left:${ind}px">
+    const sel=(CRONO_PENDING&&CRONO_PENDING.outline===n.outline);
+    return `<div class="tnode${sel?' tsel':''}" style="padding-left:${ind}px">
       ${car}
+      <span class="pin material-icons${sel?' pinon':''}" onclick="cronoSelecionar('${esc(n.outline)}')" title="${sel?'selecionado':'selecionar'}">${sel?'check_circle':'radio_button_unchecked'}</span>
       <span class="tcode">${esc(n.outline)}</span>
-      <span class="tname" onclick="cronoSelecionar('${esc(n.outline)}')" title="selecionar como tarefa-âncora">${esc(n.nome)} ${tag}</span>
+      <span class="tname" onclick="cronoSelecionar('${esc(n.outline)}')" title="selecionar como tarefa-âncora">${esc(n.nome)} ${tag}${sel?' <span class="selflag">✓ selecionado</span>':''}</span>
       <span class="tdate">${D(n.start)}</span>
-      <span class="pin material-icons" onclick="cronoSelecionar('${esc(n.outline)}')" title="selecionar">radio_button_checked</span>
     </div>`;
   }).join('');
 }
@@ -954,7 +958,13 @@ function quantTab(i){
 }
 function quantEditar(){ EDITQ=true;
   QNTFONTE=(CUR.quantitativo_fonte==='composicao'?'composicao':(CUR.quantitativo_fonte==='orcamento'?'analitico':'manual'));
-  QCOMP_SEL=(CUR.quant_comp_sel||[]).map(s=>({...s})); QCOMP_DATA=null;
+  // pré-carrega a seleção atual — inclusive quando o quantitativo foi DERIVADO da verba (refs/cesta moram na verba):
+  let refs=CUR.quantitativo_refs||[];
+  if(!refs.length && CUR.quantitativo_fonte==='orcamento') refs=CUR.orcamento_refs||[];               // veio da verba analítica
+  QNT_SEL=new Set(refs.map(Number));
+  let qcs=CUR.quant_comp_sel||[];
+  if(!qcs.length && CUR.quantitativo_fonte==='composicao') qcs=(CUR.composicao_sel||[]).filter(s=>s.q); // veio da verba composição (insumos "define quantitativo")
+  QCOMP_SEL=qcs.map(s=>({...s})); QCOMP_DATA=null;
   drawModal(); }
 function quantCancelar(){ EDITQ=false; drawModal(); }
 function qntSetFonte(v){ QNTFONTE=v; qntRenderFonte(); }

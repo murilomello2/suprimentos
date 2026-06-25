@@ -467,30 +467,49 @@ function updCat(c){ c=c||'';
   if(/criar|criou|desdobr|exclu|^item|^nome/i.test(c)) return ['item','tp-loc'];
   return ['edição','tp-none'];
 }
+function progCard(label,done,total,icon){
+  const falta=Math.max(total-done,0), pct=total?Math.round(done/total*100):0;
+  return `<div class="kpi" style="min-width:210px">
+    <div class="l" style="display:flex;align-items:center;gap:6px;margin-bottom:2px"><span class="material-icons" style="font-size:16px;color:var(--dourado)">${icon}</span>${label}</div>
+    <div class="v">${done} <span class="muted" style="font-size:15px;font-weight:600">/ ${total}</span> curados</div>
+    <div style="height:7px;background:var(--line);border-radius:5px;overflow:hidden;margin:7px 0 4px"><div style="height:100%;width:${pct}%;background:var(--ok);transition:width .3s"></div></div>
+    <div class="l">${pct}% feito · <b style="color:var(--pend)">faltam ${falta}</b></div>
+  </div>`;
+}
 async function renderUpdates(){
   const box=document.getElementById('updwrap');
-  box.innerHTML='<div class="empty">Carregando atualizações…</div>';
+  box.innerHTML='<div class="empty">Carregando…</div>';
+  try{ await load(); }catch(e){}                 // recarrega o matriz p/ os contadores ficarem frescos
+  const its=DATA.itens||[], tot=its.length;
+  const cards=`<div style="font-size:13px;color:var(--verde-d);font-weight:800;margin:0 0 8px">Progresso da curadoria</div>
+    <div class="kpis" style="padding:0 0 16px">
+      ${progCard('Cronograma', its.filter(i=>i.curado_data).length, tot, 'event')}
+      ${progCard('Orçamento (verba)', its.filter(i=>i.curado_verba).length, tot, 'request_quote')}
+      ${progCard('Quantitativo', its.filter(i=>i.curado_quant).length, tot, 'straighten')}
+    </div>`;
   let d;
   try{ d=await (await fetch('actions/historico.php?_='+Date.now())).json(); }
-  catch(e){ box.innerHTML='<div class="empty">Falha: '+esc(e.message)+'</div>'; return; }
-  if(d.error){ box.innerHTML='<div class="empty">Erro: '+esc(d.error)+'</div>'; return; }
-  const hs=d.historico||[];
-  if(!hs.length){ box.innerHTML='<div class="empty">Nenhuma atualização registrada ainda.</div>'; return; }
-  let html=`<div class="note">As ${hs.length} alterações mais recentes — quem · quando · item · o quê. Clique numa linha pra abrir o item.</div>
-    <div class="wrap" style="margin:0"><table><thead><tr><th>Quando</th><th>Quem</th><th>Item (grupo)</th><th>O que mudou</th></tr></thead><tbody>`;
-  for(const h of hs){
-    const [lbl,cls]=updCat(h.campo);
-    const v=(h.valor_depois!=null&&String(h.valor_depois)!=='')?`: <b>${esc(String(h.valor_depois).slice(0,70))}</b>`:'';
-    const it=byOrdem(h.servico_id);
-    html+=`<tr ${it?`onclick="openModal(${h.servico_id})" style="cursor:pointer"`:''}>
-      <td class="muted" style="white-space:nowrap;font-size:12px">${fmtDateTime(h.created_at)}</td>
-      <td style="white-space:nowrap">${esc(h.usuario_nome||('#'+(h.bitrix_id||'')))}</td>
-      <td><div class="svc">${esc(h.item_nome||'—')}</div><div class="svc-sub">${esc(h.grupo||'')}</div></td>
-      <td><span class="tp-chip ${cls}">${lbl}</span> ${esc(h.campo||'')}${v}</td>
-    </tr>`;
+  catch(e){ box.innerHTML=cards+'<div class="empty">Falha ao carregar o histórico: '+esc(e.message)+'</div>'; return; }
+  const hs=(d&&d.historico)||[];
+  let feed='<div style="font-size:13px;color:var(--verde-d);font-weight:800;margin:4px 0 6px">Últimas alterações</div>';
+  if(!hs.length){ feed+='<div class="empty">Nenhuma alteração registrada ainda.</div>'; }
+  else {
+    feed+=`<div class="note">As ${hs.length} mais recentes — quem · quando · item · o quê. Clique numa linha pra abrir o item.</div>
+      <div class="wrap" style="margin:0"><table><thead><tr><th>Quando</th><th>Quem</th><th>Item (grupo)</th><th>O que mudou</th></tr></thead><tbody>`;
+    for(const h of hs){
+      const [lbl,cls]=updCat(h.campo);
+      const v=(h.valor_depois!=null&&String(h.valor_depois)!=='')?`: <b>${esc(String(h.valor_depois).slice(0,70))}</b>`:'';
+      const it=byOrdem(h.servico_id);
+      feed+=`<tr ${it?`onclick="openModal(${h.servico_id})" style="cursor:pointer"`:''}>
+        <td class="muted" style="white-space:nowrap;font-size:12px">${fmtDateTime(h.created_at)}</td>
+        <td style="white-space:nowrap">${esc(h.usuario_nome||('#'+(h.bitrix_id||'')))}</td>
+        <td><div class="svc">${esc(h.item_nome||'—')}</div><div class="svc-sub">${esc(h.grupo||'')}</div></td>
+        <td><span class="tp-chip ${cls}">${lbl}</span> ${esc(h.campo||'')}${v}</td>
+      </tr>`;
+    }
+    feed+='</tbody></table></div>';
   }
-  html+='</tbody></table></div>';
-  box.innerHTML=html;
+  box.innerHTML=cards+feed;
 }
 async function recarregar(){ await load(); toast('Radar atualizado'); }
 async function auditRemover(ordem,lineId){

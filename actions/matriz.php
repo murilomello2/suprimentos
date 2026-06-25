@@ -10,6 +10,16 @@ require_once __DIR__ . '/../includes/cronograma.php';
 try {
     db_seed_if_empty();
     $pdo = db();
+
+    // Resiliência a DEPLOY PARCIAL: este endpoint lê colunas aditivas que são criadas no db.php.
+    // Como o FTP às vezes sobe actions/ sem includes/db.php (timeout), garantimos as colunas aqui
+    // mesmo se o db.php online estiver desatualizado — evita o HTTP 500 do radar.
+    foreach (['composicao_sel'=>'TEXT','verba_curada'=>'INTEGER DEFAULT 0',
+              'quant_comp_sel'=>'TEXT','quant_curada'=>'INTEGER DEFAULT 0'] as $col=>$type) {
+        $has = $pdo->query("SELECT COUNT(*) FROM pragma_table_info('radar_item') WHERE name='".$col."'")->fetchColumn();
+        if (!$has) { try { $pdo->exec("ALTER TABLE radar_item ADD COLUMN $col $type"); } catch (Throwable $e) {} }
+    }
+
     $obra = $pdo->query("SELECT * FROM obra WHERE id=1")->fetch();
 
     $rows = $pdo->query("

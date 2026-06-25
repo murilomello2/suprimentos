@@ -178,6 +178,14 @@ function db_schema($pdo) {
                     WHERE papel='comprador' AND editar_escopo='sel' AND COALESCE(obras_editar,'') IN ('','[]')");
         $pdo->prepare("INSERT OR REPLACE INTO meta (k,v) VALUES ('datafix_comprador_edit_v1','1')")->execute();
     }
+
+    // data-fix one-shot: lead PADRÃO 60 dias p/ todos (regra geral nova). Limpa qualquer lead_override
+    // pré-existente => todos os itens passam a usar o default 60 (ajuste por item vem depois, caso a caso).
+    $dfl = $pdo->query("SELECT v FROM meta WHERE k='datafix_lead60_v1'")->fetch();
+    if (!$dfl) {
+        $pdo->exec("UPDATE radar_item SET lead_override=NULL");
+        $pdo->prepare("INSERT OR REPLACE INTO meta (k,v) VALUES ('datafix_lead60_v1','1')")->execute();
+    }
 }
 
 /** Permissões efetivas de um usuário p/ enforcement NO SERVIDOR. Não cadastrado/sem id => nega. */

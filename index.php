@@ -90,6 +90,10 @@
   .qcell .muted{font-size:11.5px}
   .date{white-space:nowrap;font-variant-numeric:tabular-nums}
   .tag-venc{background:var(--pendbg);color:var(--pend);font-size:10px;font-weight:700;padding:1px 6px;border-radius:6px;margin-left:5px}
+  .tag-al{font-size:10px;font-weight:700;padding:1px 6px;border-radius:6px;margin-left:5px;white-space:nowrap}
+  .tag-al.crit{background:var(--pendbg);color:var(--pend)}
+  .tag-al.atras{background:var(--andbg);color:var(--and)}
+  .tag-al.prox{background:var(--cotbg);color:var(--cot)}
   .curva{display:inline-block;width:19px;height:19px;line-height:19px;text-align:center;border-radius:6px;font-size:11px;font-weight:800;color:#fff}
   .c-A{background:#c0392b}.c-B{background:#c8821a}.c-C{background:#1f8f4e}
   .muted{color:var(--muted)}
@@ -341,7 +345,21 @@ const STK={'Finalizado':'st-Finalizado','Cotação Iniciada':'st-CotacaoIniciada
 const STATUSES=['Não Iniciado','Cotação Iniciada','Com Pendências','Em Andamento','Finalizado'];
 function toast(m){const t=document.getElementById('toastEl');t.textContent=m;t.style.display='block';clearTimeout(t._);t._=setTimeout(()=>t.style.display='none',2400);}
 const byOrdem=o=>DATA.itens.find(i=>i.ordem==o);
-const isAlert=i=>i.data_gatilho&&i.data_gatilho<today&&i.status!=='Finalizado';
+function daysBetween(a,b){ return Math.round((new Date(b)-new Date(a))/86400000); }
+/* nível de alerta da cotação: 'critico' (fim venceu, não finalizado) > 'atrasado' (início venceu, não iniciou)
+   > 'proximo' (faltam ≤7d p/ iniciar) > 'ok'. Item finalizado saiu do radar de Suprimentos = ok. */
+function alertLevel(i){
+  const st=i.status||'Não Iniciado';
+  if(st==='Finalizado') return 'ok';
+  const F=i.fim_cotacao, I=i.inicio_cotacao||i.data_gatilho;
+  if(F && F<today) return 'critico';                          // passou o FIM e não está finalizado
+  if(st==='Não Iniciado'){
+    if(I && I<today) return 'atrasado';                       // passou o INÍCIO e ainda não começou
+    if(I && daysBetween(today,I)<=7) return 'proximo';        // início chegando (≤7 dias)
+  }
+  return 'ok';
+}
+const isAlert=i=>alertLevel(i)!=='ok';
 
 async function load(){
   try{
@@ -353,12 +371,13 @@ async function load(){
     document.getElementById('sub').innerHTML=`Mostrando: ${obraTxt} · ligado ao cronograma, orçamento e dicionário · hoje: ${D(today)}`+(rs.crono_erro?` · <span style="color:var(--pend)">cronograma offline</span>`:'');
     // KPIs
     const comData=d.itens.filter(i=>i.data_necessaria).length;
-    const alerta=d.itens.filter(isAlert).length;
+    const criticos=d.itens.filter(i=>alertLevel(i)==='critico').length;
+    const atrasados=d.itens.filter(i=>alertLevel(i)==='atrasado').length;
     const cv=k=>d.itens.filter(i=>i.curva===k).length;
     document.getElementById('kpis').innerHTML=`
       <div class="kpi"><div class="v">${rs.total}</div><div class="l">Itens no radar</div></div>
       <div class="kpi"><div class="v">${comData} / ${rs.total}</div><div class="l">Com data definida</div></div>
-      <div class="kpi"><div class="v ${alerta?'alert':''}">${alerta}</div><div class="l">Em alerta (disparar já)</div></div>
+      <div class="kpi"><div class="v ${criticos?'alert':''}">${criticos}</div><div class="l">Críticos (fim da cotação venceu)${atrasados?` · ${atrasados} atrasados`:''}</div></div>
       <div class="kpi"><div class="v">${cv('A')} · ${cv('B')} · ${cv('C')}</div><div class="l">Curva A / B / C</div></div>
       <div class="kpi" title="${rs.cobertura_real!=null?`Cobertura REAL, sem contar verba em dobro: ${rs.cobertura_analitico}% por vínculo analítico (linhas distintas) + ${rs.cobertura_composicao}% por composição. Coberto ${BRL(rs.cobertura_valor)} de ${BRL(rs.cobertura_total_leaf)} em folhas.`:'sem dados'}"><div class="v gold">${rs.cobertura_real!=null?rs.cobertura_real.toLocaleString('pt-BR')+'%':'—'}</div><div class="l">Cobertura real do orçamento</div></div>`;
     // filtros dinâmicos (grupos em ordem lógica = ordem de aparição; demais ordenados)
@@ -632,7 +651,9 @@ function render(){
 }
 function rowHtml(i){
   const st=i.status||'Não Iniciado';
-  const venc=isAlert(i)?`<span class="tag-venc">vencido</span>`:'';
+  const lvl=alertLevel(i);
+  const chipIni=lvl==='atrasado'?`<span class="tag-al atras">atrasado</span>`:lvl==='proximo'?`<span class="tag-al prox">iniciar</span>`:'';
+  const chipFim=lvl==='critico'?`<span class="tag-al crit">crítico</span>`:'';
   return `<tr class="item" onclick="openModal(${i.ordem})">
     <td><div class="svc">${esc(i.nome)} ${tipoChip(i.tipo)}</div><div class="svc-sub">${esc(i.forma_contratacao||'')}</div></td>
     <td><span class="curva c-${i.curva||'C'}">${esc(i.curva||'—')}</span></td>
@@ -641,8 +662,8 @@ function rowHtml(i){
     <td>${i.quantitativo!=null?`<div class="qcell" title="${esc(QNUM(i.quantitativo)+' '+(i.quantitativo_unidade||''))}"><b>${QNUM(i.quantitativo)}</b> <span class="muted">${esc(i.quantitativo_unidade||'')}</span>${i.curado_quant?' <span class="material-icons" title="quantitativo curado" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':''}</div>`:'<span class="muted">—</span>'}</td>
     <td class="date">${D(i.data_necessaria)}${i.curado_data?' <span class="material-icons" title="data curada" style="font-size:12px;color:var(--ok);vertical-align:-2px">verified</span>':''}</td>
     <td>${pctChip(i.cronograma_pct)}</td>
-    <td class="date">${D(i.data_gatilho)}${venc}</td>
-    <td class="date">${D(i.fim_cotacao)}</td>
+    <td class="date">${D(i.inicio_cotacao)}${chipIni}</td>
+    <td class="date">${D(i.fim_cotacao)}${chipFim}</td>
     <td>${statusSelect(i)}</td>
     <td>${i.fornecedor?`<span class="mapa-on">● cotando</span>`:'<span class="muted">—</span>'}</td>
     <td onclick="event.stopPropagation()"><button class="eye" onclick="openModal(${i.ordem})"><span class="material-icons" style="font-size:17px;line-height:28px">visibility</span></button></td>
@@ -1311,9 +1332,10 @@ function resumoTab(i){
   const ro = `
     <div class="fld"><label>Verba ${i.curado_verba?'(curada ✓)':'(estimada)'} ${i.verba_metodo?'· '+esc(i.verba_metodo):''}</label><input value="${esc(verbaLbl)}" disabled></div>
     <div class="grid2">
-      <div class="fld"><label>Início da cotação (gatilho)</label><input value="${D(i.data_gatilho)}" disabled></div>
-      <div class="fld"><label>Necessário em obra ${i.curado_data?'(curado ✓)':''}</label><input value="${D(i.data_necessaria)}" disabled></div>
+      <div class="fld"><label>Início da cotação</label><input value="${D(i.inicio_cotacao)}" disabled></div>
+      <div class="fld"><label>Fim da cotação <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— prazo de Suprimentos</span></label><input value="${D(i.fim_cotacao)}" disabled></div>
     </div>
+    <div class="fld"><label>Necessário em obra ${i.curado_data?'(curado ✓)':''} <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— lead ${i.lead_efetivo??60}d → fim → −30d → início</span></label><input value="${D(i.data_necessaria)}" disabled></div>
     <div class="fld"><label>Quantitativo ${i.curado_quant?'(curado ✓)':''}</label><input value="${i.quantitativo!=null?esc(QNUM(i.quantitativo)+' '+(i.quantitativo_unidade||'')):'—'}" disabled></div>`;
 
   if(!EDITR){

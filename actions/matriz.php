@@ -58,7 +58,7 @@ try {
 
         // overrides da curadoria têm prioridade sobre o automático
         $lead = ($r['lead_override'] !== null && $r['lead_override'] !== '')
-                ? (int)$r['lead_override'] : $r['lead_dias'];
+                ? (int)$r['lead_override'] : 60;   // lead PADRÃO 60 dias (regra geral; override por item nas exceções)
         $data_nec = $r['data_necessaria_override'] ?: $auto['data_necessaria'];
         $marco    = $r['crono_marco_override'] ?: $auto['marco_casado'];
         // caminho (WBS) de onde a tarefa-âncora veio, p/ conferência: ex. Custos Indiretos › … › tarefa.
@@ -69,14 +69,18 @@ try {
         $crono_pct = $r['crono_marco_override']
                    ? crono_percent_por_nome($r['crono_marco_override'], $tasks)
                    : ($auto['percent'] ?? null);
-        $gatilho  = ($data_nec && $lead)
-                ? date('Y-m-d', strtotime($data_nec . ' -' . (int)$lead . ' days')) : null;
+        // FIM da cotação = data em obra − lead (prazo de Suprimentos fechar; depois vem a fabricação).
+        // INÍCIO da cotação = fim − 30 dias (fixo). Tudo recalcula da data viva do cronograma.
+        $fim    = $data_nec ? date('Y-m-d', strtotime($data_nec . ' -' . (int)$lead . ' days')) : null;
+        $inicio = $fim ? date('Y-m-d', strtotime($fim . ' -30 days')) : null;
         $verba    = ($r['verba_override'] !== null && $r['verba_override'] !== '')
                 ? (float)$r['verba_override'] : (float)$r['verba_estim'];
 
         $d = [
             'data_necessaria' => $data_nec,
-            'data_gatilho'    => $gatilho,
+            'inicio_cotacao'  => $inicio,
+            'fim_cotacao'     => $fim,
+            'data_gatilho'    => $inicio,   // alias: o front usa data_gatilho como "início da cotação"
             'marco_casado'    => $marco,
             'marco_path'      => $marco_path,
             'cronograma_pct'  => $crono_pct,

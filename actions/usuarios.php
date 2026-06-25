@@ -40,8 +40,8 @@ try {
 
     // permissões efetivas de um usuário (enforcement). Não cadastrado => nega tudo.
     if (isset($_GET['me'])) {
-        $st = $pdo->prepare("SELECT * FROM usuario WHERE bitrix_id=? AND ativo=1");
-        $st->execute([$_GET['me']]);
+        $st = $pdo->prepare("SELECT * FROM usuario WHERE TRIM(bitrix_id)=? AND ativo=1");
+        $st->execute([trim((string)$_GET['me'])]);
         $u = $st->fetch();
         if (!$u) { echo json_encode(['autorizado'=>false,'menus'=>[],'perm_admin'=>0]); exit; }
         echo json_encode(['autorizado'=>true] + jrow($u), JSON_UNESCAPED_UNICODE); exit;

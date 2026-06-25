@@ -174,9 +174,11 @@ function db_schema($pdo) {
 /** Permissões efetivas de um usuário p/ enforcement NO SERVIDOR. Não cadastrado/sem id => nega. */
 function user_perms($pdo, $bid) {
     $deny = ['autorizado'=>false,'perm_admin'=>0,'nome'=>'','editar_escopo'=>'nenhuma','obras_editar'=>[]];
-    if ($bid === null || $bid === '') return $deny;
-    $st = $pdo->prepare("SELECT * FROM usuario WHERE bitrix_id=? AND ativo=1");
-    $st->execute([(string)$bid]);
+    $bid = trim((string)($bid ?? ''));               // BX24 às vezes manda id com espaço/quebra invisível
+    if ($bid === '') return $deny;
+    // compara já com TRIM dos dois lados (resiliente a id salvo/recebido com espaço)
+    $st = $pdo->prepare("SELECT * FROM usuario WHERE TRIM(bitrix_id)=? AND ativo=1");
+    $st->execute([$bid]);
     $u = $st->fetch();
     if (!$u) return $deny;
     return ['autorizado'=>true,'perm_admin'=>(int)$u['perm_admin'],'nome'=>$u['nome'] ?? '',

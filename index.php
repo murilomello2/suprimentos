@@ -907,6 +907,7 @@ async function cronoBuscar(){
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
   try{
     const d=await (await fetch('actions/crono_search.php?q='+encodeURIComponent(q))).json();
+    if(d.error){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px;color:var(--pend)">Erro na busca: '+esc(d.error)+'</div>';return;}
     CRONO_SEARCH=(d.tarefas||[]).map(t=>({outline:t.outline_number||t.wbs,nome:t.nome,start:t.start,wbs:t.wbs}));
     if(!CRONO_SEARCH.length){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Nada encontrado.</div>';return;}
     box.innerHTML='<div class="srbox">'+CRONO_SEARCH.map(t=>`

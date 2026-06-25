@@ -13,12 +13,12 @@ try {
     $obra = $pdo->query("SELECT cronograma_id FROM obra WHERE id=1")->fetch();
     $cid  = $obra['cronograma_id'] ?? '';
     $q    = trim($_GET['q'] ?? '');
-    if (!$cid || mb_strlen($q) < 2) { echo json_encode(['tarefas'=>[]]); exit; }
+    if (!$cid || strlen($q) < 2) { echo json_encode(['tarefas'=>[]]); exit; }  // strlen: servidor não tem mbstring
 
     // ilike no nome; pega tarefas (não-resumo de preferência) com data
     $path = 'obra_cronograma_tarefas?cronograma_id=eq.' . rawurlencode($cid)
           . '&nome=ilike.' . rawurlencode('*' . $q . '*')
-          . '&select=nome,wbs,start,finish,is_milestone,is_summary,outline_level'
+          . '&select=outline_number,nome,wbs,start,finish,is_milestone,is_summary,outline_level'
           . '&order=start.asc&limit=40';
     $rows = sb_get($path);
     echo json_encode(['tarefas'=>$rows], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

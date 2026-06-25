@@ -22,7 +22,7 @@ try {
                r.verba_override, r.lead_override, r.crono_marco_override,
                r.data_necessaria_override, r.orcamento_refs,
                r.quantitativo_valor, r.quantitativo_unidade, r.quantitativo_refs, r.quantitativo_fonte,
-               r.tipo, r.verba_metodo, r.verba_material, r.verba_mo, r.composicao_id, r.area_base, r.composicao_sel
+               r.tipo, r.verba_metodo, r.verba_material, r.verba_mo, r.composicao_id, r.area_base, r.composicao_sel, r.verba_curada
         FROM servico s
         JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = 1
         ORDER BY s.grupo_ordem, s.ordem
@@ -63,7 +63,7 @@ try {
             'confianca'       => $r['data_necessaria_override'] ? 'curado (manual)' : $auto['confianca'],
             'lead_efetivo'    => $lead,
             'verba'           => $verba,
-            'curado_verba'    => $r['verba_override'] !== null,
+            'curado_verba'    => (bool)((int)($r['verba_curada'] ?? 0)),
             'curado_data'     => (bool)$r['data_necessaria_override'],
             'orcamento_refs'  => $r['orcamento_refs'] ? json_decode($r['orcamento_refs'], true) : [],
             'quantitativo'         => $r['quantitativo_valor'] !== null ? (float)$r['quantitativo_valor'] : null,

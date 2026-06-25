@@ -104,10 +104,12 @@ function db_schema($pdo) {
         updated_at TEXT,
         UNIQUE(obra_id, servico_id)
     )");
-    // coluna ADITIVA (não dropa radar_item): cesta de insumos de composição p/ compor a verba
-    $hasSel = false;
-    foreach ($pdo->query("PRAGMA table_info(radar_item)") as $c) if ($c['name'] === 'composicao_sel') $hasSel = true;
-    if (!$hasSel) $pdo->exec("ALTER TABLE radar_item ADD COLUMN composicao_sel TEXT");
+    // colunas ADITIVAS (não dropam radar_item):
+    $rcols = [];
+    foreach ($pdo->query("PRAGMA table_info(radar_item)") as $c) $rcols[$c['name']] = true;
+    if (!isset($rcols['composicao_sel'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN composicao_sel TEXT");
+    // verba_curada (0/1): a verba só é "curada" quando alguém altera+confirma. Default 0 => reseta a curada de TODAS.
+    if (!isset($rcols['verba_curada'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN verba_curada INTEGER DEFAULT 0");
     $pdo->exec("CREATE TABLE IF NOT EXISTS orcamento_linha (
         id INTEGER PRIMARY KEY,
         obra_id INTEGER NOT NULL DEFAULT 1,

@@ -682,7 +682,7 @@ function drawModal(){
   postDraw(i);
 }
 function postDraw(i){
-  if(TAB==='Orçamento'){ orcShowCurrent(i); if(EDITO) orcRenderFonte(); }
+  if(TAB==='Orçamento'){ orcShowCurrent(i); orcLoadLastChange(i.ordem); if(EDITO) orcRenderFonte(); }
   if(TAB==='Cronograma'){ if(EDITC) cronoInit(); }
   if(TAB==='Quantitativo'){ quantShowCurrent(i); if(EDITQ) qntLoadTree(); }
   if(TAB==='Histórico'){ loadHist(i.ordem); }
@@ -912,18 +912,19 @@ async function qntLimpar(){ EDITQ=false; QNT_SEL.clear(); await saveAndReload({q
 /* ===== Orçamento — árvore navegável (Grupo → Disciplina → Elemento → item) ===== */
 let ORC_SEL=new Set(), ORC_NODES=[];
 function orcTab(i){
-  const fonte = i.curado_verba ? 'Verba curada por composição do orçamento analítico'
-                               : 'Verba ainda não curada (estimativa preliminar — a definir o método)';
+  const MET={analitico:'linhas do orçamento (analítico)', composicao:'composição de insumos', manual:'manual'};
+  const metodo = MET[i.verba_metodo] || 'estimativa preliminar (a curar)';
   let h=`
     <div class="box"><div class="bl">Verba atual</div>
-      <div class="bv"><b style="font-size:16px">${BRL(i.verba)}</b> <span class="muted" style="font-size:12px">— ${fonte}</span></div></div>
+      <div class="bv"><b style="font-size:16px">${BRL(i.verba)}</b> <span class="muted" style="font-size:12px">— método: ${metodo}</span>${i.curado_verba?'<span style="color:var(--ok);font-weight:700;font-size:12px"> · curada ✓</span>':'<span style="color:var(--and);font-size:12px"> · a curar</span>'}</div>
+      <div id="orcLastChange" style="font-size:11.5px;margin-top:5px;color:var(--muted)"></div></div>
     <div class="box"><div class="bl">Composição selecionada</div>
       <div class="bv" id="orcSel">—</div><div id="orcTotal" style="margin-top:6px;font-weight:700"></div></div>`;
   if(!EDITO){
     h+=`<div style="display:flex;gap:8px;margin-top:6px">`;
     if(IS_ADMIN){
       h+=`<button class="btn-prim" onclick="orcEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar vínculo de verba</button>`;
-      if(i.curado_verba) h+=`<button class="btn-ghost" onclick="orcLimpar()">↺ Limpar</button>`;
+      if(i.verba_metodo) h+=`<button class="btn-ghost" onclick="orcLimpar()">↺ Limpar</button>`;
     } else h+=`<span class="muted" style="font-size:12.5px">Somente administradores podem editar a verba.</span>`;
     h+=`</div>`;
   } else {
@@ -941,6 +942,17 @@ function orcTab(i){
 let ORCFONTE='analitico';
 function orcEditar(){ EDITO=true; ORCFONTE=(CUR.verba_metodo==='composicao'?'composicao':'analitico'); COMP_SEL=(CUR.composicao_sel||[]).map(s=>({...s})); COMP_DATA=null; drawModal(); }
 function orcCancelar(){ EDITO=false; drawModal(); }
+async function orcLoadLastChange(ordem){
+  const box=document.getElementById('orcLastChange'); if(!box)return;
+  try{
+    const d=await (await fetch('actions/historico.php?ordem='+ordem)).json();
+    const v=(d.historico||[]).find(h=>/^Verba/.test(h.campo||''));  // histórico vem do mais recente p/ o mais antigo
+    if(v){
+      let q=v.created_at; try{ q=new Date(v.created_at).toLocaleString('pt-BR'); }catch(e){}
+      box.innerHTML=`<span class="material-icons" style="font-size:14px;vertical-align:-3px;color:var(--verde)">history</span> Última alteração da verba por <b>${esc(v.usuario_nome||('#'+v.bitrix_id))}</b> · ${esc(q)}`;
+    } else box.innerHTML='<span class="muted">Sem alteração de verba registrada ainda — a verba será marcada como curada quando alguém editar e salvar.</span>';
+  }catch(e){ box.innerHTML=''; }
+}
 function orcSetFonte(v){ ORCFONTE=v; orcRenderFonte(); }
 function orcRenderFonte(){
   const box=document.getElementById('orcFonteBox'); if(!box)return;

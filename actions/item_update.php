@@ -62,6 +62,7 @@ try {
         $set[] = "orcamento_refs = ?"; $vals[] = $refs ? json_encode($refs) : null;
         $set[] = "verba_override = ?"; $vals[] = $refs ? $soma : null;
         $set[] = "verba_metodo = ?";   $vals[] = $refs ? 'analitico' : null;
+        $set[] = "verba_curada = ?";   $vals[] = $refs ? 1 : 0;
         if ($refs) {
             $sq = $pdo->prepare("SELECT COALESCE(SUM(qtde),0) s FROM orcamento_linha WHERE id IN ($inq)");
             $sq->execute($refs);
@@ -157,6 +158,7 @@ try {
             $set[]="verba_mo = ?";        $vals[]=$vmo ?: null;
             $set[]="verba_override = ?";  $vals[]=$verba;
             $set[]="orcamento_refs = ?";  $vals[]=null;
+            $set[]="verba_curada = ?";    $vals[]=1;
             if ($qval > 0) {
                 $set[]="quantitativo_valor = ?";   $vals[]=$qval;
                 $set[]="quantitativo_unidade = ?"; $vals[]=$qun;
@@ -170,6 +172,7 @@ try {
             $set[]="verba_override = ?"; $vals[]=null;
             $set[]="verba_material = ?"; $vals[]=null;
             $set[]="verba_mo = ?";       $vals[]=null;
+            $set[]="verba_curada = ?";   $vals[]=0;
             $h('Verba (composição)', '', 'limpo');
         }
         unset($campos['composicao_sel']);
@@ -195,6 +198,7 @@ try {
             $set[]="verba_mo = ?";       $vals[]=$papel==='material' ? null : $vmo;
             $set[]="verba_override = ?"; $vals[]=$verba;
             $set[]="orcamento_refs = ?"; $vals[]=null;
+            $set[]="verba_curada = ?";   $vals[]=1;
             if ($papel === 'mo') {
                 $set[]="quantitativo_valor = ?"; $vals[]=$area;
                 $set[]="quantitativo_unidade = ?"; $vals[]=$compUn;
@@ -225,7 +229,7 @@ try {
         if ((string)$antes !== (string)$v) $h($LABEL[$k] ?? $k, $antes, $v);
         if ($k === 'validado')          { $set[]="$k = ?"; $vals[]=(int)(bool)$v; continue; }
         if ($k === 'lead_override')     { $set[]="$k = ?"; $vals[]= nullable($v)===null?null:(int)$v; continue; }
-        if ($k === 'verba_override')    { $set[]="$k = ?"; $vals[]= nullable($v)===null?null:(float)$v; continue; }
+        if ($k === 'verba_override')    { $vc=nullable($v); $set[]="$k = ?"; $vals[]= $vc===null?null:(float)$v; $set[]="verba_curada = ?"; $vals[]= $vc===null?0:1; continue; }
         if ($k === 'quantitativo_valor'){ $set[]="$k = ?"; $vals[]= nullable($v)===null?null:(float)$v; continue; }
         $set[] = "$k = ?"; $vals[] = nullable($v);
     }

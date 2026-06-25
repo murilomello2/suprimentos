@@ -221,6 +221,7 @@
         <select id="fstatus" onchange="render()"><option value="">Todos os status</option></select>
         <select id="fresp" onchange="render()"><option value="">Todos os responsáveis</option></select>
         <label class="toggle"><input type="checkbox" id="onlyalert" onchange="render()"> Somente em alerta</label>
+        <select id="fcurada" onchange="render()" title="filtrar pela verba curada"><option value="">Verba: todas</option><option value="sim">Só curadas ✓</option><option value="nao">Só não curadas</option></select>
       </div>
     </div>
 
@@ -585,13 +586,15 @@ function render(){
   const fc=document.getElementById('fcurva').value;
   const fs=document.getElementById('fstatus').value,fr=document.getElementById('fresp').value;
   const oa=document.getElementById('onlyalert').checked;
+  const fcd=document.getElementById('fcurada')?document.getElementById('fcurada').value:'';
   const flat=document.getElementById('fview').value==='lista';
-  const _naf=[fo,fg,fc,fs,fr].filter(Boolean).length+(oa?1:0);
+  const _naf=[fo,fg,fc,fs,fr].filter(Boolean).length+(oa?1:0)+(fcd?1:0);
   const _fb=document.getElementById('filtBadge'); if(_fb) _fb.textContent=_naf?` ·${_naf}`:'';
   const rows=DATA.itens.filter(i=>
     (!q||(i.nome+' '+(i.forma_contratacao||'')+' '+(i.responsavel||'')).toLowerCase().includes(q))&&
     (!fg||i.grupo===fg)&&(!fo||i.obra_nome===fo)&&(!fc||i.curva===fc)&&
-    (!fs||(i.status||'Não Iniciado')===fs)&&(!fr||i.responsavel===fr)&&(!oa||isAlert(i)));
+    (!fs||(i.status||'Não Iniciado')===fs)&&(!fr||i.responsavel===fr)&&(!oa||isAlert(i))&&
+    (!fcd||(fcd==='sim'?i.curado_verba:!i.curado_verba)));
   // ordem completa dos grupos (segue grupo_ordem do backend) — base p/ reordenar
   GORDER=[...new Set(DATA.itens.map(i=>i.grupo||'—'))];
   const tb=document.getElementById('tb');
@@ -869,7 +872,14 @@ async function qntExpand(ix){
   const d=await (await fetch('actions/orcamento.php?children_of='+encodeURIComponent(n.codigo))).json();
   QNT_NODES.splice(ix+1,0,...(d.linhas||[]).map(x=>({...x,expanded:false}))); n.expanded=true; qntRenderTree();
 }
-function qntToggleSel(id){ QNT_SEL.has(id)?QNT_SEL.delete(id):QNT_SEL.add(id); qntRenderTree(); qntRenderSel(); qntRenderSearch(); }
+function qntToggleSel(id){
+  const tr=document.getElementById('qntTree'), sr=document.querySelector('#qntSearch .srbox');
+  const ts=tr?tr.scrollTop:0, ss=sr?sr.scrollTop:0;
+  QNT_SEL.has(id)?QNT_SEL.delete(id):QNT_SEL.add(id);
+  qntRenderTree(); qntRenderSel(); qntRenderSearch();
+  const tr2=document.getElementById('qntTree'); if(tr2)tr2.scrollTop=ts;        // mantém a posição da lista
+  const sr2=document.querySelector('#qntSearch .srbox'); if(sr2)sr2.scrollTop=ss;
+}
 async function qntRenderSel(){
   const el=document.getElementById('qntSel'); if(!el)return;
   if(!QNT_SEL.size){ const t=document.getElementById('qntTotal'); if(t)t.textContent=''; return; }
@@ -1023,7 +1033,14 @@ async function orcExpand(ix){
   const filhos=(d.linhas||[]).map(x=>({...x,expanded:false}));
   ORC_NODES.splice(ix+1,0,...filhos); n.expanded=true; orcRenderTree();
 }
-function orcToggleSel(id){ ORC_SEL.has(id)?ORC_SEL.delete(id):ORC_SEL.add(id); orcRenderTree(); orcRenderSel(); orcRenderSearch(); }
+function orcToggleSel(id){
+  const tr=document.getElementById('orcTree'), sr=document.querySelector('#orcSearch .srbox');
+  const ts=tr?tr.scrollTop:0, ss=sr?sr.scrollTop:0;
+  ORC_SEL.has(id)?ORC_SEL.delete(id):ORC_SEL.add(id);
+  orcRenderTree(); orcRenderSel(); orcRenderSearch();
+  const tr2=document.getElementById('orcTree'); if(tr2)tr2.scrollTop=ts;
+  const sr2=document.querySelector('#orcSearch .srbox'); if(sr2)sr2.scrollTop=ss;
+}
 async function orcRenderSel(){
   const el=document.getElementById('orcSel'); if(!el)return;
   if(!ORC_SEL.size){el.innerHTML='<span class="muted">Nenhum item selecionado.</span>';document.getElementById('orcTotal').textContent='';return;}

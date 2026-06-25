@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cockpit de Suprimentos — Caprem</title>
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<script src="//api.bitrix24.com/api/v1/"></script>
 <style>
   :root{
     --verde:#1f6b3b; --verde-d:#16502c; --dourado:#c9a227;
@@ -17,7 +18,7 @@
   *{box-sizing:border-box}
   body{margin:0;font-family:-apple-system,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--txt);font-size:14px}
   .app{display:flex;min-height:100vh}
-  .side{width:230px;background:var(--verde);color:#eafaef;flex-shrink:0;position:sticky;top:0;height:100vh}
+  .side{width:230px;background:var(--verde);color:#eafaef;flex-shrink:0;position:sticky;top:0;height:100vh;display:flex;flex-direction:column}
   .brand{padding:18px;font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(255,255,255,.12)}
   .brand .material-icons{color:var(--dourado)}
   .navlabel{font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;color:#bfe6cd;padding:16px 18px 6px;opacity:.85}
@@ -25,6 +26,10 @@
   .nav a .material-icons{font-size:19px}
   .nav a:hover{background:rgba(255,255,255,.06)}
   .nav a.active{background:rgba(255,255,255,.12);border-left-color:var(--dourado);font-weight:700}
+  .whoami{margin-top:auto;padding:12px 18px;border-top:1px solid rgba(255,255,255,.12);font-size:11.5px;color:#bfe6cd;line-height:1.55}
+  .whoami .wname{font-weight:800;color:#eafaef}
+  .whoami .wsrc{opacity:.6;font-size:10px;margin-top:2px}
+  .whoami .wsrc.bad{color:#ffd5cf;opacity:.95}
   .main{flex:1;min-width:0}
   .top{padding:20px 26px 4px}
   .h1{font-size:23px;font-weight:800;color:var(--verde-d);margin:0;display:flex;align-items:center;gap:10px}
@@ -185,6 +190,7 @@
       <a id="nav-config" data-menu="config" onclick="showView('config')"><span class="material-icons">settings</span> Configurações</a>
       <a id="nav-audit" data-menu="audit" onclick="showView('audit')"><span class="material-icons">fact_check</span> Auditoria <span style="font-size:9px;background:var(--dourado);color:#fff;padding:1px 5px;border-radius:5px;margin-left:auto">temp</span></a>
     </nav>
+    <div class="whoami" id="whoami"></div>
   </aside>
 
   <main class="main">
@@ -1239,12 +1245,25 @@ const PRESETS={
 };
 
 async function getCurrentUser(){
-  let bid=null;
-  if(window.BX24){ try{ bid=await new Promise(r=>{BX24.init(()=>BX24.callMethod('user.current',{},x=>r((x.data()||{}).ID)));setTimeout(()=>r(null),4000);}); }catch(e){} }
-  if(!bid) bid='20'; // dev local sem Bitrix → admin Murilo
-  try{ const p=await (await fetch('actions/usuarios.php?me='+encodeURIComponent(bid))).json(); EU=Object.assign({bitrix_id:bid},p); IS_ADMIN=!!p.perm_admin; }
-  catch(e){ EU={bitrix_id:bid,autorizado:true,perm_admin:1,menus:MENUS.map(m=>m[0])}; IS_ADMIN=true; }
-  applyMenus();
+  let bid=null, via='fallback';
+  const isLocal=(location.hostname==='localhost'||location.hostname==='127.0.0.1');
+  if(!isLocal && window.BX24){
+    try{ bid=await new Promise(r=>{ BX24.init(()=>BX24.callMethod('user.current',{},x=>r((x.data()||{}).ID))); setTimeout(()=>r(null),5000); }); }catch(e){}
+    if(bid) via='bx24';
+  }
+  if(!bid) bid='20'; // localhost dev OU não identificado → admin Murilo (provisório — ver indicador "Você" na barra)
+  try{ const p=await (await fetch('actions/usuarios.php?me='+encodeURIComponent(bid))).json(); EU=Object.assign({bitrix_id:bid,via},p); IS_ADMIN=!!p.perm_admin; }
+  catch(e){ EU={bitrix_id:bid,via,autorizado:true,perm_admin:1,menus:MENUS.map(m=>m[0])}; IS_ADMIN=true; }
+  applyMenus(); updateWhoami();
+}
+function updateWhoami(){
+  const el=document.getElementById('whoami'); if(!el)return;
+  if(!EU){ el.innerHTML=''; return; }
+  const papel = EU.autorizado===false ? 'sem acesso' : (PAPEL_LABEL[EU.papel]||EU.papel||(EU.perm_admin?'Administrador':'—'));
+  const ok = EU.via==='bx24';
+  el.innerHTML=`<div class="wname">${esc(EU.nome||('Usuário '+EU.bitrix_id))}</div>
+    <div>#${esc(EU.bitrix_id)} · ${esc(papel)}</div>
+    <div class="wsrc${ok?'':' bad'}">${ok?'identificado via Bitrix':'fallback — não identificado'}</div>`;
 }
 function applyMenus(){
   const allow = (EU&&EU.autorizado)?(EU.menus||[]):[];

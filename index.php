@@ -94,6 +94,7 @@
   .tag-al.crit{background:var(--pendbg);color:var(--pend)}
   .tag-al.atras{background:var(--andbg);color:var(--and)}
   .tag-al.prox{background:var(--cotbg);color:var(--cot)}
+  .tag-al.fin{background:var(--okbg);color:var(--ok)}
   .curva{display:inline-block;width:19px;height:19px;line-height:19px;text-align:center;border-radius:6px;font-size:11px;font-weight:800;color:#fff}
   .c-A{background:#c0392b}.c-B{background:#c8821a}.c-C{background:#1f8f4e}
   .muted{color:var(--muted)}
@@ -350,7 +351,7 @@ function daysBetween(a,b){ return Math.round((new Date(b)-new Date(a))/86400000)
    > 'proximo' (faltam ≤7d p/ iniciar) > 'ok'. Item finalizado saiu do radar de Suprimentos = ok. */
 function alertLevel(i){
   const st=i.status||'Não Iniciado';
-  if(st==='Finalizado') return 'ok';
+  if(st==='Finalizado') return 'finalizado';                  // concluído (fica no radar p/ consulta; sem alerta)
   const F=i.fim_cotacao, I=i.inicio_cotacao||i.data_gatilho;
   if(F && F<today) return 'critico';                          // passou o FIM e não está finalizado
   if(st==='Não Iniciado'){
@@ -359,7 +360,7 @@ function alertLevel(i){
   }
   return 'ok';
 }
-const isAlert=i=>alertLevel(i)!=='ok';
+const isAlert=i=>['critico','atrasado','proximo'].includes(alertLevel(i)); // 'finalizado'/'ok' não são alerta
 
 async function load(){
   try{
@@ -653,7 +654,7 @@ function rowHtml(i){
   const st=i.status||'Não Iniciado';
   const lvl=alertLevel(i);
   const chipIni=lvl==='atrasado'?`<span class="tag-al atras">atrasado</span>`:lvl==='proximo'?`<span class="tag-al prox">iniciar</span>`:'';
-  const chipFim=lvl==='critico'?`<span class="tag-al crit">crítico</span>`:'';
+  const chipFim=lvl==='critico'?`<span class="tag-al crit">crítico</span>`:lvl==='finalizado'?`<span class="tag-al fin">✓ concluído</span>`:'';
   return `<tr class="item" onclick="openModal(${i.ordem})">
     <td><div class="svc">${esc(i.nome)} ${tipoChip(i.tipo)}</div><div class="svc-sub">${esc(i.forma_contratacao||'')}</div></td>
     <td><span class="curva c-${i.curva||'C'}">${esc(i.curva||'—')}</span></td>

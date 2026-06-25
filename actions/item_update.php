@@ -30,11 +30,22 @@ try {
 
     $pdo = db();
 
-    // ---- PERMISSÃO (servidor): só edita quem tem escopo de edição na obra ----
+    // ---- PERMISSÃO (servidor): enforcement POR CAMPO ----
+    // editor geral (editar_escopo) altera status/fornecedor/observação; vínculos e dicionário exigem
+    // permissão específica; grupo/tipo/nome/responsável/lead = só admin. Admin faz tudo.
     $perms = user_perms($pdo, $me);
-    if (!can_edit_obra($perms, 1)) {
+    $GRUPO_LABEL = ['geral'=>'status/fornecedor/observação', 'crono'=>'vínculo de cronograma',
+                    'orcamento'=>'vínculo de orçamento/verba', 'quant'=>'vínculo de quantitativo',
+                    'dicionario'=>'dicionário', 'admin'=>'grupo/tipo/nome/responsável (só admin)'];
+    $negados = [];
+    foreach (array_keys($campos) as $k) {
+        $g = field_group($k);
+        if (!can_field_group($perms, $g, 1)) $negados[$g] = true;
+    }
+    if ($negados) {
         http_response_code(403);
-        echo json_encode(['error' => 'Sem permissão de edição. Se você deveria ter acesso, recarregue a página.'], JSON_UNESCAPED_UNICODE);
+        $quais = implode(', ', array_map(function($g) use ($GRUPO_LABEL){ return $GRUPO_LABEL[$g] ?? $g; }, array_keys($negados)));
+        echo json_encode(['error' => 'Sem permissão para alterar: '.$quais.'.'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 

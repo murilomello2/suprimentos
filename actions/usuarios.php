@@ -23,12 +23,21 @@ function preset($papel) {
 
 function jrow($r) {
     foreach (['obras_ver','obras_editar','menus'] as $k) $r[$k] = $r[$k] ? json_decode($r[$k], true) : [];
-    $r['perm_admin'] = (int)$r['perm_admin']; $r['ativo'] = (int)$r['ativo'];
+    foreach (['perm_admin','ativo','perm_crono','perm_orcamento','perm_quant','perm_dicionario'] as $k) $r[$k] = (int)($r[$k] ?? 0);
     return $r;
 }
 
 try {
     $pdo = db();
+
+    // resiliência a DEPLOY PARCIAL: garante as colunas de permissão granular (db.php pode chegar depois no FTP)
+    try {
+        $ucols = [];
+        foreach ($pdo->query("PRAGMA table_info(usuario)") as $c) $ucols[$c['name']] = true;
+        foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario'] as $pc) {
+            if (!isset($ucols[$pc])) { try { $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INTEGER DEFAULT 0"); } catch (Throwable $e) {} }
+        }
+    } catch (Throwable $e) {}
 
     // lista de RESPONSÁVEIS possíveis p/ o Radar = usuários ativos com o papel 'comprador'
     // (rotulado "Suprimentos" na UI). Sem cargo — só id + nome.
@@ -79,6 +88,10 @@ try {
             'obras_editar'  => json_encode($in['obras_editar'] ?? []),
             'menus'         => json_encode($in['menus']        ?? $p['menus']),
             'perm_admin'    => (int)($in['perm_admin'] ?? $p['perm_admin']),
+            'perm_crono'      => (int)($in['perm_crono'] ?? 0),
+            'perm_orcamento'  => (int)($in['perm_orcamento'] ?? 0),
+            'perm_quant'      => (int)($in['perm_quant'] ?? 0),
+            'perm_dicionario' => (int)($in['perm_dicionario'] ?? 0),
             'ativo'         => (int)($in['ativo'] ?? 1),
             'updated_at'    => date('c'),
         ];

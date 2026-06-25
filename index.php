@@ -660,7 +660,8 @@ async function saveField(ordem,campo,valor){
 /* ---------- modal ---------- */
 let EDITC=false, EDITO=false, EDITQ=false, EDITD=false, EDITR=false; // modos "Editar" (cronograma/orçamento/quantitativo/dicionário/resumo)
 let IS_ADMIN=false;                       // fail-closed; vira true só quando getCurrentUser confirma perm_admin
-let CAN_EDIT=false;                       // pode editar a curadoria (admin OU editar_escopo libera a obra)
+let CAN_EDIT=false;                       // editor geral da obra (status/fornecedor/observação)
+let CAN_CRONO=false, CAN_ORC=false, CAN_QUANT=false, CAN_DIC=false; // permissões específicas (vínculos + dicionário)
 let EU=null;                             // usuário logado + permissões efetivas
 function openModal(o){CUR=byOrdem(o);TAB='Resumo';EDITC=EDITO=EDITQ=EDITD=EDITR=false;drawModal();document.getElementById('ov').classList.add('open');}
 function closeModal(){document.getElementById('ov').classList.remove('open');render();renderMatriz();}
@@ -716,10 +717,10 @@ function cronoTab(i){
     <div class="box"><div class="bl">Tarefa-âncora atual ${i.curado_data?'(curada ✓)':''}</div><div class="bv">${casou}</div></div>`;
   if(!EDITC){
     h+=`<div style="display:flex;gap:8px;margin-top:6px">`;
-    if(IS_ADMIN){
+    if(CAN_CRONO){
       h+=`<button class="btn-prim" onclick="cronoEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar vínculo</button>`;
       if(i.curado_data) h+=`<button class="btn-ghost" onclick="cronoLimpar()">↺ Voltar ao automático</button>`;
-    } else h+=`<span class="muted" style="font-size:12.5px">Somente administradores podem editar o vínculo.</span>`;
+    } else h+=`<span class="muted" style="font-size:12.5px">Você não tem permissão para editar o vínculo de cronograma.</span>`;
     h+=`</div>`;
   } else {
     h+=`
@@ -818,10 +819,10 @@ function quantTab(i){
     <div class="box"><div class="bl">Quantitativo atual ${i.curado_quant?'(curado ✓)':''}</div><div class="bv" id="qntSel">${atual}</div><div id="qntTotal" style="margin-top:6px;font-weight:700"></div></div>`;
   if(!EDITQ){
     h+=`<div style="display:flex;gap:8px;margin-top:6px">`;
-    if(IS_ADMIN){
+    if(CAN_QUANT){
       h+=`<button class="btn-prim" onclick="quantEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar quantitativo</button>`;
       if(i.curado_quant) h+=`<button class="btn-ghost" onclick="qntLimpar()">↺ Limpar</button>`;
-    } else h+=`<span class="muted" style="font-size:12.5px">Somente administradores podem editar.</span>`;
+    } else h+=`<span class="muted" style="font-size:12.5px">Você não tem permissão para editar o quantitativo.</span>`;
     h+=`</div>`;
   } else {
     h+=`
@@ -1035,10 +1036,10 @@ function orcTab(i){
       <div class="bv" id="orcSel">—</div><div id="orcTotal" style="margin-top:6px;font-weight:700"></div></div>`;
   if(!EDITO){
     h+=`<div style="display:flex;gap:8px;margin-top:6px">`;
-    if(IS_ADMIN){
+    if(CAN_ORC){
       h+=`<button class="btn-prim" onclick="orcEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar vínculo de verba</button>`;
       if(i.verba_metodo) h+=`<button class="btn-ghost" onclick="orcLimpar()">↺ Limpar</button>`;
-    } else h+=`<span class="muted" style="font-size:12.5px">Somente administradores podem editar a verba.</span>`;
+    } else h+=`<span class="muted" style="font-size:12.5px">Você não tem permissão para editar a verba.</span>`;
     h+=`</div>`;
   } else {
     h+=`
@@ -1261,7 +1262,7 @@ function dicTab(i){
     <div class="box"><div class="bl">Variáveis a cotar (template)</div><div class="bv">${esc(i.variaveis_cotar||'—')}</div></div>
     <div class="box"><div class="bl">Lições / armadilhas</div><div class="bv">${esc(i.licoes||'—')}</div></div>
     <div class="box"><div class="bl">Documentos / exigências</div><div class="bv">${esc(i.documentos||'—')}</div></div>
-    <div style="margin-top:6px">${IS_ADMIN?`<button class="btn-prim" onclick="EDITD=true;drawModal()"><span class="material-icons" style="font-size:16px">edit</span> Editar dicionário</button>`:`<span class="muted" style="font-size:12.5px">Somente administradores editam o dicionário.</span>`}</div>
+    <div style="margin-top:6px">${CAN_DIC?`<button class="btn-prim" onclick="EDITD=true;drawModal()"><span class="material-icons" style="font-size:16px">edit</span> Editar dicionário</button>`:`<span class="muted" style="font-size:12.5px">Você não tem permissão para editar o dicionário.</span>`}</div>
     <div class="note">📚 Esta inteligência é o aprendizado por tipo de serviço — levada para a PRÓXIMA obra (sem alterar obras passadas). Editar aqui melhora o De-Para das próximas cargas.</div>`;
   }
   return `
@@ -1317,37 +1318,41 @@ function resumoTab(i){
         <button class="btn-ghost" onclick="excluirItem()" style="color:var(--pend)"><span class="material-icons" style="font-size:15px">delete</span> Excluir item</button>
       </div>`:''}`;
   }
-  // ---------- MODO EDIÇÃO ----------
+  // ---------- MODO EDIÇÃO ---------- (editor geral: status/fornecedor/observações; demais campos = admin)
+  const a=IS_ADMIN;
   return `
-    <div class="fld"><label>Nome do item</label><input id="rNome" value="${esc(i.nome||'')}"></div>
+    ${a?`<div class="fld"><label>Nome do item</label><input id="rNome" value="${esc(i.nome||'')}"></div>`
+       :`<div class="fld"><label>Nome do item</label><input value="${esc(i.nome||'')}" disabled></div>`}
     <div class="grid2">
-      ${IS_ADMIN?`<div class="fld"><label>Grupo <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— mover / criar novo</span></label><select id="rGrupo">${grupoOptions(i.grupo)}</select></div>`
-                :`<div class="fld"><label>Grupo</label><input value="${esc(i.grupo||'')}" disabled></div>`}
-      <div class="fld"><label>Tipo do item</label>
-        <select id="rTipo">${TIPOS.map(t=>`<option value="${t}" ${t===tp?'selected':''}>${t||'— a classificar —'}</option>`).join('')}</select></div>
+      ${a?`<div class="fld"><label>Grupo <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— mover / criar novo</span></label><select id="rGrupo">${grupoOptions(i.grupo)}</select></div>`
+         :`<div class="fld"><label>Grupo</label><input value="${esc(i.grupo||'')}" disabled></div>`}
+      ${a?`<div class="fld"><label>Tipo do item</label><select id="rTipo">${TIPOS.map(t=>`<option value="${t}" ${t===tp?'selected':''}>${t||'— a classificar —'}</option>`).join('')}</select></div>`
+         :`<div class="fld"><label>Tipo do item</label><input value="${esc(tp||'— a classificar —')}" disabled></div>`}
       <div class="fld"><label>Status</label>
         <select id="rStatus">${STATUSES.map(s=>`<option ${s===st?'selected':''}>${s}</option>`).join('')}</select></div>
-      <div class="fld"><label>Responsável <span style="color:var(--pend)">*</span></label>
-        <select id="rResp">${respOptions(i.responsavel)}</select></div>
+      ${a?`<div class="fld"><label>Responsável <span style="color:var(--pend)">*</span></label><select id="rResp">${respOptions(i.responsavel)}</select></div>`
+         :`<div class="fld"><label>Responsável</label><input value="${esc(i.responsavel||'—')}" disabled></div>`}
     </div>
     <div class="grid2">
       <div class="fld"><label>Fornecedor</label><input id="rForn" value="${esc(i.fornecedor||'')}" placeholder="fornecedor cotado/contratado"></div>
-      <div class="fld"><label>Lead time (dias)</label><input id="rLead" type="number" min="0" value="${i.lead_efetivo??''}" placeholder="dias entre disparar e precisar"></div>
+      ${a?`<div class="fld"><label>Lead time (dias)</label><input id="rLead" type="number" min="0" value="${i.lead_efetivo??''}" placeholder="dias entre disparar e precisar"></div>`
+         :`<div class="fld"><label>Lead time (dias)</label><input value="${i.lead_efetivo??''}" disabled></div>`}
     </div>
     ${ro}
     <div class="fld"><label>Observações</label><textarea id="rObs" placeholder="anotações da curadoria…">${esc(i.observacoes||'')}</textarea></div>
     <div style="display:flex;gap:8px"><button class="btn-prim" onclick="resumoSalvar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">save</span> Salvar</button>
       <button class="btn-ghost" onclick="EDITR=false;drawModal()">Cancelar</button></div>
-    <div class="note">Verba, datas e quantitativo são editados nas abas próprias (Orçamento, Cronograma, Quantitativo). Toda alteração fica registrada na aba Histórico.</div>`;
+    <div class="note">${a?'':'Como editor, você altera <b>status, fornecedor e observações</b>. Grupo, tipo, nome, responsável e lead são de administrador. '}Verba, datas e quantitativo são editados nas abas próprias (Orçamento, Cronograma, Quantitativo). Toda alteração fica registrada na aba Histórico.</div>`;
 }
 async function resumoSalvar(){
-  const resp=val('rResp');
-  if(!resp){ toast('Responsável é obrigatório'); return; }
-  const campos={ nome:val('rNome'), tipo:val('rTipo'), status:val('rStatus'),
-    responsavel:resp, fornecedor:val('rForn'), observacoes:val('rObs') };
-  const lead=val('rLead');
-  if(lead!==String(CUR.lead_efetivo??'')) campos.lead_override=lead; // só grava override se mudou (senão congela o lead do template)
+  // editor geral salva só status/fornecedor/observações
+  const campos={ status:val('rStatus'), fornecedor:val('rForn'), observacoes:val('rObs') };
   if(IS_ADMIN){
+    const resp=val('rResp');
+    if(!resp){ toast('Responsável é obrigatório'); return; }
+    campos.nome=val('rNome'); campos.tipo=val('rTipo'); campos.responsavel=resp;
+    const lead=val('rLead');
+    if(lead!==String(CUR.lead_efetivo??'')) campos.lead_override=lead; // só grava override se mudou (senão congela o lead do template)
     let g=val('rGrupo');
     if(g==='__novo__'){ g=(prompt('Nome do novo grupo')||'').trim(); if(!g){ toast('Informe o grupo'); return; } }
     if(g) campos.grupo=g;
@@ -1473,6 +1478,11 @@ async function getCurrentUser(){
   catch(e){ EU={bitrix_id:bid,via,autorizado:true,perm_admin:1,editar_escopo:'todas',menus:MENUS.map(m=>m[0])}; IS_ADMIN=true; }
   CAN_EDIT = IS_ADMIN || (EU && (EU.editar_escopo==='todas'
               || (EU.editar_escopo==='sel' && (EU.obras_editar||[]).map(Number).includes(1))));
+  // permissões específicas: exigem ser editor da obra (CAN_EDIT) + a flag; admin tem tudo
+  CAN_CRONO = IS_ADMIN || (CAN_EDIT && !!(EU && EU.perm_crono));
+  CAN_ORC   = IS_ADMIN || (CAN_EDIT && !!(EU && EU.perm_orcamento));
+  CAN_QUANT = IS_ADMIN || (CAN_EDIT && !!(EU && EU.perm_quant));
+  CAN_DIC   = IS_ADMIN || (CAN_EDIT && !!(EU && EU.perm_dicionario));
   applyMenus(); updateWhoami();
 }
 function updateWhoami(){
@@ -1517,6 +1527,7 @@ function userForm(bid){
   const menus=u?(u.menus||[]):PRESETS.coordenador.menus;
   const obrasVer=u?(u.obras_ver||[]):[], obrasEdit=u?(u.obras_editar||[]):[];
   const adm=u?u.perm_admin:0, ativo=u?u.ativo:1;
+  const pc=u?u.perm_crono:0, po=u?u.perm_orcamento:0, pq=u?u.perm_quant:0, pd=u?u.perm_dicionario:0;
   const obrasChk=(pref,sel)=>CFG.obras.map(o=>`<label class="ckl"><input type="checkbox" id="${pref}-${o.id}" ${sel.includes(o.id)?'checked':''}> ${esc(o.nome)}</label>`).join('');
   document.getElementById('modal').innerHTML=`
     <div class="mhead"><button class="mclose" onclick="closeModal()">×</button>
@@ -1540,16 +1551,24 @@ function userForm(bid){
       </div>
       <div class="fld"><label>Menus visíveis</label><div class="chkbox" style="display:flex;flex-wrap:wrap;gap:12px">
         ${MENUS.map(m=>`<label class="ckl"><input type="checkbox" id="mn-${m[0]}" ${menus.includes(m[0])?'checked':''}> ${m[1]}</label>`).join('')}</div></div>
-      <label class="ckl" style="margin:4px 0 12px"><input type="checkbox" id="uAdmin" ${adm?'checked':''}> É administrador (acessa Configurações)</label>
+      <div class="fld"><label>Permissões específicas <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— além de editar status / fornecedor / observação</span></label>
+        <div class="chkbox" style="display:flex;flex-wrap:wrap;gap:14px">
+          <label class="ckl"><input type="checkbox" id="pCrono" ${pc?'checked':''}> Vínculo de cronograma</label>
+          <label class="ckl"><input type="checkbox" id="pOrc" ${po?'checked':''}> Vínculo de orçamento (verba)</label>
+          <label class="ckl"><input type="checkbox" id="pQuant" ${pq?'checked':''}> Vínculo de quantitativo</label>
+          <label class="ckl"><input type="checkbox" id="pDic" ${pd?'checked':''}> Editar dicionário</label>
+        </div></div>
+      <label class="ckl" style="margin:4px 0 12px"><input type="checkbox" id="uAdmin" ${adm?'checked':''}> É administrador (acessa Configurações e edita tudo)</label>
       <div style="display:flex;gap:8px"><button class="btn-prim" onclick="userSave()">Salvar usuário</button>
         <button class="btn-ghost" onclick="closeModal()">Cancelar</button></div>
     </div>`;
   document.getElementById('ov').classList.add('open');
 }
 function userPreset(){
-  const p=PRESETS[val('uPapel')]; if(!p)return;
+  const p=PRESETS[val('uPapel')]; if(!p)return; // 'personalizado' (null) mantém o que está marcado
   document.getElementById('uVer').value=p.ver; document.getElementById('uEdit').value=p.edit;
   document.getElementById('uAdmin').checked=!!p.adm;
+  ['pCrono','pOrc','pQuant','pDic'].forEach(id=>{const e=document.getElementById(id); if(e)e.checked=false;}); // presets definidos zeram as específicas
   MENUS.forEach(m=>{const e=document.getElementById('mn-'+m[0]); if(e)e.checked=p.menus.includes(m[0]);});
   userToggleObras();
 }
@@ -1580,7 +1599,12 @@ async function userSave(){
   const obras_editar=edit==='sel'?CFG.obras.filter(o=>document.getElementById('oe-'+o.id).checked).map(o=>o.id):[];
   const body={acao:'save',me:EU&&EU.bitrix_id,bitrix_id:NUSER.bitrix_id,nome:NUSER.nome,cargo:NUSER.cargo,papel:val('uPapel'),
     ver_escopo:ver,editar_escopo:edit,obras_ver,obras_editar,menus,
-    perm_admin:document.getElementById('uAdmin').checked?1:0,ativo:parseInt(val('uAtivo'))};
+    perm_admin:document.getElementById('uAdmin').checked?1:0,
+    perm_crono:document.getElementById('pCrono').checked?1:0,
+    perm_orcamento:document.getElementById('pOrc').checked?1:0,
+    perm_quant:document.getElementById('pQuant').checked?1:0,
+    perm_dicionario:document.getElementById('pDic').checked?1:0,
+    ativo:parseInt(val('uAtivo'))};
   const d=await (await fetch('actions/usuarios.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
   if(d.error){
     const dbg=d.debug?` · (servidor recebeu me=${JSON.stringify(d.debug.me_recebido)}; eu enviei=${JSON.stringify(EU&&EU.bitrix_id)})`:'';

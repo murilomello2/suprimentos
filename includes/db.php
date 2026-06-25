@@ -161,6 +161,15 @@ function db_schema($pdo) {
     )");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_hist_serv ON historico(servico_id)");
 
+    // permissões GRANULARES de edição (além do editar_escopo geral) — aditivas, fora do drop de migração.
+    // perm_admin = tudo. editar_escopo (todas/sel) = editor geral (status/fornecedor/observação).
+    // estas liberam capacidades específicas POR USUÁRIO:
+    $ucols = [];
+    foreach ($pdo->query("PRAGMA table_info(usuario)") as $c) $ucols[$c['name']] = true;
+    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario'] as $pc) {
+        if (!isset($ucols[$pc])) $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INTEGER DEFAULT 0");
+    }
+
     // data-fix one-shot: compradores nasciam com editar_escopo='sel' + obras_editar vazio => 403 em tudo
     // (regressão do enforcement). Destrava quem é da equipe de Suprimentos pra editar.
     $df = $pdo->query("SELECT v FROM meta WHERE k='datafix_comprador_edit_v1'")->fetch();
@@ -183,7 +192,11 @@ function user_perms($pdo, $bid) {
     if (!$u) return $deny;
     return ['autorizado'=>true,'perm_admin'=>(int)$u['perm_admin'],'nome'=>$u['nome'] ?? '',
             'editar_escopo'=>$u['editar_escopo'] ?? 'nenhuma',
-            'obras_editar'=>$u['obras_editar'] ? (json_decode($u['obras_editar'], true) ?: []) : []];
+            'obras_editar'=>$u['obras_editar'] ? (json_decode($u['obras_editar'], true) ?: []) : [],
+            'perm_crono'=>(int)($u['perm_crono'] ?? 0),
+            'perm_orcamento'=>(int)($u['perm_orcamento'] ?? 0),
+            'perm_quant'=>(int)($u['perm_quant'] ?? 0),
+            'perm_dicionario'=>(int)($u['perm_dicionario'] ?? 0)];
 }
 function can_edit_obra($perms, $obra_id) {
     if (!empty($perms['perm_admin'])) return true;
@@ -191,6 +204,35 @@ function can_edit_obra($perms, $obra_id) {
     if (($perms['editar_escopo'] ?? '') === 'sel'
         && in_array((int)$obra_id, array_map('intval', $perms['obras_editar'] ?? []), true)) return true;
     return false;
+}
+/** Pode editar este GRUPO de campos na obra?
+ *  geral = status/fornecedor/observação (qualquer editor da obra)
+ *  crono/orcamento/quant/dicionario = exige a permissão específica (além de ser editor da obra)
+ *  admin = só administrador (grupo, tipo, nome, responsável, lead, validado) */
+function can_field_group($perms, $group, $obra_id) {
+    if (!empty($perms['perm_admin'])) return true;           // admin faz tudo
+    if ($group === 'admin') return false;                    // só admin
+    if (!can_edit_obra($perms, $obra_id)) return false;      // precisa ser editor da obra
+    switch ($group) {
+        case 'geral':      return true;
+        case 'crono':      return !empty($perms['perm_crono']);
+        case 'orcamento':  return !empty($perms['perm_orcamento']);
+        case 'quant':      return !empty($perms['perm_quant']);
+        case 'dicionario': return !empty($perms['perm_dicionario']);
+    }
+    return false;
+}
+/** Mapa campo/branch -> grupo de permissão (usado no item_update p/ enforcement por campo). */
+function field_group($key) {
+    static $M = [
+        'status'=>'geral','fornecedor'=>'geral','observacoes'=>'geral',
+        'crono_marco_override'=>'crono','data_necessaria_override'=>'crono',
+        'orcamento_refs'=>'orcamento','composicao_sel'=>'orcamento','composicao'=>'orcamento','verba_override'=>'orcamento',
+        'quant_refs'=>'quant','quant_comp_sel'=>'quant','quantitativo_valor'=>'quant','quantitativo_unidade'=>'quant','quantitativo_fonte'=>'quant',
+        'dicionario'=>'dicionario',
+        'nome'=>'admin','grupo'=>'admin','tipo'=>'admin','responsavel'=>'admin','lead_override'=>'admin','validado'=>'admin',
+    ];
+    return $M[$key] ?? 'admin';   // desconhecido => exige admin (fail-safe)
 }
 function log_historico($pdo, $obra_id, $servico_id, $item_nome, $bid, $nome, $campo, $antes, $depois) {
     $pdo->prepare("INSERT INTO historico

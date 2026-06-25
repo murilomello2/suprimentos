@@ -141,6 +141,41 @@ function db_schema($pdo) {
         ativo INTEGER DEFAULT 1,
         updated_at TEXT
     )");
+    // histórico de alterações — NÃO entra no drop de migração (persiste entre versões)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS historico (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        obra_id INTEGER, servico_id INTEGER, item_nome TEXT,
+        bitrix_id TEXT, usuario_nome TEXT,
+        campo TEXT, valor_antes TEXT, valor_depois TEXT, created_at TEXT
+    )");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_hist_serv ON historico(servico_id)");
+}
+
+/** Permissões efetivas de um usuário p/ enforcement NO SERVIDOR. Não cadastrado/sem id => nega. */
+function user_perms($pdo, $bid) {
+    $deny = ['autorizado'=>false,'perm_admin'=>0,'nome'=>'','editar_escopo'=>'nenhuma','obras_editar'=>[]];
+    if ($bid === null || $bid === '') return $deny;
+    $st = $pdo->prepare("SELECT * FROM usuario WHERE bitrix_id=? AND ativo=1");
+    $st->execute([(string)$bid]);
+    $u = $st->fetch();
+    if (!$u) return $deny;
+    return ['autorizado'=>true,'perm_admin'=>(int)$u['perm_admin'],'nome'=>$u['nome'] ?? '',
+            'editar_escopo'=>$u['editar_escopo'] ?? 'nenhuma',
+            'obras_editar'=>$u['obras_editar'] ? (json_decode($u['obras_editar'], true) ?: []) : []];
+}
+function can_edit_obra($perms, $obra_id) {
+    if (!empty($perms['perm_admin'])) return true;
+    if (($perms['editar_escopo'] ?? '') === 'todas') return true;
+    if (($perms['editar_escopo'] ?? '') === 'sel'
+        && in_array((int)$obra_id, array_map('intval', $perms['obras_editar'] ?? []), true)) return true;
+    return false;
+}
+function log_historico($pdo, $obra_id, $servico_id, $item_nome, $bid, $nome, $campo, $antes, $depois) {
+    $pdo->prepare("INSERT INTO historico
+        (obra_id,servico_id,item_nome,bitrix_id,usuario_nome,campo,valor_antes,valor_depois,created_at)
+        VALUES (?,?,?,?,?,?,?,?,?)")
+        ->execute([$obra_id,$servico_id,$item_nome,(string)$bid,$nome ?: ('Usuário '.$bid),$campo,
+                   $antes===null?null:(string)$antes, $depois===null?null:(string)$depois, date('c')]);
 }
 
 function _slugify($s){

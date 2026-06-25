@@ -200,7 +200,7 @@
         <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">radar</span> Radar de Aquisições</h1>
         <p class="sub" id="sub">Carregando…</p>
       </div>
-      <button class="btn-prim" onclick="novoItem()" style="flex:0 0 auto;margin-top:4px"><span class="material-icons" style="font-size:18px">add</span> Novo item</button>
+      <button id="btnNovo" class="btn-prim" onclick="novoItem()" style="flex:0 0 auto;margin-top:4px"><span class="material-icons" style="font-size:18px">add</span> Novo item</button>
     </div>
     <div class="kpis" id="kpis"></div>
 
@@ -414,7 +414,7 @@ async function auditRemover(ordem,lineId){
   if(!confirm(`Remover esta linha do orçamento de "${it.nome}"?\nA verba dele será recalculada sem essa linha.`))return;
   try{
     const d=await (await fetch('actions/item_update.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ordem,campos:{orcamento_refs:novo}})})).json();
+      body:JSON.stringify({ordem,campos:{orcamento_refs:novo},me:EU&&EU.bitrix_id})})).json();
     if(d.error){toast('Erro: '+d.error);return;}
   }catch(e){toast('Falha ao salvar');return;}
   await load(); renderAudit(); toast('Linha removida de '+it.nome);
@@ -625,7 +625,7 @@ function rowHtml(i){
     <td>${pctChip(i.cronograma_pct)}</td>
     <td class="date">${D(i.data_gatilho)}${venc}</td>
     <td class="date">${D(i.fim_cotacao)}</td>
-    <td onclick="event.stopPropagation()">${statusSelect(i)}</td>
+    <td>${statusSelect(i)}</td>
     <td>${i.fornecedor?`<span class="mapa-on">● cotando</span>`:'<span class="muted">—</span>'}</td>
     <td onclick="event.stopPropagation()"><button class="eye" onclick="openModal(${i.ordem})"><span class="material-icons" style="font-size:17px;line-height:28px">visibility</span></button></td>
   </tr>`;
@@ -636,14 +636,14 @@ function pctChip(p){ if(p==null) return '<span class="muted">—</span>'; const 
   return `<span class="pctw" title="conclusão da tarefa no cronograma (ao vivo)"><span class="pctbar"><span class="pctfill" style="width:${Math.min(v,100)}%;background:${c}"></span></span><span class="pctn">${v}%</span></span>`; }
 function statusSelect(i){
   const st=i.status||'Não Iniciado';
-  return `<select class="stsel ${STK[st]}" onchange="saveField(${i.ordem},'status',this.value)">`+
-    STATUSES.map(s=>`<option ${s===st?'selected':''}>${s}</option>`).join('')+`</select>`;
+  // estático: status é alterado pelo botão Editar dentro do item (com permissão + histórico)
+  return `<span class="stsel ${STK[st]}" style="cursor:pointer" title="abra o item e clique em Editar para alterar">${esc(st)}</span>`;
 }
 
 async function saveField(ordem,campo,valor){
   try{
     const r=await fetch('actions/item_update.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ordem,campos:{[campo]:valor}})});
+      body:JSON.stringify({ordem,campos:{[campo]:valor},me:EU&&EU.bitrix_id})});
     const d=await r.json();
     if(d.error){toast('Erro: '+d.error);return false;}
     Object.assign(byOrdem(ordem),d.item); // reflete na memória
@@ -655,15 +655,16 @@ async function saveField(ordem,campo,valor){
 }
 
 /* ---------- modal ---------- */
-let EDITC=false, EDITO=false, EDITQ=false, EDITD=false; // modos "Editar" (cronograma/orçamento/quantitativo/dicionário)
+let EDITC=false, EDITO=false, EDITQ=false, EDITD=false, EDITR=false; // modos "Editar" (cronograma/orçamento/quantitativo/dicionário/resumo)
 let IS_ADMIN=false;                       // fail-closed; vira true só quando getCurrentUser confirma perm_admin
+let CAN_EDIT=false;                       // pode editar a curadoria (admin OU editar_escopo libera a obra)
 let EU=null;                             // usuário logado + permissões efetivas
-function openModal(o){CUR=byOrdem(o);TAB='Resumo';EDITC=EDITO=EDITQ=EDITD=false;drawModal();document.getElementById('ov').classList.add('open');}
+function openModal(o){CUR=byOrdem(o);TAB='Resumo';EDITC=EDITO=EDITQ=EDITD=EDITR=false;drawModal();document.getElementById('ov').classList.add('open');}
 function closeModal(){document.getElementById('ov').classList.remove('open');render();renderMatriz();}
-function setTab(t){TAB=t;EDITC=EDITO=EDITQ=EDITD=false;drawModal();}
+function setTab(t){TAB=t;EDITC=EDITO=EDITQ=EDITD=EDITR=false;drawModal();}
 function drawModal(){
   const i=CUR;if(!i)return;
-  const tabs=['Resumo','Cronograma','Orçamento','Quantitativo','Dicionário','Mapa de cotação'];
+  const tabs=['Resumo','Cronograma','Orçamento','Quantitativo','Dicionário','Mapa de cotação','Histórico'];
   document.getElementById('modal').innerHTML=`
     <div class="mhead">
       <button class="mclose" onclick="closeModal()">×</button>
@@ -684,6 +685,7 @@ function postDraw(i){
   if(TAB==='Orçamento'){ orcShowCurrent(i); if(EDITO) orcRenderFonte(); }
   if(TAB==='Cronograma'){ if(EDITC) cronoInit(); }
   if(TAB==='Quantitativo'){ quantShowCurrent(i); if(EDITQ) qntLoadTree(); }
+  if(TAB==='Histórico'){ loadHist(i.ordem); }
 }
 function tabBody(i){
   if(TAB==='Resumo') return resumoTab(i);
@@ -691,6 +693,7 @@ function tabBody(i){
   if(TAB==='Quantitativo') return quantTab(i);
   if(TAB==='Orçamento') return orcTab(i);
   if(TAB==='Dicionário') return dicTab(i);
+  if(TAB==='Histórico') return histTab(i);
   // Mapa de cotação
   const itens=(i.variaveis_cotar||'').split('|').map(s=>s.trim()).filter(Boolean);
   return `
@@ -1123,41 +1126,93 @@ function resumoTab(i){
   const tp=i.tipo||'';
   const verbaLbl = (i.verba_material!=null||i.verba_mo!=null)
     ? `Material ${BRL(i.verba_material||0)} + MO ${BRL(i.verba_mo||0)}` : BRL(i.verba);
-  return `
-    ${IS_ADMIN?`<div class="box" style="border-left:3px solid var(--dourado);display:flex;align-items:center;gap:10px;margin-bottom:14px">
-      <span class="material-icons" style="color:var(--dourado)">drive_file_move</span>
-      <div style="flex:1">
-        <div class="bl" style="margin-bottom:4px">Grupo deste item — mover de grupo ou criar um novo</div>
-        <select onchange="modalGrupo(this.value)" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13.5px;background:#fff">${grupoOptions(i.grupo)}</select>
-      </div>
-    </div>`:''}
+  // blocos read-only (verba/datas/quant são editados nas abas próprias)
+  const ro = `
+    <div class="fld"><label>Verba ${i.curado_verba?'(curada ✓)':'(estimada)'} ${i.verba_metodo?'· '+esc(i.verba_metodo):''}</label><input value="${esc(verbaLbl)}" disabled></div>
     <div class="grid2">
-      <div class="fld"><label>Tipo do item</label>
-        <select onchange="modalSave('tipo',this.value)">${TIPOS.map(t=>`<option value="${t}" ${t===tp?'selected':''}>${t||'— a classificar —'}</option>`).join('')}</select></div>
-      <div class="fld"><label>Status</label>
-        <select onchange="modalSave('status',this.value)">${STATUSES.map(s=>`<option ${s===st?'selected':''}>${s}</option>`).join('')}</select></div>
-      <div class="fld"><label>Responsável <span style="color:var(--pend)">*</span></label>
-        <select onchange="modalSaveResp(this.value)">${respOptions(i.responsavel)}</select></div>
-      <div class="fld"><label>Fornecedor</label>
-        <input value="${esc(i.fornecedor||'')}" onchange="modalSave('fornecedor',this.value)" placeholder="fornecedor cotado/contratado"></div>
-    </div>
-    <div class="grid2">
-      <div class="fld"><label>Lead time (dias) — configurável</label>
-        <input type="number" min="0" value="${i.lead_efetivo??''}" onchange="modalSaveReload('lead_override',this.value)" placeholder="dias entre disparar e precisar"></div>
       <div class="fld"><label>Início da cotação (gatilho)</label><input value="${D(i.data_gatilho)}" disabled></div>
-    </div>
-    <div class="fld"><label>Verba ${i.curado_verba?'(curada ✓)':'(estimada)'} ${i.verba_metodo?'· '+i.verba_metodo:''}</label><input value="${verbaLbl}" disabled></div>
-    <div class="grid2">
       <div class="fld"><label>Necessário em obra ${i.curado_data?'(curado ✓)':''}</label><input value="${D(i.data_necessaria)}" disabled></div>
-      <div class="fld"><label>Quantitativo ${i.curado_quant?'(curado ✓)':''}</label><input value="${i.quantitativo!=null?QNUM(i.quantitativo)+' '+(i.quantitativo_unidade||''):'—'}" disabled></div>
     </div>
-    <div class="fld"><label>Observações</label>
-      <textarea onchange="modalSave('observacoes',this.value)" placeholder="anotações da curadoria…">${esc(i.observacoes||'')}</textarea></div>
-    <span class="saved" id="savedTag"><span class="material-icons" style="font-size:14px;vertical-align:-2px">check</span> salvo</span>
-    ${IS_ADMIN?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;gap:8px">
-      <button class="btn-ghost" onclick="desdobrarItem()"><span class="material-icons" style="font-size:15px">call_split</span> Desdobrar em Material + MO</button>
-      <button class="btn-ghost" onclick="excluirItem()" style="color:var(--pend)"><span class="material-icons" style="font-size:15px">delete</span> Excluir item</button>
-    </div>`:''}`;
+    <div class="fld"><label>Quantitativo ${i.curado_quant?'(curado ✓)':''}</label><input value="${i.quantitativo!=null?esc(QNUM(i.quantitativo)+' '+(i.quantitativo_unidade||'')):'—'}" disabled></div>`;
+
+  if(!EDITR){
+    // ---------- MODO LEITURA (campos travados) ----------
+    return `
+      <div class="grid2">
+        <div class="fld"><label>Grupo</label><input value="${esc(i.grupo||'—')}" disabled></div>
+        <div class="fld"><label>Tipo do item</label><input value="${esc(tp||'— a classificar —')}" disabled></div>
+        <div class="fld"><label>Status</label><input value="${esc(st)}" disabled></div>
+        <div class="fld"><label>Responsável</label><input value="${esc(i.responsavel||'—')}" disabled></div>
+        <div class="fld"><label>Fornecedor</label><input value="${esc(i.fornecedor||'—')}" disabled></div>
+        <div class="fld"><label>Lead time (dias)</label><input value="${i.lead_efetivo??'—'}" disabled></div>
+      </div>
+      ${ro}
+      <div class="fld"><label>Observações</label><textarea disabled>${esc(i.observacoes||'')}</textarea></div>
+      <div style="margin-top:4px">
+        ${CAN_EDIT?`<button class="btn-prim" onclick="EDITR=true;drawModal()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">edit</span> Editar</button>`
+                  :`<span class="muted" style="font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">lock</span> Você tem acesso somente leitura.</span>`}
+      </div>
+      ${IS_ADMIN?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;gap:8px">
+        <button class="btn-ghost" onclick="desdobrarItem()"><span class="material-icons" style="font-size:15px">call_split</span> Desdobrar em Material + MO</button>
+        <button class="btn-ghost" onclick="excluirItem()" style="color:var(--pend)"><span class="material-icons" style="font-size:15px">delete</span> Excluir item</button>
+      </div>`:''}`;
+  }
+  // ---------- MODO EDIÇÃO ----------
+  return `
+    <div class="fld"><label>Nome do item</label><input id="rNome" value="${esc(i.nome||'')}"></div>
+    <div class="grid2">
+      ${IS_ADMIN?`<div class="fld"><label>Grupo <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— mover / criar novo</span></label><select id="rGrupo">${grupoOptions(i.grupo)}</select></div>`
+                :`<div class="fld"><label>Grupo</label><input value="${esc(i.grupo||'')}" disabled></div>`}
+      <div class="fld"><label>Tipo do item</label>
+        <select id="rTipo">${TIPOS.map(t=>`<option value="${t}" ${t===tp?'selected':''}>${t||'— a classificar —'}</option>`).join('')}</select></div>
+      <div class="fld"><label>Status</label>
+        <select id="rStatus">${STATUSES.map(s=>`<option ${s===st?'selected':''}>${s}</option>`).join('')}</select></div>
+      <div class="fld"><label>Responsável <span style="color:var(--pend)">*</span></label>
+        <select id="rResp">${respOptions(i.responsavel)}</select></div>
+    </div>
+    <div class="grid2">
+      <div class="fld"><label>Fornecedor</label><input id="rForn" value="${esc(i.fornecedor||'')}" placeholder="fornecedor cotado/contratado"></div>
+      <div class="fld"><label>Lead time (dias)</label><input id="rLead" type="number" min="0" value="${i.lead_efetivo??''}" placeholder="dias entre disparar e precisar"></div>
+    </div>
+    ${ro}
+    <div class="fld"><label>Observações</label><textarea id="rObs" placeholder="anotações da curadoria…">${esc(i.observacoes||'')}</textarea></div>
+    <div style="display:flex;gap:8px"><button class="btn-prim" onclick="resumoSalvar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">save</span> Salvar</button>
+      <button class="btn-ghost" onclick="EDITR=false;drawModal()">Cancelar</button></div>
+    <div class="note">Verba, datas e quantitativo são editados nas abas próprias (Orçamento, Cronograma, Quantitativo). Toda alteração fica registrada na aba Histórico.</div>`;
+}
+async function resumoSalvar(){
+  const resp=val('rResp');
+  if(!resp){ toast('Responsável é obrigatório'); return; }
+  const campos={ nome:val('rNome'), tipo:val('rTipo'), status:val('rStatus'),
+    responsavel:resp, fornecedor:val('rForn'), lead_override:val('rLead'), observacoes:val('rObs') };
+  if(IS_ADMIN){
+    let g=val('rGrupo');
+    if(g==='__novo__'){ g=(prompt('Nome do novo grupo')||'').trim(); if(!g){ toast('Informe o grupo'); return; } }
+    if(g) campos.grupo=g;
+  }
+  EDITR=false;
+  await saveAndReload(campos);
+  toast('Alterações salvas');
+}
+/* ----- Histórico de alterações (por item) ----- */
+function histTab(i){ return `<div id="histBox"><div class="empty">Carregando histórico…</div></div>`; }
+async function loadHist(ordem){
+  const box=document.getElementById('histBox'); if(!box)return;
+  let d;
+  try{ d=await (await fetch('actions/historico.php?ordem='+ordem)).json(); }
+  catch(e){ box.innerHTML='<div class="empty">Falha ao carregar o histórico.</div>'; return; }
+  const hs=(d&&d.historico)||[];
+  if(!hs.length){ box.innerHTML='<div class="muted" style="padding:10px 2px">Nenhuma alteração registrada ainda neste item.</div>'; return; }
+  box.innerHTML='<div class="note" style="margin-top:0">Toda alteração feita por qualquer usuário fica registrada aqui (mais recente primeiro).</div>'+
+    hs.map(h=>{
+      let quando=h.created_at||'';
+      try{ quando=new Date(h.created_at).toLocaleString('pt-BR'); }catch(e){}
+      const antes=(h.valor_antes!=null&&h.valor_antes!=='')?`<span class="muted">${esc(h.valor_antes)}</span> → `:'';
+      return `<div style="padding:9px 2px;border-bottom:1px solid #f1f3f2;font-size:13px">
+        <div><b>${esc(h.campo)}</b>: ${antes}<b>${esc(h.valor_depois||'—')}</b></div>
+        <div class="muted" style="font-size:11.5px;margin-top:2px"><span class="material-icons" style="font-size:13px;vertical-align:-2px">person</span> ${esc(h.usuario_nome||('#'+h.bitrix_id))} · ${esc(quando)}</div>
+      </div>`;
+    }).join('');
 }
 async function modalSave(campo,valor){
   const ok=await saveField(CUR.ordem,campo,valor);
@@ -1178,7 +1233,7 @@ async function modalGrupo(v){
 async function saveAndReload(campos){
   try{
     const d=await (await fetch('actions/item_update.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ordem:CUR.ordem,campos})})).json();
+      body:JSON.stringify({ordem:CUR.ordem,campos,me:EU&&EU.bitrix_id})})).json();
     if(d.error){toast('Erro: '+d.error);return;}
     await load();
     CUR=byOrdem(CUR.ordem); drawModal();
@@ -1212,7 +1267,7 @@ async function novoItemSalvar(){
   let grupo=val('niGrupo');
   if(grupo==='__novo__'){ grupo=(prompt('Nome do novo grupo')||'').trim(); if(!grupo){toast('Informe o grupo');return;} }
   const resp=val('niResp');
-  const body={acao:'novo', nome:val('niNome'), grupo, tipo:val('niTipo'), curva:val('niCurva'), responsavel:resp, copy_from:val('niCopy')||null};
+  const body={acao:'novo', nome:val('niNome'), grupo, tipo:val('niTipo'), curva:val('niCurva'), responsavel:resp, copy_from:val('niCopy')||null, me:EU&&EU.bitrix_id};
   if(!body.nome){toast('Informe o nome');return;}
   if(!resp){toast('Responsável é obrigatório');return;}
   const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
@@ -1221,14 +1276,14 @@ async function novoItemSalvar(){
 }
 async function desdobrarItem(){
   if(!CUR)return;
-  const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'desdobrar',ordem:CUR.ordem})})).json();
+  const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'desdobrar',ordem:CUR.ordem,me:EU&&EU.bitrix_id})})).json();
   if(d.error){toast('Erro: '+d.error);return;}
   closeModal(); await load(); toast('Desdobrado em (MAT) e (MO)');
 }
 async function excluirItem(){
   if(!CUR)return;
   if(!confirm('Excluir o item "'+CUR.nome+'" do radar? Esta ação não pode ser desfeita.'))return;
-  const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',ordem:CUR.ordem})})).json();
+  const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',ordem:CUR.ordem,me:EU&&EU.bitrix_id})})).json();
   if(d.error){toast('Erro: '+d.error);return;}
   closeModal(); await load(); toast('Item excluído');
 }
@@ -1253,7 +1308,9 @@ async function getCurrentUser(){
   }
   if(!bid) bid='20'; // localhost dev OU não identificado → admin Murilo (provisório — ver indicador "Você" na barra)
   try{ const p=await (await fetch('actions/usuarios.php?me='+encodeURIComponent(bid))).json(); EU=Object.assign({bitrix_id:bid,via},p); IS_ADMIN=!!p.perm_admin; }
-  catch(e){ EU={bitrix_id:bid,via,autorizado:true,perm_admin:1,menus:MENUS.map(m=>m[0])}; IS_ADMIN=true; }
+  catch(e){ EU={bitrix_id:bid,via,autorizado:true,perm_admin:1,editar_escopo:'todas',menus:MENUS.map(m=>m[0])}; IS_ADMIN=true; }
+  CAN_EDIT = IS_ADMIN || (EU && (EU.editar_escopo==='todas'
+              || (EU.editar_escopo==='sel' && (EU.obras_editar||[]).map(Number).includes(1))));
   applyMenus(); updateWhoami();
 }
 function updateWhoami(){
@@ -1271,6 +1328,7 @@ function applyMenus(){
     const m=a.getAttribute('data-menu');
     a.style.display=(IS_ADMIN||allow.includes(m))?'':'none';
   });
+  const bn=document.getElementById('btnNovo'); if(bn) bn.style.display=CAN_EDIT?'':'none'; // só quem edita cria item
 }
 async function renderConfig(){
   const box=document.getElementById('cfgwrap'); box.innerHTML='<div class="empty">Carregando…</div>';

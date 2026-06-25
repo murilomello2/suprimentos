@@ -16,11 +16,21 @@ try {
     $pdo = db(); db_seed_if_empty();
     $in = json_decode(file_get_contents('php://input'), true);
     $acao = $in['acao'] ?? 'novo';
+    $me = $in['me'] ?? null;
+
+    // ---- PERMISSÃO (servidor): só cria/altera quem tem escopo de edição ----
+    $perms = user_perms($pdo, $me);
+    if (!can_edit_obra($perms, 1)) {
+        http_response_code(403);
+        echo json_encode(['error'=>'Sem permissão de edição.'], JSON_UNESCAPED_UNICODE); exit;
+    }
 
     if ($acao === 'excluir') {
         $ordem = (int)($in['ordem'] ?? 0);
+        $nm = $pdo->prepare("SELECT nome FROM servico WHERE id=?"); $nm->execute([$ordem]); $nome = $nm->fetchColumn() ?: ('#'.$ordem);
         $pdo->prepare("DELETE FROM radar_item WHERE obra_id=1 AND servico_id=?")->execute([$ordem]);
         $pdo->prepare("DELETE FROM servico WHERE id=?")->execute([$ordem]);
+        log_historico($pdo, 1, $ordem, $nome, $me, $perms['nome'], 'Item excluído', $nome, '');
         echo json_encode(['ok'=>true]); exit;
     }
 
@@ -33,6 +43,7 @@ try {
         $base = base_nome($src['nome']);
         $o1 = criar_item($pdo, "$base (MAT)", $src['grupo'], 'Material', $src['curva'], $ordem);
         $o2 = criar_item($pdo, "$base (MO)",  $src['grupo'], 'Mão de obra', $src['curva'], $ordem);
+        log_historico($pdo, 1, $ordem, $src['nome'], $me, $perms['nome'], 'Desdobrado em Material + MO', $src['nome'], "$base (MAT) + $base (MO)");
         echo json_encode(['ok'=>true, 'criados'=>[$o1,$o2]]); exit;
     }
 
@@ -53,6 +64,7 @@ try {
         $pdo->prepare("UPDATE radar_item SET responsavel=? WHERE obra_id=1 AND servico_id=?")
             ->execute([$resp, $ordem]);
     }
+    log_historico($pdo, 1, $ordem, $nome, $me, $perms['nome'], 'Item criado', '', $nome.' · grupo '.$grupo);
     echo json_encode(['ok'=>true, 'ordem'=>$ordem]);
 } catch (Throwable $e) {
     http_response_code(400);

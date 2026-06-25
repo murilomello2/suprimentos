@@ -675,7 +675,7 @@ function drawModal(){
       <div class="mt">${esc(i.nome)}</div>
       <div class="meta">
         <span><span class="material-icons">person</span>${esc(i.responsavel||'sem responsável')}</span>
-        <span><span class="material-icons">straighten</span>${esc(i.unidade||'—')}</span>
+        <span><span class="material-icons">straighten</span>${esc((i.curado_quant&&i.quantitativo_unidade)?i.quantitativo_unidade:(i.unidade||'—'))}</span>
         <span><span class="material-icons">event</span>obra: ${D(i.data_necessaria)}</span>
         <span><span class="material-icons">schedule</span>lead: ${i.lead_efetivo?i.lead_efetivo+' d':'—'}</span>
       </div>
@@ -815,7 +815,6 @@ function quantTab(i){
     ? `<b style="font-size:16px">${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}</b> <span class="muted" style="font-size:12px">— ${_qf}</span>`
     : '<span class="muted">Sem quantitativo definido.</span>';
   let h=`
-    <div class="box"><div class="bl">Quantitativo que importa (dicionário)</div><div class="bv">${esc(i.quantitativo_txt||'—')}</div></div>
     <div class="box"><div class="bl">Quantitativo atual ${i.curado_quant?'(curado ✓)':''}</div><div class="bv" id="qntSel">${atual}</div><div id="qntTotal" style="margin-top:6px;font-weight:700"></div></div>`;
   if(!EDITQ){
     h+=`<div style="display:flex;gap:8px;margin-top:6px">`;
@@ -927,19 +926,28 @@ async function qcompSalvar(){
 }
 async function quantShowCurrent(i){
   const el=document.getElementById('qntSel'), tot=document.getElementById('qntTotal');
-  // COMPOSIÇÃO: mostra como foi computado (cada insumo: área × consumo = subtotal) p/ conferência
-  if(i.quantitativo_fonte==='composicao' && (i.quant_comp_sel||[]).length){
+  // MEMORIAL de conferência — descobre a origem do quantitativo p/ mostrar o cálculo e os itens:
+  // 1) cesta própria do quantitativo (fonte composição direta)
+  let cesta=(i.quant_comp_sel||[]), origem='composição de insumos — área × consumo';
+  // 2) senão, a verba por composição já definiu o quantitativo (insumos marcados "define quantitativo")
+  if(!cesta.length){
+    const qs=(i.composicao_sel||[]).filter(s=>s.q);
+    const qsum=qs.reduce((a,s)=>a+(s.area||0)*(s.coef||0),0);
+    if(qs.length && i.quantitativo!=null && Math.abs(qsum-i.quantitativo)<Math.max(1,Math.abs(i.quantitativo)*0.005)){
+      cesta=qs; origem='insumos da composição da verba marcados "define quantitativo" — área × consumo';
+    }
+  }
+  if(cesta.length && el){
     let qval=0;
-    el.innerHTML=`<div style="margin-bottom:6px"><b style="font-size:16px">${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}</b> <span class="muted" style="font-size:12px">— soma destes insumos (área × consumo):</span></div>`+
-      i.quant_comp_sel.map(s=>{const qq=(s.area||0)*(s.coef||0); qval+=qq;
-        return `<div class="pickrow" style="align-items:center"><span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
-          <div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.desc)}</div>
-            <small class="muted">${s.compdesc?esc(s.compdesc.slice(0,44))+' · ':''}${QNUM(s.area)} × ${QNUM(s.coef)} ${esc(s.unidade||'')}/un</small></div>
-          <span class="money" style="min-width:104px;text-align:right">${QNUM(qq)} ${esc(s.unidade||'')}</span></div>`;}).join('');
+    el.innerHTML=`<div style="margin-bottom:6px"><b style="font-size:16px">${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}</b> <span class="muted" style="font-size:12px">— ${origem}:</span></div>`+
+      cesta.map(s=>{const qq=(s.area||0)*(s.coef||0); qval+=qq;
+        return `<div class="pickrow" style="align-items:flex-start"><span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
+          <div style="flex:1;min-width:0"><div>${esc(s.desc)}</div>
+            <small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} = <b>${QNUM(qq)} ${esc(s.unidade||'')}</b>${s.compdesc?' · '+esc(s.compdesc.slice(0,40)):''}</small></div></div>`;}).join('');
     if(tot) tot.textContent='Soma: '+QNUM(qval)+' '+(i.quantitativo_unidade||'');
     return;
   }
-  // ANALÍTICO: mostra as linhas do orçamento selecionadas (path + qtde)
+  // 3) analítico — linhas do orçamento selecionadas (caminho + qtde)
   QNT_SEL=new Set((i.quantitativo_refs||[]).map(Number));
   if(QNT_SEL.size) await qntRenderSel();
 }

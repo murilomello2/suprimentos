@@ -1556,7 +1556,7 @@ function novoItem(){
         <div class="fld"><label>Tipo</label><select id="niTipo"><option value="">— a classificar —</option>${TIPOS.map(t=>`<option>${t}</option>`).join('')}</select></div>
       </div>
       <div class="grid2">
-        <div class="fld"><label>Responsável <span style="color:var(--pend)">*</span></label><select id="niResp">${respOptions('')}</select></div>
+        <div class="fld"><label>Responsável <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— opcional, define depois</span></label><select id="niResp">${respOptions('')}</select></div>
         <div class="fld"><label>Curva (opcional)</label><select id="niCurva"><option value="">auto</option><option>A</option><option>B</option><option>C</option></select></div>
       </div>
       <div class="fld"><label>Copiar dicionário de (opcional)</label><select id="niCopy"><option value="">— nenhum —</option>${DATA.itens.map(i=>`<option value="${i.ordem}">${esc(i.nome)}</option>`).join('')}</select></div>
@@ -1572,7 +1572,7 @@ async function novoItemSalvar(){
   const resp=val('niResp');
   const body={acao:'novo', nome:val('niNome'), grupo, tipo:val('niTipo'), curva:val('niCurva'), responsavel:resp, copy_from:val('niCopy')||null, me:EU&&EU.bitrix_id};
   if(!body.nome){toast('Informe o nome');return;}
-  if(!resp){toast('Responsável é obrigatório');return;}
+  // responsável NÃO é obrigatório na criação — pode ser atribuído depois (inclusive em massa por grupo/categoria)
   const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
   if(d.error){toast('Erro: '+d.error);return;}
   closeModal(); await load(); toast('Item criado');

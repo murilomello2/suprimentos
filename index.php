@@ -687,7 +687,7 @@ function drawModal(){
 function postDraw(i){
   if(TAB==='Orçamento'){ orcShowCurrent(i); orcLoadLastChange(i.ordem); if(EDITO) orcRenderFonte(); }
   if(TAB==='Cronograma'){ if(EDITC) cronoInit(); }
-  if(TAB==='Quantitativo'){ quantShowCurrent(i); if(EDITQ) qntLoadTree(); }
+  if(TAB==='Quantitativo'){ quantShowCurrent(i); if(EDITQ) qntRenderFonte(); }
   if(TAB==='Histórico'){ loadHist(i.ordem); }
 }
 function tabBody(i){
@@ -807,6 +807,7 @@ async function cronoLimpar(){ EDITC=false; await saveAndReload({crono_marco_over
 
 /* ===== Quantitativo — vínculo (read-only) + Editar → árvore (soma qtde) / manual ===== */
 let QNT_SEL=new Set(), QNT_NODES=[];
+let QNTFONTE='manual', QCOMP_DATA=null, QCOMP_AREA=0, QCOMP_SEL=[];   // quantitativo por composição (cesta)
 const QNUM=n=>n!=null?Number(n).toLocaleString('pt-BR',{maximumFractionDigits:2}):'—';
 function quantTab(i){
   const atual = i.quantitativo!=null
@@ -824,26 +825,105 @@ function quantTab(i){
     h+=`</div>`;
   } else {
     h+=`
-    <div class="grid2" style="margin-top:8px">
-      <div class="fld"><label>Quantitativo manual</label><input id="qntManV" type="number" step="any" placeholder="valor" value="${i.quantitativo!=null?i.quantitativo:''}"></div>
-      <div class="fld"><label>Unidade</label><input id="qntManU" placeholder="m², m³, kg, un…" value="${esc(i.quantitativo_unidade||'')}"></div>
-    </div>
-    <div style="margin:-4px 0 10px"><button class="btn-ghost" onclick="qntManualSalvar()">Salvar quantitativo manual</button></div>
-    <div class="fld"><label>Ou compor do orçamento — busque e marque as linhas (soma as quantidades)</label>
-      <div class="search" style="border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
-        <input id="qntQ" placeholder="ex.: bloco, contrapiso, concreto laje…" oninput="qntBuscar()"></div></div>
-    <div id="qntSearch"></div>
-    <div class="tree" id="qntTree">Carregando…</div>
-    <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
-      <button class="btn-prim" onclick="qntSalvar()">Salvar do orçamento</button>
-      <button class="btn-ghost" onclick="quantCancelar()">Cancelar</button>
-    </div>`;
+    <div class="fld" style="margin-top:8px"><label>Fonte do quantitativo</label>
+      <select id="qntFonte" onchange="qntSetFonte(this.value)">
+        <option value="manual" ${QNTFONTE==='manual'?'selected':''}>Manual</option>
+        <option value="analitico" ${QNTFONTE==='analitico'?'selected':''}>Orçamento analítico (somar quantidades das linhas)</option>
+        <option value="composicao" ${QNTFONTE==='composicao'?'selected':''}>Composição (cesta de insumos — ex.: contar blocos)</option>
+      </select></div>
+    <div id="qntFonteBox"></div>
+    <div style="margin-top:8px"><button class="btn-ghost" onclick="quantCancelar()">Cancelar</button></div>`;
   }
   h+=`<div class="note">O quantitativo vira aprendizado por tipo de serviço (replicável p/ obra nova) sem alterar obras passadas. Cuidado com unidades diferentes ao somar linhas.</div>`;
   return h;
 }
-function quantEditar(){ EDITQ=true; drawModal(); }
+function quantEditar(){ EDITQ=true;
+  QNTFONTE=(CUR.quantitativo_fonte==='composicao'?'composicao':(CUR.quantitativo_fonte==='orcamento'?'analitico':'manual'));
+  QCOMP_SEL=(CUR.quant_comp_sel||[]).map(s=>({...s})); QCOMP_DATA=null;
+  drawModal(); }
 function quantCancelar(){ EDITQ=false; drawModal(); }
+function qntSetFonte(v){ QNTFONTE=v; qntRenderFonte(); }
+function qntRenderFonte(){
+  const box=document.getElementById('qntFonteBox'); if(!box)return;
+  if(QNTFONTE==='manual'){
+    box.innerHTML=`<div class="grid2">
+      <div class="fld"><label>Quantitativo manual</label><input id="qntManV" type="number" step="any" placeholder="valor" value="${CUR.quantitativo!=null?CUR.quantitativo:''}"></div>
+      <div class="fld"><label>Unidade</label><input id="qntManU" placeholder="m², m³, kg, un…" value="${esc(CUR.quantitativo_unidade||'')}"></div></div>
+      <div style="margin-top:6px"><button class="btn-prim" onclick="qntManualSalvar()">Salvar quantitativo manual</button></div>`;
+  } else if(QNTFONTE==='analitico'){
+    box.innerHTML=`<div class="fld"><label>Busque e marque as linhas do orçamento (soma as quantidades)</label>
+      <div class="search" style="border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
+        <input id="qntQ" placeholder="ex.: bloco, contrapiso, concreto laje…" oninput="qntBuscar()"></div></div>
+      <div id="qntSearch"></div><div class="tree" id="qntTree">Carregando…</div>
+      <div style="margin-top:8px"><button class="btn-prim" onclick="qntSalvar()">Salvar do orçamento</button></div>`;
+    qntLoadTree();
+  } else {
+    box.innerHTML=`<div class="fld"><label>Busque composições e marque os insumos — soma área × consumo (ex.: bloco 14 + bloco 19 = total de blocos)</label>
+      <div class="search" style="border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
+        <input id="qcompQ" placeholder="ex.: alvenaria bloco, concreto…" oninput="qcompBuscar()"></div></div>
+      <div id="qcompSearch"></div><div id="qcompDetail"></div><div id="qcompBasket" style="margin-top:8px"></div><div id="qcompTotals"></div>`;
+    qcompRenderBasket();
+  }
+}
+async function qcompBuscar(){
+  const q=document.getElementById('qcompQ').value.trim();
+  const box=document.getElementById('qcompSearch'); if(!box)return;
+  if(q.length<2){box.innerHTML='';return;}
+  box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
+  const d=await (await fetch('actions/composicao.php?q='+encodeURIComponent(q))).json();
+  const list=d.composicoes||[];
+  if(!list.length){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Nada encontrado.</div>';return;}
+  box.innerHTML='<div class="srbox">'+list.map(c=>`<div class="pickrow" onclick="qcompEscolher(${c.id})">
+    <span class="material-icons" style="font-size:16px;color:var(--verde)">playlist_add</span>
+    <div><div>${esc(c.descricao)}</div><small class="muted">${QNUM(c.qtde_total)} ${esc(c.unidade||'')}</small></div></div>`).join('')+'</div>';
+}
+async function qcompEscolher(id){
+  QCOMP_DATA=await (await fetch('actions/composicao.php?id='+id)).json();
+  QCOMP_AREA=QCOMP_DATA.qtde_total||0;
+  document.getElementById('qcompSearch').innerHTML='';
+  qcompRenderDetail();
+}
+function qcompRenderDetail(){
+  const box=document.getElementById('qcompDetail'); if(!box||!QCOMP_DATA)return;
+  const c=QCOMP_DATA;
+  box.innerHTML=`<div class="box"><div class="bl">${esc(c.descricao)}</div><div class="bv muted" style="font-size:12px">total ${QNUM(c.qtde_total)} ${esc(c.unidade||'')}</div></div>
+    <div class="fld"><label>Área/quantidade desta composição (padrão = total)</label><input type="number" step="any" value="${QCOMP_AREA}" oninput="QCOMP_AREA=parseFloat(this.value)||0"></div>
+    <div class="tree" style="max-height:200px">${c.insumos.map((in_,ix)=>{const on=QCOMP_SEL.some(s=>s.cid===c.id&&s.idx===ix);
+      return `<div class="tnode"><span class="material-icons chk" onclick="qcompToggleInsumo(${ix})" style="color:${on?'var(--ok)':'var(--muted)'}">${on?'check_box':'check_box_outline_blank'}</span>
+      <span class="badge-tp ${in_.tipo}">${in_.tipo==='mo'?'MO':'MAT'}</span>
+      <span class="tname">${esc(in_.descricao)}</span><span class="tval">${QNUM(in_.coef)} ${esc(in_.unidade||'')}/un</span></div>`;}).join('')}</div>
+    <div class="muted" style="font-size:11.5px;margin-top:4px">Marque o(s) insumo(s) cuja contagem é o quantitativo (ex.: o bloco). Pode abrir outra composição e marcar mais.</div>`;
+}
+function qcompToggleInsumo(ix){
+  const c=QCOMP_DATA; const in_=c&&c.insumos[ix]; if(!in_)return;
+  const i=QCOMP_SEL.findIndex(s=>s.cid===c.id&&s.idx===ix);
+  if(i>=0) QCOMP_SEL.splice(i,1);
+  else QCOMP_SEL.push({cid:c.id, idx:ix, area:QCOMP_AREA||c.qtde_total||0, desc:in_.descricao, tipo:in_.tipo, unidade:in_.unidade, coef:+in_.coef, compdesc:c.descricao});
+  qcompRenderDetail(); qcompRenderBasket();
+}
+function qcompRenderBasket(){
+  const box=document.getElementById('qcompBasket'), tot=document.getElementById('qcompTotals'); if(!box)return;
+  if(!QCOMP_SEL.length){ box.innerHTML='<div class="muted" style="font-size:12px;padding:6px 2px">Nenhum insumo selecionado — marque insumos das composições acima.</div>'; if(tot)tot.innerHTML=''; return; }
+  let qval=0, qun='';
+  box.innerHTML='<div class="bl" style="margin-bottom:4px">Quantitativo composto destes insumos</div>'+QCOMP_SEL.map((s,k)=>{
+    const qq=(s.area||0)*(s.coef||0); qval+=qq; if(!qun)qun=s.unidade;
+    return `<div class="pickrow" style="gap:8px;align-items:center">
+      <span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
+      <div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.desc)}</div><small class="muted">${esc((s.compdesc||'').slice(0,38))} · ${QNUM(s.coef)} ${esc(s.unidade||'')}/un</small></div>
+      <input type="number" step="any" style="width:84px;border:1px solid var(--line);border-radius:7px;padding:4px 6px" value="${s.area}" oninput="QCOMP_SEL[${k}].area=parseFloat(this.value)||0;qcompRenderBasket()" title="área">
+      <span class="money" style="min-width:96px;text-align:right">${QNUM(qq)} ${esc(s.unidade||'')}</span>
+      <span class="material-icons" style="cursor:pointer;color:var(--pend);font-size:18px" onclick="QCOMP_SEL.splice(${k},1);qcompRenderDetail();qcompRenderBasket()" title="remover">close</span>
+    </div>`;
+  }).join('');
+  if(tot) tot.innerHTML=`<div class="box" style="margin-top:8px"><div class="bv"><b>Quantitativo total:</b> ${QNUM(qval)} ${esc(qun)}</div></div>
+    <div style="margin-top:8px"><button class="btn-prim" onclick="qcompSalvar()">Salvar quantitativo por composição</button></div>`;
+}
+async function qcompSalvar(){
+  if(!QCOMP_SEL.length){toast('Marque ao menos um insumo');return;}
+  EDITQ=false;
+  await saveAndReload({quant_comp_sel: QCOMP_SEL.map(s=>({cid:s.cid, idx:s.idx, area:s.area}))});
+  toast('Quantitativo por composição salvo ('+QCOMP_SEL.length+' insumo(s))');
+}
 async function quantShowCurrent(i){
   QNT_SEL=new Set((i.quantitativo_refs||[]).map(Number));
   if(QNT_SEL.size) await qntRenderSel();

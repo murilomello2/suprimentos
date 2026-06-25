@@ -22,7 +22,7 @@ try {
                r.verba_override, r.lead_override, r.crono_marco_override,
                r.data_necessaria_override, r.orcamento_refs,
                r.quantitativo_valor, r.quantitativo_unidade, r.quantitativo_refs, r.quantitativo_fonte,
-               r.tipo, r.verba_metodo, r.verba_material, r.verba_mo, r.composicao_id, r.area_base, r.composicao_sel, r.verba_curada
+               r.tipo, r.verba_metodo, r.verba_material, r.verba_mo, r.composicao_id, r.area_base, r.composicao_sel, r.verba_curada, r.quant_comp_sel
         FROM servico s
         JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = 1
         ORDER BY s.grupo_ordem, s.ordem
@@ -70,6 +70,7 @@ try {
             'quantitativo_unidade' => $r['quantitativo_unidade'],
             'quantitativo_fonte'   => $r['quantitativo_fonte'],
             'quantitativo_refs'    => $r['quantitativo_refs'] ? json_decode($r['quantitativo_refs'], true) : [],
+            'quant_comp_sel'       => $r['quant_comp_sel'] ? json_decode($r['quant_comp_sel'], true) : [],
             'curado_quant'         => $r['quantitativo_valor'] !== null,
             'verba_material'       => $r['verba_material'] !== null ? (float)$r['verba_material'] : null,
             'verba_mo'             => $r['verba_mo'] !== null ? (float)$r['verba_mo'] : null,

@@ -128,6 +128,39 @@ try {
         unset($campos['quant_refs']);
     }
 
+    // ----- QUANTITATIVO por COMPOSIÇÃO: cesta de insumos (soma área × coef) -----
+    if (array_key_exists('quant_comp_sel', $campos)) {
+        $sel = $campos['quant_comp_sel'];
+        $qval = 0; $qun = ''; $clean = []; $cache = [];
+        if (is_array($sel)) foreach ($sel as $s) {
+            $cid = (int)($s['cid'] ?? 0); $idx = (int)($s['idx'] ?? -1); $area = (float)($s['area'] ?? 0);
+            if ($cid <= 0 || $idx < 0 || $area <= 0) continue;
+            if (!isset($cache[$cid])) {
+                $q = $pdo->prepare("SELECT descricao,unidade,coef,rs_unit,tipo FROM composicao_insumo WHERE composicao_id=? ORDER BY id");
+                $q->execute([$cid]); $cache[$cid] = $q->fetchAll();
+            }
+            if (!isset($cache[$cid][$idx])) continue;
+            $ins = $cache[$cid][$idx];
+            $qval += $area * (float)$ins['coef']; if ($qun === '') $qun = $ins['unidade'];
+            $clean[] = ['cid'=>$cid,'idx'=>$idx,'area'=>$area,'desc'=>$ins['descricao'],'tipo'=>$ins['tipo'],
+                        'unidade'=>$ins['unidade'],'coef'=>(float)$ins['coef'],'rs_unit'=>(float)$ins['rs_unit']];
+        }
+        if ($clean) {
+            $set[]="quant_comp_sel = ?";       $vals[]=json_encode($clean, JSON_UNESCAPED_UNICODE);
+            $set[]="quantitativo_valor = ?";   $vals[]=$qval;
+            $set[]="quantitativo_unidade = ?"; $vals[]=$qun;
+            $set[]="quantitativo_fonte = ?";   $vals[]='composicao';
+            $set[]="quantitativo_refs = ?";    $vals[]=null;
+            $h('Quantitativo (composição)', '', number_format($qval,2,',','.').' '.$qun.' · '.count($clean).' insumo(s)');
+        } else {
+            $set[]="quant_comp_sel = ?";     $vals[]=null;
+            $set[]="quantitativo_valor = ?"; $vals[]=null;
+            $set[]="quantitativo_fonte = ?"; $vals[]=null;
+            $h('Quantitativo (composição)', '', 'limpo');
+        }
+        unset($campos['quant_comp_sel']);
+    }
+
     // ----- VERBA por COMPOSIÇÃO: cesta de insumos selecionados (de 1+ composições) -----
     if (array_key_exists('composicao_sel', $campos)) {
         $sel = $campos['composicao_sel'];

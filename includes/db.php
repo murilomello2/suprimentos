@@ -110,6 +110,8 @@ function db_schema($pdo) {
     if (!isset($rcols['composicao_sel'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN composicao_sel TEXT");
     // verba_curada (0/1): a verba só é "curada" quando alguém altera+confirma. Default 0 => reseta a curada de TODAS.
     if (!isset($rcols['verba_curada'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN verba_curada INTEGER DEFAULT 0");
+    // cesta de insumos do QUANTITATIVO por composição (independente da verba)
+    if (!isset($rcols['quant_comp_sel'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN quant_comp_sel TEXT");
     $pdo->exec("CREATE TABLE IF NOT EXISTS orcamento_linha (
         id INTEGER PRIMARY KEY,
         obra_id INTEGER NOT NULL DEFAULT 1,

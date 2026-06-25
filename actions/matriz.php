@@ -14,11 +14,15 @@ try {
     // Resiliência a DEPLOY PARCIAL: este endpoint lê colunas aditivas que são criadas no db.php.
     // Como o FTP às vezes sobe actions/ sem includes/db.php (timeout), garantimos as colunas aqui
     // mesmo se o db.php online estiver desatualizado — evita o HTTP 500 do radar.
-    foreach (['composicao_sel'=>'TEXT','verba_curada'=>'INTEGER DEFAULT 0',
-              'quant_comp_sel'=>'TEXT','quant_curada'=>'INTEGER DEFAULT 0'] as $col=>$type) {
-        $has = $pdo->query("SELECT COUNT(*) FROM pragma_table_info('radar_item') WHERE name='".$col."'")->fetchColumn();
-        if (!$has) { try { $pdo->exec("ALTER TABLE radar_item ADD COLUMN $col $type"); } catch (Throwable $e) {} }
-    }
+    // Usa o PRAGMA table_info clássico (suportado em qualquer build do SQLite), não a forma table-valued.
+    try {
+        $rcols = [];
+        foreach ($pdo->query("PRAGMA table_info(radar_item)") as $c) $rcols[$c['name']] = true;
+        foreach (['composicao_sel'=>'TEXT','verba_curada'=>'INTEGER DEFAULT 0',
+                  'quant_comp_sel'=>'TEXT','quant_curada'=>'INTEGER DEFAULT 0'] as $col=>$type) {
+            if (!isset($rcols[$col])) { try { $pdo->exec("ALTER TABLE radar_item ADD COLUMN $col $type"); } catch (Throwable $e) {} }
+        }
+    } catch (Throwable $e) { /* nunca derruba o endpoint por causa da auto-cura */ }
 
     $obra = $pdo->query("SELECT * FROM obra WHERE id=1")->fetch();
 

@@ -30,6 +30,16 @@
   .whoami .wname{font-weight:800;color:#eafaef}
   .whoami .wsrc{opacity:.6;font-size:10px;margin-top:2px}
   .whoami .wsrc.bad{color:#ffd5cf;opacity:.95}
+  .side{transition:width .15s ease}
+  .sidetoggle{margin-left:auto;flex-shrink:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.14);border:0;border-radius:7px;color:#eafaef;cursor:pointer;padding:0}
+  .sidetoggle:hover{background:rgba(255,255,255,.26)}
+  .sidetoggle .material-icons{font-size:18px;color:#eafaef;transition:transform .15s}
+  .app.sidecollapsed .side{width:60px}
+  .app.sidecollapsed .brandicon,.app.sidecollapsed .brandtext,.app.sidecollapsed .navtxt,.app.sidecollapsed .navlabel,.app.sidecollapsed .whoami,.app.sidecollapsed .navbadge{display:none}
+  .app.sidecollapsed .brand{justify-content:center;padding:14px 0;gap:0}
+  .app.sidecollapsed .sidetoggle{margin-left:0}
+  .app.sidecollapsed .sidetoggle .material-icons{transform:rotate(180deg)}
+  .app.sidecollapsed .nav a{justify-content:center;padding:11px 0}
   .main{flex:1;min-width:0}
   .top{padding:20px 26px 4px}
   .h1{font-size:23px;font-weight:800;color:var(--verde-d);margin:0;display:flex;align-items:center;gap:10px}
@@ -175,20 +185,25 @@
 </style>
 </head>
 <body>
-<div class="app">
+<div class="app" id="app">
+  <script>try{if(localStorage.getItem('sideCollapsed')==='1')document.getElementById('app').classList.add('sidecollapsed');}catch(e){}</script>
   <aside class="side">
-    <div class="brand"><span class="material-icons">inventory_2</span> Cockpit de Suprimentos</div>
+    <div class="brand">
+      <span class="material-icons brandicon">inventory_2</span>
+      <span class="brandtext">Cockpit de Suprimentos</span>
+      <button class="sidetoggle" onclick="toggleSide()" title="Recolher / expandir menu"><span class="material-icons">chevron_left</span></button>
+    </div>
     <div class="navlabel">Aquisições</div>
     <nav class="nav">
-      <a id="nav-dashboard" data-menu="dashboard" onclick="toast('Dashboard — próxima etapa')"><span class="material-icons">dashboard</span> Dashboard</a>
-      <a id="nav-radar" data-menu="radar" class="active" onclick="showView('radar')"><span class="material-icons">radar</span> Radar de Aquisições</a>
-      <a id="nav-matriz" data-menu="matriz" onclick="showView('matriz')"><span class="material-icons">grid_on</span> Matriz</a>
-      <a id="nav-cotacoes" data-menu="cotacoes" onclick="toast('Mapa de Cotações — Fase 3')"><span class="material-icons">request_quote</span> Mapa de Cotações</a>
+      <a id="nav-dashboard" data-menu="dashboard" title="Dashboard" onclick="toast('Dashboard — próxima etapa')"><span class="material-icons">dashboard</span> <span class="navtxt">Dashboard</span></a>
+      <a id="nav-radar" data-menu="radar" class="active" title="Radar de Aquisições" onclick="showView('radar')"><span class="material-icons">radar</span> <span class="navtxt">Radar de Aquisições</span></a>
+      <a id="nav-matriz" data-menu="matriz" title="Matriz" onclick="showView('matriz')"><span class="material-icons">grid_on</span> <span class="navtxt">Matriz</span></a>
+      <a id="nav-cotacoes" data-menu="cotacoes" title="Mapa de Cotações" onclick="toast('Mapa de Cotações — Fase 3')"><span class="material-icons">request_quote</span> <span class="navtxt">Mapa de Cotações</span></a>
     </nav>
     <div class="navlabel">Administração</div>
     <nav class="nav">
-      <a id="nav-config" data-menu="config" onclick="showView('config')"><span class="material-icons">settings</span> Configurações</a>
-      <a id="nav-audit" data-menu="audit" onclick="showView('audit')"><span class="material-icons">fact_check</span> Auditoria <span style="font-size:9px;background:var(--dourado);color:#fff;padding:1px 5px;border-radius:5px;margin-left:auto">temp</span></a>
+      <a id="nav-config" data-menu="config" title="Configurações" onclick="showView('config')"><span class="material-icons">settings</span> <span class="navtxt">Configurações</span></a>
+      <a id="nav-audit" data-menu="audit" title="Auditoria" onclick="showView('audit')"><span class="material-icons">fact_check</span> <span class="navtxt">Auditoria</span> <span class="navbadge" style="font-size:9px;background:var(--dourado);color:#fff;padding:1px 5px;border-radius:5px;margin-left:auto">temp</span></a>
     </nav>
     <div class="whoami" id="whoami"></div>
   </aside>
@@ -1501,6 +1516,12 @@ function applyMenus(){
     a.style.display=(IS_ADMIN||allow.includes(m))?'':'none';
   });
   const bn=document.getElementById('btnNovo'); if(bn) bn.style.display=CAN_EDIT?'':'none'; // só quem edita cria item
+}
+function toggleSide(){
+  const app=document.getElementById('app');
+  const c=!app.classList.contains('sidecollapsed');
+  app.classList.toggle('sidecollapsed', c);
+  try{ localStorage.setItem('sideCollapsed', c?'1':'0'); }catch(e){}
 }
 async function renderConfig(){
   const box=document.getElementById('cfgwrap'); box.innerHTML='<div class="empty">Carregando…</div>';

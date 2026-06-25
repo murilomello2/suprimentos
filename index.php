@@ -341,7 +341,7 @@
 </div>
 
 <!-- modal -->
-<div class="ov" id="ov" onclick="if(event.target===this)closeModal()">
+<div class="ov" id="ov">
   <div class="modal" id="modal"></div>
 </div>
 <div class="toast" id="toastEl"></div>

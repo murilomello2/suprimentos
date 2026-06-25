@@ -208,6 +208,7 @@
     <div class="navlabel">Administração</div>
     <nav class="nav">
       <a id="nav-config" data-menu="config" title="Configurações" onclick="showView('config')"><span class="material-icons">settings</span> <span class="navtxt">Configurações</span></a>
+      <a id="nav-updates" data-menu="updates" title="Atualizações" onclick="showView('updates')"><span class="material-icons">history</span> <span class="navtxt">Atualizações</span> <span class="navbadge" style="font-size:9px;background:var(--dourado);color:#fff;padding:1px 5px;border-radius:5px;margin-left:auto">temp</span></a>
       <a id="nav-audit" data-menu="audit" title="Auditoria" onclick="showView('audit')"><span class="material-icons">fact_check</span> <span class="navtxt">Auditoria</span> <span class="navbadge" style="font-size:9px;background:var(--dourado);color:#fff;padding:1px 5px;border-radius:5px;margin-left:auto">temp</span></a>
     </nav>
     <div class="whoami" id="whoami"></div>
@@ -220,7 +221,10 @@
         <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">radar</span> Radar de Aquisições</h1>
         <p class="sub" id="sub">Carregando…</p>
       </div>
-      <button id="btnNovo" class="btn-prim" onclick="novoItem()" style="flex:0 0 auto;margin-top:4px"><span class="material-icons" style="font-size:18px">add</span> Novo item</button>
+      <div style="display:flex;gap:8px;flex:0 0 auto;margin-top:4px">
+        <button class="btn-ghost" onclick="recarregar()" title="Recarregar do servidor — evita trabalhar com dado que outra pessoa já curou"><span class="material-icons" style="font-size:18px">refresh</span> Atualizar</button>
+        <button id="btnNovo" class="btn-prim" onclick="novoItem()"><span class="material-icons" style="font-size:18px">add</span> Novo item</button>
+      </div>
     </div>
     <div class="kpis" id="kpis"></div>
 
@@ -322,6 +326,17 @@
     </div>
     <div id="auditwrap" style="margin:8px 26px 30px"><div class="empty">Carregando…</div></div>
    </section>
+
+   <section id="view-updates" style="display:none">
+    <div class="top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div>
+        <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">history</span> Atualizações</h1>
+        <p class="sub">Últimas curadorias da equipe — cronograma, orçamento, quantitativo e criação de itens. Use pra não trabalhar num item que outra pessoa já mexeu. <b>Tela temporária</b>.</p>
+      </div>
+      <button class="btn-ghost" onclick="renderUpdates()" style="flex:0 0 auto;margin-top:4px"><span class="material-icons" style="font-size:18px">refresh</span> Atualizar</button>
+    </div>
+    <div id="updwrap" style="margin:8px 26px 30px"><div class="empty">Carregando…</div></div>
+   </section>
   </main>
 </div>
 
@@ -398,7 +413,7 @@ function fillMulti(id,arr){const el=document.getElementById(id);el.innerHTML=arr
 
 /* ---------- view switch ---------- */
 function showView(v){
-  ['radar','matriz','config','audit'].forEach(x=>{
+  ['radar','matriz','config','audit','updates'].forEach(x=>{
     document.getElementById('view-'+x).style.display=v===x?'':'none';
     document.getElementById('nav-'+x).classList.toggle('active',v===x);
   });
@@ -406,6 +421,7 @@ function showView(v){
   if(v==='config') renderConfig();
   if(v==='radar') fitRadarHeight();
   if(v==='audit') renderAudit();
+  if(v==='updates') renderUpdates();
 }
 
 /* ===== Auditoria de Orçamento (temporária) — duplicação de vínculo de verba ===== */
@@ -442,6 +458,41 @@ async function renderAudit(){
   }
   box.innerHTML=html;
 }
+/* ===== Atualizações (temporária) — feed das últimas curadorias da equipe ===== */
+function fmtDateTime(s){ if(!s)return'—'; const d=new Date(s); if(isNaN(d))return String(s); const p=n=>String(n).padStart(2,'0'); return `${p(d.getDate())}/${p(d.getMonth()+1)} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function updCat(c){ c=c||'';
+  if(/^Verba/i.test(c)) return ['orçamento','tp-mat'];
+  if(/^Quantitativo/i.test(c)) return ['quantitativo','tp-mo'];
+  if(/cronograma|data em obra|âncora|vínculo de cronograma/i.test(c)) return ['cronograma','tp-emp'];
+  if(/criar|criou|desdobr|exclu|^item|^nome/i.test(c)) return ['item','tp-loc'];
+  return ['edição','tp-none'];
+}
+async function renderUpdates(){
+  const box=document.getElementById('updwrap');
+  box.innerHTML='<div class="empty">Carregando atualizações…</div>';
+  let d;
+  try{ d=await (await fetch('actions/historico.php?_='+Date.now())).json(); }
+  catch(e){ box.innerHTML='<div class="empty">Falha: '+esc(e.message)+'</div>'; return; }
+  if(d.error){ box.innerHTML='<div class="empty">Erro: '+esc(d.error)+'</div>'; return; }
+  const hs=d.historico||[];
+  if(!hs.length){ box.innerHTML='<div class="empty">Nenhuma atualização registrada ainda.</div>'; return; }
+  let html=`<div class="note">As ${hs.length} alterações mais recentes — quem · quando · item · o quê. Clique numa linha pra abrir o item.</div>
+    <div class="wrap" style="margin:0"><table><thead><tr><th>Quando</th><th>Quem</th><th>Item (grupo)</th><th>O que mudou</th></tr></thead><tbody>`;
+  for(const h of hs){
+    const [lbl,cls]=updCat(h.campo);
+    const v=(h.valor_depois!=null&&String(h.valor_depois)!=='')?`: <b>${esc(String(h.valor_depois).slice(0,70))}</b>`:'';
+    const it=byOrdem(h.servico_id);
+    html+=`<tr ${it?`onclick="openModal(${h.servico_id})" style="cursor:pointer"`:''}>
+      <td class="muted" style="white-space:nowrap;font-size:12px">${fmtDateTime(h.created_at)}</td>
+      <td style="white-space:nowrap">${esc(h.usuario_nome||('#'+(h.bitrix_id||'')))}</td>
+      <td><div class="svc">${esc(h.item_nome||'—')}</div><div class="svc-sub">${esc(h.grupo||'')}</div></td>
+      <td><span class="tp-chip ${cls}">${lbl}</span> ${esc(h.campo||'')}${v}</td>
+    </tr>`;
+  }
+  html+='</tbody></table></div>';
+  box.innerHTML=html;
+}
+async function recarregar(){ await load(); toast('Radar atualizado'); }
 async function auditRemover(ordem,lineId){
   const it=byOrdem(ordem); if(!it){toast('item não encontrado — recarregue');return;}
   const cur=(it.orcamento_refs||[]).map(Number);
@@ -1499,7 +1550,7 @@ async function excluirItem(){
 }
 /* ===== Configuração / Permissões (Bloco 2) ===== */
 let CFG={usuarios:[],obras:[]}, NUSER=null;
-const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Mapa de Cotações'],['config','Configurações']];
+const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Mapa de Cotações'],['updates','Atualizações'],['config','Configurações']];
 const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',comprador:'Suprimentos',coordenador:'Coordenador',personalizado:'Personalizado'};
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},

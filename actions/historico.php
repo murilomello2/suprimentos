@@ -14,7 +14,9 @@ try {
         $st = $pdo->prepare("SELECT * FROM historico WHERE servico_id=? ORDER BY id DESC LIMIT 300");
         $st->execute([$ordem]);
     } else {
-        $st = $pdo->query("SELECT * FROM historico ORDER BY id DESC LIMIT 300");
+        // feed global de atualizações: junta o GRUPO atual do item (p/ a tela "Atualizações")
+        $st = $pdo->query("SELECT h.*, s.grupo FROM historico h LEFT JOIN servico s ON s.id=h.servico_id
+                           ORDER BY h.id DESC LIMIT 300");
     }
     echo json_encode(['historico' => $st->fetchAll()], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 } catch (Throwable $e) {

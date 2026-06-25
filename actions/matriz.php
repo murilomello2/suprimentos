@@ -61,6 +61,11 @@ try {
                 ? (int)$r['lead_override'] : $r['lead_dias'];
         $data_nec = $r['data_necessaria_override'] ?: $auto['data_necessaria'];
         $marco    = $r['crono_marco_override'] ?: $auto['marco_casado'];
+        // caminho (WBS) de onde a tarefa-âncora veio, p/ conferência: ex. Custos Indiretos › … › tarefa.
+        // function_exists: resiliente a deploy parcial (cronograma.php é includes/, pode chegar depois no FTP).
+        $marco_wbs = ($tasks && function_exists('crono_wbs_por_nome'))
+            ? ($r['crono_marco_override'] ? crono_wbs_por_nome($marco, $tasks) : ($auto['marco_wbs'] ?? null)) : null;
+        $marco_path = ($tasks && $marco_wbs && function_exists('crono_path_por_wbs')) ? crono_path_por_wbs($marco_wbs, $tasks) : [];
         $crono_pct = $r['crono_marco_override']
                    ? crono_percent_por_nome($r['crono_marco_override'], $tasks)
                    : ($auto['percent'] ?? null);
@@ -73,6 +78,7 @@ try {
             'data_necessaria' => $data_nec,
             'data_gatilho'    => $gatilho,
             'marco_casado'    => $marco,
+            'marco_path'      => $marco_path,
             'cronograma_pct'  => $crono_pct,
             'confianca'       => $r['data_necessaria_override'] ? 'curado (manual)' : $auto['confianca'],
             'lead_efetivo'    => $lead,

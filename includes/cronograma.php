@@ -46,19 +46,19 @@ function crono_resolver($servico, $tasks) {
 
     // Casa por PRIORIDADE: o De-Para lista os termos do marco principal primeiro.
     // Usa o primeiro termo que encontrar tarefa(s); entre elas, a menor data de início.
-    $melhor = null; $marco = null; $idxTermo = null; $pct = null;
+    $melhor = null; $marco = null; $marcoWbs = null; $idxTermo = null; $pct = null;
     foreach ($termos as $ti => $t) {
         foreach ($tasks as $tk) {
             $st = $tk['start'] ?? null;
             if (!$st) continue;
             if (strpos(_norm_txt($tk['nome']), $t) !== false) {
-                if (!$melhor || $st < $melhor) { $melhor = $st; $marco = $tk['nome']; $pct = $tk['percent_complete'] ?? null; }
+                if (!$melhor || $st < $melhor) { $melhor = $st; $marco = $tk['nome']; $marcoWbs = $tk['wbs'] ?? null; $pct = $tk['percent_complete'] ?? null; }
             }
         }
         if ($melhor) { $idxTermo = $ti; break; } // achou no termo de maior prioridade
     }
     if (!$melhor) {
-        return ['data_necessaria'=>null, 'data_gatilho'=>null, 'marco_casado'=>null, 'confianca'=>'sem match', 'percent'=>null];
+        return ['data_necessaria'=>null, 'data_gatilho'=>null, 'marco_casado'=>null, 'marco_wbs'=>null, 'confianca'=>'sem match', 'percent'=>null];
     }
     $gatilho = null;
     if (!empty($servico['lead_dias'])) {
@@ -69,9 +69,35 @@ function crono_resolver($servico, $tasks) {
         'data_necessaria' => $melhor,
         'data_gatilho'    => $gatilho,
         'marco_casado'    => $marco,
+        'marco_wbs'       => $marcoWbs,
         'confianca'       => $idxTermo === 0 ? 'auto (marco principal)' : 'auto (termo secundário)',
         'percent'         => $pct !== null ? (float)$pct : null,
     ];
+}
+
+/** WBS de uma tarefa pelo nome (1ª que casar). */
+function crono_wbs_por_nome($nome, $tasks) {
+    $alvo = _norm_txt($nome);
+    foreach ($tasks as $tk) {
+        if (_norm_txt($tk['nome']) === $alvo) return $tk['wbs'] ?? null;
+    }
+    return null;
+}
+
+/** Caminho (cadeia de nomes ancestrais até a tarefa) a partir do WBS, usando os prefixos pontilhados.
+ *  Ex.: wbs "2.1.3" => [nome de "2", nome de "2.1", nome de "2.1.3"]. */
+function crono_path_por_wbs($wbs, $tasks) {
+    if ($wbs === null || $wbs === '') return [];
+    $byWbs = [];
+    foreach ($tasks as $tk) { if (isset($tk['wbs']) && $tk['wbs'] !== '') $byWbs[(string)$tk['wbs']] = $tk['nome']; }
+    $parts = explode('.', (string)$wbs);
+    $acc = []; $path = [];
+    foreach ($parts as $p) {
+        $acc[] = $p;
+        $code = implode('.', $acc);
+        if (isset($byWbs[$code]) && (!$path || end($path) !== $byWbs[$code])) $path[] = $byWbs[$code];
+    }
+    return $path;
 }
 
 /** % de conclusão de uma tarefa (por nome) buscada no conjunto de tarefas em cache. */

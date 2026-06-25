@@ -724,12 +724,17 @@ function tabBody(i){
 /* ===== Cronograma — vínculo (read-only) + Editar vínculo → árvore ===== */
 let CRONO_NODES=[], CRONO_SEARCH=[], CRONO_PENDING=null;
 function cronoTab(i){
-  const casou = i.marco_casado
-    ? `${esc(i.marco_casado)} → <b>${D(i.data_necessaria)}</b> <span class="muted">(${esc(i.confianca||'')})</span>`
-    : 'Sem tarefa casada automaticamente.';
+  const path = i.marco_path||[];
+  const crumb = path.length
+    ? path.map((p,ix)=>ix===path.length-1?`<b>${esc(p)}</b>`:`<span class="muted">${esc(p)}</span>`).join(' <span style="opacity:.4">›</span> ')
+    : (i.marco_casado?`<b>${esc(i.marco_casado)}</b>`:'');
   let h=`
-    <div class="box"><div class="bl">Marco do dicionário (referência)</div><div class="bv">${esc(i.marco_cronograma||'—')}</div></div>
-    <div class="box"><div class="bl">Tarefa-âncora atual ${i.curado_data?'(curada ✓)':''}</div><div class="bv">${casou}</div></div>`;
+    <div class="box"><div class="bl">Tarefa-âncora atual ${i.curado_data?'(curada ✓)':''}</div>
+      ${i.marco_casado
+        ? `<div class="bv" style="line-height:1.7">${crumb}</div>
+           <div class="muted" style="font-size:12.5px;margin-top:3px">→ necessário em obra: <b style="color:var(--txt)">${D(i.data_necessaria)}</b> · ${esc(i.confianca||'')}</div>`
+        : `<div class="bv muted">Sem tarefa casada automaticamente — clique em Editar vínculo e selecione a linha do cronograma.</div>`}
+    </div>`;
   if(!EDITC){
     h+=`<div style="display:flex;gap:8px;margin-top:6px">`;
     if(CAN_CRONO){

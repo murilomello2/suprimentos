@@ -36,6 +36,15 @@ try {
     // Lógica INLINE (não depende de funções novas do db.php) — usa só user_perms + can_edit_obra (antigas);
     // permissões ausentes no $perms (db.php desatualizado) caem em "negado" (fail-safe), nunca em 500.
     $perms    = user_perms($pdo, $me);
+    // resiliência a deploy parcial: se o db.php online ainda for antigo, user_perms não traz as perms
+    // granulares — busca direto na tabela (colunas garantidas pelo self-heal do usuarios.php).
+    if ($me !== null && $me !== '' && !array_key_exists('perm_orcamento', $perms)) {
+        try {
+            $pg = $pdo->prepare("SELECT perm_crono,perm_orcamento,perm_quant,perm_dicionario FROM usuario WHERE TRIM(bitrix_id)=? AND ativo=1");
+            $pg->execute([trim((string)$me)]);
+            if ($row = $pg->fetch()) $perms = $perms + $row;   // adiciona as perm_* que faltavam
+        } catch (Throwable $e) {}
+    }
     $is_admin = !empty($perms['perm_admin']);
     $editor   = $is_admin || can_edit_obra($perms, 1);
     $FG = [

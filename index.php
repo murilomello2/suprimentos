@@ -623,7 +623,7 @@ function rowHtml(i){
     <td><span class="curva c-${i.curva||'C'}">${esc(i.curva||'—')}</span></td>
     <td>${i.responsavel?esc(i.responsavel):`<button class="resp-miss" onclick="event.stopPropagation();openModal(${i.ordem})">definir</button>`}</td>
     <td class="money">${BRL(i.verba)}${i.curado_verba?' <span class="material-icons" title="verba curada" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':''}</td>
-    <td>${i.quantitativo!=null?`<div class="qcell" title="${esc(QNUM(i.quantitativo)+' '+(i.quantitativo_unidade||''))}"><b>${QNUM(i.quantitativo)}</b> <span class="muted">${esc(i.quantitativo_unidade||'')}</span></div>`:'<span class="muted">—</span>'}</td>
+    <td>${i.quantitativo!=null?`<div class="qcell" title="${esc(QNUM(i.quantitativo)+' '+(i.quantitativo_unidade||''))}"><b>${QNUM(i.quantitativo)}</b> <span class="muted">${esc(i.quantitativo_unidade||'')}</span>${i.curado_quant?' <span class="material-icons" title="quantitativo curado" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':''}</div>`:'<span class="muted">—</span>'}</td>
     <td class="date">${D(i.data_necessaria)}${i.curado_data?' <span class="material-icons" title="data curada" style="font-size:12px;color:var(--ok);vertical-align:-2px">verified</span>':''}</td>
     <td>${pctChip(i.cronograma_pct)}</td>
     <td class="date">${D(i.data_gatilho)}${venc}</td>
@@ -810,8 +810,9 @@ let QNT_SEL=new Set(), QNT_NODES=[];
 let QNTFONTE='manual', QCOMP_DATA=null, QCOMP_AREA=0, QCOMP_SEL=[];   // quantitativo por composição (cesta)
 const QNUM=n=>n!=null?Number(n).toLocaleString('pt-BR',{maximumFractionDigits:2}):'—';
 function quantTab(i){
+  const _qf = i.quantitativo_fonte==='composicao'?'por composição de insumos':(i.quantitativo_fonte==='orcamento'?'do orçamento (linhas)':'manual');
   const atual = i.quantitativo!=null
-    ? `<b style="font-size:16px">${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}</b> <span class="muted" style="font-size:12px">— ${i.quantitativo_fonte==='orcamento'?'do orçamento':'manual'}</span>`
+    ? `<b style="font-size:16px">${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}</b> <span class="muted" style="font-size:12px">— ${_qf}</span>`
     : '<span class="muted">Sem quantitativo definido.</span>';
   let h=`
     <div class="box"><div class="bl">Quantitativo que importa (dicionário)</div><div class="bv">${esc(i.quantitativo_txt||'—')}</div></div>
@@ -925,6 +926,20 @@ async function qcompSalvar(){
   toast('Quantitativo por composição salvo ('+QCOMP_SEL.length+' insumo(s))');
 }
 async function quantShowCurrent(i){
+  const el=document.getElementById('qntSel'), tot=document.getElementById('qntTotal');
+  // COMPOSIÇÃO: mostra como foi computado (cada insumo: área × consumo = subtotal) p/ conferência
+  if(i.quantitativo_fonte==='composicao' && (i.quant_comp_sel||[]).length){
+    let qval=0;
+    el.innerHTML=`<div style="margin-bottom:6px"><b style="font-size:16px">${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}</b> <span class="muted" style="font-size:12px">— soma destes insumos (área × consumo):</span></div>`+
+      i.quant_comp_sel.map(s=>{const qq=(s.area||0)*(s.coef||0); qval+=qq;
+        return `<div class="pickrow" style="align-items:center"><span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
+          <div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.desc)}</div>
+            <small class="muted">${s.compdesc?esc(s.compdesc.slice(0,44))+' · ':''}${QNUM(s.area)} × ${QNUM(s.coef)} ${esc(s.unidade||'')}/un</small></div>
+          <span class="money" style="min-width:104px;text-align:right">${QNUM(qq)} ${esc(s.unidade||'')}</span></div>`;}).join('');
+    if(tot) tot.textContent='Soma: '+QNUM(qval)+' '+(i.quantitativo_unidade||'');
+    return;
+  }
+  // ANALÍTICO: mostra as linhas do orçamento selecionadas (path + qtde)
   QNT_SEL=new Set((i.quantitativo_refs||[]).map(Number));
   if(QNT_SEL.size) await qntRenderSel();
 }

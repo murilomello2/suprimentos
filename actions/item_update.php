@@ -71,6 +71,7 @@ try {
             $set[] = "quantitativo_valor = ?";   $vals[] = (float)$sq->fetch()['s'];
             $set[] = "quantitativo_unidade = ?"; $vals[] = ($uq->fetch()['unidade'] ?? null) ?: null;
             $set[] = "quantitativo_fonte = ?";   $vals[] = 'orcamento';
+            $set[] = "quant_curada = ?";         $vals[] = 1;
         }
         $h('Verba (vínculo analítico)', '', $refs ? ('R$ '.number_format($soma,2,',','.').' · '.count($refs).' linhas') : 'limpo');
         unset($campos['orcamento_refs']);
@@ -124,6 +125,7 @@ try {
         $set[] = "quantitativo_valor = ?";   $vals[] = $refs ? $soma : null;
         $set[] = "quantitativo_unidade = ?"; $vals[] = $refs ? $unid : null;
         $set[] = "quantitativo_fonte = ?";   $vals[] = $refs ? 'orcamento' : null;
+        $set[] = "quant_curada = ?";         $vals[] = $refs ? 1 : 0;
         $h('Quantitativo (vínculo)', '', $refs ? (number_format($soma,2,',','.').' '.$unid) : 'limpo');
         unset($campos['quant_refs']);
     }
@@ -131,19 +133,20 @@ try {
     // ----- QUANTITATIVO por COMPOSIÇÃO: cesta de insumos (soma área × coef) -----
     if (array_key_exists('quant_comp_sel', $campos)) {
         $sel = $campos['quant_comp_sel'];
-        $qval = 0; $qun = ''; $clean = []; $cache = [];
+        $qval = 0; $qun = ''; $clean = []; $cache = []; $cnames = [];
         if (is_array($sel)) foreach ($sel as $s) {
             $cid = (int)($s['cid'] ?? 0); $idx = (int)($s['idx'] ?? -1); $area = (float)($s['area'] ?? 0);
             if ($cid <= 0 || $idx < 0 || $area <= 0) continue;
             if (!isset($cache[$cid])) {
                 $q = $pdo->prepare("SELECT descricao,unidade,coef,rs_unit,tipo FROM composicao_insumo WHERE composicao_id=? ORDER BY id");
                 $q->execute([$cid]); $cache[$cid] = $q->fetchAll();
+                $cn = $pdo->prepare("SELECT descricao FROM composicao WHERE id=?"); $cn->execute([$cid]); $cnames[$cid] = $cn->fetchColumn() ?: '';
             }
             if (!isset($cache[$cid][$idx])) continue;
             $ins = $cache[$cid][$idx];
             $qval += $area * (float)$ins['coef']; if ($qun === '') $qun = $ins['unidade'];
             $clean[] = ['cid'=>$cid,'idx'=>$idx,'area'=>$area,'desc'=>$ins['descricao'],'tipo'=>$ins['tipo'],
-                        'unidade'=>$ins['unidade'],'coef'=>(float)$ins['coef'],'rs_unit'=>(float)$ins['rs_unit']];
+                        'unidade'=>$ins['unidade'],'coef'=>(float)$ins['coef'],'rs_unit'=>(float)$ins['rs_unit'],'compdesc'=>$cnames[$cid]];
         }
         if ($clean) {
             $set[]="quant_comp_sel = ?";       $vals[]=json_encode($clean, JSON_UNESCAPED_UNICODE);
@@ -151,11 +154,13 @@ try {
             $set[]="quantitativo_unidade = ?"; $vals[]=$qun;
             $set[]="quantitativo_fonte = ?";   $vals[]='composicao';
             $set[]="quantitativo_refs = ?";    $vals[]=null;
+            $set[]="quant_curada = ?";         $vals[]=1;
             $h('Quantitativo (composição)', '', number_format($qval,2,',','.').' '.$qun.' · '.count($clean).' insumo(s)');
         } else {
             $set[]="quant_comp_sel = ?";     $vals[]=null;
             $set[]="quantitativo_valor = ?"; $vals[]=null;
             $set[]="quantitativo_fonte = ?"; $vals[]=null;
+            $set[]="quant_curada = ?";       $vals[]=0;
             $h('Quantitativo (composição)', '', 'limpo');
         }
         unset($campos['quant_comp_sel']);
@@ -197,6 +202,7 @@ try {
                 $set[]="quantitativo_unidade = ?"; $vals[]=$qun;
                 $set[]="quantitativo_fonte = ?";   $vals[]='composicao';
                 $set[]="quantitativo_refs = ?";    $vals[]=null;
+                $set[]="quant_curada = ?";         $vals[]=1;
             }
             $h('Verba (composição)', '', 'R$ '.number_format($verba,2,',','.').' · '.count($clean).' insumo(s)');
         } else {
@@ -232,6 +238,7 @@ try {
             $set[]="verba_override = ?"; $vals[]=$verba;
             $set[]="orcamento_refs = ?"; $vals[]=null;
             $set[]="verba_curada = ?";   $vals[]=1;
+            $set[]="quant_curada = ?";   $vals[]=1;
             if ($papel === 'mo') {
                 $set[]="quantitativo_valor = ?"; $vals[]=$area;
                 $set[]="quantitativo_unidade = ?"; $vals[]=$compUn;
@@ -263,7 +270,7 @@ try {
         if ($k === 'validado')          { $set[]="$k = ?"; $vals[]=(int)(bool)$v; continue; }
         if ($k === 'lead_override')     { $set[]="$k = ?"; $vals[]= nullable($v)===null?null:(int)$v; continue; }
         if ($k === 'verba_override')    { $vc=nullable($v); $set[]="$k = ?"; $vals[]= $vc===null?null:(float)$v; $set[]="verba_curada = ?"; $vals[]= $vc===null?0:1; continue; }
-        if ($k === 'quantitativo_valor'){ $set[]="$k = ?"; $vals[]= nullable($v)===null?null:(float)$v; continue; }
+        if ($k === 'quantitativo_valor'){ $qc=nullable($v); $set[]="$k = ?"; $vals[]= $qc===null?null:(float)$v; $set[]="quant_curada = ?"; $vals[]= $qc===null?0:1; continue; }
         $set[] = "$k = ?"; $vals[] = nullable($v);
     }
 

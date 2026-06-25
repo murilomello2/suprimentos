@@ -48,6 +48,7 @@ try {
     $h = function($campo,$antes,$depois) use (&$hist){ $hist[] = [$campo,$antes,$depois]; };
 
     $set = []; $vals = [];
+    $pdo->beginTransaction();        // dado + histórico atômicos
 
     // ----- vínculo de verba por LINHAS do orçamento (analítico) -----
     if (array_key_exists('orcamento_refs', $campos)) {
@@ -190,10 +191,12 @@ try {
 
     // grava o histórico (quem/quando/item/campo/antes→depois)
     foreach ($hist as $e) log_historico($pdo, 1, $ordem, $item_nome, $me, $perms['nome'], $e[0], $e[1], $e[2]);
+    $pdo->commit();
 
     $row = $pdo->prepare("SELECT * FROM radar_item WHERE obra_id=1 AND servico_id=?"); $row->execute([$ordem]);
     echo json_encode(['ok'=>true, 'item'=>$row->fetch(), 'hist'=>count($hist)], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
+    if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
     http_response_code(400);
     echo json_encode(['error'=>$e->getMessage()], JSON_UNESCAPED_UNICODE);
 }

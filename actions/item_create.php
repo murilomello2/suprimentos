@@ -24,6 +24,7 @@ try {
         http_response_code(403);
         echo json_encode(['error'=>'Sem permissão de edição.'], JSON_UNESCAPED_UNICODE); exit;
     }
+    $pdo->beginTransaction(); // criação/exclusão + histórico atômicos (evita item duplicado em retry)
 
     if ($acao === 'excluir') {
         $ordem = (int)($in['ordem'] ?? 0);
@@ -31,6 +32,7 @@ try {
         $pdo->prepare("DELETE FROM radar_item WHERE obra_id=1 AND servico_id=?")->execute([$ordem]);
         $pdo->prepare("DELETE FROM servico WHERE id=?")->execute([$ordem]);
         log_historico($pdo, 1, $ordem, $nome, $me, $perms['nome'], 'Item excluído', $nome, '');
+        $pdo->commit();
         echo json_encode(['ok'=>true]); exit;
     }
 
@@ -44,6 +46,7 @@ try {
         $o1 = criar_item($pdo, "$base (MAT)", $src['grupo'], 'Material', $src['curva'], $ordem);
         $o2 = criar_item($pdo, "$base (MO)",  $src['grupo'], 'Mão de obra', $src['curva'], $ordem);
         log_historico($pdo, 1, $ordem, $src['nome'], $me, $perms['nome'], 'Desdobrado em Material + MO', $src['nome'], "$base (MAT) + $base (MO)");
+        $pdo->commit();
         echo json_encode(['ok'=>true, 'criados'=>[$o1,$o2]]); exit;
     }
 
@@ -65,8 +68,10 @@ try {
             ->execute([$resp, $ordem]);
     }
     log_historico($pdo, 1, $ordem, $nome, $me, $perms['nome'], 'Item criado', '', $nome.' · grupo '.$grupo);
+    $pdo->commit();
     echo json_encode(['ok'=>true, 'ordem'=>$ordem]);
 } catch (Throwable $e) {
+    if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
     http_response_code(400);
     echo json_encode(['error'=>$e->getMessage()], JSON_UNESCAPED_UNICODE);
 }

@@ -549,7 +549,7 @@ async function grupoMover(idx,dir){
   if(j<0||j>=arr.length)return;
   [arr[idx],arr[j]]=[arr[j],arr[idx]];
   const order=arr.filter(g=>g!=='—');   // não envia o pseudo-grupo "sem grupo" ao reorder
-  try{ await fetch('actions/grupos.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'reorder',ordem:order})}); }
+  try{ await fetch('actions/grupos.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'reorder',ordem:order,me:EU&&EU.bitrix_id})}); }
   catch(e){ toast('Falha ao reordenar'); return; }
   await load();
 }
@@ -557,7 +557,7 @@ async function grupoRenomear(idx){
   const g=GORDER[idx]; if(g==null)return;
   const to=(prompt('Renomear grupo:',g)||'').trim();
   if(!to||to===g)return;
-  try{ await fetch('actions/grupos.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'rename',from:g,to})}); }
+  try{ await fetch('actions/grupos.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'rename',from:g,to,me:EU&&EU.bitrix_id})}); }
   catch(e){ toast('Falha ao renomear'); return; }
   if(COLLAPSED.has(g)){ COLLAPSED.delete(g); COLLAPSED.add(to); saveCollapsed(); }
   await load(); toast('Grupo renomeado');
@@ -1184,7 +1184,9 @@ async function resumoSalvar(){
   const resp=val('rResp');
   if(!resp){ toast('Responsável é obrigatório'); return; }
   const campos={ nome:val('rNome'), tipo:val('rTipo'), status:val('rStatus'),
-    responsavel:resp, fornecedor:val('rForn'), lead_override:val('rLead'), observacoes:val('rObs') };
+    responsavel:resp, fornecedor:val('rForn'), observacoes:val('rObs') };
+  const lead=val('rLead');
+  if(lead!==String(CUR.lead_efetivo??'')) campos.lead_override=lead; // só grava override se mudou (senão congela o lead do template)
   if(IS_ADMIN){
     let g=val('rGrupo');
     if(g==='__novo__'){ g=(prompt('Nome do novo grupo')||'').trim(); if(!g){ toast('Informe o grupo'); return; } }
@@ -1416,7 +1418,7 @@ async function userSave(){
   const ver=val('uVer'),edit=val('uEdit');
   const obras_ver=ver==='sel'?CFG.obras.filter(o=>document.getElementById('ov-'+o.id).checked).map(o=>o.id):[];
   const obras_editar=edit==='sel'?CFG.obras.filter(o=>document.getElementById('oe-'+o.id).checked).map(o=>o.id):[];
-  const body={acao:'save',bitrix_id:NUSER.bitrix_id,nome:NUSER.nome,cargo:NUSER.cargo,papel:val('uPapel'),
+  const body={acao:'save',me:EU&&EU.bitrix_id,bitrix_id:NUSER.bitrix_id,nome:NUSER.nome,cargo:NUSER.cargo,papel:val('uPapel'),
     ver_escopo:ver,editar_escopo:edit,obras_ver,obras_editar,menus,
     perm_admin:document.getElementById('uAdmin').checked?1:0,ativo:parseInt(val('uAtivo'))};
   const d=await (await fetch('actions/usuarios.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
@@ -1425,7 +1427,7 @@ async function userSave(){
 }
 async function userDelete(bid){
   if(!confirm('Remover o acesso deste usuário?'))return;
-  await fetch('actions/usuarios.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'delete',bitrix_id:bid})});
+  await fetch('actions/usuarios.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'delete',bitrix_id:bid,me:EU&&EU.bitrix_id})});
   await renderConfig(); toast('Acesso removido');
 }
 

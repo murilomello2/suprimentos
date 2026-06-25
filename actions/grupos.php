@@ -16,6 +16,11 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $in = json_decode(file_get_contents('php://input'), true);
+        $perms = user_perms($pdo, $in['me'] ?? null);
+        if (!can_edit_obra($perms, 1)) {
+            http_response_code(403);
+            echo json_encode(['error'=>'Sem permissão de edição.'], JSON_UNESCAPED_UNICODE); exit;
+        }
         $acao = $in['acao'] ?? '';
 
         if ($acao === 'rename') {

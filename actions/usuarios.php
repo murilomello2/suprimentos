@@ -15,7 +15,7 @@ function preset($papel) {
     switch ($papel) {
         case 'admin':       return ['ver_escopo'=>'todas','editar_escopo'=>'todas','menus'=>['dashboard','radar','matriz','cotacoes','config'],'perm_admin'=>1];
         case 'diretor':     return ['ver_escopo'=>'todas','editar_escopo'=>'nenhuma','menus'=>['dashboard','radar','matriz','cotacoes'],'perm_admin'=>0];
-        case 'comprador':   return ['ver_escopo'=>'todas','editar_escopo'=>'sel','menus'=>['radar','matriz','cotacoes'],'perm_admin'=>0];
+        case 'comprador':   return ['ver_escopo'=>'todas','editar_escopo'=>'todas','menus'=>['radar','matriz','cotacoes'],'perm_admin'=>0];
         case 'coordenador': return ['ver_escopo'=>'sel','editar_escopo'=>'nenhuma','menus'=>['radar','matriz'],'perm_admin'=>0];
         default:            return $base;
     }
@@ -49,6 +49,12 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $in = json_decode(file_get_contents('php://input'), true);
+        // ENFORCEMENT: só administrador gerencia permissões (evita auto-promoção via POST direto)
+        $caller = user_perms($pdo, $in['me'] ?? null);
+        if (empty($caller['perm_admin'])) {
+            http_response_code(403);
+            echo json_encode(['error'=>'Apenas administradores gerenciam permissões.'], JSON_UNESCAPED_UNICODE); exit;
+        }
         $acao = $in['acao'] ?? 'save';
         $bid = (string)($in['bitrix_id'] ?? '');
         if ($bid === '') throw new Exception('bitrix_id obrigatório');

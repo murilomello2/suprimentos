@@ -21,6 +21,7 @@ function db() {
     $pdo = new PDO('sqlite:' . DB_PATH);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    $pdo->exec('PRAGMA busy_timeout=4000'); // evita SQLITE_BUSY imediato com múltiplos usuários
     db_migrate($pdo);
     db_schema($pdo);
     return $pdo;
@@ -149,6 +150,15 @@ function db_schema($pdo) {
         campo TEXT, valor_antes TEXT, valor_depois TEXT, created_at TEXT
     )");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_hist_serv ON historico(servico_id)");
+
+    // data-fix one-shot: compradores nasciam com editar_escopo='sel' + obras_editar vazio => 403 em tudo
+    // (regressão do enforcement). Destrava quem é da equipe de Suprimentos pra editar.
+    $df = $pdo->query("SELECT v FROM meta WHERE k='datafix_comprador_edit_v1'")->fetch();
+    if (!$df) {
+        $pdo->exec("UPDATE usuario SET editar_escopo='todas'
+                    WHERE papel='comprador' AND editar_escopo='sel' AND COALESCE(obras_editar,'') IN ('','[]')");
+        $pdo->prepare("INSERT OR REPLACE INTO meta (k,v) VALUES ('datafix_comprador_edit_v1','1')")->execute();
+    }
 }
 
 /** Permissões efetivas de um usuário p/ enforcement NO SERVIDOR. Não cadastrado/sem id => nega. */

@@ -294,6 +294,17 @@ try {
         unset($campos['composicao']);
     }
 
+    // ----- vínculo de CRONOGRAMA: SEMPRE registra o save (curadoria explícita), mesmo se o valor não mudou -----
+    // (a verba e o quantitativo já logam sempre via seus branches; aqui igualamos o cronograma)
+    if (array_key_exists('crono_marco_override', $campos) || array_key_exists('data_necessaria_override', $campos)) {
+        $cm = array_key_exists('crono_marco_override', $campos)    ? nullable($campos['crono_marco_override'])    : ($before['crono_marco_override'] ?? null);
+        $dn = array_key_exists('data_necessaria_override', $campos) ? nullable($campos['data_necessaria_override']) : ($before['data_necessaria_override'] ?? null);
+        if (array_key_exists('crono_marco_override', $campos))     { $set[]="crono_marco_override = ?";    $vals[]=$cm; }
+        if (array_key_exists('data_necessaria_override', $campos)) { $set[]="data_necessaria_override = ?"; $vals[]=$dn; }
+        $h('Cronograma (vínculo)', '', $cm ? ($cm . ($dn ? ' → ' . $dn : '')) : 'limpo (voltou ao automático)');
+        unset($campos['crono_marco_override'], $campos['data_necessaria_override']);
+    }
+
     // ----- campos simples do radar_item -----
     foreach ($campos as $k => $v) {
         if (!in_array($k, $SIMPLES, true)) continue;

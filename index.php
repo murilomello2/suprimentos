@@ -794,7 +794,7 @@ function drawModal(){
 }
 function postDraw(i){
   if(TAB==='Orçamento'){ orcShowCurrent(i); orcLoadLastChange(i.ordem); if(EDITO) orcRenderFonte(); }
-  if(TAB==='Cronograma'){ if(EDITC) cronoInit(); }
+  if(TAB==='Cronograma'){ cronoLoadLastChange(i.ordem); if(EDITC) cronoInit(); }
   if(TAB==='Quantitativo'){ quantShowCurrent(i); if(EDITQ) qntRenderFonte(); }
   if(TAB==='Histórico'){ loadHist(i.ordem); }
 }
@@ -826,6 +826,7 @@ function cronoTab(i){
         ? `<div class="bv" style="line-height:1.7">${crumb}</div>
            <div class="muted" style="font-size:12.5px;margin-top:3px">→ necessário em obra: <b style="color:var(--txt)">${D(i.data_necessaria)}</b> · ${esc(i.confianca||'')}</div>`
         : `<div class="bv muted">Sem tarefa casada automaticamente — clique em Editar vínculo e selecione a linha do cronograma.</div>`}
+      <div id="cronoLastChange" style="font-size:11.5px;margin-top:6px;color:var(--muted)"></div>
     </div>`;
   if(!EDITC){
     h+=`<div style="display:flex;gap:8px;margin-top:6px">`;
@@ -1178,6 +1179,17 @@ async function orcLoadLastChange(ordem){
       let q=v.created_at; try{ q=new Date(v.created_at).toLocaleString('pt-BR'); }catch(e){}
       box.innerHTML=`<span class="material-icons" style="font-size:14px;vertical-align:-3px;color:var(--verde)">history</span> Última alteração da verba por <b>${esc(v.usuario_nome||('#'+v.bitrix_id))}</b> · ${esc(q)}`;
     } else box.innerHTML='<span class="muted">Sem alteração de verba registrada ainda — a verba será marcada como curada quando alguém editar e salvar.</span>';
+  }catch(e){ box.innerHTML=''; }
+}
+async function cronoLoadLastChange(ordem){
+  const box=document.getElementById('cronoLastChange'); if(!box)return;
+  try{
+    const d=await (await fetch('actions/historico.php?ordem='+ordem)).json();
+    const v=(d.historico||[]).find(h=>/^(cronograma|data em obra)/i.test(h.campo||''));  // mais recente primeiro
+    if(v){
+      let q=v.created_at; try{ q=new Date(v.created_at).toLocaleString('pt-BR'); }catch(e){}
+      box.innerHTML=`<span class="material-icons" style="font-size:14px;vertical-align:-3px;color:var(--verde)">history</span> Última alteração do cronograma por <b>${esc(v.usuario_nome||('#'+v.bitrix_id))}</b> · ${esc(q)}`;
+    } else box.innerHTML='<span class="muted">Sem alteração de cronograma registrada ainda.</span>';
   }catch(e){ box.innerHTML=''; }
 }
 function orcSetFonte(v){ ORCFONTE=v; orcRenderFonte(); }

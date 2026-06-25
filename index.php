@@ -1582,7 +1582,10 @@ async function userSave(){
     ver_escopo:ver,editar_escopo:edit,obras_ver,obras_editar,menus,
     perm_admin:document.getElementById('uAdmin').checked?1:0,ativo:parseInt(val('uAtivo'))};
   const d=await (await fetch('actions/usuarios.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
-  if(d.error){toast('Erro: '+d.error);return;}
+  if(d.error){
+    const dbg=d.debug?` · (servidor recebeu me=${JSON.stringify(d.debug.me_recebido)}; eu enviei=${JSON.stringify(EU&&EU.bitrix_id)})`:'';
+    console.warn('userSave erro:',d,'EU=',EU); toast('Erro: '+d.error+dbg); return;
+  }
   closeModal(); await renderConfig(); toast('Usuário salvo');
 }
 async function userDelete(bid){

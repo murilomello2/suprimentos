@@ -53,7 +53,9 @@ try {
         $caller = user_perms($pdo, $in['me'] ?? null);
         if (empty($caller['perm_admin'])) {
             http_response_code(403);
-            echo json_encode(['error'=>'Apenas administradores gerenciam permissões.'], JSON_UNESCAPED_UNICODE); exit;
+            echo json_encode(['error'=>'Apenas administradores gerenciam permissões.',
+                'debug'=>['me_recebido'=>($in['me'] ?? null), 'tipo'=>gettype($in['me'] ?? null),
+                          'autorizado'=>(bool)($caller['autorizado'] ?? false)]], JSON_UNESCAPED_UNICODE); exit;
         }
         $acao = $in['acao'] ?? 'save';
         $bid = (string)($in['bitrix_id'] ?? '');

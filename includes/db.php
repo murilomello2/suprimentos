@@ -205,35 +205,8 @@ function can_edit_obra($perms, $obra_id) {
         && in_array((int)$obra_id, array_map('intval', $perms['obras_editar'] ?? []), true)) return true;
     return false;
 }
-/** Pode editar este GRUPO de campos na obra?
- *  geral = status/fornecedor/observação (qualquer editor da obra)
- *  crono/orcamento/quant/dicionario = exige a permissão específica (além de ser editor da obra)
- *  admin = só administrador (grupo, tipo, nome, responsável, lead, validado) */
-function can_field_group($perms, $group, $obra_id) {
-    if (!empty($perms['perm_admin'])) return true;           // admin faz tudo
-    if ($group === 'admin') return false;                    // só admin
-    if (!can_edit_obra($perms, $obra_id)) return false;      // precisa ser editor da obra
-    switch ($group) {
-        case 'geral':      return true;
-        case 'crono':      return !empty($perms['perm_crono']);
-        case 'orcamento':  return !empty($perms['perm_orcamento']);
-        case 'quant':      return !empty($perms['perm_quant']);
-        case 'dicionario': return !empty($perms['perm_dicionario']);
-    }
-    return false;
-}
-/** Mapa campo/branch -> grupo de permissão (usado no item_update p/ enforcement por campo). */
-function field_group($key) {
-    static $M = [
-        'status'=>'geral','fornecedor'=>'geral','observacoes'=>'geral',
-        'crono_marco_override'=>'crono','data_necessaria_override'=>'crono',
-        'orcamento_refs'=>'orcamento','composicao_sel'=>'orcamento','composicao'=>'orcamento','verba_override'=>'orcamento',
-        'quant_refs'=>'quant','quant_comp_sel'=>'quant','quantitativo_valor'=>'quant','quantitativo_unidade'=>'quant','quantitativo_fonte'=>'quant',
-        'dicionario'=>'dicionario',
-        'nome'=>'admin','grupo'=>'admin','tipo'=>'admin','responsavel'=>'admin','lead_override'=>'admin','validado'=>'admin',
-    ];
-    return $M[$key] ?? 'admin';   // desconhecido => exige admin (fail-safe)
-}
+// NB: o enforcement por campo (mapa campo->grupo + checagem) é INLINE no actions/item_update.php,
+// pra ser resiliente a deploy parcial (não depende deste arquivo chegar atualizado no FTP).
 function log_historico($pdo, $obra_id, $servico_id, $item_nome, $bid, $nome, $campo, $antes, $depois) {
     $pdo->prepare("INSERT INTO historico
         (obra_id,servico_id,item_nome,bitrix_id,usuario_nome,campo,valor_antes,valor_depois,created_at)

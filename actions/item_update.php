@@ -30,17 +30,32 @@ try {
 
     $pdo = db();
 
-    // ---- PERMISSÃO (servidor): enforcement POR CAMPO ----
+    // ---- PERMISSÃO (servidor): enforcement POR CAMPO (inline; resiliente a deploy parcial) ----
     // editor geral (editar_escopo) altera status/fornecedor/observação; vínculos e dicionário exigem
     // permissão específica; grupo/tipo/nome/responsável/lead = só admin. Admin faz tudo.
-    $perms = user_perms($pdo, $me);
-    $GRUPO_LABEL = ['geral'=>'status/fornecedor/observação', 'crono'=>'vínculo de cronograma',
-                    'orcamento'=>'vínculo de orçamento/verba', 'quant'=>'vínculo de quantitativo',
-                    'dicionario'=>'dicionário', 'admin'=>'grupo/tipo/nome/responsável (só admin)'];
+    // Lógica INLINE (não depende de funções novas do db.php) — usa só user_perms + can_edit_obra (antigas);
+    // permissões ausentes no $perms (db.php desatualizado) caem em "negado" (fail-safe), nunca em 500.
+    $perms    = user_perms($pdo, $me);
+    $is_admin = !empty($perms['perm_admin']);
+    $editor   = $is_admin || can_edit_obra($perms, 1);
+    $FG = [
+        'status'=>'geral','fornecedor'=>'geral','observacoes'=>'geral',
+        'crono_marco_override'=>'crono','data_necessaria_override'=>'crono',
+        'orcamento_refs'=>'orcamento','composicao_sel'=>'orcamento','composicao'=>'orcamento','verba_override'=>'orcamento',
+        'quant_refs'=>'quant','quant_comp_sel'=>'quant','quantitativo_valor'=>'quant','quantitativo_unidade'=>'quant','quantitativo_fonte'=>'quant',
+        'dicionario'=>'dicionario',
+    ];                                   // chave ausente => 'admin'
+    $PERM_FLAG   = ['crono'=>'perm_crono','orcamento'=>'perm_orcamento','quant'=>'perm_quant','dicionario'=>'perm_dicionario'];
+    $GRUPO_LABEL = ['geral'=>'status/fornecedor/observação','crono'=>'vínculo de cronograma',
+                    'orcamento'=>'vínculo de orçamento/verba','quant'=>'vínculo de quantitativo',
+                    'dicionario'=>'dicionário','admin'=>'grupo/tipo/nome/responsável (só admin)'];
     $negados = [];
     foreach (array_keys($campos) as $k) {
-        $g = field_group($k);
-        if (!can_field_group($perms, $g, 1)) $negados[$g] = true;
+        $g  = $FG[$k] ?? 'admin';
+        $ok = $is_admin
+            || ($g === 'geral' && $editor)
+            || (isset($PERM_FLAG[$g]) && $editor && !empty($perms[$PERM_FLAG[$g]]));
+        if (!$ok) $negados[$g] = true;
     }
     if ($negados) {
         http_response_code(403);

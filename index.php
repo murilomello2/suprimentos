@@ -1060,14 +1060,16 @@ async function quantShowCurrent(i){
       cesta=qs; origem='insumos da composição da verba marcados "define quantitativo" — área × consumo';
     }
   }
-  if(cesta.length && el){
+  if(cesta.length){
+    const locMap=await loadCompLocais(cesta);
+    const el2=document.getElementById('qntSel'), tot2=document.getElementById('qntTotal'); if(!el2) return;
     let qval=0;
-    el.innerHTML=`<div style="margin-bottom:6px"><b style="font-size:16px">${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}</b> <span class="muted" style="font-size:12px">— ${origem}:</span></div>`+
-      cesta.map(s=>{const qq=(s.area||0)*(s.coef||0); qval+=qq;
+    el2.innerHTML=`<div style="margin-bottom:6px"><b style="font-size:16px">${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}</b> <span class="muted" style="font-size:12px">— ${origem}:</span></div>`+
+      cesta.map(s=>{const qq=(s.area||0)*(s.coef||0); qval+=qq; const ld=insumoLocaisDet(s, locMap);
         return `<div class="pickrow" style="align-items:flex-start"><span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
           <div style="flex:1;min-width:0"><div>${esc(s.desc)}</div>
-            <small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} = <b>${QNUM(qq)} ${esc(s.unidade||'')}</b>${s.compdesc?' · '+esc(s.compdesc.slice(0,40)):''}</small>${locDet(s.locais_det)}</div></div>`;}).join('');
-    if(tot) tot.textContent='Soma: '+QNUM(qval)+' '+(i.quantitativo_unidade||'');
+            <small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} = <b>${QNUM(qq)} ${esc(s.unidade||'')}</b>${s.compdesc?' · '+esc(s.compdesc.slice(0,40)):''}</small>${locDet(ld.det, ld.todos)}</div></div>`;}).join('');
+    if(tot2) tot2.textContent='Soma: '+QNUM(qval)+' '+(i.quantitativo_unidade||'');
     return;
   }
   // 3) analítico — linhas do orçamento selecionadas (caminho + qtde)
@@ -1226,15 +1228,29 @@ function orcRenderFonte(){
     orcLoadTree();
   }
 }
-function locDet(det){ return (det&&det.length)?`<div class="muted" style="font-size:11px;margin-top:2px;line-height:1.5"><span class="material-icons" style="font-size:12px;vertical-align:-2px;color:var(--dourado)">place</span> ${det.map(l=>esc(l.local)+' ('+QNUM(l.qtde)+(l.unidade?' '+esc(l.unidade):'')+')').join(' · ')}</div>`:''; }
+function locDet(det, todos){ if(!det||!det.length) return '';
+  return `<div class="muted" style="font-size:11px;margin-top:3px;line-height:1.6"><span class="material-icons" style="font-size:12px;vertical-align:-2px;color:var(--dourado)">place</span> ${todos?'<b>todos os locais</b> · ':''}${det.map(l=>esc(l.local)+' ('+QNUM(l.qtde)+(l.unidade?' '+esc(l.unidade):'')+')').join(' · ')}</div>`; }
+async function loadCompLocais(compSel){   // baixa os locais de cada composição envolvida (1 fetch por composição)
+  const cids=[...new Set((compSel||[]).map(s=>s.cid).filter(Boolean))]; const m={};
+  await Promise.all(cids.map(async cid=>{ try{ m[cid]=await (await fetch('actions/composicao_locais.php?id='+cid)).json(); }catch(e){} }));
+  return m;
+}
+function insumoLocaisDet(s, locMap){      // detalhe salvo (filtrado) OU todos os locais da composição (se não filtrou)
+  if(s.locais_det&&s.locais_det.length) return {det:s.locais_det, todos:false};
+  const L=locMap&&locMap[s.cid];
+  if(L&&L.grupos&&L.grupos.length) return {det:L.grupos.map(g=>({local:g.local,qtde:g.qtde,unidade:g.unidade||''})), todos:true};
+  return {det:null, todos:false};
+}
 async function orcShowCurrent(i){
-  // composição: mostra a cesta de insumos (read-only)
+  // composição: mostra a cesta de insumos (read-only) + os LOCAIS de cada um (filtrados ou todos)
   if(i.verba_metodo==='composicao' && (i.composicao_sel||[]).length){
+    const locMap=await loadCompLocais(i.composicao_sel);
     const el=document.getElementById('orcSel'); if(el){
       let vmat=0,vmo=0;
       el.innerHTML=i.composicao_sel.map(s=>{const c=(s.area||0)*(s.coef||0)*(s.rs_unit||0); if(s.tipo==='mo')vmo+=c;else vmat+=c;
+        const ld=insumoLocaisDet(s, locMap);
         return `<div class="pickrow" style="align-items:flex-start"><span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
-          <div style="min-width:0"><div>${esc(s.desc)}</div><small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} × R$${QNUM(s.rs_unit)} = ${BRL(c)}${s.q?' · define quantitativo':''}</small>${locDet(s.locais_det)}</div></div>`;}).join('');
+          <div style="min-width:0"><div>${esc(s.desc)}</div><small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} × R$${QNUM(s.rs_unit)} = ${BRL(c)}${s.q?' · define quantitativo':''}</small>${locDet(ld.det, ld.todos)}</div></div>`;}).join('');
       const t=document.getElementById('orcTotal'); if(t) t.textContent='Material '+BRL(vmat)+' · MO '+BRL(vmo);
     }
     return;

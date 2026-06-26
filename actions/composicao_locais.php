@@ -17,7 +17,7 @@ try {
     if ($desc === false) { echo json_encode(['grupos'=>[], 'total'=>0]); exit; }
 
     // linhas-folha do orçamento com a MESMA descrição (cada uma = a composição aplicada num local)
-    $st = $pdo->prepare("SELECT id, path_str, qtde, valor FROM orcamento_linha WHERE descricao=? AND folha=1 ORDER BY path_str");
+    $st = $pdo->prepare("SELECT id, path_str, qtde, valor, unidade FROM orcamento_linha WHERE descricao=? AND folha=1 ORDER BY path_str");
     $st->execute([$desc]);
     $rows = $st->fetchAll();
 
@@ -26,8 +26,9 @@ try {
         $parts = array_map('trim', explode('›', (string)($r['path_str'] ?? '')));
         $local = $parts[0] !== '' ? $parts[0] : '(sem local)';
         $sub   = count($parts) > 1 ? implode(' › ', array_slice($parts, 1)) : $local;
-        if (!isset($grupos[$local])) $grupos[$local] = ['local'=>$local, 'qtde'=>0.0, 'valor'=>0.0, 'linhas'=>[]];
-        $grupos[$local]['linhas'][] = ['id'=>(int)$r['id'], 'sub'=>$sub, 'qtde'=>(float)$r['qtde'], 'valor'=>(float)$r['valor']];
+        $un    = $r['unidade'] ?? '';
+        if (!isset($grupos[$local])) $grupos[$local] = ['local'=>$local, 'qtde'=>0.0, 'valor'=>0.0, 'unidade'=>$un, 'linhas'=>[]];
+        $grupos[$local]['linhas'][] = ['id'=>(int)$r['id'], 'sub'=>$sub, 'qtde'=>(float)$r['qtde'], 'valor'=>(float)$r['valor'], 'unidade'=>$un];
         $grupos[$local]['qtde']  += (float)$r['qtde'];
         $grupos[$local]['valor'] += (float)$r['valor'];
         $total += (float)$r['qtde'];

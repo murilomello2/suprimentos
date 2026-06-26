@@ -1167,8 +1167,8 @@ let ORC_SEL=new Set(), ORC_NODES=[];
 function orcTab(i){
   const MET={analitico:'linhas do orçamento (analítico)', composicao:'composição de insumos', manual:'manual'};
   const metodo = MET[i.verba_metodo] || 'estimativa preliminar (a curar)';
-  const editBar = !EDITO ? `<div style="display:flex;gap:8px;margin:6px 0 10px">${
-    CAN_ORC ? `<button class="btn-prim" onclick="orcEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar vínculo de verba</button>`+(i.verba_metodo?`<button class="btn-ghost" onclick="orcLimpar()">↺ Limpar</button>`:'')
+  const editBar = !EDITO ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px">${
+    CAN_ORC ? `<button class="btn-prim" onclick="orcEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar vínculo de verba</button>`+(i.verba_metodo?`<button class="btn-ghost" onclick="orcLimpar()">↺ Limpar</button>`:'')+(i.verba_metodo==='analitico'?`<button class="btn-ghost" onclick="separarMO()" title="Tira a mão de obra embutida nas linhas inteiras, deixando o item só com o material — a MO fica livre pro item de Mão de Obra"><span class="material-icons" style="font-size:15px;vertical-align:-3px">content_cut</span> Separar material × MO</button>`:'')
             : `<span class="muted" style="font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">lock</span> Você não tem permissão para editar a verba.</span>`
   }</div>` : '';
   let h=`
@@ -1389,6 +1389,27 @@ function orcRenderSearch(){
 }
 async function orcSalvar(){ EDITO=false; await saveAndReload({orcamento_refs:[...ORC_SEL]}); toast('Verba composta ('+ORC_SEL.size+' itens)'); }
 async function orcLimpar(){ EDITO=false; ORC_SEL.clear(); await saveAndReload({orcamento_refs:[]}); toast('Composição limpa'); }
+// Separar material × MO: converte verba analítica (linha inteira) em composição SÓ material, liberando a MO
+async function separarMO(){
+  if(!CUR) return;
+  let d; try{ d=await (await fetch('actions/separar_mo.php?ordem='+CUR.ordem)).json(); }
+  catch(e){ toast('Falha ao calcular'); return; }
+  if(d.error){ toast(d.error); return; }
+  const r=d.resumo;
+  let msg='Separar material × MO de “'+CUR.nome+'”:\n\n'
+    +'• Verba hoje (linha inteira, com MO):  '+BRL(r.verba_antes)+'\n'
+    +'• Vira SÓ MATERIAL:  '+BRL(r.verba_depois)+'\n'
+    +'• Libera de MÃO DE OBRA:  '+BRL(r.mo_liberada)+'  (pra alocar no item de MO)\n'
+    +'• '+r.n_composicoes+' composições · '+r.n_insumos_mat+' insumos de material\n';
+  if(r.sem_composicao && r.sem_composicao.length)
+    msg+='\n⚠️ '+r.sem_composicao.length+' linha(s) SEM composição serão removidas (não dá pra separar):\n- '+r.sem_composicao.slice(0,6).join('\n- ')+(r.sem_composicao.length>6?'\n…':'')+'\n';
+  msg+='\nO item passa a ser por composição (só material). Confirmar?';
+  if(!confirm(msg)) return;
+  const sel=(d.composicao_sel||[]).map(s=>({cid:s.cid, idx:s.idx, area:s.area, q:0, locais:s.locais||null}));
+  EDITO=false;
+  await saveAndReload({composicao_sel:sel, orcamento_refs:[]});
+  toast('Material × MO separados — '+BRL(r.mo_liberada)+' de MO liberados. Agora monte o item de Mão de Obra.');
+}
 
 /* ===== Motor de USO da verba (uma linha do orçamento não pode compor 2 itens) ===== */
 let VERBA_USOS=null;

@@ -933,16 +933,14 @@ function quantTab(i){
   const atual = i.quantitativo!=null
     ? `<b style="font-size:16px">${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}</b> <span class="muted" style="font-size:12px">— ${_qf}</span>`
     : '<span class="muted">Sem quantitativo definido.</span>';
+  const editBar = !EDITQ ? `<div style="display:flex;gap:8px;margin:0 0 10px">${
+    CAN_QUANT ? `<button class="btn-prim" onclick="quantEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar quantitativo</button>`+(i.curado_quant?`<button class="btn-ghost" onclick="qntLimpar()">↺ Limpar</button>`:'')
+              : `<span class="muted" style="font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">lock</span> Você não tem permissão para editar o quantitativo.</span>`
+  }</div>` : '';
   let h=`
-    <div class="box"><div class="bl">Quantitativo atual ${i.curado_quant?'(curado ✓)':''}</div><div class="bv" id="qntSel">${atual}</div><div id="qntTotal" style="margin-top:6px;font-weight:700"></div></div>`;
-  if(!EDITQ){
-    h+=`<div style="display:flex;gap:8px;margin-top:6px">`;
-    if(CAN_QUANT){
-      h+=`<button class="btn-prim" onclick="quantEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar quantitativo</button>`;
-      if(i.curado_quant) h+=`<button class="btn-ghost" onclick="qntLimpar()">↺ Limpar</button>`;
-    } else h+=`<span class="muted" style="font-size:12.5px">Você não tem permissão para editar o quantitativo.</span>`;
-    h+=`</div>`;
-  } else {
+    ${editBar}
+    <div class="box"><div class="bl">Quantitativo atual ${i.curado_quant?'(curado ✓)':''}${EDITQ?'':' <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— somente leitura</span>'}</div><div class="bv" id="qntSel">${atual}</div><div id="qntTotal" style="margin-top:6px;font-weight:700"></div></div>`;
+  if(EDITQ){
     h+=`
     <div class="fld" style="margin-top:8px"><label>Fonte do quantitativo</label>
       <select id="qntFonte" onchange="qntSetFonte(this.value)">
@@ -1114,7 +1112,7 @@ async function qntRenderSel(){
   const d=await (await fetch('actions/orcamento.php?ids='+[...QNT_SEL].join(','))).json();
   const byU={}; let html='';
   d.linhas.forEach(l=>{ byU[l.unidade]=(byU[l.unidade]||0)+(l.qtde||0);
-    html+=`<div class="pickrow"><span class="material-icons" style="font-size:16px;color:var(--ok)" onclick="qntToggleSel(${l.id})">check_box</span>
+    html+=`<div class="pickrow"><span class="material-icons" style="font-size:16px;color:var(--ok)${EDITQ?';cursor:pointer':''}" ${EDITQ?`onclick="qntToggleSel(${l.id})" title="remover"`:''}>${EDITQ?'check_box':'check_circle'}</span>
       <div><div>${esc(l.descricao)}</div><small class="muted">${esc(l.path_str||'')} · ${QNUM(l.qtde)} ${esc(l.unidade||'')}</small></div></div>`; });
   el.innerHTML=html||'<span class="muted">—</span>';
   const tot=document.getElementById('qntTotal');
@@ -1152,20 +1150,18 @@ let ORC_SEL=new Set(), ORC_NODES=[];
 function orcTab(i){
   const MET={analitico:'linhas do orçamento (analítico)', composicao:'composição de insumos', manual:'manual'};
   const metodo = MET[i.verba_metodo] || 'estimativa preliminar (a curar)';
+  const editBar = !EDITO ? `<div style="display:flex;gap:8px;margin:6px 0 10px">${
+    CAN_ORC ? `<button class="btn-prim" onclick="orcEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar vínculo de verba</button>`+(i.verba_metodo?`<button class="btn-ghost" onclick="orcLimpar()">↺ Limpar</button>`:'')
+            : `<span class="muted" style="font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">lock</span> Você não tem permissão para editar a verba.</span>`
+  }</div>` : '';
   let h=`
     <div class="box"><div class="bl">Verba atual</div>
       <div class="bv"><b style="font-size:16px">${BRL(i.verba)}</b> <span class="muted" style="font-size:12px">— método: ${metodo}</span>${i.curado_verba?'<span style="color:var(--ok);font-weight:700;font-size:12px"> · curada ✓</span>':'<span style="color:var(--and);font-size:12px"> · a curar</span>'}</div>
       <div id="orcLastChange" style="font-size:11.5px;margin-top:5px;color:var(--muted)"></div></div>
-    <div class="box"><div class="bl">Composição selecionada</div>
+    ${editBar}
+    <div class="box"><div class="bl">Composição selecionada${EDITO?'':' <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— somente leitura (clique em Editar pra alterar)</span>'}</div>
       <div class="bv" id="orcSel">—</div><div id="orcTotal" style="margin-top:6px;font-weight:700"></div></div>`;
-  if(!EDITO){
-    h+=`<div style="display:flex;gap:8px;margin-top:6px">`;
-    if(CAN_ORC){
-      h+=`<button class="btn-prim" onclick="orcEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar vínculo de verba</button>`;
-      if(i.verba_metodo) h+=`<button class="btn-ghost" onclick="orcLimpar()">↺ Limpar</button>`;
-    } else h+=`<span class="muted" style="font-size:12.5px">Você não tem permissão para editar a verba.</span>`;
-    h+=`</div>`;
-  } else {
+  if(EDITO){
     h+=`
     <div class="fld" style="margin-top:8px"><label>Fonte da verba</label>
       <select id="orcFonte" onchange="orcSetFonte(this.value)">
@@ -1286,7 +1282,7 @@ async function orcRenderSel(){
   const d=await (await fetch('actions/orcamento.php?ids='+[...ORC_SEL].join(','))).json();
   let tot=0;
   el.innerHTML=d.linhas.map(l=>{tot+=(l.valor||0);return `<div class="pickrow">
-    <span class="material-icons" style="font-size:16px;color:var(--ok)" onclick="orcToggleSel(${l.id})" title="remover">check_box</span>
+    <span class="material-icons" style="font-size:16px;color:var(--ok)${EDITO?';cursor:pointer':''}" ${EDITO?`onclick="orcToggleSel(${l.id})" title="remover"`:''}>${EDITO?'check_box':'check_circle'}</span>
     <div><div>${esc(l.descricao)}</div><small class="muted">${esc(l.path_str||'')} · ${BRL(l.valor)}</small></div></div>`;}).join('');
   document.getElementById('orcTotal').textContent='Total: '+BRL(tot);
 }

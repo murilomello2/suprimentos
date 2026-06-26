@@ -1309,6 +1309,7 @@ async function orcLimpar(){ EDITO=false; ORC_SEL.clear(); await saveAndReload({o
 
 /* ----- Composição — CESTA de insumos (de 1+ composições): verba = soma do que você marcar ----- */
 let COMP_DATA=null, COMP_AREA=0, COMP_LAST=[], COMP_SEL=[];
+let COMP_LOCAIS=null, COMP_LOCAIS_SEL=new Set();   // locais (linhas do orçamento) da composição aberta + selecionados
 async function compBuscar(){
   const q=document.getElementById('compQ').value.trim();
   const box=document.getElementById('compSearch'); if(!box)return;
@@ -1323,19 +1324,62 @@ async function compBuscar(){
 }
 async function compEscolher(id){
   COMP_DATA=await (await fetch('actions/composicao.php?id='+id)).json();
-  COMP_AREA=COMP_DATA.qtde_total||0;
+  COMP_LOCAIS=await (await fetch('actions/composicao_locais.php?id='+id)).json();
+  const allIds=(COMP_LOCAIS.grupos||[]).flatMap(g=>g.linhas.map(l=>l.id));
+  // se já há insumo desta composição na cesta com locais salvos, reusa a seleção; senão, todos os locais
+  const ex=COMP_SEL.find(s=>s.cid===id && Array.isArray(s.locais) && s.locais.length);
+  COMP_LOCAIS_SEL=new Set(ex?ex.locais:allIds);
+  compRecalcArea();
   document.getElementById('compSearch').innerHTML='';
   compRenderDetail();
 }
+function compRecalcArea(){
+  const grupos=(COMP_LOCAIS&&COMP_LOCAIS.grupos)||[];
+  if(!grupos.length){ COMP_AREA=COMP_DATA?(COMP_DATA.qtde_total||0):0; return; }
+  let a=0; grupos.forEach(g=>g.linhas.forEach(l=>{ if(COMP_LOCAIS_SEL.has(l.id)) a+=(l.qtde||0); }));
+  COMP_AREA=a;
+}
+function compSyncSelArea(){   // propaga a área/locais pros insumos JÁ marcados desta composição
+  if(!COMP_DATA)return;
+  const loc=(COMP_LOCAIS&&COMP_LOCAIS.grupos&&COMP_LOCAIS.grupos.length)?[...COMP_LOCAIS_SEL]:null;
+  COMP_SEL.forEach(s=>{ if(s.cid===COMP_DATA.id){ s.area=COMP_AREA; s.locais=loc; } });
+}
+function compLocalToggle(id){ COMP_LOCAIS_SEL.has(id)?COMP_LOCAIS_SEL.delete(id):COMP_LOCAIS_SEL.add(id); compRecalcArea(); compSyncSelArea(); compRenderDetail(); compRenderBasket(); }
+function compLocalToggleGroup(gi){
+  const g=((COMP_LOCAIS&&COMP_LOCAIS.grupos)||[])[gi]; if(!g)return;
+  const allOn=g.linhas.every(l=>COMP_LOCAIS_SEL.has(l.id));
+  g.linhas.forEach(l=>{ allOn?COMP_LOCAIS_SEL.delete(l.id):COMP_LOCAIS_SEL.add(l.id); });
+  compRecalcArea(); compSyncSelArea(); compRenderDetail(); compRenderBasket();
+}
 function compRenderDetail(){
   const box=document.getElementById('compDetail'); if(!box||!COMP_DATA)return;
-  const c=COMP_DATA;
+  const c=COMP_DATA; const un=esc(c.unidade||'');
+  const grupos=(COMP_LOCAIS&&COMP_LOCAIS.grupos)||[];
+  const locaisHtml = grupos.length ? `
+    <div class="fld" style="margin-top:6px;margin-bottom:2px"><label><span class="material-icons" style="font-size:14px;vertical-align:-3px;color:var(--dourado)">place</span> Locais desta composição — desmarque o que NÃO entra (ex.: tirar muros/áreas comuns, manter só a fachada das torres)</label></div>
+    <div class="tree" style="max-height:210px">
+      ${grupos.map((g,gi)=>{
+        const allOn=g.linhas.every(l=>COMP_LOCAIS_SEL.has(l.id)), someOn=g.linhas.some(l=>COMP_LOCAIS_SEL.has(l.id));
+        const gico=allOn?'check_box':(someOn?'indeterminate_check_box':'check_box_outline_blank');
+        return `<div class="tnode tparent">
+          <span class="material-icons chk" onclick="compLocalToggleGroup(${gi})" style="color:${allOn?'var(--ok)':(someOn?'var(--and)':'var(--muted)')}">${gico}</span>
+          <span class="tname">${esc(g.local)}</span><span class="tval">${QNUM(g.qtde)} ${un}</span></div>`+
+          g.linhas.map(l=>{const on=COMP_LOCAIS_SEL.has(l.id);
+            return `<div class="tnode" style="padding-left:26px">
+            <span class="material-icons chk" onclick="compLocalToggle(${l.id})" style="color:${on?'var(--ok)':'var(--muted)'};font-size:17px">${on?'check_box':'check_box_outline_blank'}</span>
+            <span class="tname" style="font-size:11.5px">${esc(l.sub)}</span><span class="tval">${QNUM(l.qtde)} ${un}</span></div>`;}).join('');
+      }).join('')}
+    </div>
+    <div class="muted" style="font-size:12px;margin:5px 0 2px">Área selecionada: <b style="color:var(--verde-d)">${QNUM(COMP_AREA)} ${un}</b> <span style="opacity:.7">de ${QNUM(COMP_LOCAIS.total||c.qtde_total)} ${un} (todos os locais)</span></div>
+  ` : `
+    <div class="fld"><label>Área/quantidade desta composição (vale para os insumos que marcar; padrão = total)</label>
+      <input id="compArea" type="number" step="any" value="${COMP_AREA}" oninput="COMP_AREA=parseFloat(this.value)||0;compSyncSelArea();compRenderBasket()"></div>`;
   box.innerHTML=`
     <div class="box"><div class="bl">${esc(c.descricao)}</div>
-      <div class="bv muted" style="font-size:12px">unidade ${esc(c.unidade||'')} · total no orçamento ${QNUM(c.qtde_total)} ${esc(c.unidade||'')}</div></div>
-    <div class="fld"><label>Área/quantidade desta composição (vale para os insumos que marcar; padrão = total)</label>
-      <input id="compArea" type="number" step="any" value="${COMP_AREA}" oninput="COMP_AREA=parseFloat(this.value)||0"></div>
-    <div class="tree" style="max-height:200px">
+      <div class="bv muted" style="font-size:12px">unidade ${un} · total no orçamento ${QNUM(c.qtde_total)} ${un}</div></div>
+    ${locaisHtml}
+    <div class="fld" style="margin:6px 0 2px"><label>Insumos — marque o que entra na verba (a área vem dos locais acima)</label></div>
+    <div class="tree" style="max-height:170px">
       ${c.insumos.map((in_,ix)=>{ const on=COMP_SEL.some(s=>s.cid===c.id&&s.idx===ix);
         return `<div class="tnode">
         <span class="material-icons chk" onclick="compToggleInsumo(${ix})" style="color:${on?'var(--ok)':'var(--muted)'}">${on?'check_box':'check_box_outline_blank'}</span>
@@ -1344,13 +1388,14 @@ function compRenderDetail(){
         <span class="tval">${QNUM(in_.coef)} ${esc(in_.unidade||'')} × R$${QNUM(in_.rs_unit)}</span>
       </div>`;}).join('')}
     </div>
-    <div class="muted" style="font-size:11.5px;margin-top:4px">Marque os insumos que entram na verba deste item (ex.: só o bloco). Pode abrir outra composição e marcar mais.</div>`;
+    <div class="muted" style="font-size:11.5px;margin-top:4px">Ex.: marque só a MO do reboco. Pode abrir outra composição e marcar mais.</div>`;
 }
 function compToggleInsumo(ix){
   const c=COMP_DATA; const in_=c&&c.insumos[ix]; if(!in_)return;
   const i=COMP_SEL.findIndex(s=>s.cid===c.id&&s.idx===ix);
   if(i>=0) COMP_SEL.splice(i,1);
-  else COMP_SEL.push({cid:c.id, idx:ix, area:COMP_AREA||c.qtde_total||0, q:(in_.tipo==='material'),
+  else COMP_SEL.push({cid:c.id, idx:ix, area:COMP_AREA||c.qtde_total||0, q:!COMP_SEL.some(s=>s.cid===c.id&&s.q),
+    locais:(COMP_LOCAIS&&COMP_LOCAIS.grupos&&COMP_LOCAIS.grupos.length)?[...COMP_LOCAIS_SEL]:null,
     desc:in_.descricao, tipo:in_.tipo, unidade:in_.unidade, coef:+in_.coef, rs_unit:+in_.rs_unit, compdesc:c.descricao});
   compRenderDetail(); compRenderBasket();
 }
@@ -1381,7 +1426,7 @@ function compRenderBasket(){
 async function compSalvar(){
   if(!COMP_SEL.length){toast('Marque ao menos um insumo');return;}
   EDITO=false;
-  await saveAndReload({composicao_sel: COMP_SEL.map(s=>({cid:s.cid, idx:s.idx, area:s.area, q:s.q?1:0}))});
+  await saveAndReload({composicao_sel: COMP_SEL.map(s=>({cid:s.cid, idx:s.idx, area:s.area, q:s.q?1:0, locais:s.locais||null}))});
   toast('Verba por composição salva ('+COMP_SEL.length+' insumo(s))');
 }
 

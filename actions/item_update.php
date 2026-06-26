@@ -207,6 +207,13 @@ try {
         $vmat = 0; $vmo = 0; $qval = 0; $qun = ''; $clean = []; $cache = [];
         if (is_array($sel)) foreach ($sel as $s) {
             $cid = (int)($s['cid'] ?? 0); $idx = (int)($s['idx'] ?? -1); $area = (float)($s['area'] ?? 0);
+            // LOCAIS: se vierem linhas do orçamento selecionadas, a ÁREA = soma das qtdes delas (recalcula no servidor)
+            $locais = (isset($s['locais']) && is_array($s['locais'])) ? array_values(array_filter(array_map('intval', $s['locais']))) : null;
+            if ($locais) {
+                $inq = implode(',', array_fill(0, count($locais), '?'));
+                $aq = $pdo->prepare("SELECT COALESCE(SUM(qtde),0) s FROM orcamento_linha WHERE id IN ($inq)");
+                $aq->execute($locais); $area = (float)$aq->fetch()['s'];
+            }
             if ($cid <= 0 || $idx < 0 || $area <= 0) continue;
             if (!isset($cache[$cid])) {
                 $q = $pdo->prepare("SELECT descricao,unidade,coef,rs_unit,tipo FROM composicao_insumo WHERE composicao_id=? ORDER BY id");
@@ -219,7 +226,7 @@ try {
             if (!empty($s['q'])) { $qval += $area * (float)$ins['coef']; if ($qun === '') $qun = $ins['unidade']; }
             $clean[] = ['cid'=>$cid,'idx'=>$idx,'area'=>$area,'q'=>!empty($s['q']),
                         'desc'=>$ins['descricao'],'tipo'=>$ins['tipo'],'unidade'=>$ins['unidade'],
-                        'coef'=>(float)$ins['coef'],'rs_unit'=>(float)$ins['rs_unit']];
+                        'coef'=>(float)$ins['coef'],'rs_unit'=>(float)$ins['rs_unit'],'locais'=>$locais];
         }
         if ($clean) {
             $verba = $vmat + $vmo;

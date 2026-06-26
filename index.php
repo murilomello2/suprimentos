@@ -1217,13 +1217,24 @@ function orcRenderFonte(){
     if(COMP_SEL.length && !COMP_DATA) compEscolher(COMP_SEL[0].cid);
   } else {
     box.innerHTML=`
-      <div class="fld"><label>Buscar item por nome</label>
+      <div class="box" style="background:#fbfdf9;border-color:var(--ok)">
+        <div class="bl" style="display:flex;align-items:center;gap:6px"><span class="material-icons" style="font-size:16px;color:var(--dourado)">bolt</span> Busca em massa (vários termos)</div>
+        <div class="muted" style="font-size:11.5px;margin:2px 0 6px">Pra itens com muitos insumos (ex.: tubos e conexões). Edite os termos, busque, confira por grupo e adicione tudo de uma vez.</div>
+        <textarea id="massaTermos" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px;min-height:40px" placeholder="tubo, luva, joelho, …">tubo, luva, joelho, cotovelo, junção, conexão, tê, adaptador, redução, niple, bucha, tampão</textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;align-items:center">
+          <select id="massaEscopo" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12px"><option value="hidr">Só Instalações (hidr/sanit)</option><option value="tudo">Orçamento inteiro</option></select>
+          <button class="btn-ghost" style="padding:6px 10px" onclick="massaPreset()">💧 Tubos e conexões</button>
+          <button class="btn-prim" style="padding:6px 12px" onclick="massaBuscar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">search</span> Buscar em massa</button>
+        </div>
+        <div id="massaRes" style="margin-top:8px"></div>
+      </div>
+      <div class="fld"><label>Ou buscar item por nome (um a um)</label>
         <div class="search" style="border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
           <input id="orcQ" placeholder="ex.: concreto pilar torre, aço viga…" oninput="orcBuscar()"></div></div>
       <div id="orcSearch"></div>
       <div class="fld" style="margin-bottom:4px"><label>Ou navegue a árvore e marque os itens (folhas)</label></div>
       <div class="tree" id="orcTree">Carregando…</div>
-      <div style="margin-top:10px;display:flex;gap:8px"><button class="btn-prim" onclick="orcSalvar()">Salvar composição</button>
+      <div style="margin-top:10px;display:flex;gap:8px"><button class="btn-prim" onclick="orcSalvar()">Salvar verba</button>
         <button class="btn-ghost" onclick="orcCancelar()">Cancelar</button></div>`;
     orcLoadTree();
   }
@@ -1325,6 +1336,59 @@ function orcRenderSearch(){
 }
 async function orcSalvar(){ EDITO=false; await saveAndReload({orcamento_refs:[...ORC_SEL]}); toast('Verba composta ('+ORC_SEL.size+' itens)'); }
 async function orcLimpar(){ EDITO=false; ORC_SEL.clear(); await saveAndReload({orcamento_refs:[]}); toast('Composição limpa'); }
+
+/* ===== Busca em massa (vários termos → linhas-folha agrupadas → adiciona tudo à verba) ===== */
+let MASSA=null, MASSA_SEL=new Set(), MASSA_OPEN=new Set();
+function massaPreset(){ const t=document.getElementById('massaTermos'); if(t) t.value='tubo, luva, joelho, cotovelo, junção, conexão, tê, adaptador, redução, niple, bucha, tampão'; }
+async function massaBuscar(){
+  const termos=(document.getElementById('massaTermos')?.value||'').trim();
+  const escopo=document.getElementById('massaEscopo')?.value||'hidr';
+  const box=document.getElementById('massaRes'); if(!box)return;
+  if(!termos){ box.innerHTML='<div class="muted" style="font-size:12px">Informe os termos.</div>'; return; }
+  box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
+  let d; try{ d=await (await fetch('actions/orcamento_massa.php?escopo='+escopo+'&termos='+encodeURIComponent(termos))).json(); }
+  catch(e){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Falha: '+esc(e.message)+'</div>'; return; }
+  if(d.error){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Erro: '+esc(d.error)+'</div>'; return; }
+  MASSA=d; MASSA_SEL=new Set(); MASSA_OPEN=new Set();
+  (d.grupos||[]).forEach(g=>g.linhas.forEach(l=>MASSA_SEL.add(l.id)));   // tudo marcado por padrão
+  massaRender();
+}
+function massaRender(){
+  const box=document.getElementById('massaRes'); if(!box)return;
+  if(!MASSA||!(MASSA.grupos||[]).length){ box.innerHTML='<div class="muted" style="font-size:12px">Nada encontrado.</div>'; return; }
+  let selN=0, selV=0;
+  const gh=MASSA.grupos.map((g,gi)=>{
+    const ids=g.linhas.map(l=>l.id);
+    const allOn=ids.every(id=>MASSA_SEL.has(id)), someOn=ids.some(id=>MASSA_SEL.has(id));
+    g.linhas.forEach(l=>{ if(MASSA_SEL.has(l.id)){ selN++; selV+=l.valor; } });
+    const open=MASSA_OPEN.has(gi);
+    return `<div class="tnode tparent">
+      <span class="material-icons chk" onclick="massaToggleGrupo(${gi})" style="color:${allOn?'var(--ok)':someOn?'var(--and)':'var(--muted)'}">${allOn?'check_box':someOn?'indeterminate_check_box':'check_box_outline_blank'}</span>
+      <span class="caret material-icons" onclick="massaExpand(${gi})">${open?'expand_more':'chevron_right'}</span>
+      <span class="tname" style="text-transform:capitalize">${esc(g.termo)} <span class="muted">(${g.n})</span></span>
+      <span class="tval">${BRL(g.valor)}</span></div>`+
+    (open?g.linhas.map(l=>{const on=MASSA_SEL.has(l.id);
+      return `<div class="tnode" style="padding-left:30px">
+        <span class="material-icons chk" onclick="massaToggleLinha(${l.id})" style="color:${on?'var(--ok)':'var(--muted)'};font-size:16px">${on?'check_box':'check_box_outline_blank'}</span>
+        <span class="tname" style="font-size:11px">${esc((l.desc||'').slice(0,52))} <span class="muted">· ${esc(l.local)}</span></span>
+        <span class="tval">${BRL(l.valor)}</span></div>`;}).join(''):'');
+  }).join('');
+  box.innerHTML=`<div class="tree" style="max-height:280px">${gh}</div>
+    <div class="box" style="margin-top:6px;padding:8px 12px"><div class="bv"><b>Selecionado: ${selN} linhas · ${BRL(selV)}</b> <span class="muted" style="font-size:11.5px">de ${MASSA.n_linhas} · ${BRL(MASSA.total)}</span></div></div>
+    <div style="margin-top:6px"><button class="btn-prim" onclick="massaAdd()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar à verba (${selN} linhas)</button></div>`;
+}
+function massaToggleGrupo(gi){ const g=MASSA.grupos[gi]; if(!g)return; const allOn=g.linhas.every(l=>MASSA_SEL.has(l.id)); g.linhas.forEach(l=>{ allOn?MASSA_SEL.delete(l.id):MASSA_SEL.add(l.id); }); massaRender(); }
+function massaToggleLinha(id){ MASSA_SEL.has(id)?MASSA_SEL.delete(id):MASSA_SEL.add(id); massaRender(); }
+function massaExpand(gi){ MASSA_OPEN.has(gi)?MASSA_OPEN.delete(gi):MASSA_OPEN.add(gi); massaRender(); }
+function massaAdd(){
+  const add=[...MASSA_SEL]; if(!add.length){ toast('Marque ao menos uma linha'); return; }
+  const usadas=new Set(); DATA.itens.forEach(i=>{ if(i.ordem!=CUR.ordem)(i.orcamento_refs||[]).forEach(id=>usadas.add(Number(id))); });
+  const dups=add.filter(id=>usadas.has(id)).length;
+  add.forEach(id=>ORC_SEL.add(id));
+  orcRenderSel();
+  MASSA=null; MASSA_SEL=new Set(); const box=document.getElementById('massaRes'); if(box) box.innerHTML='';
+  toast(add.length+' linhas adicionadas à verba'+(dups?(' · ⚠️ '+dups+' já estavam em outro item — veja a Auditoria'):'')+'. Clique em Salvar verba.');
+}
 
 /* ----- Composição — CESTA de insumos (de 1+ composições): verba = soma do que você marcar ----- */
 let COMP_DATA=null, COMP_AREA=0, COMP_LAST=[], COMP_SEL=[];

@@ -1271,6 +1271,10 @@ function orcRenderFonte(){
             <select id="massaMaterial" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12px"><option value="">Todos os materiais</option><option value="pvc,cpvc">Só PVC + CPVC</option><option value="pex">Só PEX</option><option value="metal">Só Metais/Registros</option><option value="cobre">Só Cobre</option></select>
             <button class="btn-prim" style="padding:6px 12px" onclick="massaBuscar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">search</span> Buscar</button>
           </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:7px;align-items:center">
+            <span class="muted" style="font-size:11.5px"><span class="material-icons" style="font-size:14px;vertical-align:-3px;color:var(--dourado)">call_split</span> O que entra na verba:</span>
+            <select id="massaTipo" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12px"><option value="inteira">Linha inteira (material + MO)</option><option value="material">Só o material</option><option value="mo">Só a mão de obra</option></select>
+          </div>
           <div id="massaRes" style="margin-top:8px"></div>
         </div>
       </div>
@@ -1523,13 +1527,37 @@ function massaToggleGrupo(key){ const g=massaGrupos().find(x=>x.key===key); if(!
   livres.forEach(l=>{ allOn?MASSA_SEL.delete(l.id):MASSA_SEL.add(l.id); }); massaRender(); }
 function massaToggleLinha(id){ if(usadoPorOutro(id).length)return; MASSA_SEL.has(id)?MASSA_SEL.delete(id):MASSA_SEL.add(id); massaRender(); }
 function massaExpand(key){ MASSA_OPEN.has(key)?MASSA_OPEN.delete(key):MASSA_OPEN.add(key); massaRender(); }
-function massaAdd(){
+async function massaAdd(){
   const add=[...MASSA_SEL].filter(id=>!usadoPorOutro(id).length);   // nunca adiciona linha travada
   if(!add.length){ toast('Marque ao menos uma linha livre'); return; }
-  add.forEach(id=>ORC_SEL.add(id));
-  orcRenderSel();
-  MASSA=null; MASSA_SEL=new Set(); const box=document.getElementById('massaRes'); if(box) box.innerHTML='';
-  toast(add.length+' linhas adicionadas à verba. Clique em Salvar verba.');
+  const tipo=document.getElementById('massaTipo')?.value||'inteira';
+  if(tipo==='inteira'){   // linha inteira = analítico (material + MO)
+    add.forEach(id=>ORC_SEL.add(id)); orcRenderSel();
+    MASSA=null; MASSA_SEL=new Set(); const b=document.getElementById('massaRes'); if(b) b.innerHTML='';
+    toast(add.length+' linhas (material + MO) adicionadas à verba. Clique em Salvar verba.'); return;
+  }
+  // só material / só mão de obra → converte as linhas nos insumos da composição
+  if(ORC_SEL.size){ if(!confirm('Você já tem linhas inteiras selecionadas. Pegar “só '+(tipo==='mo'?'mão de obra':'material')+'” passa a verba pra composição e descarta as linhas inteiras. Continuar?')) return; ORC_SEL.clear(); }
+  let d; try{ d=await (await fetch('actions/linhas_composicao.php?tipo='+tipo+'&ids='+add.join(','))).json(); }
+  catch(e){ toast('Falha ao converter'); return; }
+  if(d.error){ toast(d.error); return; }
+  await loadVerbaUsos();
+  let added=0, skip=0, restr=0;
+  (d.composicao_sel||[]).forEach(s=>{
+    if(COMP_SEL.some(x=>x.cid===s.cid&&x.idx===s.idx)){ skip++; return; }
+    const ids=(s.locais||[]).map(l=>l.id); const sp=compInsumoSplit(s.cid,s.idx,ids);
+    if(ids.length>0 && sp.livres.length===0) return;                                 // 100% em conflito → pula
+    const freeSet=new Set(sp.livres);
+    const area=ids.length ? (s.locais||[]).filter(l=>freeSet.has(l.id)).reduce((a,l)=>a+l.q,0) : s.area;
+    if(sp.conf.length) restr++;
+    COMP_SEL.push({cid:s.cid, idx:s.idx, area, q:0, locais:ids.length?sp.livres:null,
+      desc:s.desc, tipo:s.tipo, unidade:s.unidade, coef:+s.coef, rs_unit:+s.rs_unit, compdesc:s.compdesc});
+    added++;
+  });
+  const semC=(d.resumo&&d.resumo.sem_composicao)||[];
+  MASSA=null; MASSA_SEL=new Set();
+  ORCFONTE='composicao'; drawModal();   // troca pra fonte composição e mostra a cesta resumida
+  toast(added+' insumos de '+(tipo==='mo'?'mão de obra':'material')+' na verba'+(restr?' · '+restr+' restringidos (locais já usados)':'')+(skip?' · '+skip+' já na cesta':'')+(semC.length?' · ⚠️ '+semC.length+' sem composição ignoradas':'')+'. Salve a verba por composição.');
 }
 // expandir/recolher os painéis avançados (ficam fechados por padrão p/ não poluir)
 function massaToggle(){ const p=document.getElementById('massaPanel'), b=document.getElementById('massaBtn'); if(!p)return;

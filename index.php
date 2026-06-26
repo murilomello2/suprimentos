@@ -432,31 +432,40 @@ function showView(v){
 async function renderAudit(){
   const box=document.getElementById('auditwrap');
   box.innerHTML='<div class="empty">Rodando auditoria na base…</div>';
-  let d;
-  try{ d=await (await fetch('actions/audit_orcamento.php')).json(); }
+  let d,u;
+  try{
+    d=await (await fetch('actions/audit_orcamento.php')).json();
+    u=await (await fetch('actions/verba_usos.php?_='+Date.now())).json();
+  }
   catch(e){ box.innerHTML='<div class="empty">Falha: '+esc(e.message)+'</div>'; return; }
   if(d.error){ box.innerHTML='<div class="empty">Erro: '+esc(d.error)+'</div>'; return; }
+  if(u.error){ box.innerHTML='<div class="empty">Erro (usos): '+esc(u.error)+'</div>'; return; }
+  const dups=(u&&u.duplicatas)||[];
+  const inflado=dups.reduce((s,x)=>s+(x.valor||0)*((x.n||1)-1),0);
   const pct=d.cobertura_distinta_pct_folhas;
   let html=`<div class="kpis" style="padding:0 0 14px">
     <div class="kpi"><div class="v gold">${pct}%</div><div class="l">Cobertura real (analítico, distinto)</div></div>
     <div class="kpi"><div class="v">${BRL(d.valor_coberto_distinto)}</div><div class="l">de ${BRL(d.total_leaf)} em folhas</div></div>
-    <div class="kpi"><div class="v ${d.linhas_duplicadas?'alert':''}">${d.linhas_duplicadas}</div><div class="l">Linhas duplicadas</div></div>
-    <div class="kpi"><div class="v ${d.valor_inflado_por_dup?'alert':''}">${BRL(d.valor_inflado_por_dup)}</div><div class="l">Verba inflada por duplicação</div></div>
-    <div class="kpi"><div class="v">${d.composicao_itens}</div><div class="l">Itens por composição (à parte)</div></div>
+    <div class="kpi"><div class="v ${dups.length?'alert':''}">${dups.length}</div><div class="l">Linhas em 2+ itens (analítico + composição)</div></div>
+    <div class="kpi"><div class="v ${inflado?'alert':''}">${BRL(inflado)}</div><div class="l">Verba inflada por duplicação</div></div>
+    <div class="kpi"><div class="v">${d.composicao_itens}</div><div class="l">Itens por composição</div></div>
   </div>`;
-  if(!d.duplicatas.length){
+  if(!dups.length){
     html+='<div class="panel" style="padding:18px 16px"><b style="color:var(--ok)">✓ Sem duplicação.</b> Cada linha do orçamento está em no máximo um item — a verba não está contada em dobro.</div>';
   } else {
-    html+='<div class="note">Cada linha abaixo compõe a verba de 2+ itens (double-count). Deixe em <b>um</b> item e clique <b>“remover daqui”</b> nos outros — a verba do item recalcula na hora.</div>';
+    html+='<div class="note">Cada linha abaixo compõe a verba de 2+ itens (conta em dobro). Deixe em <b>um</b>: nos usos <b>analíticos</b> clique “remover daqui”; nos que usam por <b>composição</b>, abra o item e ajuste os locais.</div>';
     html+='<div class="wrap" style="margin:0"><table><thead><tr><th>Linha do orçamento</th><th>R$ × usos</th><th>Itens que a usam</th></tr></thead><tbody>';
-    for(const dup of d.duplicatas){
+    for(const dup of dups){
       html+=`<tr>
         <td><div class="svc">${esc((dup.descricao||'').slice(0,90))}</div><div class="svc-sub">${esc(dup.path||'')}</div></td>
         <td class="money">${BRL(dup.valor)} <span class="muted">×${dup.n}</span></td>
-        <td>${dup.itens.map(it=>`<div style="display:flex;align-items:center;gap:8px;padding:3px 0">
-          <span class="tp-chip tp-mat-mo">${esc(it.grupo||'')}</span><span style="flex:1">${esc(it.nome)}</span>
-          <button class="btn-ghost" style="padding:3px 9px;font-size:12px;color:var(--pend)" onclick="auditRemover(${it.ordem},${dup.id})">remover daqui</button>
-        </div>`).join('')}</td></tr>`;
+        <td>${dup.itens.map(it=>{ const vias=it.vias||[]; const ana=vias.some(v=>v==='analítico'); const comp=vias.some(v=>v.indexOf('composição')===0);
+          return `<div style="display:flex;align-items:center;gap:8px;padding:3px 0">
+          <span class="tp-chip ${comp&&!ana?'tp-mat-mo':'tp-mat'}">${ana&&comp?'ambos':comp?'composição':'analítico'}</span>
+          <span style="flex:1">${esc(it.nome)} <span class="muted" style="font-size:11px">· ${esc(vias.join(' · '))}</span></span>
+          ${ana?`<button class="btn-ghost" style="padding:3px 9px;font-size:12px;color:var(--pend)" onclick="auditRemover(${it.ordem},${dup.id})">remover daqui</button>`
+               :`<button class="btn-ghost" style="padding:3px 9px;font-size:12px" onclick="openModal(${it.ordem})">abrir item</button>`}
+        </div>`;}).join('')}</td></tr>`;
     }
     html+='</tbody></table></div>';
   }
@@ -527,7 +536,7 @@ async function auditRemover(ordem,lineId){
       body:JSON.stringify({ordem,campos:{orcamento_refs:novo},me:EU&&EU.bitrix_id})})).json();
     if(d.error){toast('Erro: '+d.error);return;}
   }catch(e){toast('Falha ao salvar');return;}
-  await load(); renderAudit(); toast('Linha removida de '+it.nome);
+  VERBA_USOS=null; await load(); renderAudit(); toast('Linha removida de '+it.nome);
 }
 
 /* ---------- matriz ---------- */
@@ -1176,7 +1185,7 @@ function orcTab(i){
   return h;
 }
 let ORCFONTE='analitico';
-function orcEditar(){ EDITO=true; ORCFONTE=(CUR.verba_metodo==='composicao'?'composicao':'analitico'); COMP_SEL=(CUR.composicao_sel||[]).map(s=>({...s})); COMP_DATA=null; drawModal(); }
+function orcEditar(){ EDITO=true; VERBA_USOS=null; ORCFONTE=(CUR.verba_metodo==='composicao'?'composicao':'analitico'); COMP_SEL=(CUR.composicao_sel||[]).map(s=>({...s})); COMP_DATA=null; drawModal(); }
 function orcCancelar(){ EDITO=false; drawModal(); }
 async function orcLoadLastChange(ordem){
   const box=document.getElementById('orcLastChange'); if(!box)return;
@@ -1219,12 +1228,18 @@ function orcRenderFonte(){
     box.innerHTML=`
       <div class="box" style="background:#fbfdf9;border-color:var(--ok)">
         <div class="bl" style="display:flex;align-items:center;gap:6px"><span class="material-icons" style="font-size:16px;color:var(--dourado)">bolt</span> Busca em massa (vários termos)</div>
-        <div class="muted" style="font-size:11.5px;margin:2px 0 6px">Pra itens com muitos insumos (ex.: tubos e conexões). Edite os termos, busque, confira por grupo e adicione tudo de uma vez.</div>
+        <div class="muted" style="font-size:11.5px;margin:2px 0 6px">Pra itens com muitos insumos. Use um atalho por fornecedor (ou edite os termos), busque, confira por <b>material</b> e adicione tudo de uma vez. Linhas já usadas em outro item aparecem 🔒 travadas.</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;align-items:center">
+          <span class="muted" style="font-size:11.5px">Atalho:</span>
+          <button class="btn-ghost" style="padding:5px 10px" onclick="massaPreset('pvc')">💧 PVC e CPVC</button>
+          <button class="btn-ghost" style="padding:5px 10px" onclick="massaPreset('pex')">🔵 PEX</button>
+          <button class="btn-ghost" style="padding:5px 10px" onclick="massaPreset('metal')">🔧 Registros / Metais</button>
+        </div>
         <textarea id="massaTermos" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px;min-height:40px" placeholder="tubo, luva, joelho, …">tubo, luva, joelho, cotovelo, junção, conexão, tê, adaptador, redução, niple, bucha, tampão</textarea>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;align-items:center">
-          <select id="massaEscopo" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12px"><option value="hidr">Só Instalações (hidr/sanit)</option><option value="tudo">Orçamento inteiro</option></select>
-          <button class="btn-ghost" style="padding:6px 10px" onclick="massaPreset()">💧 Tubos e conexões</button>
-          <button class="btn-prim" style="padding:6px 12px" onclick="massaBuscar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">search</span> Buscar em massa</button>
+          <select id="massaEscopo" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12px"><option value="hidr">Escopo: Instalações (hidr/sanit)</option><option value="tudo">Escopo: orçamento inteiro</option></select>
+          <select id="massaMaterial" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12px"><option value="">Todos os materiais</option><option value="pvc,cpvc">Só PVC + CPVC</option><option value="pex">Só PEX</option><option value="metal">Só Metais/Registros</option><option value="cobre">Só Cobre</option></select>
+          <button class="btn-prim" style="padding:6px 12px" onclick="massaBuscar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">search</span> Buscar</button>
         </div>
         <div id="massaRes" style="margin-top:8px"></div>
       </div>
@@ -1271,6 +1286,7 @@ async function orcShowCurrent(i){
 }
 async function orcLoadTree(){
   const box=document.getElementById('orcTree'); if(!box)return;
+  await loadVerbaUsos();   // pra travar as linhas já usadas em outro item
   const d=await (await fetch('actions/orcamento.php')).json();
   ORC_NODES=(d.linhas||[]).map(n=>({...n,expanded:false}));
   orcRenderTree();
@@ -1280,10 +1296,14 @@ function orcRenderTree(){
   box.innerHTML=ORC_NODES.map((n,ix)=>{
     const ind=(n.depth-1)*16;
     const car=n.expansivel?`<span class="caret material-icons" onclick="orcExpand(${ix})">${n.expanded?'expand_more':'chevron_right'}</span>`:'<span class="caret-sp"></span>';
-    const chk=n.folha?`<span class="material-icons chk" onclick="orcToggleSel(${n.id})" style="color:${ORC_SEL.has(n.id)?'var(--ok)':'var(--muted)'}">${ORC_SEL.has(n.id)?'check_box':'check_box_outline_blank'}</span>`:'<span class="caret-sp"></span>';
-    return `<div class="tnode ${n.folha?'':'tparent'}" style="padding-left:${ind}px">
+    const uso=n.folha?usadoPorOutro(n.id):[];
+    let chk;
+    if(!n.folha) chk='<span class="caret-sp"></span>';
+    else if(uso.length && !ORC_SEL.has(n.id)) chk='<span class="material-icons" style="color:var(--pend);font-size:18px" title="Já usado em outro item — não pode entrar em 2">lock</span>';
+    else chk=`<span class="material-icons chk" onclick="orcToggleSel(${n.id})" style="color:${ORC_SEL.has(n.id)?'var(--ok)':'var(--muted)'}">${ORC_SEL.has(n.id)?'check_box':'check_box_outline_blank'}</span>`;
+    return `<div class="tnode ${n.folha?'':'tparent'}" style="padding-left:${ind}px${(uso.length&&!ORC_SEL.has(n.id))?';opacity:.6':''}">
       ${car}${chk}
-      <span class="tname">${esc(n.descricao)}</span>
+      <span class="tname">${esc(n.descricao)}${uso.length?` <span style="color:var(--pend);font-size:11px">· já em “${esc(uso[0].nome)}”</span>`:''}</span>
       <span class="tval">${n.valor!=null?BRL(n.valor):''}</span>
     </div>`;
   }).join('');
@@ -1299,6 +1319,7 @@ async function orcExpand(ix){
   ORC_NODES.splice(ix+1,0,...filhos); n.expanded=true; orcRenderTree();
 }
 function orcToggleSel(id){
+  if(!ORC_SEL.has(id)){ const u=usadoPorOutro(id); if(u.length){ toast('Essa linha já está na verba de “'+u[0].nome+'” — não pode entrar em 2 itens. Veja a Auditoria.'); return; } }
   const tr=document.getElementById('orcTree'), sr=document.querySelector('#orcSearch .srbox');
   const ts=tr?tr.scrollTop:0, ss=sr?sr.scrollTop:0;
   ORC_SEL.has(id)?ORC_SEL.delete(id):ORC_SEL.add(id);
@@ -1322,6 +1343,7 @@ async function orcBuscar(){
   const box=document.getElementById('orcSearch'); if(!box)return;
   if(q.length<2){ORC_LAST=[];box.innerHTML='';return;}
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
+  await loadVerbaUsos();
   const d=await (await fetch('actions/orcamento.php?q='+encodeURIComponent(q))).json();
   ORC_LAST=d.linhas||[];
   if(!ORC_LAST.length){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Nada encontrado.</div>';return;}
@@ -1330,64 +1352,117 @@ async function orcBuscar(){
 function orcRenderSearch(){
   const box=document.getElementById('orcSearch'); if(!box)return;
   if(!ORC_LAST.length){box.innerHTML='';return;}
-  box.innerHTML='<div class="srbox">'+ORC_LAST.map(l=>{const on=ORC_SEL.has(l.id);return `<div class="pickrow" onclick="orcToggleSel(${l.id})">
+  box.innerHTML='<div class="srbox">'+ORC_LAST.map(l=>{const on=ORC_SEL.has(l.id); const uso=usadoPorOutro(l.id);
+    if(uso.length && !on) return `<div class="pickrow" style="opacity:.6" title="Já usado — não pode entrar em 2 itens">
+      <span class="material-icons" style="font-size:16px;color:var(--pend)">lock</span>
+      <div><div>${esc(l.descricao)}</div><small style="color:var(--pend)">já em “${esc(uso[0].nome)}”${uso.length>1?' +'+(uso.length-1):''} · ${esc(l.path_str||'')}</small></div></div>`;
+    return `<div class="pickrow" onclick="orcToggleSel(${l.id})">
     <span class="material-icons" style="font-size:16px;color:${on?'var(--ok)':'var(--muted)'}">${on?'check_box':'check_box_outline_blank'}</span>
     <div><div>${esc(l.descricao)}</div><small class="muted">${esc(l.path_str||'')} · ${BRL(l.valor)}</small></div></div>`;}).join('')+'</div>';
 }
 async function orcSalvar(){ EDITO=false; await saveAndReload({orcamento_refs:[...ORC_SEL]}); toast('Verba composta ('+ORC_SEL.size+' itens)'); }
 async function orcLimpar(){ EDITO=false; ORC_SEL.clear(); await saveAndReload({orcamento_refs:[]}); toast('Composição limpa'); }
 
-/* ===== Busca em massa (vários termos → linhas-folha agrupadas → adiciona tudo à verba) ===== */
-let MASSA=null, MASSA_SEL=new Set(), MASSA_OPEN=new Set();
-function massaPreset(){ const t=document.getElementById('massaTermos'); if(t) t.value='tubo, luva, joelho, cotovelo, junção, conexão, tê, adaptador, redução, niple, bucha, tampão'; }
+/* ===== Motor de USO da verba (uma linha do orçamento não pode compor 2 itens) ===== */
+let VERBA_USOS=null;
+async function loadVerbaUsos(force){
+  if(VERBA_USOS && !force) return VERBA_USOS;
+  try{ VERBA_USOS=await (await fetch('actions/verba_usos.php?_='+Date.now())).json(); }
+  catch(e){ VERBA_USOS={usos:{},nomes:{}}; }
+  return VERBA_USOS;
+}
+// linha já usada na verba de OUTRO item (≠ o atual)? devolve [{ordem,nome}]
+function usadoPorOutro(lineId){
+  if(!VERBA_USOS||!VERBA_USOS.usos) return [];
+  const ords=VERBA_USOS.usos[lineId]||VERBA_USOS.usos[String(lineId)]||[];
+  const cur=(typeof CUR!=='undefined'&&CUR)?Number(CUR.ordem):-1;
+  return ords.filter(o=>Number(o)!==cur).map(o=>({ordem:o, nome:(VERBA_USOS.nomes&&(VERBA_USOS.nomes[o]||VERBA_USOS.nomes[String(o)]))||('item '+o)}));
+}
+
+/* ===== Busca em massa (vários termos → agrupa por material/peça → adiciona à verba) ===== */
+let MASSA=null, MASSA_SEL=new Set(), MASSA_OPEN=new Set(), MASSA_GROUP='material';
+const MAT_INFO={pvc:{lbl:'PVC',ico:'💧'},cpvc:{lbl:'CPVC (água quente)',ico:'🔥'},pex:{lbl:'PEX',ico:'🔵'},cobre:{lbl:'Cobre',ico:'🟤'},metal:{lbl:'Metais / Registros (ferro, latão)',ico:'🔧'},outro:{lbl:'Outros',ico:'⚪'}};
+const MAT_ORDER=['pvc','cpvc','pex','cobre','metal','outro'];
+const MASSA_PRESETS={
+  pvc:{termos:'tubo, luva, joelho, cotovelo, curva, junção, conexão, tê, adaptador, redução, bucha, niple, cap, tampão, caixa, sifonada, ralo, esgoto', escopo:'hidr', material:'pvc,cpvc'},
+  pex:{termos:'tubo, conexão, luva, joelho, cotovelo, tê, adaptador, curva, redução, registro, kit', escopo:'hidr', material:'pex'},
+  metal:{termos:'registro, misturador, válvula, valvula, adaptador', escopo:'tudo', material:'metal'}
+};
+function massaPreset(k){ const p=MASSA_PRESETS[k]; if(!p)return;
+  const t=document.getElementById('massaTermos'); if(t) t.value=p.termos;
+  const e=document.getElementById('massaEscopo'); if(e) e.value=p.escopo;
+  const m=document.getElementById('massaMaterial'); if(m) m.value=p.material||'';
+  massaBuscar();
+}
 async function massaBuscar(){
   const termos=(document.getElementById('massaTermos')?.value||'').trim();
   const escopo=document.getElementById('massaEscopo')?.value||'hidr';
+  const material=document.getElementById('massaMaterial')?.value||'';
   const box=document.getElementById('massaRes'); if(!box)return;
   if(!termos){ box.innerHTML='<div class="muted" style="font-size:12px">Informe os termos.</div>'; return; }
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
-  let d; try{ d=await (await fetch('actions/orcamento_massa.php?escopo='+escopo+'&termos='+encodeURIComponent(termos))).json(); }
+  await loadVerbaUsos();   // garante o mapa de uso pra travar duplicadas
+  let d; try{ d=await (await fetch('actions/orcamento_massa.php?escopo='+escopo+'&material='+encodeURIComponent(material)+'&termos='+encodeURIComponent(termos))).json(); }
   catch(e){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Falha: '+esc(e.message)+'</div>'; return; }
   if(d.error){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Erro: '+esc(d.error)+'</div>'; return; }
   MASSA=d; MASSA_SEL=new Set(); MASSA_OPEN=new Set();
-  (d.grupos||[]).forEach(g=>g.linhas.forEach(l=>MASSA_SEL.add(l.id)));   // tudo marcado por padrão
+  (d.linhas||[]).forEach(l=>{ if(!usadoPorOutro(l.id).length) MASSA_SEL.add(l.id); });   // marca tudo, MENOS o já usado em outro item
   massaRender();
+}
+function massaGrupos(){
+  const by={};
+  (MASSA.linhas||[]).forEach(l=>{ const k=(MASSA_GROUP==='material'?l.material:l.termo)||'outro'; (by[k]=by[k]||[]).push(l); });
+  let keys=Object.keys(by);
+  if(MASSA_GROUP==='material'){ const oi=x=>{const i=MAT_ORDER.indexOf(x); return i<0?99:i;}; keys.sort((a,b)=>oi(a)-oi(b)); }
+  else keys.sort((a,b)=>by[b].reduce((s,l)=>s+l.valor,0)-by[a].reduce((s,l)=>s+l.valor,0));
+  return keys.map(k=>({key:k, label:(MASSA_GROUP==='material'&&MAT_INFO[k])?(MAT_INFO[k].ico+' '+MAT_INFO[k].lbl):k, linhas:by[k]}));
 }
 function massaRender(){
   const box=document.getElementById('massaRes'); if(!box)return;
-  if(!MASSA||!(MASSA.grupos||[]).length){ box.innerHTML='<div class="muted" style="font-size:12px">Nada encontrado.</div>'; return; }
-  let selN=0, selV=0;
-  const gh=MASSA.grupos.map((g,gi)=>{
-    const ids=g.linhas.map(l=>l.id);
-    const allOn=ids.every(id=>MASSA_SEL.has(id)), someOn=ids.some(id=>MASSA_SEL.has(id));
-    g.linhas.forEach(l=>{ if(MASSA_SEL.has(l.id)){ selN++; selV+=l.valor; } });
-    const open=MASSA_OPEN.has(gi);
+  if(!MASSA||!(MASSA.linhas||[]).length){ box.innerHTML='<div class="muted" style="font-size:12px">Nada encontrado.</div>'; return; }
+  const grupos=massaGrupos(); let selN=0, selV=0;
+  const gh=grupos.map(g=>{
+    const livres=g.linhas.filter(l=>!usadoPorOutro(l.id).length);
+    const allOn=livres.length&&livres.every(l=>MASSA_SEL.has(l.id)), someOn=livres.some(l=>MASSA_SEL.has(l.id));
+    let gV=0, nUsadas=0; g.linhas.forEach(l=>{ if(MASSA_SEL.has(l.id)){selN++;selV+=l.valor;} gV+=l.valor; if(usadoPorOutro(l.id).length)nUsadas++; });
+    const open=MASSA_OPEN.has(g.key);
     return `<div class="tnode tparent">
-      <span class="material-icons chk" onclick="massaToggleGrupo(${gi})" style="color:${allOn?'var(--ok)':someOn?'var(--and)':'var(--muted)'}">${allOn?'check_box':someOn?'indeterminate_check_box':'check_box_outline_blank'}</span>
-      <span class="caret material-icons" onclick="massaExpand(${gi})">${open?'expand_more':'chevron_right'}</span>
-      <span class="tname" style="text-transform:capitalize">${esc(g.termo)} <span class="muted">(${g.n})</span></span>
-      <span class="tval">${BRL(g.valor)}</span></div>`+
-    (open?g.linhas.map(l=>{const on=MASSA_SEL.has(l.id);
+      <span class="material-icons chk" onclick="massaToggleGrupo('${g.key}')" style="color:${allOn?'var(--ok)':someOn?'var(--and)':'var(--muted)'}">${allOn?'check_box':someOn?'indeterminate_check_box':'check_box_outline_blank'}</span>
+      <span class="caret material-icons" onclick="massaExpand('${g.key}')">${open?'expand_more':'chevron_right'}</span>
+      <span class="tname">${esc(g.label)} <span class="muted">(${g.linhas.length}${nUsadas?' · <span style="color:var(--pend)">'+nUsadas+' 🔒</span>':''})</span></span>
+      <span class="tval">${BRL(gV)}</span></div>`+
+    (open?g.linhas.map(l=>{ const uso=usadoPorOutro(l.id), on=MASSA_SEL.has(l.id);
+      if(uso.length) return `<div class="tnode" style="padding-left:30px;opacity:.6" title="Já usado — não pode entrar em 2 itens">
+        <span class="material-icons" style="color:var(--pend);font-size:16px">lock</span>
+        <span class="tname" style="font-size:11px">${esc((l.desc||'').slice(0,44))} <span style="color:var(--pend)">· já em “${esc(uso[0].nome)}”${uso.length>1?' +'+(uso.length-1):''}</span></span>
+        <span class="tval">${BRL(l.valor)}</span></div>`;
       return `<div class="tnode" style="padding-left:30px">
         <span class="material-icons chk" onclick="massaToggleLinha(${l.id})" style="color:${on?'var(--ok)':'var(--muted)'};font-size:16px">${on?'check_box':'check_box_outline_blank'}</span>
-        <span class="tname" style="font-size:11px">${esc((l.desc||'').slice(0,52))} <span class="muted">· ${esc(l.local)}</span></span>
+        <span class="tname" style="font-size:11px">${esc((l.desc||'').slice(0,44))} <span class="muted">· ${esc(l.local)}${MASSA_GROUP==='material'?' · '+esc(l.termo):''}</span></span>
         <span class="tval">${BRL(l.valor)}</span></div>`;}).join(''):'');
   }).join('');
-  box.innerHTML=`<div class="tree" style="max-height:280px">${gh}</div>
-    <div class="box" style="margin-top:6px;padding:8px 12px"><div class="bv"><b>Selecionado: ${selN} linhas · ${BRL(selV)}</b> <span class="muted" style="font-size:11.5px">de ${MASSA.n_linhas} · ${BRL(MASSA.total)}</span></div></div>
+  box.innerHTML=`<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px;font-size:11.5px">
+      <span class="muted">Agrupar por:</span>
+      <button class="btn-ghost" style="padding:3px 9px${MASSA_GROUP==='material'?';background:var(--azul);color:#fff':''}" onclick="massaSetGroup('material')">Material / fornecedor</button>
+      <button class="btn-ghost" style="padding:3px 9px${MASSA_GROUP==='termo'?';background:var(--azul);color:#fff':''}" onclick="massaSetGroup('termo')">Tipo de peça</button></div>
+    <div class="tree" style="max-height:300px">${gh}</div>
+    <div class="box" style="margin-top:6px;padding:8px 12px"><div class="bv"><b>Selecionado: ${selN} linhas · ${BRL(selV)}</b> <span class="muted" style="font-size:11.5px">de ${MASSA.n_linhas} · ${BRL(MASSA.total)} encontrados</span></div></div>
     <div style="margin-top:6px"><button class="btn-prim" onclick="massaAdd()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar à verba (${selN} linhas)</button></div>`;
 }
-function massaToggleGrupo(gi){ const g=MASSA.grupos[gi]; if(!g)return; const allOn=g.linhas.every(l=>MASSA_SEL.has(l.id)); g.linhas.forEach(l=>{ allOn?MASSA_SEL.delete(l.id):MASSA_SEL.add(l.id); }); massaRender(); }
-function massaToggleLinha(id){ MASSA_SEL.has(id)?MASSA_SEL.delete(id):MASSA_SEL.add(id); massaRender(); }
-function massaExpand(gi){ MASSA_OPEN.has(gi)?MASSA_OPEN.delete(gi):MASSA_OPEN.add(gi); massaRender(); }
+function massaSetGroup(g){ MASSA_GROUP=g; MASSA_OPEN=new Set(); massaRender(); }
+function massaToggleGrupo(key){ const g=massaGrupos().find(x=>x.key===key); if(!g)return;
+  const livres=g.linhas.filter(l=>!usadoPorOutro(l.id).length);
+  const allOn=livres.length&&livres.every(l=>MASSA_SEL.has(l.id));
+  livres.forEach(l=>{ allOn?MASSA_SEL.delete(l.id):MASSA_SEL.add(l.id); }); massaRender(); }
+function massaToggleLinha(id){ if(usadoPorOutro(id).length)return; MASSA_SEL.has(id)?MASSA_SEL.delete(id):MASSA_SEL.add(id); massaRender(); }
+function massaExpand(key){ MASSA_OPEN.has(key)?MASSA_OPEN.delete(key):MASSA_OPEN.add(key); massaRender(); }
 function massaAdd(){
-  const add=[...MASSA_SEL]; if(!add.length){ toast('Marque ao menos uma linha'); return; }
-  const usadas=new Set(); DATA.itens.forEach(i=>{ if(i.ordem!=CUR.ordem)(i.orcamento_refs||[]).forEach(id=>usadas.add(Number(id))); });
-  const dups=add.filter(id=>usadas.has(id)).length;
+  const add=[...MASSA_SEL].filter(id=>!usadoPorOutro(id).length);   // nunca adiciona linha travada
+  if(!add.length){ toast('Marque ao menos uma linha livre'); return; }
   add.forEach(id=>ORC_SEL.add(id));
   orcRenderSel();
   MASSA=null; MASSA_SEL=new Set(); const box=document.getElementById('massaRes'); if(box) box.innerHTML='';
-  toast(add.length+' linhas adicionadas à verba'+(dups?(' · ⚠️ '+dups+' já estavam em outro item — veja a Auditoria'):'')+'. Clique em Salvar verba.');
+  toast(add.length+' linhas adicionadas à verba. Clique em Salvar verba.');
 }
 
 /* ----- Composição — CESTA de insumos (de 1+ composições): verba = soma do que você marcar ----- */
@@ -1662,6 +1737,7 @@ async function saveAndReload(campos){
     const d=await (await fetch('actions/item_update.php',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({ordem:CUR.ordem,campos,me:EU&&EU.bitrix_id})})).json();
     if(d.error){toast('Erro: '+d.error);return;}
+    VERBA_USOS=null;            // verba mudou → recarrega o mapa de uso na próxima leitura
     await load();
     CUR=byOrdem(CUR.ordem); drawModal();
   }catch(e){toast('Falha ao salvar');}

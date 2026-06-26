@@ -1220,10 +1220,26 @@ function orcRenderFonte(){
   const box=document.getElementById('orcFonteBox'); if(!box)return;
   if(ORCFONTE==='composicao'){
     box.innerHTML=`
-      <div class="fld"><label>Buscar composição (ex.: contrapiso, alvenaria, concreto) — marque os insumos que entram na verba</label>
+      <div class="fld"><label>Buscar composição por nome (ex.: contrapiso, alvenaria) — marque os insumos</label>
         <div class="search" style="border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
           <input id="compQ" placeholder="digite o serviço…" oninput="compBuscar()"></div></div>
       <div id="compSearch"></div>
+      <div style="margin:10px 0 0"><button class="btn-ghost" id="insMassaBtn" onclick="insMassaToggle()" style="padding:6px 11px;font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--dourado)">groups</span> Busca em massa por insumo <span class="material-icons mtcaret" style="font-size:16px;vertical-align:-3px">expand_more</span></button></div>
+      <div id="insMassaPanel" style="display:none;margin-top:8px">
+        <div class="box" style="background:#fbfdf9;border-color:var(--ok)">
+          <div class="muted" style="font-size:11.5px;margin-bottom:6px">Pra insumo/MO pulverizado em muitas composições (ex.: encanador dentro de cada peça). Busca o insumo e traz de TODAS as composições, agrupado por sistema. Já usado em outro item = 🔒.</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;align-items:center">
+            <span class="muted" style="font-size:11.5px">Atalho:</span>
+            <button class="btn-ghost" style="padding:5px 10px" onclick="insMassaPreset('encanador')">👷 MO hidráulica (encanador)</button>
+            <button class="btn-ghost" style="padding:5px 10px" onclick="insMassaPreset('eletricista')">⚡ MO elétrica (eletricista)</button>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input id="insMassaTermos" style="flex:1;min-width:170px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px" placeholder="ex.: encanador">
+            <button class="btn-prim" style="padding:6px 12px" onclick="insMassaBuscar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">search</span> Buscar</button>
+          </div>
+          <div id="insMassaRes" style="margin-top:8px"></div>
+        </div>
+      </div>
       <div id="compDetail"></div>
       <div id="compBasket" style="margin-top:8px"></div>
       <div id="compTotals"></div>`;
@@ -1621,24 +1637,40 @@ function compToggleInsumo(ix){
   if(sp.conf.length) toast(sp.conf.length+' local(is) já em “'+(sp.items[0]||'')+'” não entraram neste insumo.');
   compRenderDetail(); compRenderBasket();
 }
+let COMP_BASKET_GROUPS=[];
+function compRemoverGrupo(i){ const g=COMP_BASKET_GROUPS[i]; if(!g)return; COMP_SEL=COMP_SEL.filter(s=>!(s.desc===g.desc&&s.tipo===g.tipo)); compRenderDetail(); compRenderBasket(); }
 function compRenderBasket(){
   const box=document.getElementById('compBasket'), tot=document.getElementById('compTotals');
   if(!box)return;
   if(!COMP_SEL.length){ box.innerHTML='<div class="muted" style="font-size:12px;padding:6px 2px">Nenhum insumo na verba ainda — marque insumos das composições acima (de quantas composições quiser).</div>'; if(tot)tot.innerHTML=''; return; }
   let vmat=0,vmo=0,qval=0,qun='';
-  box.innerHTML='<div class="bl" style="margin-bottom:4px">Verba composta destes insumos</div>'+COMP_SEL.map((s,k)=>{
-    const custo=(s.area||0)*(s.coef||0)*(s.rs_unit||0); if(s.tipo==='mo')vmo+=custo; else vmat+=custo;
-    if(s.q){ qval+=(s.area||0)*(s.coef||0); if(!qun)qun=s.unidade; }
-    return `<div class="pickrow" style="gap:8px;align-items:center">
-      <span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
-      <div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.desc)}</div>
-        <small class="muted">${esc((s.compdesc||'').slice(0,38))} · ${QNUM(s.coef)}×R$${QNUM(s.rs_unit)}</small></div>
-      <input type="number" step="any" style="width:84px;border:1px solid var(--line);border-radius:7px;padding:4px 6px" value="${s.area}" oninput="COMP_SEL[${k}].area=parseFloat(this.value)||0;compRenderBasket()" title="área/quantidade">
-      <span class="money" style="min-width:88px;text-align:right">${BRL(custo)}</span>
-      <label class="ckl" style="font-size:11px" title="usar pro quantitativo"><input type="checkbox" ${s.q?'checked':''} onchange="COMP_SEL[${k}].q=this.checked;compRenderBasket()"> qtd</label>
-      <span class="material-icons" style="cursor:pointer;color:var(--pend);font-size:18px" onclick="COMP_SEL.splice(${k},1);compRenderDetail();compRenderBasket()" title="remover">close</span>
-    </div>`;
-  }).join('');
+  COMP_SEL.forEach(s=>{ const c=(s.area||0)*(s.coef||0)*(s.rs_unit||0); if(s.tipo==='mo')vmo+=c; else vmat+=c; if(s.q){ qval+=(s.area||0)*(s.coef||0); if(!qun)qun=s.unidade; } });
+  if(COMP_SEL.length>25){
+    // RESUMO: muitos insumos (ex.: 364 encanadores) — agrupa por tipo/descrição pra não virar lista gigante
+    const by={}; COMP_SEL.forEach(s=>{ const key=s.desc+'|'+s.tipo; if(!by[key])by[key]={desc:s.desc,tipo:s.tipo,n:0,custo:0}; by[key].n++; by[key].custo+=(s.area||0)*(s.coef||0)*(s.rs_unit||0); });
+    COMP_BASKET_GROUPS=Object.values(by).sort((a,b)=>b.custo-a.custo);
+    box.innerHTML=`<div class="bl" style="margin-bottom:4px">Verba composta — ${COMP_SEL.length} insumos (resumo)</div>`+
+      COMP_BASKET_GROUPS.map((g,i)=>`<div class="pickrow" style="gap:8px;align-items:center">
+        <span class="badge-tp ${g.tipo}">${g.tipo==='mo'?'MO':'MAT'}</span>
+        <div style="flex:1;min-width:0">${esc(g.desc)} <span class="muted">· de ${g.n} composições</span></div>
+        <span class="money" style="min-width:96px;text-align:right">${BRL(g.custo)}</span>
+        <span class="material-icons" style="cursor:pointer;color:var(--pend);font-size:18px" onclick="compRemoverGrupo(${i})" title="remover todos deste tipo">close</span>
+      </div>`).join('')+
+      `<div class="muted" style="font-size:11px;margin-top:4px">Resumido (muitos insumos). Pra ajustar local/área de um específico, abra a composição dele na busca acima.</div>`;
+  } else {
+    box.innerHTML='<div class="bl" style="margin-bottom:4px">Verba composta destes insumos</div>'+COMP_SEL.map((s,k)=>{
+      const custo=(s.area||0)*(s.coef||0)*(s.rs_unit||0);
+      return `<div class="pickrow" style="gap:8px;align-items:center">
+        <span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
+        <div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.desc)}</div>
+          <small class="muted">${esc((s.compdesc||'').slice(0,38))} · ${QNUM(s.coef)}×R$${QNUM(s.rs_unit)}</small></div>
+        <input type="number" step="any" style="width:84px;border:1px solid var(--line);border-radius:7px;padding:4px 6px" value="${s.area}" oninput="COMP_SEL[${k}].area=parseFloat(this.value)||0;compRenderBasket()" title="área/quantidade">
+        <span class="money" style="min-width:88px;text-align:right">${BRL(custo)}</span>
+        <label class="ckl" style="font-size:11px" title="usar pro quantitativo"><input type="checkbox" ${s.q?'checked':''} onchange="COMP_SEL[${k}].q=this.checked;compRenderBasket()"> qtd</label>
+        <span class="material-icons" style="cursor:pointer;color:var(--pend);font-size:18px" onclick="COMP_SEL.splice(${k},1);compRenderDetail();compRenderBasket()" title="remover">close</span>
+      </div>`;
+    }).join('');
+  }
   if(tot) tot.innerHTML=`<div class="box" style="margin-top:8px"><div class="bv">
       <b>Material:</b> ${BRL(vmat)} &nbsp;·&nbsp; <b>MO:</b> ${BRL(vmo)} &nbsp;·&nbsp; <b>Total verba:</b> ${BRL(vmat+vmo)}<br>
       <span class="muted" style="font-size:12px">Quantitativo: ${qval>0?QNUM(qval)+' '+esc(qun):'— (marque "qtd" em algum insumo)'}</span></div></div>
@@ -1654,6 +1686,79 @@ async function compSalvar(){
   COMP_SEL=validos; EDITO=false;
   await saveAndReload({composicao_sel: COMP_SEL.map(s=>({cid:s.cid, idx:s.idx, area:s.area, q:s.q?1:0, locais:s.locais||null}))});
   toast('Verba por composição salva ('+COMP_SEL.length+' insumo(s))'+(removidos?' · '+removidos+' já usado(s) removido(s)':''));
+}
+
+/* ===== Busca em massa por INSUMO (MO/insumo pulverizado em muitas composições) ===== */
+let INSMASSA=null, INSMASSA_SEL=new Set(), INSMASSA_OPEN=new Set();
+function insMassaToggle(){ const p=document.getElementById('insMassaPanel'), b=document.getElementById('insMassaBtn'); if(!p)return;
+  const open=p.style.display==='none'; p.style.display=open?'block':'none';
+  const ic=b&&b.querySelector('.mtcaret'); if(ic) ic.textContent=open?'expand_less':'expand_more';
+}
+function insMassaPreset(k){ const t=document.getElementById('insMassaTermos'); if(t) t.value=k; insMassaBuscar(); }
+function insMassaKey(m){ return m.cid+'#'+m.idx; }
+function insMassaFully(m){ const ids=m.locais.map(l=>l.id); const sp=compInsumoSplit(m.cid,m.idx,ids); return (ids.length>0 && sp.livres.length===0); }
+function insMassaGrupos(){ const by={}; (INSMASSA.matches||[]).forEach(m=>{ (by[m.sistema]=by[m.sistema]||[]).push(m); });
+  return Object.keys(by).sort((a,b)=>by[b].reduce((s,m)=>s+m.valor,0)-by[a].reduce((s,m)=>s+m.valor,0)).map(k=>({sis:k, matches:by[k]})); }
+async function insMassaBuscar(){
+  const termos=(document.getElementById('insMassaTermos')?.value||'').trim();
+  const box=document.getElementById('insMassaRes'); if(!box)return;
+  if(!termos){ box.innerHTML='<div class="muted" style="font-size:12px">Informe o insumo (ex.: encanador).</div>'; return; }
+  box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
+  await loadVerbaUsos();
+  let d; try{ d=await (await fetch('actions/composicao_insumo_massa.php?termos='+encodeURIComponent(termos))).json(); }
+  catch(e){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Falha: '+esc(e.message)+'</div>'; return; }
+  if(d.error){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Erro: '+esc(d.error)+'</div>'; return; }
+  INSMASSA=d; INSMASSA_OPEN=new Set(); INSMASSA_SEL=new Set();
+  (d.matches||[]).forEach(m=>{ if(!insMassaFully(m)) INSMASSA_SEL.add(insMassaKey(m)); });   // marca tudo, menos o já usado em outro item
+  insMassaRender();
+}
+function insMassaRender(){
+  const box=document.getElementById('insMassaRes'); if(!box)return;
+  if(!INSMASSA||!(INSMASSA.matches||[]).length){ box.innerHTML='<div class="muted" style="font-size:12px">Nada encontrado.</div>'; return; }
+  const grupos=insMassaGrupos(); let selN=0, selV=0;
+  const gh=grupos.map((g,gi)=>{
+    const livres=g.matches.filter(m=>!insMassaFully(m));
+    const allOn=livres.length&&livres.every(m=>INSMASSA_SEL.has(insMassaKey(m))), someOn=livres.some(m=>INSMASSA_SEL.has(insMassaKey(m)));
+    let gV=0,nBloq=0; g.matches.forEach(m=>{ if(INSMASSA_SEL.has(insMassaKey(m))){selN++;selV+=m.valor;} gV+=m.valor; if(insMassaFully(m))nBloq++; });
+    const open=INSMASSA_OPEN.has(g.sis);
+    return `<div class="tnode tparent">
+      <span class="material-icons chk" onclick="insMassaToggleGrupo(${gi})" style="color:${allOn?'var(--ok)':someOn?'var(--and)':'var(--muted)'}">${allOn?'check_box':someOn?'indeterminate_check_box':'check_box_outline_blank'}</span>
+      <span class="caret material-icons" onclick="insMassaExpand(${gi})">${open?'expand_more':'chevron_right'}</span>
+      <span class="tname">${esc(g.sis)} <span class="muted">(${g.matches.length}${nBloq?' · <span style="color:var(--pend)">'+nBloq+' 🔒</span>':''})</span></span>
+      <span class="tval">${BRL(gV)}</span></div>`+
+    (open?g.matches.map(m=>{ const on=INSMASSA_SEL.has(insMassaKey(m));
+      if(insMassaFully(m)) return `<div class="tnode" style="padding-left:30px;opacity:.6"><span class="material-icons" style="color:var(--pend);font-size:16px">lock</span>
+        <span class="tname" style="font-size:11px">${esc(m.ins)} <span class="muted">· ${esc((m.comp||'').slice(0,28))}</span> <span style="color:var(--pend)">· já em outro item</span></span><span class="tval">${BRL(m.valor)}</span></div>`;
+      return `<div class="tnode" style="padding-left:30px"><span class="material-icons chk" onclick="insMassaToggleLinha('${insMassaKey(m)}')" style="color:${on?'var(--ok)':'var(--muted)'};font-size:16px">${on?'check_box':'check_box_outline_blank'}</span>
+        <span class="tname" style="font-size:11px"><span class="badge-tp ${m.tipo}">${m.tipo==='mo'?'MO':'MAT'}</span> ${esc(m.ins)} <span class="muted">· ${esc((m.comp||'').slice(0,28))} · ${QNUM(m.area)}${esc(m.unidade||'')}×${QNUM(m.coef)}</span></span><span class="tval">${BRL(m.valor)}</span></div>`;
+    }).join(''):'');
+  }).join('');
+  box.innerHTML=`<div class="tree" style="max-height:300px">${gh}</div>
+    <div class="box" style="margin-top:6px;padding:8px 12px"><div class="bv"><b>Selecionado: ${selN} insumos · ${BRL(selV)}</b> <span class="muted" style="font-size:11.5px">de ${INSMASSA.n} · ${BRL(INSMASSA.total)} encontrados</span></div></div>
+    <div style="margin-top:6px"><button class="btn-prim" onclick="insMassaAdd()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar à verba (${selN})</button></div>`;
+}
+function insMassaToggleGrupo(gi){ const g=insMassaGrupos()[gi]; if(!g)return; const livres=g.matches.filter(m=>!insMassaFully(m));
+  const allOn=livres.length&&livres.every(m=>INSMASSA_SEL.has(insMassaKey(m))); livres.forEach(m=>{ allOn?INSMASSA_SEL.delete(insMassaKey(m)):INSMASSA_SEL.add(insMassaKey(m)); }); insMassaRender(); }
+function insMassaToggleLinha(key){ INSMASSA_SEL.has(key)?INSMASSA_SEL.delete(key):INSMASSA_SEL.add(key); insMassaRender(); }
+function insMassaExpand(gi){ const g=insMassaGrupos()[gi]; if(!g)return; INSMASSA_OPEN.has(g.sis)?INSMASSA_OPEN.delete(g.sis):INSMASSA_OPEN.add(g.sis); insMassaRender(); }
+function insMassaAdd(){
+  if(!INSMASSA) return;
+  const sel=(INSMASSA.matches||[]).filter(m=>INSMASSA_SEL.has(insMassaKey(m)));
+  let added=0, restr=0, skip=0;
+  sel.forEach(m=>{
+    if(COMP_SEL.some(s=>s.cid===m.cid&&s.idx===m.idx)){ skip++; return; }       // já está na cesta
+    const ids=m.locais.map(l=>l.id); const sp=compInsumoSplit(m.cid,m.idx,ids);
+    if(ids.length>0 && sp.livres.length===0) return;                            // 100% em conflito → pula
+    const freeSet=new Set(sp.livres);
+    const area=ids.length ? m.locais.filter(l=>freeSet.has(l.id)).reduce((a,l)=>a+l.q,0) : m.area;
+    if(sp.conf.length) restr++;
+    COMP_SEL.push({cid:m.cid, idx:m.idx, area, q:0, locais:ids.length?sp.livres:null,
+      desc:m.ins, tipo:m.tipo, unidade:m.unidade, coef:+m.coef, rs_unit:+m.rs_unit, compdesc:m.comp});
+    added++;
+  });
+  INSMASSA=null; const box=document.getElementById('insMassaRes'); if(box) box.innerHTML='';
+  compRenderBasket();
+  toast(added+' insumos adicionados à verba'+(restr?(' · '+restr+' com locais já usados restringidos'):'')+(skip?(' · '+skip+' já na cesta'):'')+'. Clique em Salvar verba por composição.');
 }
 
 /* ----- Dicionário (template/aprendizado, editável → reflete em obra nova) ----- */

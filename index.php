@@ -1378,6 +1378,25 @@ function usadoPorOutro(lineId){
   const cur=(typeof CUR!=='undefined'&&CUR)?Number(CUR.ordem):-1;
   return ords.filter(o=>Number(o)!==cur).map(o=>({ordem:o, nome:(VERBA_USOS.nomes&&(VERBA_USOS.nomes[o]||VERBA_USOS.nomes[String(o)]))||('item '+o)}));
 }
+// claims detalhadas por linha (trava da CESTA de composição: nível insumo × local)
+function _curOrdem(){ return (typeof CUR!=='undefined'&&CUR)?Number(CUR.ordem):-1; }
+function nomeItem(o){ return (VERBA_USOS&&VERBA_USOS.nomes&&(VERBA_USOS.nomes[o]||VERBA_USOS.nomes[String(o)]))||('item '+o); }
+function lineClaims(L){ return (VERBA_USOS&&VERBA_USOS.linhas&&(VERBA_USOS.linhas[L]||VERBA_USOS.linhas[String(L)]))||{}; }
+// linha tomada INTEIRA (analítico) por outro item → bloqueia QUALQUER insumo dela
+function compLocalBloqueado(L){ const w=((lineClaims(L).w)||[]).filter(o=>Number(o)!==_curOrdem()); return w.length?{item:nomeItem(w[0])}:null; }
+// separa um conjunto de linhas em livres × em conflito p/ o insumo (cid#idx): conflito = linha inteira por outro OU MESMO insumo por outro
+function compInsumoSplit(cid, idx, lineIds){
+  const key=cid+'#'+idx, livres=[], conf=[], items=new Set();
+  (lineIds||[]).forEach(L=>{ const c=lineClaims(L);
+    const w=((c.w)||[]).filter(o=>Number(o)!==_curOrdem());
+    const ins=(((c.i)&&c.i[key])||[]).filter(o=>Number(o)!==_curOrdem());
+    if(w.length||ins.length){ conf.push(L); [...w,...ins].forEach(o=>items.add(o)); } else livres.push(L);
+  });
+  return {livres, conf, items:[...items].map(nomeItem)};
+}
+function compTodasLinhas(){ return ((COMP_LOCAIS&&COMP_LOCAIS.grupos)||[]).flatMap(g=>g.linhas.map(l=>l.id)); }
+function compCandidato(){ const g=(COMP_LOCAIS&&COMP_LOCAIS.grupos)||[]; return g.length?[...COMP_LOCAIS_SEL]:compTodasLinhas(); }
+function somaQtdeDeLinhas(ids){ const set=new Set(ids); let a=0; ((COMP_LOCAIS&&COMP_LOCAIS.grupos)||[]).forEach(g=>g.linhas.forEach(l=>{ if(set.has(l.id)) a+=(l.qtde||0); })); return a; }
 
 /* ===== Busca em massa (vários termos → agrupa por material/peça → adiciona à verba) ===== */
 let MASSA=null, MASSA_SEL=new Set(), MASSA_OPEN=new Set(), MASSA_GROUP='material';
@@ -1481,12 +1500,13 @@ async function compBuscar(){
     <div><div>${esc(c.descricao)}</div><small class="muted">${QNUM(c.qtde_total)} ${esc(c.unidade||'')} · R$${QNUM(c.rs_unit)}/un</small></div></div>`).join('')+'</div>';
 }
 async function compEscolher(id){
+  await loadVerbaUsos();   // pra travar locais/insumos já usados em outro item
   COMP_DATA=await (await fetch('actions/composicao.php?id='+id)).json();
   COMP_LOCAIS=await (await fetch('actions/composicao_locais.php?id='+id)).json();
   const allIds=(COMP_LOCAIS.grupos||[]).flatMap(g=>g.linhas.map(l=>l.id));
   // se já há insumo desta composição na cesta com locais salvos, reusa a seleção; senão, todos os locais
   const ex=COMP_SEL.find(s=>s.cid===id && Array.isArray(s.locais) && s.locais.length);
-  COMP_LOCAIS_SEL=new Set(ex?ex.locais:allIds);
+  COMP_LOCAIS_SEL=new Set((ex?ex.locais:allIds).filter(L=>!compLocalBloqueado(L)));  // não marca locais tomados inteiros por outro item
   compRecalcArea();
   document.getElementById('compSearch').innerHTML='';
   compRenderDetail();
@@ -1497,16 +1517,24 @@ function compRecalcArea(){
   let a=0; grupos.forEach(g=>g.linhas.forEach(l=>{ if(COMP_LOCAIS_SEL.has(l.id)) a+=(l.qtde||0); }));
   COMP_AREA=a;
 }
-function compSyncSelArea(){   // propaga a área/locais pros insumos JÁ marcados desta composição
+function compSyncSelArea(){   // re-restringe a área/locais de cada insumo desta composição (exclui o que já está em outro item)
   if(!COMP_DATA)return;
-  const loc=(COMP_LOCAIS&&COMP_LOCAIS.grupos&&COMP_LOCAIS.grupos.length)?[...COMP_LOCAIS_SEL]:null;
-  COMP_SEL.forEach(s=>{ if(s.cid===COMP_DATA.id){ s.area=COMP_AREA; s.locais=loc; } });
+  const hasLocais=!!(COMP_LOCAIS&&COMP_LOCAIS.grupos&&COMP_LOCAIS.grupos.length);
+  const cand=compCandidato();
+  COMP_SEL.forEach(s=>{ if(s.cid===COMP_DATA.id){
+    if(hasLocais){ const sp=compInsumoSplit(s.cid,s.idx,cand); s.locais=sp.livres; s.area=somaQtdeDeLinhas(sp.livres); }
+    else { s.locais=null; s.area=COMP_AREA; }
+  }});
 }
-function compLocalToggle(id){ COMP_LOCAIS_SEL.has(id)?COMP_LOCAIS_SEL.delete(id):COMP_LOCAIS_SEL.add(id); compRecalcArea(); compSyncSelArea(); compRenderDetail(); compRenderBasket(); }
+function compLocalToggle(id){
+  if(!COMP_LOCAIS_SEL.has(id)){ const b=compLocalBloqueado(id); if(b){ toast('Esse local já está usado INTEIRO em “'+b.item+'” — não dá pra usar aqui.'); return; } }
+  COMP_LOCAIS_SEL.has(id)?COMP_LOCAIS_SEL.delete(id):COMP_LOCAIS_SEL.add(id); compRecalcArea(); compSyncSelArea(); compRenderDetail(); compRenderBasket();
+}
 function compLocalToggleGroup(gi){
   const g=((COMP_LOCAIS&&COMP_LOCAIS.grupos)||[])[gi]; if(!g)return;
-  const allOn=g.linhas.every(l=>COMP_LOCAIS_SEL.has(l.id));
-  g.linhas.forEach(l=>{ allOn?COMP_LOCAIS_SEL.delete(l.id):COMP_LOCAIS_SEL.add(l.id); });
+  const livres=g.linhas.filter(l=>!compLocalBloqueado(l.id));
+  const allOn=livres.length&&livres.every(l=>COMP_LOCAIS_SEL.has(l.id));
+  livres.forEach(l=>{ allOn?COMP_LOCAIS_SEL.delete(l.id):COMP_LOCAIS_SEL.add(l.id); });
   compRecalcArea(); compSyncSelArea(); compRenderDetail(); compRenderBasket();
 }
 function compRenderDetail(){
@@ -1517,12 +1545,17 @@ function compRenderDetail(){
     <div class="fld" style="margin-top:6px;margin-bottom:2px"><label><span class="material-icons" style="font-size:14px;vertical-align:-3px;color:var(--dourado)">place</span> Locais desta composição — desmarque o que NÃO entra (ex.: tirar muros/áreas comuns, manter só a fachada das torres)</label></div>
     <div class="tree" style="max-height:210px">
       ${grupos.map((g,gi)=>{
-        const allOn=g.linhas.every(l=>COMP_LOCAIS_SEL.has(l.id)), someOn=g.linhas.some(l=>COMP_LOCAIS_SEL.has(l.id));
+        const free=g.linhas.filter(l=>!compLocalBloqueado(l.id));
+        const allOn=free.length&&free.every(l=>COMP_LOCAIS_SEL.has(l.id)), someOn=free.some(l=>COMP_LOCAIS_SEL.has(l.id));
         const gico=allOn?'check_box':(someOn?'indeterminate_check_box':'check_box_outline_blank');
+        const nBloq=g.linhas.length-free.length;
         return `<div class="tnode tparent">
           <span class="material-icons chk" onclick="compLocalToggleGroup(${gi})" style="color:${allOn?'var(--ok)':(someOn?'var(--and)':'var(--muted)')}">${gico}</span>
-          <span class="tname">${esc(g.local)}</span><span class="tval">${QNUM(g.qtde)} ${un}</span></div>`+
-          g.linhas.map(l=>{const on=COMP_LOCAIS_SEL.has(l.id);
+          <span class="tname">${esc(g.local)}${nBloq?` <span style="color:var(--pend);font-size:11px">· ${nBloq} 🔒</span>`:''}</span><span class="tval">${QNUM(g.qtde)} ${un}</span></div>`+
+          g.linhas.map(l=>{ const b=compLocalBloqueado(l.id); const on=COMP_LOCAIS_SEL.has(l.id);
+            if(b) return `<div class="tnode" style="padding-left:26px;opacity:.55" title="linha usada inteira em outro item">
+              <span class="material-icons" style="color:var(--pend);font-size:16px">lock</span>
+              <span class="tname" style="font-size:11.5px">${esc(l.sub)} <span style="color:var(--pend)">· já em “${esc(b.item)}”</span></span><span class="tval">${QNUM(l.qtde)} ${un}</span></div>`;
             return `<div class="tnode" style="padding-left:26px">
             <span class="material-icons chk" onclick="compLocalToggle(${l.id})" style="color:${on?'var(--ok)':'var(--muted)'};font-size:17px">${on?'check_box':'check_box_outline_blank'}</span>
             <span class="tname" style="font-size:11.5px">${esc(l.sub)}</span><span class="tval">${QNUM(l.qtde)} ${un}</span></div>`;}).join('');
@@ -1538,23 +1571,33 @@ function compRenderDetail(){
     ${locaisHtml}
     <div class="fld" style="margin:6px 0 2px"><label>Insumos — marque o que entra na verba (a área vem dos locais acima)</label></div>
     <div class="tree" style="max-height:170px">
-      ${c.insumos.map((in_,ix)=>{ const on=COMP_SEL.some(s=>s.cid===c.id&&s.idx===ix);
+      ${(()=>{ const cand=compCandidato(); return c.insumos.map((in_,ix)=>{ const on=COMP_SEL.some(s=>s.cid===c.id&&s.idx===ix);
+        const sp=compInsumoSplit(c.id,ix,cand); const fully=cand.length>0&&sp.livres.length===0; const partial=!fully&&sp.conf.length>0;
+        if(fully&&!on) return `<div class="tnode" style="opacity:.55" title="esse insumo já está em outro item em todos os locais selecionados">
+          <span class="material-icons" style="color:var(--pend)">lock</span>
+          <span class="badge-tp ${in_.tipo}">${in_.tipo==='mo'?'MO':'MAT'}</span>
+          <span class="tname">${esc(in_.descricao)} <span style="color:var(--pend);font-size:11px">· já em “${esc(sp.items[0]||'')}” (todos os locais)</span></span></div>`;
         return `<div class="tnode">
         <span class="material-icons chk" onclick="compToggleInsumo(${ix})" style="color:${on?'var(--ok)':'var(--muted)'}">${on?'check_box':'check_box_outline_blank'}</span>
         <span class="badge-tp ${in_.tipo}">${in_.tipo==='mo'?'MO':'MAT'}</span>
-        <span class="tname">${esc(in_.descricao)}</span>
+        <span class="tname">${esc(in_.descricao)}${partial?` <span style="color:var(--and);font-size:11px">· ⚠️ ${sp.conf.length} local(is) já em “${esc(sp.items[0]||'')}” (não conta)</span>`:''}</span>
         <span class="tval">${QNUM(in_.coef)} ${esc(in_.unidade||'')} × R$${QNUM(in_.rs_unit)}</span>
-      </div>`;}).join('')}
+      </div>`;}).join(''); })()}
     </div>
-    <div class="muted" style="font-size:11.5px;margin-top:4px">Ex.: marque só a MO do reboco. Pode abrir outra composição e marcar mais.</div>`;
+    <div class="muted" style="font-size:11.5px;margin-top:4px">Ex.: marque só a MO do reboco. Insumo/local já usado em outro item aparece 🔒/⚠️ e não conta de novo.</div>`;
 }
 function compToggleInsumo(ix){
   const c=COMP_DATA; const in_=c&&c.insumos[ix]; if(!in_)return;
   const i=COMP_SEL.findIndex(s=>s.cid===c.id&&s.idx===ix);
-  if(i>=0) COMP_SEL.splice(i,1);
-  else COMP_SEL.push({cid:c.id, idx:ix, area:COMP_AREA||c.qtde_total||0, q:!COMP_SEL.some(s=>s.cid===c.id&&s.q),
-    locais:(COMP_LOCAIS&&COMP_LOCAIS.grupos&&COMP_LOCAIS.grupos.length)?[...COMP_LOCAIS_SEL]:null,
+  if(i>=0){ COMP_SEL.splice(i,1); compRenderDetail(); compRenderBasket(); return; }
+  const hasLocais=!!(COMP_LOCAIS&&COMP_LOCAIS.grupos&&COMP_LOCAIS.grupos.length);
+  const cand=compCandidato(); const sp=compInsumoSplit(c.id, ix, cand);
+  if(cand.length>0 && sp.livres.length===0){ toast('“'+in_.descricao+'” já está em “'+(sp.items[0]||'outro item')+'” em todos os locais — não dá pra contar de novo.'); return; }
+  const area=hasLocais?somaQtdeDeLinhas(sp.livres):(COMP_AREA||c.qtde_total||0);
+  COMP_SEL.push({cid:c.id, idx:ix, area, q:!COMP_SEL.some(s=>s.cid===c.id&&s.q),
+    locais:hasLocais?sp.livres:null,
     desc:in_.descricao, tipo:in_.tipo, unidade:in_.unidade, coef:+in_.coef, rs_unit:+in_.rs_unit, compdesc:c.descricao});
+  if(sp.conf.length) toast(sp.conf.length+' local(is) já em “'+(sp.items[0]||'')+'” não entraram neste insumo.');
   compRenderDetail(); compRenderBasket();
 }
 function compRenderBasket(){
@@ -1583,9 +1626,13 @@ function compRenderBasket(){
 }
 async function compSalvar(){
   if(!COMP_SEL.length){toast('Marque ao menos um insumo');return;}
-  EDITO=false;
+  // tira insumos que ficaram sem nenhum local livre (100% já em outro item) — não contam
+  const validos=COMP_SEL.filter(s=>!(Array.isArray(s.locais)&&s.locais.length===0));
+  const removidos=COMP_SEL.length-validos.length;
+  if(!validos.length){ toast('Os insumos marcados já estão em outro item em todos os locais — nada pra salvar sem duplicar.'); return; }
+  COMP_SEL=validos; EDITO=false;
   await saveAndReload({composicao_sel: COMP_SEL.map(s=>({cid:s.cid, idx:s.idx, area:s.area, q:s.q?1:0, locais:s.locais||null}))});
-  toast('Verba por composição salva ('+COMP_SEL.length+' insumo(s))');
+  toast('Verba por composição salva ('+COMP_SEL.length+' insumo(s))'+(removidos?' · '+removidos+' já usado(s) removido(s)':''));
 }
 
 /* ----- Dicionário (template/aprendizado, editável → reflete em obra nova) ----- */

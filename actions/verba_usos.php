@@ -57,8 +57,8 @@ try {
         }
     }
 
-    // mapa achatado pro guard do cliente (qualquer uso) + linhas em conflito real
-    $usosFlat = []; $dupLids = [];
+    // mapa achatado pro guard do cliente (qualquer uso) + claims detalhadas por linha + linhas em conflito real
+    $usosFlat = []; $linhasOut = []; $dupLids = [];
     foreach ($usos as $L => $claims) {
         $items = []; foreach ($claims as $c) $items[$c['ordem']] = 1;
         $usosFlat[$L] = array_map('intval', array_keys($items));
@@ -68,6 +68,12 @@ try {
             if ($c['kind'] === 'A') $whole[$c['ordem']] = 1;
             else { if (!isset($byIns[$c['ins']])) $byIns[$c['ins']] = []; $byIns[$c['ins']][$c['ordem']] = 1; }
         }
+        // claims detalhadas: w = itens que usam a linha INTEIRA (analítico); i = {cid#idx: [itens]} por insumo
+        $entry = [];
+        if ($whole) $entry['w'] = array_map('intval', array_keys($whole));
+        if ($byIns) { $entry['i'] = []; foreach ($byIns as $k => $os) $entry['i'][$k] = array_map('intval', array_keys($os)); }
+        $linhasOut[$L] = $entry;
+
         $conflict = false;
         if (count($whole) >= 2) $conflict = true;
         elseif (count($whole) >= 1 && count($items) >= 2) $conflict = true;
@@ -97,7 +103,7 @@ try {
         usort($duplicatas, function($a,$b){ return $b['valor'] <=> $a['valor']; });
     }
 
-    echo json_encode(['usos'=>$usosFlat, 'nomes'=>$nomes, 'duplicatas'=>$duplicatas, 'n_dups'=>count($duplicatas)], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['usos'=>$usosFlat, 'linhas'=>$linhasOut, 'nomes'=>$nomes, 'duplicatas'=>$duplicatas, 'n_dups'=>count($duplicatas)], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     http_response_code(500);
     echo json_encode(['error'=>$e->getMessage()], JSON_UNESCAPED_UNICODE);

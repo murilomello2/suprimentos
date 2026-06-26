@@ -208,11 +208,22 @@ try {
         if (is_array($sel)) foreach ($sel as $s) {
             $cid = (int)($s['cid'] ?? 0); $idx = (int)($s['idx'] ?? -1); $area = (float)($s['area'] ?? 0);
             // LOCAIS: se vierem linhas do orçamento selecionadas, a ÁREA = soma das qtdes delas (recalcula no servidor)
+            // e monta o DETALHE (por local de 1º nível) p/ mostrar no read-only da verba e do quantitativo.
             $locais = (isset($s['locais']) && is_array($s['locais'])) ? array_values(array_filter(array_map('intval', $s['locais']))) : null;
+            $locais_det = null;
             if ($locais) {
                 $inq = implode(',', array_fill(0, count($locais), '?'));
-                $aq = $pdo->prepare("SELECT COALESCE(SUM(qtde),0) s FROM orcamento_linha WHERE id IN ($inq)");
-                $aq->execute($locais); $area = (float)$aq->fetch()['s'];
+                $lq = $pdo->prepare("SELECT path_str, qtde, unidade FROM orcamento_linha WHERE id IN ($inq)");
+                $lq->execute($locais);
+                $area = 0.0; $grp = []; $lun = '';
+                foreach ($lq->fetchAll() as $ln) {
+                    $area += (float)$ln['qtde']; if ($lun === '') $lun = $ln['unidade'] ?? '';
+                    $parts = array_map('trim', explode('›', (string)($ln['path_str'] ?? '')));
+                    $loc = $parts[0] !== '' ? $parts[0] : '(local)';
+                    $grp[$loc] = ($grp[$loc] ?? 0) + (float)$ln['qtde'];
+                }
+                $locais_det = [];
+                foreach ($grp as $loc => $qq) $locais_det[] = ['local'=>$loc, 'qtde'=>$qq, 'unidade'=>$lun];
             }
             if ($cid <= 0 || $idx < 0 || $area <= 0) continue;
             if (!isset($cache[$cid])) {
@@ -226,7 +237,7 @@ try {
             if (!empty($s['q'])) { $qval += $area * (float)$ins['coef']; if ($qun === '') $qun = $ins['unidade']; }
             $clean[] = ['cid'=>$cid,'idx'=>$idx,'area'=>$area,'q'=>!empty($s['q']),
                         'desc'=>$ins['descricao'],'tipo'=>$ins['tipo'],'unidade'=>$ins['unidade'],
-                        'coef'=>(float)$ins['coef'],'rs_unit'=>(float)$ins['rs_unit'],'locais'=>$locais];
+                        'coef'=>(float)$ins['coef'],'rs_unit'=>(float)$ins['rs_unit'],'locais'=>$locais,'locais_det'=>$locais_det];
         }
         if ($clean) {
             $verba = $vmat + $vmo;

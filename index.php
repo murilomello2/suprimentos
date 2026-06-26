@@ -1066,7 +1066,7 @@ async function quantShowCurrent(i){
       cesta.map(s=>{const qq=(s.area||0)*(s.coef||0); qval+=qq;
         return `<div class="pickrow" style="align-items:flex-start"><span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
           <div style="flex:1;min-width:0"><div>${esc(s.desc)}</div>
-            <small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} = <b>${QNUM(qq)} ${esc(s.unidade||'')}</b>${s.compdesc?' · '+esc(s.compdesc.slice(0,40)):''}</small></div></div>`;}).join('');
+            <small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} = <b>${QNUM(qq)} ${esc(s.unidade||'')}</b>${s.compdesc?' · '+esc(s.compdesc.slice(0,40)):''}</small>${locDet(s.locais_det)}</div></div>`;}).join('');
     if(tot) tot.textContent='Soma: '+QNUM(qval)+' '+(i.quantitativo_unidade||'');
     return;
   }
@@ -1224,14 +1224,15 @@ function orcRenderFonte(){
     orcLoadTree();
   }
 }
+function locDet(det){ return (det&&det.length)?`<div class="muted" style="font-size:11px;margin-top:2px;line-height:1.5"><span class="material-icons" style="font-size:12px;vertical-align:-2px;color:var(--dourado)">place</span> ${det.map(l=>esc(l.local)+' ('+QNUM(l.qtde)+(l.unidade?' '+esc(l.unidade):'')+')').join(' · ')}</div>`:''; }
 async function orcShowCurrent(i){
   // composição: mostra a cesta de insumos (read-only)
   if(i.verba_metodo==='composicao' && (i.composicao_sel||[]).length){
     const el=document.getElementById('orcSel'); if(el){
       let vmat=0,vmo=0;
       el.innerHTML=i.composicao_sel.map(s=>{const c=(s.area||0)*(s.coef||0)*(s.rs_unit||0); if(s.tipo==='mo')vmo+=c;else vmat+=c;
-        return `<div class="pickrow"><span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
-          <div><div>${esc(s.desc)}</div><small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} × R$${QNUM(s.rs_unit)} = ${BRL(c)}${s.q?' · define quantitativo':''}</small></div></div>`;}).join('');
+        return `<div class="pickrow" style="align-items:flex-start"><span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
+          <div style="min-width:0"><div>${esc(s.desc)}</div><small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} × R$${QNUM(s.rs_unit)} = ${BRL(c)}${s.q?' · define quantitativo':''}</small>${locDet(s.locais_det)}</div></div>`;}).join('');
       const t=document.getElementById('orcTotal'); if(t) t.textContent='Material '+BRL(vmat)+' · MO '+BRL(vmo);
     }
     return;

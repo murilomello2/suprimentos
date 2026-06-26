@@ -1211,6 +1211,8 @@ function orcRenderFonte(){
       <div id="compBasket" style="margin-top:8px"></div>
       <div id="compTotals"></div>`;
     compRenderBasket();
+    // já tem composição na cesta? abre a 1ª de cara (com os LOCAIS) p/ ajustar sem precisar re-buscar
+    if(COMP_SEL.length && !COMP_DATA) compEscolher(COMP_SEL[0].cid);
   } else {
     box.innerHTML=`
       <div class="fld"><label>Buscar item por nome</label>

@@ -963,7 +963,7 @@ function quantTab(i){
   h+=`<div class="note">O quantitativo vira aprendizado por tipo de serviço (replicável p/ obra nova) sem alterar obras passadas. Cuidado com unidades diferentes ao somar linhas.</div>`;
   return h;
 }
-function quantEditar(){ EDITQ=true;
+function quantEditar(){ EDITQ=true; VERBA_USOS=null; QNT_NODES=[];
   QNTFONTE=(CUR.quantitativo_fonte==='composicao'?'composicao':(CUR.quantitativo_fonte==='orcamento'?'analitico':'manual'));
   // pré-carrega a seleção atual — inclusive quando o quantitativo foi DERIVADO da verba (refs/cesta moram na verba):
   let refs=CUR.quantitativo_refs||[];
@@ -983,12 +983,13 @@ function qntRenderFonte(){
       <div class="fld"><label>Unidade</label><input id="qntManU" placeholder="m², m³, kg, un…" value="${esc(CUR.quantitativo_unidade||'')}"></div></div>
       <div style="margin-top:6px"><button class="btn-prim" onclick="qntManualSalvar()">Salvar quantitativo manual</button></div>`;
   } else if(QNTFONTE==='analitico'){
-    box.innerHTML=`<div class="fld"><label>Busque e marque as linhas do orçamento (soma as quantidades)</label>
+    box.innerHTML=`<div class="fld"><label>Buscar linha do orçamento por nome (soma as quantidades)</label>
       <div class="search" style="border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
         <input id="qntQ" placeholder="ex.: bloco, contrapiso, concreto laje…" oninput="qntBuscar()"></div></div>
-      <div id="qntSearch"></div><div class="tree" id="qntTree">Carregando…</div>
-      <div style="margin-top:8px"><button class="btn-prim" onclick="qntSalvar()">Salvar do orçamento</button></div>`;
-    qntLoadTree();
+      <div id="qntSearch"></div>
+      <div style="margin:10px 0 0"><button class="btn-ghost" id="qntTreeBtn" onclick="qntTreeToggle()" style="padding:6px 11px;font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">account_tree</span> Navegar a árvore <span class="material-icons mtcaret" style="font-size:16px;vertical-align:-3px">expand_more</span></button></div>
+      <div id="qntTreeWrap" style="display:none;margin-top:8px"><div class="tree" id="qntTree">Carregando…</div></div>
+      <div style="margin-top:12px"><button class="btn-prim" onclick="qntSalvar()">Salvar do orçamento</button></div>`;
   } else {
     box.innerHTML=`<div class="fld"><label>Busque composições e marque os insumos — soma área × consumo (ex.: bloco 14 + bloco 19 = total de blocos)</label>
       <div class="search" style="border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
@@ -1091,6 +1092,11 @@ async function qntLoadTree(){
   QNT_NODES=(d.linhas||[]).map(n=>({...n,expanded:false}));
   qntRenderTree();
 }
+function qntTreeToggle(){ const w=document.getElementById('qntTreeWrap'), b=document.getElementById('qntTreeBtn'); if(!w)return;
+  const open=w.style.display==='none'; w.style.display=open?'block':'none';
+  const ic=b&&b.querySelector('.mtcaret'); if(ic) ic.textContent=open?'expand_less':'expand_more';
+  if(open && !QNT_NODES.length) qntLoadTree();
+}
 function qntRenderTree(){
   const box=document.getElementById('qntTree'); if(!box)return;
   box.innerHTML=QNT_NODES.map((n,ix)=>{
@@ -1185,7 +1191,7 @@ function orcTab(i){
   return h;
 }
 let ORCFONTE='analitico';
-function orcEditar(){ EDITO=true; VERBA_USOS=null; ORCFONTE=(CUR.verba_metodo==='composicao'?'composicao':'analitico'); COMP_SEL=(CUR.composicao_sel||[]).map(s=>({...s})); COMP_DATA=null; drawModal(); }
+function orcEditar(){ EDITO=true; VERBA_USOS=null; ORC_NODES=[]; ORCFONTE=(CUR.verba_metodo==='composicao'?'composicao':'analitico'); COMP_SEL=(CUR.composicao_sel||[]).map(s=>({...s})); COMP_DATA=null; drawModal(); }
 function orcCancelar(){ EDITO=false; drawModal(); }
 async function orcLoadLastChange(ordem){
   const box=document.getElementById('orcLastChange'); if(!box)return;
@@ -1226,32 +1232,37 @@ function orcRenderFonte(){
     if(COMP_SEL.length && !COMP_DATA) compEscolher(COMP_SEL[0].cid);
   } else {
     box.innerHTML=`
-      <div class="box" style="background:#fbfdf9;border-color:var(--ok)">
-        <div class="bl" style="display:flex;align-items:center;gap:6px"><span class="material-icons" style="font-size:16px;color:var(--dourado)">bolt</span> Busca em massa (vários termos)</div>
-        <div class="muted" style="font-size:11.5px;margin:2px 0 6px">Pra itens com muitos insumos. Use um atalho por fornecedor (ou edite os termos), busque, confira por <b>material</b> e adicione tudo de uma vez. Linhas já usadas em outro item aparecem 🔒 travadas.</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;align-items:center">
-          <span class="muted" style="font-size:11.5px">Atalho:</span>
-          <button class="btn-ghost" style="padding:5px 10px" onclick="massaPreset('pvc')">💧 PVC e CPVC</button>
-          <button class="btn-ghost" style="padding:5px 10px" onclick="massaPreset('pex')">🔵 PEX</button>
-          <button class="btn-ghost" style="padding:5px 10px" onclick="massaPreset('metal')">🔧 Registros / Metais</button>
-        </div>
-        <textarea id="massaTermos" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px;min-height:40px" placeholder="tubo, luva, joelho, …">tubo, luva, joelho, cotovelo, junção, conexão, tê, adaptador, redução, niple, bucha, tampão</textarea>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;align-items:center">
-          <select id="massaEscopo" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12px"><option value="hidr">Escopo: Instalações (hidr/sanit)</option><option value="tudo">Escopo: orçamento inteiro</option></select>
-          <select id="massaMaterial" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12px"><option value="">Todos os materiais</option><option value="pvc,cpvc">Só PVC + CPVC</option><option value="pex">Só PEX</option><option value="metal">Só Metais/Registros</option><option value="cobre">Só Cobre</option></select>
-          <button class="btn-prim" style="padding:6px 12px" onclick="massaBuscar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">search</span> Buscar</button>
-        </div>
-        <div id="massaRes" style="margin-top:8px"></div>
-      </div>
-      <div class="fld"><label>Ou buscar item por nome (um a um)</label>
+      <div class="fld"><label>Buscar linha do orçamento por nome</label>
         <div class="search" style="border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
-          <input id="orcQ" placeholder="ex.: concreto pilar torre, aço viga…" oninput="orcBuscar()"></div></div>
+          <input id="orcQ" placeholder="ex.: tubo pvc, concreto pilar, aço viga…" oninput="orcBuscar()"></div></div>
       <div id="orcSearch"></div>
-      <div class="fld" style="margin-bottom:4px"><label>Ou navegue a árvore e marque os itens (folhas)</label></div>
-      <div class="tree" id="orcTree">Carregando…</div>
-      <div style="margin-top:10px;display:flex;gap:8px"><button class="btn-prim" onclick="orcSalvar()">Salvar verba</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0">
+        <button class="btn-ghost" id="massaBtn" onclick="massaToggle()" style="padding:6px 11px;font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--dourado)">bolt</span> Busca em massa <span class="material-icons mtcaret" style="font-size:16px;vertical-align:-3px">expand_more</span></button>
+        <button class="btn-ghost" id="orcTreeBtn" onclick="orcTreeToggle()" style="padding:6px 11px;font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">account_tree</span> Navegar a árvore <span class="material-icons mtcaret" style="font-size:16px;vertical-align:-3px">expand_more</span></button>
+      </div>
+      <div id="massaPanel" style="display:none;margin-top:8px">
+        <div class="box" style="background:#fbfdf9;border-color:var(--ok)">
+          <div class="muted" style="font-size:11.5px;margin-bottom:6px">Pra itens com muitos insumos (ex.: tubos e conexões). Atalho por fornecedor ou edite os termos; confira por <b>material</b> e adicione de uma vez. Já usado em outro item = 🔒.</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;align-items:center">
+            <span class="muted" style="font-size:11.5px">Atalho:</span>
+            <button class="btn-ghost" style="padding:5px 10px" onclick="massaPreset('pvc')">💧 PVC e CPVC</button>
+            <button class="btn-ghost" style="padding:5px 10px" onclick="massaPreset('pex')">🔵 PEX</button>
+            <button class="btn-ghost" style="padding:5px 10px" onclick="massaPreset('metal')">🔧 Registros / Metais</button>
+          </div>
+          <textarea id="massaTermos" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px;min-height:40px" placeholder="tubo, luva, joelho, …">tubo, luva, joelho, cotovelo, junção, conexão, tê, adaptador, redução, niple, bucha, tampão</textarea>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;align-items:center">
+            <select id="massaEscopo" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12px"><option value="hidr">Escopo: Instalações (hidr/sanit)</option><option value="tudo">Escopo: orçamento inteiro</option></select>
+            <select id="massaMaterial" style="border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12px"><option value="">Todos os materiais</option><option value="pvc,cpvc">Só PVC + CPVC</option><option value="pex">Só PEX</option><option value="metal">Só Metais/Registros</option><option value="cobre">Só Cobre</option></select>
+            <button class="btn-prim" style="padding:6px 12px" onclick="massaBuscar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">search</span> Buscar</button>
+          </div>
+          <div id="massaRes" style="margin-top:8px"></div>
+        </div>
+      </div>
+      <div id="orcTreeWrap" style="display:none;margin-top:8px">
+        <div class="tree" id="orcTree">Carregando…</div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px"><button class="btn-prim" onclick="orcSalvar()">Salvar verba</button>
         <button class="btn-ghost" onclick="orcCancelar()">Cancelar</button></div>`;
-    orcLoadTree();
   }
 }
 function locDet(det, todos){ if(!det||!det.length) return '';
@@ -1482,6 +1493,16 @@ function massaAdd(){
   orcRenderSel();
   MASSA=null; MASSA_SEL=new Set(); const box=document.getElementById('massaRes'); if(box) box.innerHTML='';
   toast(add.length+' linhas adicionadas à verba. Clique em Salvar verba.');
+}
+// expandir/recolher os painéis avançados (ficam fechados por padrão p/ não poluir)
+function massaToggle(){ const p=document.getElementById('massaPanel'), b=document.getElementById('massaBtn'); if(!p)return;
+  const open=p.style.display==='none'; p.style.display=open?'block':'none';
+  const ic=b&&b.querySelector('.mtcaret'); if(ic) ic.textContent=open?'expand_less':'expand_more';
+}
+function orcTreeToggle(){ const w=document.getElementById('orcTreeWrap'), b=document.getElementById('orcTreeBtn'); if(!w)return;
+  const open=w.style.display==='none'; w.style.display=open?'block':'none';
+  const ic=b&&b.querySelector('.mtcaret'); if(ic) ic.textContent=open?'expand_less':'expand_more';
+  if(open && !ORC_NODES.length) orcLoadTree();   // carrega a árvore só na 1ª vez que abrir
 }
 
 /* ----- Composição — CESTA de insumos (de 1+ composições): verba = soma do que você marcar ----- */

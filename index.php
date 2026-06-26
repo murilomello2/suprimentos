@@ -1,4 +1,4 @@
-<?php /* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php. */ ?>
+<?php /* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php. (republicado) */ ?>
 <!doctype html>
 <html lang="pt-br">
 <head>

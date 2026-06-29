@@ -63,24 +63,27 @@ try {
             }
             if ($embutido > 0.5) {
                 $flagged[] = ['ordem'=>(int)$r['ordem'], 'nome'=>$r['nome'], 'tipo'=>$r['tipo'], 'classe'=>$classe,
-                              'metodo'=>'analitico', 'issue'=>$issue, 'verba'=>$total, 'embutido'=>$embutido,
+                              'metodo'=>'analitico', 'issue'=>$issue, 'verba'=>$total, 'total'=>$total,
+                              'embutido'=>$embutido, 'pct'=>($total>0 ? round(100*$embutido/$total) : 0),
                               'correto'=>$total - $embutido, 'remover'=>null];
                 $totalEmbutido += $embutido;
             }
         } else {
             // COMPOSIÇÃO: checa os insumos escolhidos
-            $valWrong = 0.0; $remover = [];
+            $valWrong = 0.0; $valAll = 0.0; $remover = [];
             foreach ($csel as $s) {
                 $cid = (int)($s['cid'] ?? 0); $idx = (int)($s['idx'] ?? -1); $area = (float)($s['area'] ?? 0);
                 $ins = $insByCid[$cid][$idx] ?? null; if (!$ins) continue;
+                $v = $area * (float)$ins['coef'] * (float)$ins['rs_unit']; $valAll += $v;
                 $isMo = ($ins['tipo'] === 'mo');
                 $wrong = ($classe === 'material' && $isMo) || ($classe === 'mo' && !$isMo);
-                if ($wrong) { $valWrong += $area * (float)$ins['coef'] * (float)$ins['rs_unit']; $remover[] = ['cid'=>$cid, 'idx'=>$idx]; }
+                if ($wrong) { $valWrong += $v; $remover[] = ['cid'=>$cid, 'idx'=>$idx]; }
             }
             if ($remover) {
                 $flagged[] = ['ordem'=>(int)$r['ordem'], 'nome'=>$r['nome'], 'tipo'=>$r['tipo'], 'classe'=>$classe,
-                              'metodo'=>'composicao', 'issue'=>$issue, 'verba'=>null, 'embutido'=>$valWrong,
-                              'correto'=>null, 'remover'=>$remover];
+                              'metodo'=>'composicao', 'issue'=>$issue, 'verba'=>null, 'total'=>$valAll,
+                              'embutido'=>$valWrong, 'pct'=>($valAll>0 ? round(100*$valWrong/$valAll) : 0),
+                              'correto'=>$valAll - $valWrong, 'remover'=>$remover];
                 $totalEmbutido += $valWrong;
             }
         }

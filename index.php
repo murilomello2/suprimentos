@@ -493,7 +493,7 @@ async function renderAudit(){
       html+=`<tr>
         <td><div class="svc">${esc(f.nome)}</div><div class="svc-sub">${f.metodo==='analitico'?'linha inteira (analítico)':('composição · '+f.remover.length+' insumo(s) do lado errado')}</div></td>
         <td><span class="tp-chip ${f.classe==='material'?'tp-mat':'tp-mat-mo'}">${esc(f.tipo||'—')}</span></td>
-        <td class="money" style="color:var(--pend)">${BRL(f.embutido)} <span class="muted" style="font-size:11px">de ${lado}</span></td>
+        <td class="money" style="color:var(--pend)">${BRL(f.embutido)} <span class="muted" style="font-size:11px">de ${lado} · <b>${f.pct}%</b> de ${BRL(f.total)}</span></td>
         <td><div style="display:flex;gap:6px;justify-content:flex-end">
           <button class="btn-ghost" style="padding:3px 9px;font-size:12px" onclick="auditDetalhar(${f.ordem})"><span class="material-icons" style="font-size:14px;vertical-align:-2px">unfold_more</span> detalhar</button>
           <button class="btn-ghost" style="padding:3px 9px;font-size:12px" onclick="corrigirUm(${f.ordem})">separar</button>
@@ -550,6 +550,7 @@ async function auditDetalhar(ordem){
 }
 function auditDetHtml(d){
   const certo=d.classe==='material'?'material':'mão de obra', errado=d.classe==='material'?'mão de obra':'material';
+  const pctErr=d.total>0?Math.round(100*d.tot_errado/d.total):0;
   const mats=d.insumos.filter(x=>x.tipo!=='mo'), mos=d.insumos.filter(x=>x.tipo==='mo');
   const lin=x=>`<tr style="${x.lado==='errado'?'background:#fff4f4':''}">
       <td style="padding:3px 8px">${esc((x.desc||'').slice(0,46))}</td>
@@ -560,7 +561,7 @@ function auditDetHtml(d){
     <div class="bv" style="font-size:12.5px;margin-bottom:7px">
       Tipo declarado <b>${esc(d.tipo)}</b> · ${d.metodo==='analitico'?'linha inteira':'composição'} · total <b>${BRL(d.total)}</b><br>
       <span style="color:var(--ok)">✓ ${certo} (coerente, FICA): <b>${BRL(d.tot_correto)}</b></span> &nbsp;·&nbsp;
-      <span style="color:var(--pend)">✗ ${errado} (embutido, SAI ao separar): <b>${BRL(d.tot_errado)}</b></span>
+      <span style="color:var(--pend)">✗ ${errado} (embutido, SAI ao separar): <b>${BRL(d.tot_errado)}</b> (<b>${pctErr}%</b> do total)</span>
       ${d.sem_composicao?` &nbsp;·&nbsp; <span class="muted">⚠ ${d.sem_composicao} linha(s) sem composição (não detalhadas)</span>`:''}
     </div>
     <table style="width:100%;border-collapse:collapse;font-size:11.5px">

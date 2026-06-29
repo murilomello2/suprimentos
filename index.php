@@ -432,14 +432,16 @@ function showView(v){
 async function renderAudit(){
   const box=document.getElementById('auditwrap');
   box.innerHTML='<div class="empty">Rodando auditoria na base…</div>';
-  let d,u;
+  let d,u,co;
   try{
     d=await (await fetch('actions/audit_orcamento.php')).json();
     u=await (await fetch('actions/verba_usos.php?_='+Date.now())).json();
+    co=await (await fetch('actions/audit_coerencia.php?_='+Date.now())).json();
   }
   catch(e){ box.innerHTML='<div class="empty">Falha: '+esc(e.message)+'</div>'; return; }
   if(d.error){ box.innerHTML='<div class="empty">Erro: '+esc(d.error)+'</div>'; return; }
   if(u.error){ box.innerHTML='<div class="empty">Erro (usos): '+esc(u.error)+'</div>'; return; }
+  AUDIT_CO = co && !co.error ? co : {flagged:[],n:0,total_embutido:0,n_mat_com_mo:0,n_mo_com_mat:0};
   const dups=(u&&u.duplicatas)||[];
   const inflado=dups.reduce((s,x)=>s+(x.valor||0)*((x.n||1)-1),0);
   const pct=d.cobertura_distinta_pct_folhas;
@@ -469,7 +471,70 @@ async function renderAudit(){
     }
     html+='</tbody></table></div>';
   }
+
+  // ===== Coerência: tipo do item × o que a verba traz =====
+  const co2=AUDIT_CO, flagged=(co2.flagged)||[];
+  html+=`<div class="bl" style="font-size:14px;margin:22px 0 8px;text-transform:none;color:var(--verde-d)">Coerência — tipo do item × o que a verba traz</div>
+    <div class="kpis" style="padding:0 0 12px">
+    <div class="kpi"><div class="v ${flagged.length?'alert':''}">${flagged.length}</div><div class="l">Itens incoerentes (tipo × verba)</div></div>
+    <div class="kpi"><div class="v ${co2.total_embutido?'alert':''}">${BRL(co2.total_embutido)}</div><div class="l">Valor no lado errado (embutido)</div></div>
+    <div class="kpi"><div class="v">${co2.n_mat_com_mo}</div><div class="l">Material com MO embutida</div></div>
+    <div class="kpi"><div class="v">${co2.n_mo_com_mat}</div><div class="l">MO com material embutido</div></div>
+  </div>`;
+  if(!flagged.length){
+    html+='<div class="panel" style="padding:16px"><b style="color:var(--ok)">✓ Tudo coerente.</b> Cada item traz só o que o tipo dele diz (material só material, mão de obra só MO).</div>';
+  } else {
+    html+='<div class="note">Item de <b>material</b> que trouxe <b>mão de obra</b> (ou o contrário) — quase sempre porque pegou a <b>linha inteira</b>. <b>Separar</b> deixa o item só com o lado certo e <b>libera o outro</b> pra ir pro item correto.</div>';
+    if(co2.n_mat_com_mo) html+=`<button class="btn-prim" style="margin:0 8px 10px 0" onclick="corrigirTodosCoerencia('mat_com_mo')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">content_cut</span> Separar TODOS os ${co2.n_mat_com_mo} materiais com MO embutida</button>`;
+    if(co2.n_mo_com_mat) html+=`<button class="btn-prim" style="margin:0 8px 10px 0" onclick="corrigirTodosCoerencia('mo_com_mat')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">content_cut</span> Separar TODOS os ${co2.n_mo_com_mat} MO com material embutido</button>`;
+    html+='<div class="wrap" style="margin:0"><table><thead><tr><th>Item</th><th>Tipo declarado</th><th>Embutido (lado errado)</th><th></th></tr></thead><tbody>';
+    for(const f of flagged){
+      const lado=f.issue==='mat_com_mo'?'MO':'material';
+      html+=`<tr>
+        <td><div class="svc">${esc(f.nome)}</div><div class="svc-sub">${f.metodo==='analitico'?'linha inteira (analítico)':('composição · '+f.remover.length+' insumo(s) do lado errado')}</div></td>
+        <td><span class="tp-chip ${f.classe==='material'?'tp-mat':'tp-mat-mo'}">${esc(f.tipo||'—')}</span></td>
+        <td class="money" style="color:var(--pend)">${BRL(f.embutido)} <span class="muted" style="font-size:11px">de ${lado}</span></td>
+        <td><div style="display:flex;gap:6px;justify-content:flex-end">
+          <button class="btn-ghost" style="padding:3px 9px;font-size:12px" onclick="corrigirUm(${f.ordem})">separar</button>
+          <button class="btn-ghost" style="padding:3px 9px;font-size:12px" onclick="openModal(${f.ordem})">abrir</button></div></td></tr>`;
+    }
+    html+='</tbody></table></div>';
+  }
   box.innerHTML=html;
+}
+let AUDIT_CO=null;
+async function postItem(ordem,campos){ return (await (await fetch('actions/item_update.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ordem,campos,me:EU&&EU.bitrix_id})})).json()); }
+async function corrigirCoerencia(f){
+  if(f.metodo==='analitico'){
+    const d=await (await fetch('actions/separar_mo.php?manter='+f.classe+'&ordem='+f.ordem)).json();
+    if(d.error) return {err:d.error};
+    const sel=(d.composicao_sel||[]).map(s=>({cid:s.cid,idx:s.idx,area:s.area,q:0,locais:s.locais||null}));
+    if(!sel.length) return {err:'linhas sem composição — não separei pra não zerar a verba'};   // TRAVA anti-wipe
+    await postItem(f.ordem,{composicao_sel:sel, orcamento_refs:[]});
+  } else {
+    const it=byOrdem(f.ordem); if(!it) return {err:'item sumiu'};
+    const rem=new Set((f.remover||[]).map(x=>x.cid+'#'+x.idx));
+    const keep=(it.composicao_sel||[]).filter(s=>!rem.has(s.cid+'#'+s.idx)).map(s=>({cid:s.cid,idx:s.idx,area:s.area,q:s.q?1:0,locais:s.locais||null}));
+    await postItem(f.ordem,{composicao_sel:keep});
+  }
+  return {ok:true};
+}
+async function corrigirUm(ordem){
+  const f=(AUDIT_CO&&AUDIT_CO.flagged||[]).find(x=>x.ordem===ordem); if(!f){ toast('recarregue a auditoria'); return; }
+  const lado=f.issue==='mat_com_mo'?'mão de obra':'material';
+  if(!confirm('Separar “'+(byOrdem(ordem)||{}).nome+'”: tira '+BRL(f.embutido)+' de '+lado+' embutido, deixando o item só com o lado certo. Confirmar?')) return;
+  const r=await corrigirCoerencia(f); if(r&&r.err){ toast('Erro: '+r.err); return; }
+  VERBA_USOS=null; await load(); renderAudit(); toast('Separado · '+BRL(f.embutido)+' de '+lado+' liberado.');
+}
+async function corrigirTodosCoerencia(issue){
+  const list=(AUDIT_CO&&AUDIT_CO.flagged||[]).filter(f=>f.issue===issue);
+  if(!list.length){ toast('Nada a corrigir'); return; }
+  const totalLib=list.reduce((a,f)=>a+f.embutido,0), lado=issue==='mat_com_mo'?'mão de obra':'material';
+  if(!confirm('Separar '+list.length+' itens — tira '+BRL(totalLib)+' de '+lado+' embutido no lugar errado, deixando cada item só com o lado certo (vira composição). Confirmar?')) return;
+  const box=document.getElementById('auditwrap'); if(box) box.innerHTML='<div class="empty">Separando '+list.length+' itens…</div>';
+  let ok=0; for(const f of list){ try{ const r=await corrigirCoerencia(f); if(r&&!r.err) ok++; }catch(e){} }
+  VERBA_USOS=null; await load(); renderAudit();
+  toast(ok+'/'+list.length+' itens separados · '+BRL(totalLib)+' de '+lado+' liberados.');
 }
 /* ===== Atualizações (temporária) — feed das últimas curadorias da equipe ===== */
 function fmtDateTime(s){ if(!s)return'—'; const d=new Date(s); if(isNaN(d))return String(s); const p=n=>String(n).padStart(2,'0'); return `${p(d.getDate())}/${p(d.getMonth()+1)} ${p(d.getHours())}:${p(d.getMinutes())}`; }

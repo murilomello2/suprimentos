@@ -13,6 +13,7 @@ require_once __DIR__ . '/../includes/db.php';
 try {
     $pdo = db();
     $ordem = (int)($_GET['ordem'] ?? 0);
+    $manter = ($_GET['manter'] ?? 'material') === 'mo' ? 'mo' : 'material'; // o que FICA no item (o resto é liberado)
     $st = $pdo->prepare("SELECT orcamento_refs FROM radar_item WHERE servico_id=? AND obra_id=1");
     $st->execute([$ordem]);
     $refs = json_decode($st->fetchColumn() ?: '[]', true) ?: [];
@@ -53,7 +54,9 @@ try {
         $locais = array_map(function($l){ return (int)$l['id']; }, $ls);
         $area   = array_sum(array_map(function($l){ return (float)$l['qtde']; }, $ls));
         foreach (($insByCid[$cid] ?? []) as $idx => $ins) {
-            if ($ins['tipo'] === 'mo') continue;   // mantém tudo que NÃO é mão de obra (= material)
+            $isMo = ($ins['tipo'] === 'mo');
+            if ($manter === 'material' && $isMo) continue;   // mantém material (tira MO)
+            if ($manter === 'mo' && !$isMo) continue;        // mantém MO (tira material)
             $val = $area * (float)$ins['coef'] * (float)$ins['rs_unit'];
             $compSel[] = ['cid'=>(int)$cid, 'idx'=>$idx, 'area'=>$area, 'q'=>0, 'locais'=>$locais,
                           'desc'=>$ins['descricao'], 'tipo'=>$ins['tipo'], 'unidade'=>$ins['unidade'],
@@ -62,8 +65,9 @@ try {
         }
     }
 
-    echo json_encode(['composicao_sel'=>$compSel, 'resumo'=>[
-        'verba_antes'=>$verbaAntes, 'verba_depois'=>$verbaDepois, 'mo_liberada'=>$verbaAntes - $verbaDepois,
+    echo json_encode(['composicao_sel'=>$compSel, 'manter'=>$manter, 'resumo'=>[
+        'verba_antes'=>$verbaAntes, 'verba_depois'=>$verbaDepois,
+        'mo_liberada'=>$verbaAntes - $verbaDepois, 'liberada'=>$verbaAntes - $verbaDepois,
         'n_linhas'=>count($linhas), 'n_composicoes'=>count($linhasByCid), 'n_insumos_mat'=>count($compSel),
         'sem_composicao'=>array_values(array_unique($semComp))
     ]], JSON_UNESCAPED_UNICODE);

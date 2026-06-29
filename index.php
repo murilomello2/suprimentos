@@ -495,8 +495,10 @@ async function renderAudit(){
         <td><span class="tp-chip ${f.classe==='material'?'tp-mat':'tp-mat-mo'}">${esc(f.tipo||'—')}</span></td>
         <td class="money" style="color:var(--pend)">${BRL(f.embutido)} <span class="muted" style="font-size:11px">de ${lado}</span></td>
         <td><div style="display:flex;gap:6px;justify-content:flex-end">
+          <button class="btn-ghost" style="padding:3px 9px;font-size:12px" onclick="auditDetalhar(${f.ordem})"><span class="material-icons" style="font-size:14px;vertical-align:-2px">unfold_more</span> detalhar</button>
           <button class="btn-ghost" style="padding:3px 9px;font-size:12px" onclick="corrigirUm(${f.ordem})">separar</button>
-          <button class="btn-ghost" style="padding:3px 9px;font-size:12px" onclick="openModal(${f.ordem})">abrir</button></div></td></tr>`;
+          <button class="btn-ghost" style="padding:3px 9px;font-size:12px" onclick="openModal(${f.ordem})">abrir</button></div></td></tr>
+        <tr id="audet-${f.ordem}" style="display:none"><td colspan="4" style="padding:0;background:#fafbf8"><div class="audet-body"></div></td></tr>`;
     }
     html+='</tbody></table></div>';
   }
@@ -535,6 +537,40 @@ async function corrigirTodosCoerencia(issue){
   let ok=0; for(const f of list){ try{ const r=await corrigirCoerencia(f); if(r&&!r.err) ok++; }catch(e){} }
   VERBA_USOS=null; await load(); renderAudit();
   toast(ok+'/'+list.length+' itens separados · '+BRL(totalLib)+' de '+lado+' liberados.');
+}
+async function auditDetalhar(ordem){
+  const row=document.getElementById('audet-'+ordem); if(!row)return;
+  const show=row.style.display==='none'; row.style.display=show?'table-row':'none';
+  if(!show || row.dataset.loaded) return;
+  const body=row.querySelector('.audet-body'); body.innerHTML='<div class="muted" style="font-size:12px;padding:8px">Detalhando…</div>';
+  let d; try{ d=await (await fetch('actions/audit_detalhe.php?ordem='+ordem)).json(); }
+  catch(e){ body.innerHTML='<div class="muted" style="padding:8px">Falha.</div>'; return; }
+  if(d.error){ body.innerHTML='<div class="muted" style="padding:8px">'+esc(d.error)+'</div>'; return; }
+  body.innerHTML=auditDetHtml(d); row.dataset.loaded='1';
+}
+function auditDetHtml(d){
+  const certo=d.classe==='material'?'material':'mão de obra', errado=d.classe==='material'?'mão de obra':'material';
+  const mats=d.insumos.filter(x=>x.tipo!=='mo'), mos=d.insumos.filter(x=>x.tipo==='mo');
+  const lin=x=>`<tr style="${x.lado==='errado'?'background:#fff4f4':''}">
+      <td style="padding:3px 8px">${esc((x.desc||'').slice(0,46))}</td>
+      <td style="padding:3px 8px;color:var(--muted)">${esc((x.comp||'').slice(0,40))}</td>
+      <td style="padding:3px 8px;text-align:center"><span class="badge-tp ${x.tipo==='mo'?'mo':'material'}">${x.tipo==='mo'?'MO':'MAT'}</span>${x.lado==='errado'?' <span style="color:var(--pend)" title="sairia ao separar">⚠</span>':''}</td>
+      <td style="padding:3px 8px;text-align:right">${BRL(x.valor)}</td></tr>`;
+  return `<div style="padding:10px 12px">
+    <div class="bv" style="font-size:12.5px;margin-bottom:7px">
+      Tipo declarado <b>${esc(d.tipo)}</b> · ${d.metodo==='analitico'?'linha inteira':'composição'} · total <b>${BRL(d.total)}</b><br>
+      <span style="color:var(--ok)">✓ ${certo} (coerente, FICA): <b>${BRL(d.tot_correto)}</b></span> &nbsp;·&nbsp;
+      <span style="color:var(--pend)">✗ ${errado} (embutido, SAI ao separar): <b>${BRL(d.tot_errado)}</b></span>
+      ${d.sem_composicao?` &nbsp;·&nbsp; <span class="muted">⚠ ${d.sem_composicao} linha(s) sem composição (não detalhadas)</span>`:''}
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:11.5px">
+      <thead><tr style="border-bottom:1px solid var(--line)"><th style="text-align:left;padding:3px 8px">Insumo</th><th style="text-align:left;padding:3px 8px">Composição</th><th style="padding:3px 8px">Tipo</th><th style="text-align:right;padding:3px 8px">R$</th></tr></thead>
+      <tbody>
+        ${mats.length?'<tr><td colspan="4" style="padding:4px 8px;font-weight:700;color:var(--verde-d);background:#f3f7ef">MATERIAL — '+BRL(d.tot_material)+'</td></tr>'+mats.map(lin).join(''):''}
+        ${mos.length?'<tr><td colspan="4" style="padding:4px 8px;font-weight:700;color:var(--dourado);background:#fbf7ed">MÃO DE OBRA — '+BRL(d.tot_mo)+'</td></tr>'+mos.map(lin).join(''):''}
+      </tbody></table>
+    <div class="muted" style="font-size:11px;margin-top:5px">Linhas com fundo rosado / ⚠ são o lado <b>errado</b> pro tipo do item — é o que "Separar" remove daqui.</div>
+  </div>`;
 }
 /* ===== Atualizações (temporária) — feed das últimas curadorias da equipe ===== */
 function fmtDateTime(s){ if(!s)return'—'; const d=new Date(s); if(isNaN(d))return String(s); const p=n=>String(n).padStart(2,'0'); return `${p(d.getDate())}/${p(d.getMonth()+1)} ${p(d.getHours())}:${p(d.getMinutes())}`; }

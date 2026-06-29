@@ -73,7 +73,12 @@ try {
     foreach ($matchIns as $m) {
         $comp = $comps[$m['cid']] ?? null; if (!$comp) continue;
         $linhas = $linhasByDesc[$comp['descricao']] ?? [];
-        $locais = array_map(function($l){ return ['id'=>(int)$l['id'], 'q'=>(float)$l['qtde']]; }, $linhas);
+        $locais = array_map(function($l){
+            $parts = array_map('trim', explode('›', (string)($l['path_str'] ?? '')));
+            return ['id'=>(int)$l['id'], 'q'=>(float)$l['qtde'],
+                    'local'=>($parts[0] !== '' ? $parts[0] : '(sem local)'),
+                    'sub'=>(count($parts) > 1 ? $parts[1] : '—')];
+        }, $linhas);
         $area = $linhas ? array_sum(array_map(function($l){ return (float)$l['qtde']; }, $linhas)) : (float)$comp['qtde_total'];
         $sistema = $linhas ? _sistema(_normt($linhas[0]['path_str'])) : 'Outras';
         $valor = $area * $m['coef'] * $m['rs_unit'];

@@ -1580,7 +1580,7 @@ async function compBuscar(){
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
   const d=await (await fetch('actions/composicao.php?q='+encodeURIComponent(q))).json();
   COMP_LAST=d.composicoes||[];
-  if(!COMP_LAST.length){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Nada encontrado.</div>';return;}
+  if(!COMP_LAST.length){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Nada encontrado. É <b>mão de obra ou insumo</b> (ex.: eletricista, encanador)? Eles ficam <b>dentro</b> das composições — use a <b>Busca em massa por insumo</b> logo abaixo.</div>';return;}
   box.innerHTML='<div class="srbox">'+COMP_LAST.map(c=>`<div class="pickrow" onclick="compEscolher(${c.id})">
     <span class="material-icons" style="font-size:16px;color:var(--verde)">playlist_add</span>
     <div><div>${esc(c.descricao)}</div><small class="muted">${QNUM(c.qtde_total)} ${esc(c.unidade||'')} · R$${QNUM(c.rs_unit)}/un</small></div></div>`).join('')+'</div>';
@@ -1738,16 +1738,37 @@ async function compSalvar(){
 }
 
 /* ===== Busca em massa por INSUMO (MO/insumo pulverizado em muitas composições) ===== */
-let INSMASSA=null, INSMASSA_SEL=new Set(), INSMASSA_OPEN=new Set();
+let INSMASSA=null, INSMASSA_LEAVES=[], INSMASSA_SEL=new Set(), INSMASSA_OPEN=new Set();
 function insMassaToggle(){ const p=document.getElementById('insMassaPanel'), b=document.getElementById('insMassaBtn'); if(!p)return;
   const open=p.style.display==='none'; p.style.display=open?'block':'none';
   const ic=b&&b.querySelector('.mtcaret'); if(ic) ic.textContent=open?'expand_less':'expand_more';
 }
 function insMassaPreset(k){ const t=document.getElementById('insMassaTermos'); if(t) t.value=k; insMassaBuscar(); }
-function insMassaKey(m){ return m.cid+'#'+m.idx; }
-function insMassaFully(m){ const ids=m.locais.map(l=>l.id); const sp=compInsumoSplit(m.cid,m.idx,ids); return (ids.length>0 && sp.livres.length===0); }
-function insMassaGrupos(){ const by={}; (INSMASSA.matches||[]).forEach(m=>{ (by[m.sistema]=by[m.sistema]||[]).push(m); });
-  return Object.keys(by).sort((a,b)=>by[b].reduce((s,m)=>s+m.valor,0)-by[a].reduce((s,m)=>s+m.valor,0)).map(k=>({sis:k, matches:by[k]})); }
+// uma FOLHA = um insumo (cid#idx) numa linha do orçamento (local). Trava por linha: linha inteira (w) OU mesmo insumo (i) em outro item.
+function insMassaBuildLeaves(){
+  const lv=[], cur=_curOrdem();
+  (INSMASSA&&INSMASSA.matches||[]).forEach(m=>{
+    (m.locais||[]).forEach(l=>{
+      const c=lineClaims(l.id);
+      const w=((c.w)||[]).filter(o=>Number(o)!==cur);
+      const ins=(((c.i)&&c.i[m.cid+'#'+m.idx])||[]).filter(o=>Number(o)!==cur);
+      const blk=[...new Set([...w,...ins])];
+      lv.push({key:m.cid+'#'+m.idx+'|'+l.id, cid:m.cid, idx:m.idx, lineId:l.id, q:+l.q||0,
+        local:l.local||'(sem local)', sub:l.sub||'—', ins:m.ins, comp:m.comp, tipo:m.tipo, unidade:m.unidade||'',
+        coef:+m.coef, rs:+m.rs_unit, valor:(+l.q||0)*(+m.coef)*(+m.rs_unit),
+        locked:blk.length>0, blocker:blk.length?nomeItem(blk[0]):null, blockerOrdem:blk.length?blk[0]:null});
+    });
+  });
+  return lv;
+}
+function insMassaTree(){
+  const byL={}; INSMASSA_LEAVES.forEach(x=>{ (byL[x.local]=byL[x.local]||[]).push(x); });
+  const tot=a=>a.reduce((s,x)=>s+x.valor,0);
+  return Object.keys(byL).sort((a,b)=>tot(byL[b])-tot(byL[a])).map(local=>{
+    const lvs=byL[local], byS={}; lvs.forEach(x=>{ (byS[x.sub]=byS[x.sub]||[]).push(x); });
+    return {local, leaves:lvs, subs:Object.keys(byS).sort((a,b)=>tot(byS[b])-tot(byS[a])).map(sub=>({sub, leaves:byS[sub]}))};
+  });
+}
 async function insMassaBuscar(){
   const termos=(document.getElementById('insMassaTermos')?.value||'').trim();
   const box=document.getElementById('insMassaRes'); if(!box)return;
@@ -1758,56 +1779,73 @@ async function insMassaBuscar(){
   catch(e){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Falha: '+esc(e.message)+'</div>'; return; }
   if(d.error){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Erro: '+esc(d.error)+'</div>'; return; }
   INSMASSA=d; INSMASSA_OPEN=new Set(); INSMASSA_SEL=new Set();
-  (d.matches||[]).forEach(m=>{ if(!insMassaFully(m)) INSMASSA_SEL.add(insMassaKey(m)); });   // marca tudo, menos o já usado em outro item
+  INSMASSA_LEAVES=insMassaBuildLeaves();
+  INSMASSA_LEAVES.forEach(x=>{ if(!x.locked) INSMASSA_SEL.add(x.key); });   // marca tudo que está LIVRE
   insMassaRender();
 }
+function insMassaNodeLeaves(path){ const t=insMassaTree(); const p=path.split('.').map(Number); const L=t[p[0]]; if(!L)return[];
+  if(p.length===1) return L.leaves; const S=L.subs[p[1]]; return S?S.leaves:[]; }
+function insMassaToggleNode(path){ const lvs=insMassaNodeLeaves(path).filter(x=>!x.locked);
+  const allOn=lvs.length&&lvs.every(x=>INSMASSA_SEL.has(x.key)); lvs.forEach(x=>{ allOn?INSMASSA_SEL.delete(x.key):INSMASSA_SEL.add(x.key); }); insMassaRender(); }
+function insMassaToggleLeaf(key){ INSMASSA_SEL.has(key)?INSMASSA_SEL.delete(key):INSMASSA_SEL.add(key); insMassaRender(); }
+function insMassaExpandNode(path){ INSMASSA_OPEN.has(path)?INSMASSA_OPEN.delete(path):INSMASSA_OPEN.add(path); insMassaRender(); }
+function insMassaAbrir(ordem){ if(ordem!=null) openModal(Number(ordem)); }
+function insMassaChk(leaves,path){ const free=leaves.filter(x=>!x.locked); const a=free.length&&free.every(x=>INSMASSA_SEL.has(x.key)), s=free.some(x=>INSMASSA_SEL.has(x.key));
+  return `<span class="material-icons chk" onclick="insMassaToggleNode('${path}')" style="color:${a?'var(--ok)':s?'var(--and)':'var(--muted)'}">${a?'check_box':s?'indeterminate_check_box':'check_box_outline_blank'}</span>`; }
 function insMassaRender(){
   const box=document.getElementById('insMassaRes'); if(!box)return;
-  if(!INSMASSA||!(INSMASSA.matches||[]).length){ box.innerHTML='<div class="muted" style="font-size:12px">Nada encontrado.</div>'; return; }
-  const grupos=insMassaGrupos(); let selN=0, selV=0;
-  const gh=grupos.map((g,gi)=>{
-    const livres=g.matches.filter(m=>!insMassaFully(m));
-    const allOn=livres.length&&livres.every(m=>INSMASSA_SEL.has(insMassaKey(m))), someOn=livres.some(m=>INSMASSA_SEL.has(insMassaKey(m)));
-    let gV=0,nBloq=0; g.matches.forEach(m=>{ if(INSMASSA_SEL.has(insMassaKey(m))){selN++;selV+=m.valor;} gV+=m.valor; if(insMassaFully(m))nBloq++; });
-    const open=INSMASSA_OPEN.has(g.sis);
-    return `<div class="tnode tparent">
-      <span class="material-icons chk" onclick="insMassaToggleGrupo(${gi})" style="color:${allOn?'var(--ok)':someOn?'var(--and)':'var(--muted)'}">${allOn?'check_box':someOn?'indeterminate_check_box':'check_box_outline_blank'}</span>
-      <span class="caret material-icons" onclick="insMassaExpand(${gi})">${open?'expand_more':'chevron_right'}</span>
-      <span class="tname">${esc(g.sis)} <span class="muted">(${g.matches.length}${nBloq?' · <span style="color:var(--pend)">'+nBloq+' 🔒</span>':''})</span></span>
-      <span class="tval">${BRL(gV)}</span></div>`+
-    (open?g.matches.map(m=>{ const on=INSMASSA_SEL.has(insMassaKey(m));
-      if(insMassaFully(m)) return `<div class="tnode" style="padding-left:30px;opacity:.6"><span class="material-icons" style="color:var(--pend);font-size:16px">lock</span>
-        <span class="tname" style="font-size:11px">${esc(m.ins)} <span class="muted">· ${esc((m.comp||'').slice(0,28))}</span> <span style="color:var(--pend)">· já em outro item</span></span><span class="tval">${BRL(m.valor)}</span></div>`;
-      return `<div class="tnode" style="padding-left:30px"><span class="material-icons chk" onclick="insMassaToggleLinha('${insMassaKey(m)}')" style="color:${on?'var(--ok)':'var(--muted)'};font-size:16px">${on?'check_box':'check_box_outline_blank'}</span>
-        <span class="tname" style="font-size:11px"><span class="badge-tp ${m.tipo}">${m.tipo==='mo'?'MO':'MAT'}</span> ${esc(m.ins)} <span class="muted">· ${esc((m.comp||'').slice(0,28))} · ${QNUM(m.area)}${esc(m.unidade||'')}×${QNUM(m.coef)}</span></span><span class="tval">${BRL(m.valor)}</span></div>`;
-    }).join(''):'');
+  if(!INSMASSA_LEAVES.length){ box.innerHTML='<div class="muted" style="font-size:12px">Nada encontrado.</div>'; return; }
+  const tree=insMassaTree();
+  let selN=0, selV=0, lockN=0; const blk={};
+  INSMASSA_LEAVES.forEach(x=>{ if(x.locked){ lockN++; if(x.blocker) blk[x.blocker]=(blk[x.blocker]||0)+1; } else if(INSMASSA_SEL.has(x.key)){ selN++; selV+=x.valor; } });
+  const sum=a=>a.reduce((s,x)=>s+x.valor,0), lk=a=>a.filter(x=>x.locked).length;
+  const html=tree.map((L,li)=>{
+    const open=INSMASSA_OPEN.has(''+li), nl=lk(L.leaves);
+    let h=`<div class="tnode tparent">${insMassaChk(L.leaves,''+li)}
+      <span class="caret material-icons" onclick="insMassaExpandNode('${li}')">${open?'expand_more':'chevron_right'}</span>
+      <span class="tname"><b>${esc(L.local)}</b> <span class="muted">(${L.leaves.length}${nl?' · <span style="color:var(--pend)">'+nl+' 🔒</span>':''})</span></span>
+      <span class="tval">${BRL(sum(L.leaves))}</span></div>`;
+    if(open) h+=L.subs.map((S,si)=>{
+      const sp=li+'.'+si, sopen=INSMASSA_OPEN.has(sp), sl=lk(S.leaves);
+      let sh=`<div class="tnode" style="padding-left:22px">${insMassaChk(S.leaves,sp)}
+        <span class="caret material-icons" onclick="insMassaExpandNode('${sp}')">${sopen?'expand_more':'chevron_right'}</span>
+        <span class="tname">${esc(S.sub)} <span class="muted">(${S.leaves.length}${sl?' · <span style="color:var(--pend)">'+sl+' 🔒</span>':''})</span></span>
+        <span class="tval">${BRL(sum(S.leaves))}</span></div>`;
+      if(sopen) sh+=S.leaves.map(x=>{
+        if(x.locked) return `<div class="tnode" style="padding-left:46px;opacity:.62">
+          <span class="material-icons" style="color:var(--pend);font-size:15px">lock</span>
+          <span class="tname" style="font-size:11px">${esc(x.ins)} <span class="muted">· ${esc((x.comp||'').slice(0,22))}</span> <span style="color:var(--pend)">· já em “${esc(x.blocker||'?')}”</span></span>
+          <span class="tval">${BRL(x.valor)} <span class="material-icons" title="abrir o item que está usando" style="font-size:15px;cursor:pointer;vertical-align:-3px;color:var(--azul)" onclick="insMassaAbrir(${x.blockerOrdem})">open_in_new</span></span></div>`;
+        const on=INSMASSA_SEL.has(x.key);
+        return `<div class="tnode" style="padding-left:46px"><span class="material-icons chk" onclick="insMassaToggleLeaf('${x.key}')" style="color:${on?'var(--ok)':'var(--muted)'};font-size:15px">${on?'check_box':'check_box_outline_blank'}</span>
+          <span class="tname" style="font-size:11px"><span class="badge-tp ${x.tipo}">${x.tipo==='mo'?'MO':'MAT'}</span> ${esc(x.ins)} <span class="muted">· ${esc((x.comp||'').slice(0,22))}</span></span><span class="tval">${BRL(x.valor)}</span></div>`;
+      }).join('');
+      return sh;
+    }).join('');
+    return h;
   }).join('');
-  box.innerHTML=`<div class="tree" style="max-height:300px">${gh}</div>
-    <div class="box" style="margin-top:6px;padding:8px 12px"><div class="bv"><b>Selecionado: ${selN} insumos · ${BRL(selV)}</b> <span class="muted" style="font-size:11.5px">de ${INSMASSA.n} · ${BRL(INSMASSA.total)} encontrados</span></div></div>
+  const blkArr=Object.entries(blk).sort((a,b)=>b[1]-a[1]);
+  const blkHtml=lockN?`<div class="note" style="margin:6px 0;font-size:11.5px">🔒 ${lockN} já em outro item — ${blkArr.slice(0,4).map(e=>esc(e[0])+' ('+e[1]+')').join(' · ')}${blkArr.length>4?' …':''}. Pra liberar: abra o item (ícone ↗) e use “Separar material × MO” (se for item de material) ou tire de lá.</div>`:'';
+  box.innerHTML=`<div class="muted" style="font-size:11px;margin-bottom:4px">Navegue por local → subsistema e marque o que entra (ex.: só as Torres › Instalações). 🔒 = já em outro item.</div>
+    <div class="tree" style="max-height:320px">${html}</div>${blkHtml}
+    <div class="box" style="margin-top:6px;padding:8px 12px"><div class="bv"><b>Selecionado: ${selN} · ${BRL(selV)}</b> <span class="muted" style="font-size:11.5px">de ${INSMASSA_LEAVES.length} linhas · ${lockN} travadas</span></div></div>
     <div style="margin-top:6px"><button class="btn-prim" onclick="insMassaAdd()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar à verba (${selN})</button></div>`;
 }
-function insMassaToggleGrupo(gi){ const g=insMassaGrupos()[gi]; if(!g)return; const livres=g.matches.filter(m=>!insMassaFully(m));
-  const allOn=livres.length&&livres.every(m=>INSMASSA_SEL.has(insMassaKey(m))); livres.forEach(m=>{ allOn?INSMASSA_SEL.delete(insMassaKey(m)):INSMASSA_SEL.add(insMassaKey(m)); }); insMassaRender(); }
-function insMassaToggleLinha(key){ INSMASSA_SEL.has(key)?INSMASSA_SEL.delete(key):INSMASSA_SEL.add(key); insMassaRender(); }
-function insMassaExpand(gi){ const g=insMassaGrupos()[gi]; if(!g)return; INSMASSA_OPEN.has(g.sis)?INSMASSA_OPEN.delete(g.sis):INSMASSA_OPEN.add(g.sis); insMassaRender(); }
 function insMassaAdd(){
-  if(!INSMASSA) return;
-  const sel=(INSMASSA.matches||[]).filter(m=>INSMASSA_SEL.has(insMassaKey(m)));
-  let added=0, restr=0, skip=0;
-  sel.forEach(m=>{
-    if(COMP_SEL.some(s=>s.cid===m.cid&&s.idx===m.idx)){ skip++; return; }       // já está na cesta
-    const ids=m.locais.map(l=>l.id); const sp=compInsumoSplit(m.cid,m.idx,ids);
-    if(ids.length>0 && sp.livres.length===0) return;                            // 100% em conflito → pula
-    const freeSet=new Set(sp.livres);
-    const area=ids.length ? m.locais.filter(l=>freeSet.has(l.id)).reduce((a,l)=>a+l.q,0) : m.area;
-    if(sp.conf.length) restr++;
-    COMP_SEL.push({cid:m.cid, idx:m.idx, area, q:0, locais:ids.length?sp.livres:null,
-      desc:m.ins, tipo:m.tipo, unidade:m.unidade, coef:+m.coef, rs_unit:+m.rs_unit, compdesc:m.comp});
+  const sel=INSMASSA_LEAVES.filter(x=>!x.locked && INSMASSA_SEL.has(x.key));
+  if(!sel.length){ toast('Marque ao menos um insumo livre'); return; }
+  const byK={};
+  sel.forEach(x=>{ const k=x.cid+'#'+x.idx; if(!byK[k]) byK[k]={cid:x.cid,idx:x.idx,ins:x.ins,comp:x.comp,tipo:x.tipo,unidade:x.unidade,coef:x.coef,rs:x.rs,lines:[],area:0}; byK[k].lines.push(x.lineId); byK[k].area+=x.q; });
+  let added=0, skip=0;
+  Object.values(byK).forEach(g=>{
+    if(COMP_SEL.some(s=>s.cid===g.cid&&s.idx===g.idx)){ skip++; return; }   // já está na cesta
+    COMP_SEL.push({cid:g.cid, idx:g.idx, area:g.area, q:0, locais:g.lines,
+      desc:g.ins, tipo:g.tipo, unidade:g.unidade, coef:+g.coef, rs_unit:+g.rs, compdesc:g.comp});
     added++;
   });
-  INSMASSA=null; const box=document.getElementById('insMassaRes'); if(box) box.innerHTML='';
+  INSMASSA=null; INSMASSA_LEAVES=[]; const box=document.getElementById('insMassaRes'); if(box) box.innerHTML='';
   compRenderBasket();
-  toast(added+' insumos adicionados à verba'+(restr?(' · '+restr+' com locais já usados restringidos'):'')+(skip?(' · '+skip+' já na cesta'):'')+'. Clique em Salvar verba por composição.');
+  toast(added+' insumos na verba'+(skip?(' · '+skip+' já estavam na cesta'):'')+'. Clique em Salvar verba por composição.');
 }
 
 /* ----- Dicionário (template/aprendizado, editável → reflete em obra nova) ----- */

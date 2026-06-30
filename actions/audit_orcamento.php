@@ -54,6 +54,11 @@ try {
     $comp = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(COALESCE(verba_override,0)),0) v
                          FROM radar_item WHERE obra_id=1 AND verba_metodo='composicao'")->fetch();
 
+    // COBERTURA REAL = analítico (linhas distintas) + composição (verba dos itens por composição).
+    // Mesmo critério do KPI do Radar (matriz.php): por isso os dois passam a bater.
+    $comp_v   = (float)$comp['v'];
+    $cov_real = $cov_dist + $comp_v;
+
     echo json_encode([
         'total_obra'                 => $total_obra,
         'total_leaf'                 => $total_leaf,
@@ -65,8 +70,13 @@ try {
         'valor_inflado_por_dup'      => round($inflado, 2),
         'cobertura_distinta_pct_folhas' => $total_leaf ? round($cov_dist/$total_leaf*100, 1) : null,
         'cobertura_distinta_pct_obra'   => $total_obra ? round($cov_dist/$total_obra*100, 1) : null,
+        // cobertura REAL (= radar): analítico distinto + composição, sobre as folhas do orçamento
+        'valor_coberto_real'             => round($cov_real, 2),
+        'cobertura_real_pct_folhas'      => $total_leaf ? round($cov_real/$total_leaf*100, 1) : null,
+        'cobertura_analitico_pct_folhas' => $total_leaf ? round($cov_dist/$total_leaf*100, 1) : null,
+        'cobertura_composicao_pct_folhas'=> $total_leaf ? round($comp_v/$total_leaf*100, 1) : null,
         'composicao_itens'           => (int)$comp['c'],
-        'composicao_verba'           => round((float)$comp['v'], 2),
+        'composicao_verba'           => round($comp_v, 2),
         'duplicatas'                 => $dups,
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 } catch (Throwable $e) {

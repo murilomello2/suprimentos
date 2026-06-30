@@ -81,6 +81,12 @@
   .gbtn{border:1px solid var(--line);background:#fff;border-radius:6px;min-width:24px;height:22px;cursor:pointer;font-size:11px;color:var(--muted);line-height:1;display:inline-flex;align-items:center;justify-content:center;padding:0 4px}
   .gbtn:hover:not([disabled]){border-color:var(--verde);color:var(--verde)}
   .gbtn[disabled]{opacity:.35;cursor:default}
+  .gcur{margin-left:auto;display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;font-weight:700;font-size:11px;text-transform:none;letter-spacing:0;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--muted);white-space:nowrap}
+  .gcur.ok{background:var(--okbg);border-color:#bfe3cc;color:var(--ok)}
+  .gcur.mid{background:var(--andbg);border-color:#f0d9af;color:var(--and)}
+  .gcur small{font-weight:600;opacity:.85}
+  .gbar{display:inline-block;width:44px;height:6px;border-radius:3px;background:rgba(0,0,0,.10);overflow:hidden;flex:0 0 auto}
+  .gbar>span{display:block;height:100%;border-radius:3px;background:currentColor}
   .resp-miss{background:var(--pendbg);color:var(--pend);border:0;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;cursor:pointer}
   .resp-miss:hover{filter:brightness(.96)}
   .svc{font-weight:600;color:#111827}
@@ -456,14 +462,16 @@ async function renderAudit(){
   AUDIT_CO = co && !co.error ? co : {flagged:[],n:0,total_embutido:0,n_mat_com_mo:0,n_mo_com_mat:0};
   const dups=(u&&u.duplicatas)||[];
   const inflado=dups.reduce((s,x)=>s+(x.valor||0)*((x.n||1)-1),0);
-  const pct=d.cobertura_distinta_pct_folhas;
+  const P=x=>x==null?'—':Number(x).toLocaleString('pt-BR');
+  const pctReal=d.cobertura_real_pct_folhas, pctAna=d.cobertura_analitico_pct_folhas, pctComp=d.cobertura_composicao_pct_folhas;
   let html=`<div class="kpis" style="padding:0 0 14px">
-    <div class="kpi"><div class="v gold">${pct}%</div><div class="l">Cobertura real (analítico, distinto)</div></div>
-    <div class="kpi"><div class="v">${BRL(d.valor_coberto_distinto)}</div><div class="l">de ${BRL(d.total_leaf)} em folhas</div></div>
+    <div class="kpi" title="Mesmo critério do KPI do Radar: analítico (linhas distintas) + composição, sobre as folhas do orçamento."><div class="v gold">${P(pctReal)}%</div><div class="l">Cobertura real do orçamento</div></div>
+    <div class="kpi"><div class="v">${BRL(d.valor_coberto_real)}</div><div class="l">de ${BRL(d.total_leaf)} em folhas</div></div>
+    <div class="kpi" title="Como a cobertura real se divide entre os dois caminhos de curadoria."><div class="v">${P(pctAna)}% <span class="muted" style="font-weight:600">+ ${P(pctComp)}%</span></div><div class="l">analítico (distinto) + composição</div></div>
     <div class="kpi"><div class="v ${dups.length?'alert':''}">${dups.length}</div><div class="l">Linhas em 2+ itens (analítico + composição)</div></div>
     <div class="kpi"><div class="v ${inflado?'alert':''}">${BRL(inflado)}</div><div class="l">Verba inflada por duplicação</div></div>
-    <div class="kpi"><div class="v">${d.composicao_itens}</div><div class="l">Itens por composição</div></div>
-  </div>`;
+  </div>
+  <div class="note" style="margin:0 0 12px">A <b>cobertura real</b> (${P(pctReal)}%) agora bate com a do Radar: <b>${P(pctAna)}%</b> por vínculo analítico (linhas distintas do orçamento) + <b>${P(pctComp)}%</b> por composição (verba dos ${d.composicao_itens} itens curados por cesta de insumos).</div>`;
   if(!dups.length){
     html+='<div class="panel" style="padding:18px 16px"><b style="color:var(--ok)">✓ Sem duplicação.</b> Cada linha do orçamento está em no máximo um item — a verba não está contada em dobro.</div>';
   } else {
@@ -802,6 +810,13 @@ function groupHeaderHtml(g,items,idx){
   const verba=items.reduce((s,i)=>s+(i.verba||0),0);
   const datas=items.map(i=>i.data_gatilho).filter(Boolean).sort();
   const prox=datas.length?` · próx. início ${D(datas[0])}`:'';
+  // progresso de curadoria do grupo: verba curada (itens com verba_curada) / verba total do grupo
+  const cur=items.reduce((s,i)=>s+(i.curado_verba?(i.verba||0):0),0);
+  const nCur=items.filter(i=>i.curado_verba).length;
+  const pctCur=verba>0?Math.round(cur/verba*100):0;
+  const ccls=pctCur>=90?'ok':(pctCur>0?'mid':'');
+  const chip=`<span class="gcur ${ccls}" title="Curado ${BRL(cur)} de ${BRL(verba)} (${pctCur}%) · ${nCur} de ${n} ${n>1?'itens':'item'} com verba curada">`
+    +`<span class="gbar"><span style="width:${pctCur}%"></span></span>${pctCur}% curado${cur>0?` <small>· ${BRL(cur)}</small>`:''}</span>`;
   const adm=(IS_ADMIN && g!=='—')?`<span class="gctl">
       <button class="gbtn" title="subir grupo" ${idx<=0?'disabled':''} onclick="event.stopPropagation();grupoMover(${idx},-1)">▲</button>
       <button class="gbtn" title="descer grupo" ${idx>=GORDER.length-1?'disabled':''} onclick="event.stopPropagation();grupoMover(${idx},1)">▼</button>
@@ -811,6 +826,7 @@ function groupHeaderHtml(g,items,idx){
       <span class="material-icons gcaret">${collapsed?'chevron_right':'expand_more'}</span>
       <span class="gname">${esc(g)}</span>${adm}
       <span class="gcount">· ${n} ${n>1?'itens':'item'} · ${BRL(verba)}${prox}</span>
+      ${chip}
     </span></td></tr>`;
 }
 function render(){

@@ -54,9 +54,7 @@ try {
         $locais = array_map(function($l){ return (int)$l['id']; }, $ls);
         $area   = array_sum(array_map(function($l){ return (float)$l['qtde']; }, $ls));
         foreach (($insByCid[$cid] ?? []) as $idx => $ins) {
-            $isMo = ($ins['tipo'] === 'mo');
-            if ($manter === 'material' && $isMo) continue;   // mantém material (tira MO)
-            if ($manter === 'mo' && !$isMo) continue;        // mantém MO (tira material)
+            if ($ins['tipo'] !== $manter) continue;   // mantém SÓ a classe exata (material OU mo); mat_mo/equip ficam de fora
             $val = $area * (float)$ins['coef'] * (float)$ins['rs_unit'];
             $compSel[] = ['cid'=>(int)$cid, 'idx'=>$idx, 'area'=>$area, 'q'=>0, 'locais'=>$locais,
                           'desc'=>$ins['descricao'], 'tipo'=>$ins['tipo'], 'unidade'=>$ins['unidade'],

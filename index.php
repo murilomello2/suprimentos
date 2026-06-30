@@ -166,8 +166,9 @@
   .pendbar{font-size:13px;color:var(--verde-d);display:flex;align-items:center;gap:6px}
   .pendbar:empty{display:none}
   .pendbar:not(:empty){background:var(--okbg);border:1px solid var(--ok);border-radius:8px;padding:8px 12px;font-weight:600;margin:6px 0}
-  .badge-tp{flex:0 0 auto;font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:5px;width:34px;text-align:center}
+  .badge-tp{flex:0 0 auto;font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:5px;min-width:34px;text-align:center}
   .badge-tp.material{background:var(--cotbg);color:var(--cot)} .badge-tp.mo{background:var(--andbg);color:var(--and)}
+  .badge-tp.mat_mo{background:#e7f0e2;color:#3a6b2a} .badge-tp.equip{background:#e6eef7;color:#2f5d8f}
   .tp-chip{display:inline-block;font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:5px;vertical-align:1px;letter-spacing:.3px}
   .tp-mat{background:var(--cotbg);color:var(--cot)} .tp-mo{background:var(--andbg);color:var(--and)}
   .tp-emp{background:#efe7fb;color:#7c3aed} .tp-mat-mo{background:var(--okbg);color:var(--ok)} .tp-loc{background:#e7f0fb;color:#1e4fa3} .tp-none{background:#fbeae8;color:var(--pend)}
@@ -360,6 +361,17 @@ function saveCollapsed(){ try{ localStorage.setItem('sup_collapsed',JSON.stringi
 const BRL=n=>n?Number(n).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0}):'—';
 const D=s=>{if(!s)return'—';const p=String(s).split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:s;};
 const esc=s=>(s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// classe do insumo: material | mo | mat_mo (material+MO) | equip (equipamento)
+const TP_LABEL={mo:'MO', mat_mo:'M+MO', equip:'EQUIP', material:'MAT'};
+const TP_FULL={mo:'Mão de obra', mat_mo:'Material + MO', equip:'Equipamento', material:'Material'};
+const tpCls=t=>(['mo','mat_mo','equip','material'].includes(t)?t:'material');
+const tpLabel=t=>TP_LABEL[t]||'MAT';
+const tpBadge=t=>`<span class="badge-tp ${tpCls(t)}">${tpLabel(t)}</span>`;
+function tpSubtotais(list){ const t={material:0,mo:0,mat_mo:0,equip:0}; let total=0;
+  (list||[]).forEach(s=>{ const c=(s.area||0)*(s.coef||0)*(s.rs_unit||0); t[tpCls(s.tipo)]+=c; total+=c; }); return {t,total}; }
+function tpSubHtml(list){ const {t,total}=tpSubtotais(list); const p=[];
+  ['material','mo','mat_mo','equip'].forEach(k=>{ if(t[k]>0.5) p.push('<b>'+TP_FULL[k]+':</b> '+BRL(t[k])); });
+  return p.join(' &nbsp;·&nbsp; ')+' &nbsp;·&nbsp; <b>Total:</b> '+BRL(total); }
 const today=new Date().toISOString().slice(0,10);
 const STK={'Finalizado':'st-Finalizado','Cotação Iniciada':'st-CotacaoIniciada','Com Pendências':'st-ComPendencias','Em Andamento':'st-EmAndamento','Não Iniciado':'st-NaoIniciado'};
 const STATUSES=['Não Iniciado','Cotação Iniciada','Com Pendências','Em Andamento','Finalizado'];
@@ -549,27 +561,28 @@ async function auditDetalhar(ordem){
   body.innerHTML=auditDetHtml(d); row.dataset.loaded='1';
 }
 function auditDetHtml(d){
-  const certo=d.classe==='material'?'material':'mão de obra', errado=d.classe==='material'?'mão de obra':'material';
+  const certo=TP_FULL[d.classe==='mo'?'mo':'material'];
   const pctErr=d.total>0?Math.round(100*d.tot_errado/d.total):0;
-  const mats=d.insumos.filter(x=>x.tipo!=='mo'), mos=d.insumos.filter(x=>x.tipo==='mo');
+  const tpt=d.tot_por_tipo||{};
   const lin=x=>`<tr style="${x.lado==='errado'?'background:#fff4f4':''}">
       <td style="padding:3px 8px">${esc((x.desc||'').slice(0,46))}</td>
       <td style="padding:3px 8px;color:var(--muted)">${esc((x.comp||'').slice(0,40))}</td>
-      <td style="padding:3px 8px;text-align:center"><span class="badge-tp ${x.tipo==='mo'?'mo':'material'}">${x.tipo==='mo'?'MO':'MAT'}</span>${x.lado==='errado'?' <span style="color:var(--pend)" title="sairia ao separar">⚠</span>':''}</td>
+      <td style="padding:3px 8px;text-align:center">${tpBadge(x.tipo)}${x.lado==='errado'?' <span style="color:var(--pend)" title="sairia ao separar">⚠</span>':''}</td>
       <td style="padding:3px 8px;text-align:right">${BRL(x.valor)}</td></tr>`;
+  const grupos=['material','mo','mat_mo','equip'].map(k=>{
+    const rows=d.insumos.filter(x=>tpCls(x.tipo)===k); if(!rows.length) return '';
+    return `<tr><td colspan="4" style="padding:4px 8px;font-weight:700;background:#f1f4ed">${TP_FULL[k].toUpperCase()} — ${BRL(tpt[k]||0)}</td></tr>`+rows.map(lin).join('');
+  }).join('');
   return `<div style="padding:10px 12px">
     <div class="bv" style="font-size:12.5px;margin-bottom:7px">
       Tipo declarado <b>${esc(d.tipo)}</b> · ${d.metodo==='analitico'?'linha inteira':'composição'} · total <b>${BRL(d.total)}</b><br>
       <span style="color:var(--ok)">✓ ${certo} (coerente, FICA): <b>${BRL(d.tot_correto)}</b></span> &nbsp;·&nbsp;
-      <span style="color:var(--pend)">✗ ${errado} (embutido, SAI ao separar): <b>${BRL(d.tot_errado)}</b> (<b>${pctErr}%</b> do total)</span>
+      <span style="color:var(--pend)">✗ fora do tipo (embutido, SAI ao separar): <b>${BRL(d.tot_errado)}</b> (<b>${pctErr}%</b> do total)</span>
       ${d.sem_composicao?` &nbsp;·&nbsp; <span class="muted">⚠ ${d.sem_composicao} linha(s) sem composição (não detalhadas)</span>`:''}
     </div>
     <table style="width:100%;border-collapse:collapse;font-size:11.5px">
       <thead><tr style="border-bottom:1px solid var(--line)"><th style="text-align:left;padding:3px 8px">Insumo</th><th style="text-align:left;padding:3px 8px">Composição</th><th style="padding:3px 8px">Tipo</th><th style="text-align:right;padding:3px 8px">R$</th></tr></thead>
-      <tbody>
-        ${mats.length?'<tr><td colspan="4" style="padding:4px 8px;font-weight:700;color:var(--verde-d);background:#f3f7ef">MATERIAL — '+BRL(d.tot_material)+'</td></tr>'+mats.map(lin).join(''):''}
-        ${mos.length?'<tr><td colspan="4" style="padding:4px 8px;font-weight:700;color:var(--dourado);background:#fbf7ed">MÃO DE OBRA — '+BRL(d.tot_mo)+'</td></tr>'+mos.map(lin).join(''):''}
-      </tbody></table>
+      <tbody>${grupos}</tbody></table>
     <div class="muted" style="font-size:11px;margin-top:5px">Linhas com fundo rosado / ⚠ são o lado <b>errado</b> pro tipo do item — é o que "Separar" remove daqui.</div>
   </div>`;
 }
@@ -1125,7 +1138,7 @@ function qcompRenderDetail(){
     <div class="fld"><label>Área/quantidade desta composição (padrão = total)</label><input type="number" step="any" value="${QCOMP_AREA}" oninput="QCOMP_AREA=parseFloat(this.value)||0"></div>
     <div class="tree" style="max-height:200px">${c.insumos.map((in_,ix)=>{const on=QCOMP_SEL.some(s=>s.cid===c.id&&s.idx===ix);
       return `<div class="tnode"><span class="material-icons chk" onclick="qcompToggleInsumo(${ix})" style="color:${on?'var(--ok)':'var(--muted)'}">${on?'check_box':'check_box_outline_blank'}</span>
-      <span class="badge-tp ${in_.tipo}">${in_.tipo==='mo'?'MO':'MAT'}</span>
+      ${tpBadge(in_.tipo)}
       <span class="tname">${esc(in_.descricao)}</span><span class="tval">${QNUM(in_.coef)} ${esc(in_.unidade||'')}/un</span></div>`;}).join('')}</div>
     <div class="muted" style="font-size:11.5px;margin-top:4px">Marque o(s) insumo(s) cuja contagem é o quantitativo (ex.: o bloco). Pode abrir outra composição e marcar mais.</div>`;
 }
@@ -1143,7 +1156,7 @@ function qcompRenderBasket(){
   box.innerHTML='<div class="bl" style="margin-bottom:4px">Quantitativo composto destes insumos</div>'+QCOMP_SEL.map((s,k)=>{
     const qq=(s.area||0)*(s.coef||0); qval+=qq; if(!qun)qun=s.unidade;
     return `<div class="pickrow" style="gap:8px;align-items:center">
-      <span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
+      ${tpBadge(s.tipo)}
       <div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.desc)}</div><small class="muted">${esc((s.compdesc||'').slice(0,38))} · ${QNUM(s.coef)} ${esc(s.unidade||'')}/un</small></div>
       <input type="number" step="any" style="width:84px;border:1px solid var(--line);border-radius:7px;padding:4px 6px" value="${s.area}" oninput="QCOMP_SEL[${k}].area=parseFloat(this.value)||0;qcompRenderBasket()" title="área">
       <span class="money" style="min-width:96px;text-align:right">${QNUM(qq)} ${esc(s.unidade||'')}</span>
@@ -1178,7 +1191,7 @@ async function quantShowCurrent(i){
     let qval=0;
     el2.innerHTML=`<div style="margin-bottom:6px"><b style="font-size:16px">${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}</b> <span class="muted" style="font-size:12px">— ${origem}:</span></div>`+
       cesta.map(s=>{const qq=(s.area||0)*(s.coef||0); qval+=qq; const ld=insumoLocaisDet(s, locMap);
-        return `<div class="pickrow" style="align-items:flex-start"><span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
+        return `<div class="pickrow" style="align-items:flex-start">${tpBadge(s.tipo)}
           <div style="flex:1;min-width:0"><div>${esc(s.desc)}</div>
             <small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} = <b>${QNUM(qq)} ${esc(s.unidade||'')}</b>${s.compdesc?' · '+esc(s.compdesc.slice(0,40)):''}</small>${locDet(ld.det, ld.todos)}</div></div>`;}).join('');
     if(tot2) tot2.textContent='Soma: '+QNUM(qval)+' '+(i.quantitativo_unidade||'');
@@ -1405,12 +1418,11 @@ async function orcShowCurrent(i){
   if(i.verba_metodo==='composicao' && (i.composicao_sel||[]).length){
     const locMap=await loadCompLocais(i.composicao_sel);
     const el=document.getElementById('orcSel'); if(el){
-      let vmat=0,vmo=0;
-      el.innerHTML=i.composicao_sel.map(s=>{const c=(s.area||0)*(s.coef||0)*(s.rs_unit||0); if(s.tipo==='mo')vmo+=c;else vmat+=c;
+      el.innerHTML=i.composicao_sel.map(s=>{const c=(s.area||0)*(s.coef||0)*(s.rs_unit||0);
         const ld=insumoLocaisDet(s, locMap);
-        return `<div class="pickrow" style="align-items:flex-start"><span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
+        return `<div class="pickrow" style="align-items:flex-start">${tpBadge(s.tipo)}
           <div style="min-width:0"><div>${esc(s.desc)}</div><small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} × R$${QNUM(s.rs_unit)} = ${BRL(c)}${s.q?' · define quantitativo':''}</small>${locDet(ld.det, ld.todos)}</div></div>`;}).join('');
-      const t=document.getElementById('orcTotal'); if(t) t.textContent='Material '+BRL(vmat)+' · MO '+BRL(vmo);
+      const t=document.getElementById('orcTotal'); if(t) t.innerHTML=tpSubHtml(i.composicao_sel);
     }
     return;
   }
@@ -1763,11 +1775,11 @@ function compRenderDetail(){
         const sp=compInsumoSplit(c.id,ix,cand); const fully=cand.length>0&&sp.livres.length===0; const partial=!fully&&sp.conf.length>0;
         if(fully&&!on) return `<div class="tnode" style="opacity:.55" title="esse insumo já está em outro item em todos os locais selecionados">
           <span class="material-icons" style="color:var(--pend)">lock</span>
-          <span class="badge-tp ${in_.tipo}">${in_.tipo==='mo'?'MO':'MAT'}</span>
+          ${tpBadge(in_.tipo)}
           <span class="tname">${esc(in_.descricao)} <span style="color:var(--pend);font-size:11px">· já em “${esc(sp.items[0]||'')}” (todos os locais)</span></span></div>`;
         return `<div class="tnode">
         <span class="material-icons chk" onclick="compToggleInsumo(${ix})" style="color:${on?'var(--ok)':'var(--muted)'}">${on?'check_box':'check_box_outline_blank'}</span>
-        <span class="badge-tp ${in_.tipo}">${in_.tipo==='mo'?'MO':'MAT'}</span>
+        ${tpBadge(in_.tipo)}
         <span class="tname">${esc(in_.descricao)}${partial?` <span style="color:var(--and);font-size:11px">· ⚠️ ${sp.conf.length} local(is) já em “${esc(sp.items[0]||'')}” (não conta)</span>`:''}</span>
         <span class="tval">${QNUM(in_.coef)} ${esc(in_.unidade||'')} × R$${QNUM(in_.rs_unit)}</span>
       </div>`;}).join(''); })()}
@@ -1794,15 +1806,15 @@ function compRenderBasket(){
   const box=document.getElementById('compBasket'), tot=document.getElementById('compTotals');
   if(!box)return;
   if(!COMP_SEL.length){ box.innerHTML='<div class="muted" style="font-size:12px;padding:6px 2px">Nenhum insumo na verba ainda — marque insumos das composições acima (de quantas composições quiser).</div>'; if(tot)tot.innerHTML=''; return; }
-  let vmat=0,vmo=0,qval=0,qun='';
-  COMP_SEL.forEach(s=>{ const c=(s.area||0)*(s.coef||0)*(s.rs_unit||0); if(s.tipo==='mo')vmo+=c; else vmat+=c; if(s.q){ qval+=(s.area||0)*(s.coef||0); if(!qun)qun=s.unidade; } });
+  let qval=0,qun='';
+  COMP_SEL.forEach(s=>{ if(s.q){ qval+=(s.area||0)*(s.coef||0); if(!qun)qun=s.unidade; } });
   if(COMP_SEL.length>25){
     // RESUMO: muitos insumos (ex.: 364 encanadores) — agrupa por tipo/descrição pra não virar lista gigante
     const by={}; COMP_SEL.forEach(s=>{ const key=s.desc+'|'+s.tipo; if(!by[key])by[key]={desc:s.desc,tipo:s.tipo,n:0,custo:0}; by[key].n++; by[key].custo+=(s.area||0)*(s.coef||0)*(s.rs_unit||0); });
     COMP_BASKET_GROUPS=Object.values(by).sort((a,b)=>b.custo-a.custo);
     box.innerHTML=`<div class="bl" style="margin-bottom:4px">Verba composta — ${COMP_SEL.length} insumos (resumo)</div>`+
       COMP_BASKET_GROUPS.map((g,i)=>`<div class="pickrow" style="gap:8px;align-items:center">
-        <span class="badge-tp ${g.tipo}">${g.tipo==='mo'?'MO':'MAT'}</span>
+        ${tpBadge(g.tipo)}
         <div style="flex:1;min-width:0">${esc(g.desc)} <span class="muted">· de ${g.n} composições</span></div>
         <span class="money" style="min-width:96px;text-align:right">${BRL(g.custo)}</span>
         <span class="material-icons" style="cursor:pointer;color:var(--pend);font-size:18px" onclick="compRemoverGrupo(${i})" title="remover todos deste tipo">close</span>
@@ -1812,7 +1824,7 @@ function compRenderBasket(){
     box.innerHTML='<div class="bl" style="margin-bottom:4px">Verba composta destes insumos</div>'+COMP_SEL.map((s,k)=>{
       const custo=(s.area||0)*(s.coef||0)*(s.rs_unit||0);
       return `<div class="pickrow" style="gap:8px;align-items:center">
-        <span class="badge-tp ${s.tipo}">${s.tipo==='mo'?'MO':'MAT'}</span>
+        ${tpBadge(s.tipo)}
         <div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.desc)}</div>
           <small class="muted">${esc((s.compdesc||'').slice(0,38))} · ${QNUM(s.coef)}×R$${QNUM(s.rs_unit)}</small></div>
         <input type="number" step="any" style="width:84px;border:1px solid var(--line);border-radius:7px;padding:4px 6px" value="${s.area}" oninput="COMP_SEL[${k}].area=parseFloat(this.value)||0;compRenderBasket()" title="área/quantidade">
@@ -1823,7 +1835,7 @@ function compRenderBasket(){
     }).join('');
   }
   if(tot) tot.innerHTML=`<div class="box" style="margin-top:8px"><div class="bv">
-      <b>Material:</b> ${BRL(vmat)} &nbsp;·&nbsp; <b>MO:</b> ${BRL(vmo)} &nbsp;·&nbsp; <b>Total verba:</b> ${BRL(vmat+vmo)}<br>
+      ${tpSubHtml(COMP_SEL)}<br>
       <span class="muted" style="font-size:12px">Quantitativo: ${qval>0?QNUM(qval)+' '+esc(qun):'— (marque "qtd" em algum insumo)'}</span></div></div>
     <div style="margin-top:10px;display:flex;gap:8px"><button class="btn-prim" onclick="compSalvar()">Salvar verba por composição</button>
       <button class="btn-ghost" onclick="orcCancelar()">Cancelar</button></div>`;
@@ -1920,7 +1932,7 @@ function insMassaRender(){
           <span class="tval">${BRL(x.valor)} <span class="material-icons" title="abrir o item que está usando" style="font-size:15px;cursor:pointer;vertical-align:-3px;color:var(--azul)" onclick="insMassaAbrir(${x.blockerOrdem})">open_in_new</span></span></div>`;
         const on=INSMASSA_SEL.has(x.key);
         return `<div class="tnode" style="padding-left:46px"><span class="material-icons chk" onclick="insMassaToggleLeaf('${x.key}')" style="color:${on?'var(--ok)':'var(--muted)'};font-size:15px">${on?'check_box':'check_box_outline_blank'}</span>
-          <span class="tname" style="font-size:11px"><span class="badge-tp ${x.tipo}">${x.tipo==='mo'?'MO':'MAT'}</span> ${esc(x.ins)} <span class="muted">· ${esc((x.comp||'').slice(0,22))}</span></span><span class="tval">${BRL(x.valor)}</span></div>`;
+          <span class="tname" style="font-size:11px">${tpBadge(x.tipo)} ${esc(x.ins)} <span class="muted">· ${esc((x.comp||'').slice(0,22))}</span></span><span class="tval">${BRL(x.valor)}</span></div>`;
       }).join('');
       return sh;
     }).join('');

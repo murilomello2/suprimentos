@@ -56,9 +56,10 @@ try {
                 $cid = $cidByDesc[$l['descricao']] ?? null; if (!$cid) continue;
                 $qt = (float)$l['qtde'];
                 foreach ($insByCid[$cid] ?? [] as $ins) {
-                    $isMo = ($ins['tipo'] === 'mo');
                     $v = $qt * (float)$ins['coef'] * (float)$ins['rs_unit'];
-                    if (($classe === 'material' && $isMo) || ($classe === 'mo' && !$isMo)) $embutido += $v;
+                    // item de um lado só (material OU mo) só pode ter insumo da MESMA classe; o resto (mo, mat_mo, equip…) é embutido errado
+                    $wrong = ($classe === 'material') ? ($ins['tipo'] !== 'material') : ($ins['tipo'] !== 'mo');
+                    if ($wrong) $embutido += $v;
                 }
             }
             if ($embutido > 0.5) {
@@ -75,8 +76,7 @@ try {
                 $cid = (int)($s['cid'] ?? 0); $idx = (int)($s['idx'] ?? -1); $area = (float)($s['area'] ?? 0);
                 $ins = $insByCid[$cid][$idx] ?? null; if (!$ins) continue;
                 $v = $area * (float)$ins['coef'] * (float)$ins['rs_unit']; $valAll += $v;
-                $isMo = ($ins['tipo'] === 'mo');
-                $wrong = ($classe === 'material' && $isMo) || ($classe === 'mo' && !$isMo);
+                $wrong = ($classe === 'material') ? ($ins['tipo'] !== 'material') : ($ins['tipo'] !== 'mo');
                 if ($wrong) { $valWrong += $v; $remover[] = ['cid'=>$cid, 'idx'=>$idx]; }
             }
             if ($remover) {

@@ -46,9 +46,7 @@ try {
         $locais = array_map(function($l){ return ['id'=>(int)$l['id'], 'q'=>(float)$l['qtde']]; }, $ls);
         $area   = array_sum(array_map(function($l){ return (float)$l['qtde']; }, $ls));
         foreach (($insByCid[$cid] ?? []) as $idx => $ins) {
-            $isMo = ($ins['tipo'] === 'mo');
-            if ($tipo === 'mo' && !$isMo) continue;
-            if ($tipo === 'material' && $isMo) continue;
+            if ($ins['tipo'] !== $tipo) continue;   // só a classe EXATA pedida (material OU mo)
             $val = $area * (float)$ins['coef'] * (float)$ins['rs_unit'];
             $compSel[] = ['cid'=>(int)$cid, 'idx'=>$idx, 'area'=>$area, 'q'=>0, 'locais'=>$locais,
                           'desc'=>$ins['descricao'], 'tipo'=>$ins['tipo'], 'unidade'=>$ins['unidade'],

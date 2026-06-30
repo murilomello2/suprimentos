@@ -81,21 +81,21 @@ try {
         }
     }
 
-    $totMat = 0.0; $totMo = 0.0;
+    $totByTipo = ['material'=>0.0, 'mo'=>0.0, 'mat_mo'=>0.0, 'equip'=>0.0];
     foreach ($insumos as &$x) {
-        $isMo = ($x['tipo'] === 'mo');
-        $x['lado'] = $classe === 'material' ? ($isMo ? 'errado' : 'certo')
-                   : ($classe === 'mo' ? ($isMo ? 'certo' : 'errado') : '?');
-        if ($isMo) $totMo += $x['valor']; else $totMat += $x['valor'];
+        $tp = $x['tipo']; if (!isset($totByTipo[$tp])) $totByTipo[$tp] = 0.0; $totByTipo[$tp] += $x['valor'];
+        $x['lado'] = $classe === 'material' ? ($tp === 'material' ? 'certo' : 'errado')
+                   : ($classe === 'mo' ? ($tp === 'mo' ? 'certo' : 'errado') : '?');
     }
     unset($x);
     usort($insumos, function($a,$b){ return $b['valor'] <=> $a['valor']; });
-    $correto = $classe === 'material' ? $totMat : ($classe === 'mo' ? $totMo : 0);
-    $errado  = $classe === 'material' ? $totMo  : ($classe === 'mo' ? $totMat : 0);
+    $totalAll = array_sum($totByTipo);
+    $correto = $classe === 'material' ? $totByTipo['material'] : ($classe === 'mo' ? $totByTipo['mo'] : 0);
+    $errado  = $totalAll - $correto;
 
     echo json_encode(['ordem'=>$ordem, 'nome'=>$it['nome'], 'tipo'=>$it['tipo'], 'classe'=>$classe, 'metodo'=>$metodo,
-        'insumos'=>$insumos, 'tot_material'=>$totMat, 'tot_mo'=>$totMo, 'tot_correto'=>$correto, 'tot_errado'=>$errado,
-        'total'=>$totMat + $totMo, 'sem_composicao'=>$semComp], JSON_UNESCAPED_UNICODE);
+        'insumos'=>$insumos, 'tot_por_tipo'=>$totByTipo, 'tot_material'=>$totByTipo['material'], 'tot_mo'=>$totByTipo['mo'],
+        'tot_correto'=>$correto, 'tot_errado'=>$errado, 'total'=>$totalAll, 'sem_composicao'=>$semComp], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     http_response_code(500);
     echo json_encode(['error'=>$e->getMessage()], JSON_UNESCAPED_UNICODE);

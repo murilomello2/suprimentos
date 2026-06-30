@@ -186,6 +186,26 @@ function db_schema($pdo) {
         $pdo->exec("UPDATE radar_item SET lead_override=NULL");
         $pdo->prepare("INSERT OR REPLACE INTO meta (k,v) VALUES ('datafix_lead60_v1','1')")->execute();
     }
+
+    // data-fix: reclassificação CURADA dos insumos (4 classes: material/mo/mat_mo/equip), por descrição.
+    // A heurística do import classificava serviço/equipamento como "material" — isso quebrava verba/auditoria.
+    // Guarda o tipo original em composicao_insumo.tipo_orig (reversível). Só marca como feito se havia insumos
+    // (resiliente a deploy parcial e a banco recém-criado antes do seed).
+    $dfr = $pdo->query("SELECT v FROM meta WHERE k='datafix_reclass_v1'")->fetch();
+    if (!$dfr) {
+        $cic = []; foreach ($pdo->query("PRAGMA table_info(composicao_insumo)") as $c) $cic[$c['name']] = true;
+        if (!isset($cic['tipo_orig'])) $pdo->exec("ALTER TABLE composicao_insumo ADD COLUMN tipo_orig TEXT");
+        $pdo->exec("UPDATE composicao_insumo SET tipo_orig=tipo WHERE tipo_orig IS NULL");
+        $map = json_decode(@file_get_contents(SEED_DIR . '/reclass_tipos.json'), true);
+        if (is_array($map) && $map) {
+            $up = $pdo->prepare("UPDATE composicao_insumo SET tipo=? WHERE descricao=?");
+            $pdo->beginTransaction();
+            foreach ($map as $desc => $tipo) $up->execute([$tipo, $desc]);
+            $pdo->commit();
+            $cnt = (int)$pdo->query("SELECT COUNT(*) FROM composicao_insumo")->fetchColumn();
+            if ($cnt > 0) $pdo->prepare("INSERT OR REPLACE INTO meta (k,v) VALUES ('datafix_reclass_v1','1')")->execute();
+        }
+    }
 }
 
 /** Permissões efetivas de um usuário p/ enforcement NO SERVIDOR. Não cadastrado/sem id => nega. */

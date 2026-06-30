@@ -1427,7 +1427,57 @@ async function orcShowCurrent(i){
     return;
   }
   ORC_SEL=new Set((i.orcamento_refs||[]).map(Number));
-  await orcRenderSel();
+  if(!EDITO && ORC_SEL.size) await orcRenderBreakdown(i);   // read-only: quebra por tipo (mat/MO/equip) + por linha
+  else await orcRenderSel();
+}
+let ORC_BD=null;
+// verba analítica (linhas inteiras) → quebra em Material/MO/Equipamento, com total no topo, ▸ por linha e "agrupar por tipo"
+async function orcRenderBreakdown(i){
+  const el=document.getElementById('orcSel'), tot=document.getElementById('orcTotal'); if(!el)return;
+  el.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Detalhando material × MO × equipamento…</div>';
+  let d; try{ d=await (await fetch('actions/verba_breakdown.php?ordem='+i.ordem)).json(); }catch(e){ await orcRenderSel(); return; }
+  if(d.error){ await orcRenderSel(); return; }
+  ORC_BD=d; const tp=d.tot_por_tipo;
+  const totHtml=['material','mo','mat_mo','equip'].filter(k=>tp[k]>0.5).map(k=>`${tpBadge(k)} <b>${BRL(tp[k])}</b>`).join(' &nbsp; ')+` &nbsp;·&nbsp; <b>Total ${BRL(d.total)}</b>`;
+  const linhas=d.linhas.map((l,li)=>{
+    const sub=['material','mo','mat_mo','equip'].filter(k=>l.tot_por_tipo[k]>0.5).map(k=>tpLabel(k)+' '+BRL(l.tot_por_tipo[k])).join(' · ');
+    return `<div style="border-bottom:1px solid var(--line)">
+      <div class="pickrow" style="cursor:pointer;gap:6px" onclick="orcBdExpand(${li})">
+        <span class="material-icons" id="bdcar-${li}" style="font-size:17px;color:var(--muted)">chevron_right</span>
+        <div style="flex:1;min-width:0"><div>${esc(l.descricao)}</div><small class="muted">${esc((l.path||'').slice(0,58))} · ${sub}${l.sem_composicao?' · <span style="color:var(--and)">linha direta (sem composição)</span>':''}</small></div>
+        <span class="money">${BRL(l.valor)}</span></div>
+      <div id="bdins-${li}" style="display:none;padding:0 0 8px 30px"></div></div>`;
+  }).join('');
+  el.innerHTML=`<div class="box" style="background:#fbfdf9;border-color:var(--ok);margin-bottom:8px"><div class="bv" style="font-size:12.5px">${totHtml}</div></div>
+    <div style="margin-bottom:6px"><button class="btn-ghost" style="padding:4px 10px;font-size:12px" onclick="orcBdAgrupar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">category</span> Ver tudo agrupado por tipo</button></div>
+    <div id="bdAgr" style="display:none;margin-bottom:8px"></div>${linhas}`;
+  if(tot) tot.innerHTML='';
+}
+function orcBdExpand(li){
+  const ins=document.getElementById('bdins-'+li), car=document.getElementById('bdcar-'+li); if(!ins||!ORC_BD)return;
+  const show=ins.style.display==='none'; ins.style.display=show?'block':'none'; if(car) car.textContent=show?'expand_more':'chevron_right';
+  if(show && !ins.dataset.loaded){
+    const l=ORC_BD.linhas[li];
+    ins.innerHTML='<table style="width:100%;font-size:11px;border-collapse:collapse">'+l.insumos.map(x=>
+      `<tr><td style="padding:2px 4px;width:42px">${tpBadge(x.tipo)}</td><td style="padding:2px 4px">${esc((x.desc||'').slice(0,42))}</td>`+
+      `<td style="padding:2px 4px;text-align:right;color:var(--muted);white-space:nowrap">${QNUM(x.qtde)} ${esc(x.unidade||'')} × R$${QNUM(x.rs_unit)}</td>`+
+      `<td style="padding:2px 6px;text-align:right;white-space:nowrap">${BRL(x.valor)}</td></tr>`).join('')+'</table>';
+    ins.dataset.loaded='1';
+  }
+}
+function orcBdAgrupar(){
+  const box=document.getElementById('bdAgr'); if(!box||!ORC_BD)return;
+  const show=box.style.display==='none'; box.style.display=show?'block':'none';
+  if(show && !box.dataset.loaded){
+    const pt=ORC_BD.por_tipo;
+    box.innerHTML=['material','mo','mat_mo','equip'].map(k=>{ const arr=pt[k]||[]; if(!arr.length)return'';
+      const sub=arr.reduce((a,x)=>a+x.valor,0);
+      return `<div class="box" style="margin-bottom:6px"><div class="bl">${tpBadge(k)} ${TP_FULL[k]} — ${BRL(sub)} <span class="muted" style="font-weight:400">(${arr.length})</span></div>`+
+        '<table style="width:100%;font-size:11px;border-collapse:collapse">'+arr.map(x=>
+        `<tr><td style="padding:2px 4px">${esc((x.desc||'').slice(0,46))}</td><td style="padding:2px 4px;text-align:right;color:var(--muted);white-space:nowrap">${QNUM(x.qtde)} ${esc(x.unidade||'')}</td><td style="padding:2px 6px;text-align:right;white-space:nowrap">${BRL(x.valor)}</td></tr>`).join('')+'</table></div>';
+    }).join('');
+    box.dataset.loaded='1';
+  }
 }
 async function orcLoadTree(){
   const box=document.getElementById('orcTree'); if(!box)return;

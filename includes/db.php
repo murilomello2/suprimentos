@@ -206,6 +206,40 @@ function db_schema($pdo) {
             if ($cnt > 0) $pdo->prepare("INSERT OR REPLACE INTO meta (k,v) VALUES ('datafix_reclass_v1','1')")->execute();
         }
     }
+
+    // data-fix R06: reimporta o orçamento (valores) + composições (insumos já separados material/MO) do novo
+    // ORÇ_TRINITY_R06, PRESERVANDO a curadoria. A estrutura é idêntica ao R05 (mesmas 2836 folhas/702 comps na
+    // mesma ordem) → os IDs batem, então orcamento_refs/composicao_sel continuam válidos. Recarrega SÓ as 3
+    // tabelas-base (não toca radar_item/usuario/historico). Transacional + try/catch: se falhar, rollback e tenta de novo.
+    $dfr06 = $pdo->query("SELECT v FROM meta WHERE k='datafix_r06_v1'")->fetch();
+    if (!$dfr06) {
+        $orc  = json_decode(@file_get_contents(SEED_DIR . '/orcamento_trinity.json'), true);
+        $comp = json_decode(@file_get_contents(SEED_DIR . '/composicao_trinity.json'), true);
+        if (is_array($orc) && !empty($orc['linhas']) && is_array($comp) && !empty($comp['composicoes'])) {
+            try {
+                $cic2 = []; foreach ($pdo->query("PRAGMA table_info(composicao_insumo)") as $c) $cic2[$c['name']] = true;
+                if (!isset($cic2['tipo_orig'])) $pdo->exec("ALTER TABLE composicao_insumo ADD COLUMN tipo_orig TEXT");
+                $pdo->beginTransaction();
+                $pdo->exec("DELETE FROM orcamento_linha");
+                $ol = $pdo->prepare("INSERT INTO orcamento_linha (id,obra_id,codigo,parent,depth,nivel,descricao,path_str,unidade,qtde,valor,folha) VALUES (?,1,?,?,?,?,?,?,?,?,?,?)");
+                foreach ($orc['linhas'] as $l)
+                    $ol->execute([$l['id'],$l['codigo'],$l['parent'],$l['depth'],$l['nivel'],$l['descricao'],$l['path_str'],$l['unidade'],$l['qtde'],$l['valor'],$l['folha']]);
+                $pdo->exec("DELETE FROM composicao");
+                $pdo->exec("DELETE FROM composicao_insumo");
+                $cc = $pdo->prepare("INSERT INTO composicao (id,obra_id,descricao,unidade,qtde_total,rs_unit,rs_total) VALUES (?,1,?,?,?,?,?)");
+                $ci = $pdo->prepare("INSERT INTO composicao_insumo (composicao_id,descricao,unidade,coef,rs_unit,rs_total,tipo,tipo_orig) VALUES (?,?,?,?,?,?,?,?)");
+                foreach ($comp['composicoes'] as $co) {
+                    $cc->execute([$co['id'],$co['descricao'],$co['unidade'],$co['qtde_total'],$co['rs_unit'],$co['rs_total']]);
+                    foreach ($co['insumos'] as $in)
+                        $ci->execute([$co['id'],$in['descricao'],$in['unidade'],$in['coef'],$in['rs_unit'],$in['rs_total'],$in['tipo'],$in['tipo']]);
+                }
+                $pdo->commit();
+                $pdo->prepare("INSERT OR REPLACE INTO meta (k,v) VALUES ('datafix_r06_v1','1')")->execute();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();   // não seta a flag → tenta de novo na próxima carga
+            }
+        }
+    }
 }
 
 /** Permissões efetivas de um usuário p/ enforcement NO SERVIDOR. Não cadastrado/sem id => nega. */

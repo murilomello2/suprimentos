@@ -17,6 +17,16 @@ define('SCHEMA_VERSION', 7); // bump força recriação do catálogo + reseed
 function db() {
     static $pdo = null;
     if ($pdo) return $pdo;
+    // ---- MySQL (destino definitivo) — ativa quando DB_DRIVER='mysql' em secrets.php ----
+    if (defined('DB_DRIVER') && DB_DRIVER === 'mysql') {
+        $pdo = new PDO('mysql:host=' . MYSQL_HOST . ';port=' . MYSQL_PORT . ';dbname=' . MYSQL_DB . ';charset=' . MYSQL_CHARSET,
+                       MYSQL_USER, MYSQL_PASS);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+        db_schema_mysql($pdo);   // create-only (índices inline); os dados (inclusive curadoria) vêm da migração
+        return $pdo;
+    }
+    // ---- SQLite (interino — permanece como fallback instantâneo) ----
     if (!is_dir(dirname(DB_PATH))) @mkdir(dirname(DB_PATH), 0775, true);
     $pdo = new PDO('sqlite:' . DB_PATH);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -25,6 +35,69 @@ function db() {
     db_migrate($pdo);
     db_schema($pdo);
     return $pdo;
+}
+
+/**
+ * Schema MySQL 5.7 — create-only, InnoDB/utf8mb4, índices INLINE (o usuário não tem DROP/INDEX avulso).
+ * Todas as colunas (inclusive as que no SQLite eram aditivas via ALTER) já nascem no CREATE.
+ * NÃO roda datafix nem seed: os dados — inclusive a curadoria — vêm da migração server-side (_migrate_mysql.php).
+ * Idempotente (CREATE TABLE IF NOT EXISTS) e usa só privilégio CREATE.
+ */
+function db_schema_mysql($pdo) {
+    $E = "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+    $pdo->exec("CREATE TABLE IF NOT EXISTS meta (
+        k VARCHAR(191) NOT NULL, v TEXT, PRIMARY KEY (k)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS servico (
+        id INT NOT NULL, ordem INT, nome VARCHAR(255) NOT NULL, slug VARCHAR(191), fase VARCHAR(120), grupo VARCHAR(191),
+        grupo_ordem INT, curva VARCHAR(8), forma_contratacao VARCHAR(120), unidade VARCHAR(40),
+        quantitativo TEXT, lead_dias INT, marco_cronograma VARCHAR(255),
+        termos_orcamento TEXT, termos_cronograma TEXT, responsavel_padrao VARCHAR(191),
+        escopo TEXT, variaveis_cotar TEXT, licoes TEXT, documentos TEXT, verba_linhas TEXT,
+        PRIMARY KEY (id)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS obra (
+        id INT NOT NULL, nome VARCHAR(255) NOT NULL, slug VARCHAR(191), codinome VARCHAR(191),
+        `local` VARCHAR(255), cronograma_id VARCHAR(100), orcamento_total DOUBLE, cobertura_orcamento DOUBLE,
+        PRIMARY KEY (id), UNIQUE KEY uq_obra_slug (slug)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS radar_item (
+        id INT NOT NULL AUTO_INCREMENT, obra_id INT NOT NULL, servico_id INT NOT NULL, status VARCHAR(64),
+        responsavel VARCHAR(191), fornecedor VARCHAR(255), inicio_cotacao VARCHAR(40), fim_cotacao VARCHAR(40),
+        verba_estim DOUBLE, confianca VARCHAR(40), observacoes TEXT, validado INT DEFAULT 0, tipo VARCHAR(64),
+        verba_metodo VARCHAR(40), verba_material DOUBLE, verba_mo DOUBLE, composicao_id INT, area_base DOUBLE,
+        verba_override DOUBLE, lead_override INT, crono_marco_override VARCHAR(255), data_necessaria_override VARCHAR(40),
+        orcamento_refs TEXT, quantitativo_valor DOUBLE, quantitativo_unidade VARCHAR(40), quantitativo_refs TEXT,
+        quantitativo_fonte VARCHAR(64), updated_at VARCHAR(40), composicao_sel TEXT, verba_curada INT DEFAULT 0,
+        quant_comp_sel TEXT, quant_curada INT DEFAULT 0,
+        PRIMARY KEY (id), UNIQUE KEY uq_obra_servico (obra_id, servico_id)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS orcamento_linha (
+        id INT NOT NULL, obra_id INT NOT NULL DEFAULT 1, codigo VARCHAR(64), parent VARCHAR(64),
+        depth INT, nivel INT, descricao TEXT, path_str TEXT, unidade VARCHAR(40), qtde DOUBLE, valor DOUBLE, folha INT,
+        PRIMARY KEY (id), KEY idx_orc_parent (parent)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS composicao (
+        id INT NOT NULL, obra_id INT DEFAULT 1, descricao TEXT, unidade VARCHAR(40),
+        qtde_total DOUBLE, rs_unit DOUBLE, rs_total DOUBLE, PRIMARY KEY (id)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS composicao_insumo (
+        id INT NOT NULL AUTO_INCREMENT, composicao_id INT, descricao TEXT, unidade VARCHAR(40),
+        coef DOUBLE, rs_unit DOUBLE, rs_total DOUBLE, tipo VARCHAR(40), tipo_orig VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_ci_comp (composicao_id)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS usuario (
+        bitrix_id VARCHAR(64) NOT NULL, nome VARCHAR(191), cargo VARCHAR(191), papel VARCHAR(40),
+        ver_escopo VARCHAR(16), editar_escopo VARCHAR(16), obras_ver TEXT, obras_editar TEXT, menus TEXT,
+        perm_admin INT DEFAULT 0, ativo INT DEFAULT 1, updated_at VARCHAR(40),
+        perm_crono INT DEFAULT 0, perm_orcamento INT DEFAULT 0, perm_quant INT DEFAULT 0, perm_dicionario INT DEFAULT 0,
+        PRIMARY KEY (bitrix_id)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS historico (
+        id INT NOT NULL AUTO_INCREMENT, obra_id INT, servico_id INT, item_nome VARCHAR(255),
+        bitrix_id VARCHAR(64), usuario_nome VARCHAR(191), campo VARCHAR(120), valor_antes TEXT, valor_depois TEXT,
+        created_at VARCHAR(40), PRIMARY KEY (id), KEY idx_hist_serv (servico_id)
+    ) $E");
 }
 
 /** Auto-migração simples: se a versão do schema mudou, recria as tabelas e força reseed. */

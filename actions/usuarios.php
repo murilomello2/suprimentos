@@ -97,7 +97,8 @@ try {
         ];
         $cols = implode(',', array_keys($rec));
         $ph   = implode(',', array_fill(0, count($rec), '?'));
-        $pdo->prepare("INSERT OR REPLACE INTO usuario ($cols) VALUES ($ph)")->execute(array_values($rec));
+        // REPLACE INTO: cross-compatível SQLite + MySQL (INSERT OR REPLACE é SQLite-only e dá erro no MySQL)
+        $pdo->prepare("REPLACE INTO usuario ($cols) VALUES ($ph)")->execute(array_values($rec));
         echo json_encode(['ok'=>true]); exit;
     }
 

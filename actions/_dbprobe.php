@@ -7,7 +7,21 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/config.php';
 
 if (($_GET['key'] ?? '') !== 'mgr_7q2fk9zp') { http_response_code(403); echo json_encode(['error' => 'forbidden']); exit; }
-if (!defined('MYSQL_PASS')) { echo json_encode(['error' => 'secrets.php não carregou (MYSQL_* indefinido)']); exit; }
+if (!defined('MYSQL_PASS')) {
+    $sf = __DIR__ . '/../includes/secrets.php'; $cf = __DIR__ . '/../includes/config.php';
+    $sc = @file_get_contents($sf); $cc = @file_get_contents($cf);
+    echo json_encode([
+        'error' => 'MYSQL_* indefinido — diagnóstico:',
+        'secrets_exists' => file_exists($sf),
+        'secrets_size' => $sc === false ? null : strlen($sc),
+        'secrets_has_MYSQL_PASS' => $sc !== false && strpos($sc, 'MYSQL_PASS') !== false,
+        'secrets_first40' => $sc === false ? null : substr($sc, 0, 40),
+        'config_size' => $cc === false ? null : strlen($cc),
+        'config_tem_include_secrets' => $cc !== false && strpos($cc, 'secrets.php') !== false,
+        'opcache_on' => function_exists('opcache_get_status') && @opcache_get_status() ? true : false,
+    ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    exit;
+}
 
 $out = ['pdo_mysql' => extension_loaded('pdo_mysql'), 'attempts' => []];
 $hosts = array_values(array_unique(['localhost', '127.0.0.1', MYSQL_HOST]));

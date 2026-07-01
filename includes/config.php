@@ -27,3 +27,8 @@ define('CAPREM_API_PASSWORD', getenv('CAPREM_API_PASSWORD') ?: 'CapremApi#2026!v
 define('DB_PATH', __DIR__ . '/../data/cockpit.sqlite');
 define('TOKEN_CACHE', __DIR__ . '/../data/.token_cache.json');
 define('SEED_DIR', __DIR__ . '/../data/seed');
+
+// Segredos fora do git (MySQL do TI etc.). Carrega se presente.
+@include __DIR__ . '/secrets.php';
+// Driver do banco: 'sqlite' (atual) ou 'mysql' (após migração). Vem de secrets.php ou default sqlite.
+if (!defined('DB_DRIVER')) define('DB_DRIVER', 'sqlite');

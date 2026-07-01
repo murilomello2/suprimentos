@@ -36,13 +36,22 @@ foreach ($hosts as $h) {
         $a['ms'] = round((microtime(true) - $t0) * 1000);
         $a['version'] = $p->query("SELECT VERSION()")->fetchColumn();
         $a['current_db'] = $p->query("SELECT DATABASE()")->fetchColumn();
+        try { $a['grants'] = $p->query("SHOW GRANTS FOR CURRENT_USER()")->fetchAll(PDO::FETCH_COLUMN); }
+        catch (Throwable $e) { $a['grants_err'] = $e->getMessage(); }
         $a['tables'] = $p->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
-        // teste de escrita (posso criar/dropar tabela = tenho DDL no banco?)
-        try {
-            $p->exec("CREATE TABLE IF NOT EXISTS _probe_test (id INT PRIMARY KEY)");
-            $p->exec("DROP TABLE IF EXISTS _probe_test");
-            $a['can_create_table'] = true;
-        } catch (Throwable $e) { $a['can_create_table'] = false; $a['ddl_err'] = $e->getMessage(); }
+        // testes de privilégio, um a um (reusa _probe_test, que pode já existir de rodada anterior)
+        $t = [];
+        $try = function($sql) use ($p) { try { $p->exec($sql); return 'ok'; } catch (Throwable $e) { return $e->getMessage(); } };
+        $t['create']       = $try("CREATE TABLE IF NOT EXISTS _probe_test (id INT PRIMARY KEY)");
+        $t['insert']       = $try("INSERT INTO _probe_test (id) VALUES (1) ON DUPLICATE KEY UPDATE id=id");
+        try { $t['select'] = 'ok(' . $p->query("SELECT COUNT(*) FROM _probe_test")->fetchColumn() . ')'; } catch (Throwable $e) { $t['select'] = $e->getMessage(); }
+        $t['update']       = $try("UPDATE _probe_test SET id=1 WHERE id=1");
+        $t['delete']       = $try("DELETE FROM _probe_test WHERE id=999");
+        $t['alter_add']    = $try("ALTER TABLE _probe_test ADD COLUMN c2 INT");   // 'Duplicate column' tb = ALTER ok
+        $t['create_index'] = $try("CREATE INDEX ix_probe2 ON _probe_test (id)");
+        $t['truncate']     = $try("TRUNCATE _probe_test");
+        $t['drop']         = $try("DROP TABLE _probe_test");
+        $a['priv_tests'] = $t;
     } catch (Throwable $e) {
         $a['connected'] = false;
         $a['err'] = $e->getMessage();

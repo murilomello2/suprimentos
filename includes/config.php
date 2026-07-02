@@ -28,7 +28,15 @@ define('DB_PATH', __DIR__ . '/../data/cockpit.sqlite');
 define('TOKEN_CACHE', __DIR__ . '/../data/.token_cache.json');
 define('SEED_DIR', __DIR__ . '/../data/seed');
 
-// Segredos fora do git (MySQL do TI etc.). Carrega se presente.
+// Driver do banco: LOCAL (preview/localhost/CLI com DB_DRIVER=sqlite) usa SQLite como sandbox;
+// SERVIDOR usa MySQL. Decidido ANTES do secrets (secrets só traz credenciais) e robusto a deploy
+// parcial: se só o secrets subir, ele mesmo define 'mysql' por padrão; se só o config subir, o
+// secrets antigo já define 'mysql'. Nunca cai pra sqlite no servidor por acidente.
+if (!defined('DB_DRIVER')) {
+    $__local = (isset($_SERVER['HTTP_HOST']) && preg_match('#^(localhost|127\.0\.0\.1|\[::1\])#', $_SERVER['HTTP_HOST']))
+            || getenv('DB_DRIVER') === 'sqlite';
+    if ($__local) define('DB_DRIVER', 'sqlite');
+}
+// Segredos fora do git (MySQL do TI etc.). Carrega se presente (define DB_DRIVER='mysql' se ainda não veio).
 @include __DIR__ . '/secrets.php';
-// Driver do banco: 'sqlite' (atual) ou 'mysql' (após migração). Vem de secrets.php ou default sqlite.
 if (!defined('DB_DRIVER')) define('DB_DRIVER', 'sqlite');

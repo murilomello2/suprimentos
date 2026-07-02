@@ -1294,7 +1294,7 @@ async function qntManualSalvar(){
 async function qntLimpar(){ EDITQ=false; QNT_SEL.clear(); await saveAndReload({quantitativo_valor:'', quantitativo_unidade:'', quantitativo_fonte:'', quant_refs:[]}); toast('Quantitativo limpo'); }
 
 /* ===== Orçamento — árvore navegável (Grupo → Disciplina → Elemento → item) ===== */
-let ORC_SEL=new Set(), ORC_NODES=[];
+let ORC_SEL=new Set(), ORC_NODES=[], ORC_EXCL=[];
 function orcTab(i){
   const MET={analitico:'linhas do orçamento (analítico)', composicao:'composição de insumos', manual:'manual'};
   const metodo = MET[i.verba_metodo] || 'estimativa preliminar (a curar)';
@@ -1322,7 +1322,7 @@ function orcTab(i){
   return h;
 }
 let ORCFONTE='analitico';
-function orcEditar(){ EDITO=true; VERBA_USOS=null; ORC_NODES=[]; ORCFONTE=(CUR.verba_metodo==='composicao'?'composicao':'analitico'); COMP_SEL=(CUR.composicao_sel||[]).map(s=>({...s})); COMP_DATA=null; drawModal(); }
+function orcEditar(){ EDITO=true; VERBA_USOS=null; ORC_NODES=[]; ORCFONTE=(CUR.verba_metodo==='composicao'?'composicao':'analitico'); COMP_SEL=(CUR.composicao_sel||[]).map(s=>({...s})); ORC_EXCL=(CUR.orcamento_excl||[]).map(e=>({l:Number(e.l),d:e.d})); COMP_DATA=null; drawModal(); }
 function orcCancelar(){ EDITO=false; drawModal(); }
 async function orcLoadLastChange(ordem){
   const box=document.getElementById('orcLastChange'); if(!box)return;
@@ -1443,7 +1443,8 @@ async function orcShowCurrent(i){
     return;
   }
   ORC_SEL=new Set((i.orcamento_refs||[]).map(Number));
-  if(!EDITO && ORC_SEL.size) await orcRenderBreakdown(i);   // read-only: quebra por tipo (mat/MO/equip) + por linha
+  if(EDITO && ORCFONTE==='analitico') await orcLoadEditConf(i);   // edição: conferência interativa (tirar/incluir insumo)
+  else if(!EDITO && ORC_SEL.size) await orcRenderBreakdown(i);    // read-only: quebra por tipo (mat/MO/equip) + por linha
   else await orcRenderSel();
 }
 let ORC_BD=null;
@@ -1475,9 +1476,9 @@ function orcBdExpand(li){
   if(show && !ins.dataset.loaded){
     const l=ORC_BD.linhas[li];
     ins.innerHTML='<table style="width:100%;font-size:11px;border-collapse:collapse">'+l.insumos.map(x=>
-      `<tr><td style="padding:2px 4px;width:42px">${tpBadge(x.tipo)}</td><td style="padding:2px 4px">${esc((x.desc||'').slice(0,42))}</td>`+
+      `<tr style="${x.excl?'opacity:.45':''}"><td style="padding:2px 4px;width:42px">${tpBadge(x.tipo)}</td><td style="padding:2px 4px;${x.excl?'text-decoration:line-through':''}">${esc((x.desc||'').slice(0,42))}${x.excl?' <span style="color:var(--and);font-size:9px;text-decoration:none">· fora</span>':''}</td>`+
       `<td style="padding:2px 4px;text-align:right;color:var(--muted);white-space:nowrap">${QNUM(x.qtde)} ${esc(x.unidade||'')} × R$${QNUM(x.rs_unit)}</td>`+
-      `<td style="padding:2px 6px;text-align:right;white-space:nowrap">${BRL(x.valor)}</td></tr>`).join('')+'</table>';
+      `<td style="padding:2px 6px;text-align:right;white-space:nowrap;${x.excl?'text-decoration:line-through':''}">${BRL(x.valor)}</td></tr>`).join('')+'</table>';
     ins.dataset.loaded='1';
   }
 }
@@ -1494,6 +1495,62 @@ function orcBdAgrupar(){
     }).join('');
     box.dataset.loaded='1';
   }
+}
+// ===== Conferência interativa de insumos na EDIÇÃO analítica: abre a linha e tira/inclui insumo (ex.: espaçador) =====
+async function orcLoadEditConf(i){
+  const el=document.getElementById('orcSel'); if(!el)return;
+  const t=document.getElementById('orcTotal');
+  if(!ORC_SEL.size){ el.innerHTML='<span class="muted">Nenhuma linha na verba ainda. Use a busca ou a árvore abaixo para adicionar linhas do orçamento.</span>'; if(t)t.textContent=''; return; }
+  el.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Conferindo insumos…</div>';
+  const refs=[...ORC_SEL].join(',');
+  const excl=encodeURIComponent(JSON.stringify((ORC_EXCL||[]).filter(e=>ORC_SEL.has(Number(e.l)))));
+  let d; try{ d=await (await fetch(`actions/verba_breakdown.php?ordem=${i.ordem}&refs=${refs}&excl=${excl}`)).json(); }
+  catch(e){ el.innerHTML='<span class="muted">Falha ao carregar insumos.</span>'; return; }
+  if(d.error){ el.innerHTML='<span class="muted">'+esc(d.error)+'</span>'; return; }
+  ORC_BD=d; orcPaintEditConf();
+}
+function orcBdRecompute(){
+  if(!ORC_BD)return; const T={material:0,mo:0,mat_mo:0,equip:0};
+  ORC_BD.linhas.forEach(l=>{ const lt={material:0,mo:0,mat_mo:0,equip:0};
+    l.insumos.forEach(x=>{ if(!x.excl){ lt[x.tipo]=(lt[x.tipo]||0)+x.valor; T[x.tipo]+=x.valor; } });
+    l.tot_por_tipo=lt; });
+  ORC_BD.tot_por_tipo=T; ORC_BD.total=T.material+T.mo+T.mat_mo+T.equip;
+}
+function orcConfExpand(li){ const ins=document.getElementById('bdins-'+li), car=document.getElementById('bdcar-'+li); if(!ins)return;
+  const show=ins.style.display==='none'; ins.style.display=show?'block':'none'; if(car)car.textContent=show?'expand_more':'chevron_right'; }
+function orcPaintEditConf(){
+  const el=document.getElementById('orcSel'), tot=document.getElementById('orcTotal'); if(!el||!ORC_BD)return;
+  const tp=ORC_BD.tot_por_tipo;
+  const totHtml=['material','mo','mat_mo','equip'].filter(k=>tp[k]>0.5).map(k=>`${tpBadge(k)} <b>${BRL(tp[k])}</b>`).join(' &nbsp; ')+` &nbsp;·&nbsp; <b>Total ${BRL(ORC_BD.total)}</b>`;
+  const nExcl=(ORC_EXCL||[]).filter(e=>ORC_SEL.has(Number(e.l))).length;
+  const linhas=ORC_BD.linhas.map((l,li)=>{
+    const nx=l.insumos.filter(x=>x.excl).length;
+    const lineNet=['material','mo','mat_mo','equip'].reduce((a,k)=>a+(l.tot_por_tipo[k]||0),0);
+    const sub=['material','mo','mat_mo','equip'].filter(k=>l.tot_por_tipo[k]>0.5).map(k=>tpLabel(k)+' '+BRL(l.tot_por_tipo[k])).join(' · ');
+    const ins=l.insumos.map((x,ii)=>`<div class="pickrow" style="gap:6px;padding:2px 0;${x.excl?'opacity:.55':''}" onclick="orcExclToggle(${li}, ${ii})" title="${x.excl?'incluir de volta na verba':'tirar da verba'}">
+        <span class="material-icons" style="font-size:16px;color:${x.excl?'var(--muted)':'var(--ok)'}">${x.excl?'check_box_outline_blank':'check_box'}</span>${tpBadge(x.tipo)}
+        <div style="flex:1;min-width:0"><div style="${x.excl?'text-decoration:line-through;color:var(--muted)':''}">${esc((x.desc||'').slice(0,40))}</div></div>
+        <span class="muted" style="font-size:11px;white-space:nowrap">${QNUM(x.qtde)} ${esc(x.unidade||'')}</span>
+        <span class="money" style="${x.excl?'text-decoration:line-through;color:var(--muted)':''}">${BRL(x.valor)}</span></div>`).join('');
+    return `<div style="border-bottom:1px solid var(--line);padding:1px 0">
+      <div class="pickrow" style="gap:6px">
+        <span class="material-icons" onclick="orcToggleSel(${l.id})" style="font-size:17px;color:var(--ok);cursor:pointer" title="remover a linha inteira da verba">check_box</span>
+        <span class="material-icons" id="bdcar-${li}" onclick="orcConfExpand(${li})" style="font-size:17px;color:var(--muted);cursor:pointer">${nx?'expand_more':'chevron_right'}</span>
+        <div style="flex:1;min-width:0;cursor:pointer" onclick="orcConfExpand(${li})"><div>${esc(l.descricao)}</div><small class="muted">${esc((l.path||'').slice(0,50))}${sub?' · '+sub:''}${nx?` · <span style="color:var(--and)">−${nx} insumo</span>`:''}</small></div>
+        <span class="money">${BRL(lineNet)}</span></div>
+      <div id="bdins-${li}" style="display:${nx?'block':'none'};padding:0 0 6px 30px">${ins}</div></div>`;
+  }).join('');
+  el.innerHTML=`<div class="box" style="background:#fbfdf9;border-color:var(--ok);margin-bottom:8px">
+      <div class="bv" style="font-size:12.5px">${totHtml}${nExcl?` <span class="muted" style="font-weight:400">· ${nExcl} insumo(s) fora</span>`:''}</div>
+      <div class="muted" style="font-size:11px;margin-top:3px">Abra a linha (▸) e clique num insumo para <b>tirar/incluir</b> na verba (ex.: espaçador). O ✔ da esquerda remove a linha inteira.</div></div>${linhas}`;
+  if(tot) tot.innerHTML='';
+}
+function orcExclToggle(li, ii){
+  if(!ORC_BD)return; const l=ORC_BD.linhas[li]; if(!l)return; const insu=l.insumos[ii]; if(!insu)return;
+  const lineId=Number(l.id), desc=insu.desc; ORC_EXCL=ORC_EXCL||[];
+  const ix=ORC_EXCL.findIndex(e=>Number(e.l)===lineId && e.d===desc);
+  const nowExcl=ix<0; if(ix>=0) ORC_EXCL.splice(ix,1); else ORC_EXCL.push({l:lineId, d:desc});
+  insu.excl=nowExcl; orcBdRecompute(); orcPaintEditConf();
 }
 async function orcLoadTree(){
   const box=document.getElementById('orcTree'); if(!box)return;
@@ -1534,7 +1591,7 @@ function orcToggleSel(id){
   const tr=document.getElementById('orcTree'), sr=document.querySelector('#orcSearch .srbox');
   const ts=tr?tr.scrollTop:0, ss=sr?sr.scrollTop:0;
   ORC_SEL.has(id)?ORC_SEL.delete(id):ORC_SEL.add(id);
-  orcRenderTree(); orcRenderSel(); orcRenderSearch();
+  orcRenderTree(); if(EDITO&&ORCFONTE==='analitico'){ orcLoadEditConf(CUR); } else { orcRenderSel(); } orcRenderSearch();
   const tr2=document.getElementById('orcTree'); if(tr2)tr2.scrollTop=ts;
   const sr2=document.querySelector('#orcSearch .srbox'); if(sr2)sr2.scrollTop=ss;
 }
@@ -1571,8 +1628,9 @@ function orcRenderSearch(){
     <span class="material-icons" style="font-size:16px;color:${on?'var(--ok)':'var(--muted)'}">${on?'check_box':'check_box_outline_blank'}</span>
     <div><div>${esc(l.descricao)}</div><small class="muted">${esc(l.path_str||'')} · ${BRL(l.valor)}</small></div></div>`;}).join('')+'</div>';
 }
-async function orcSalvar(){ EDITO=false; await saveAndReload({orcamento_refs:[...ORC_SEL]}); toast('Verba composta ('+ORC_SEL.size+' itens)'); }
-async function orcLimpar(){ EDITO=false; ORC_SEL.clear(); await saveAndReload({orcamento_refs:[]}); toast('Composição limpa'); }
+async function orcSalvar(){ EDITO=false; const ex=(ORC_EXCL||[]).filter(e=>ORC_SEL.has(Number(e.l)));
+  await saveAndReload({orcamento_refs:[...ORC_SEL], orcamento_excl:ex}); toast('Verba composta ('+ORC_SEL.size+' linhas'+(ex.length?', −'+ex.length+' insumo':'')+')'); }
+async function orcLimpar(){ EDITO=false; ORC_SEL.clear(); ORC_EXCL=[]; await saveAndReload({orcamento_refs:[], orcamento_excl:[]}); toast('Composição limpa'); }
 // Separar material × MO: converte verba analítica (linha inteira) em composição SÓ material, liberando a MO
 async function separarMO(){
   if(!CUR) return;

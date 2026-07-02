@@ -50,7 +50,7 @@ try {
     $FG = [
         'status'=>'geral','fornecedor'=>'geral','observacoes'=>'geral',
         'crono_marco_override'=>'crono','data_necessaria_override'=>'crono',
-        'orcamento_refs'=>'orcamento','composicao_sel'=>'orcamento','composicao'=>'orcamento','verba_override'=>'orcamento',
+        'orcamento_refs'=>'orcamento','orcamento_excl'=>'orcamento','composicao_sel'=>'orcamento','composicao'=>'orcamento','verba_override'=>'orcamento',
         'quant_refs'=>'quant','quant_comp_sel'=>'quant','quantitativo_valor'=>'quant','quantitativo_unidade'=>'quant','quantitativo_fonte'=>'quant',
         'dicionario'=>'dicionario',
     ];                                   // chave ausente => 'admin'
@@ -88,14 +88,50 @@ try {
     // ----- vínculo de verba por LINHAS do orçamento (analítico) -----
     if (array_key_exists('orcamento_refs', $campos)) {
         $refs = array_values(array_filter(array_map('intval', (array)$campos['orcamento_refs'])));
-        $soma = 0;
+        // exclusões de insumos DENTRO das linhas (ex.: tirar o espaçador) — [{l:lineId, d:desc}]. null = não mexer.
+        $exclIn = array_key_exists('orcamento_excl', $campos)
+            ? (is_array($campos['orcamento_excl']) ? $campos['orcamento_excl'] : (json_decode((string)$campos['orcamento_excl'], true) ?: []))
+            : null;
+        $soma = 0; $inq = '';
         if ($refs) {
             $inq = implode(',', array_fill(0, count($refs), '?'));
             $st = $pdo->prepare("SELECT COALESCE(SUM(valor),0) s FROM orcamento_linha WHERE id IN ($inq)");
             $st->execute($refs); $soma = (float)$st->fetch()['s'];
         }
+        // valor dos insumos excluídos (subtrai da verba). Ignora exclusões de linhas não selecionadas.
+        $exclClean = []; $excl_val = 0.0;
+        if ($refs && is_array($exclIn) && $exclIn) {
+            $refsSet = array_flip($refs); $lmeta = [];
+            $lm = $pdo->prepare("SELECT id, qtde, valor, descricao FROM orcamento_linha WHERE id IN ($inq)"); $lm->execute($refs);
+            foreach ($lm->fetchAll() as $r) $lmeta[(int)$r['id']] = $r;
+            $descs = array_values(array_unique(array_map(function($r){ return $r['descricao']; }, $lmeta)));
+            $cidByDesc = [];
+            if ($descs) {
+                $ph = implode(',', array_fill(0, count($descs), '?'));
+                $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE descricao IN ($ph)"); $q->execute($descs);
+                foreach ($q->fetchAll() as $c) $cidByDesc[$c['descricao']] = (int)$c['id'];
+            }
+            $insUnit = []; $cids = array_values(array_unique(array_values($cidByDesc)));
+            if ($cids) {
+                $inC = implode(',', array_fill(0, count($cids), '?'));
+                $qi = $pdo->prepare("SELECT composicao_id, descricao, coef, rs_unit FROM composicao_insumo WHERE composicao_id IN ($inC)"); $qi->execute($cids);
+                foreach ($qi->fetchAll() as $r) $insUnit[$r['composicao_id'].'|'.$r['descricao']] = (float)$r['coef'] * (float)$r['rs_unit'];
+            }
+            foreach ($exclIn as $e) {
+                $l = (int)($e['l'] ?? 0); $d = (string)($e['d'] ?? '');
+                if (!$l || $d === '' || !isset($refsSet[$l]) || !isset($lmeta[$l])) continue;
+                $exclClean[] = ['l'=>$l, 'd'=>$d];
+                $cid = $cidByDesc[$lmeta[$l]['descricao']] ?? 0;
+                $u = $insUnit[$cid.'|'.$d] ?? null;
+                if ($u !== null) $excl_val += (float)$lmeta[$l]['qtde'] * $u;
+                elseif ($d === $lmeta[$l]['descricao']) $excl_val += (float)$lmeta[$l]['valor']; // linha direta excluída inteira
+            }
+        }
+        $verba = $soma - $excl_val;
         $set[] = "orcamento_refs = ?"; $vals[] = $refs ? json_encode($refs) : null;
-        $set[] = "verba_override = ?"; $vals[] = $refs ? $soma : null;
+        // orcamento_excl só é tocado se veio no payload (null = mantém); ao limpar refs, zera.
+        if ($exclIn !== null || !$refs) { $set[] = "orcamento_excl = ?"; $vals[] = ($refs && $exclClean) ? json_encode($exclClean, JSON_UNESCAPED_UNICODE) : null; }
+        $set[] = "verba_override = ?"; $vals[] = $refs ? $verba : null;
         $set[] = "verba_metodo = ?";   $vals[] = $refs ? 'analitico' : null;
         $set[] = "verba_curada = ?";   $vals[] = $refs ? 1 : 0;
         if ($refs) {
@@ -108,8 +144,8 @@ try {
             $set[] = "quantitativo_fonte = ?";   $vals[] = 'orcamento';
             $set[] = "quant_curada = ?";         $vals[] = 1;
         }
-        $h('Verba (vínculo analítico)', '', $refs ? ('R$ '.number_format($soma,2,',','.').' · '.count($refs).' linhas') : 'limpo');
-        unset($campos['orcamento_refs']);
+        $h('Verba (vínculo analítico)', '', $refs ? ('R$ '.number_format($verba,2,',','.').' · '.count($refs).' linhas'.($exclClean ? (' · −'.count($exclClean).' insumo') : '')) : 'limpo');
+        unset($campos['orcamento_refs']); unset($campos['orcamento_excl']);
     }
 
     // ----- DICIONÁRIO (template por tipo de serviço) — atualiza servico -----

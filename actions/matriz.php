@@ -19,7 +19,7 @@ try {
         $rcols = [];
         foreach ($pdo->query("PRAGMA table_info(radar_item)") as $c) $rcols[$c['name']] = true;
         foreach (['composicao_sel'=>'TEXT','verba_curada'=>'INTEGER DEFAULT 0',
-                  'quant_comp_sel'=>'TEXT','quant_curada'=>'INTEGER DEFAULT 0'] as $col=>$type) {
+                  'quant_comp_sel'=>'TEXT','quant_curada'=>'INTEGER DEFAULT 0','orcamento_excl'=>'TEXT'] as $col=>$type) {
             if (!isset($rcols[$col])) { try { $pdo->exec("ALTER TABLE radar_item ADD COLUMN $col $type"); } catch (Throwable $e) {} }
         }
     } catch (Throwable $e) { /* nunca derruba o endpoint por causa da auto-cura */ }
@@ -36,7 +36,7 @@ try {
                r.verba_override, r.lead_override, r.crono_marco_override,
                r.data_necessaria_override, r.orcamento_refs,
                r.quantitativo_valor, r.quantitativo_unidade, r.quantitativo_refs, r.quantitativo_fonte,
-               r.tipo, r.verba_metodo, r.verba_material, r.verba_mo, r.composicao_id, r.area_base, r.composicao_sel, r.verba_curada, r.quant_comp_sel, r.quant_curada
+               r.tipo, r.verba_metodo, r.verba_material, r.verba_mo, r.composicao_id, r.area_base, r.composicao_sel, r.verba_curada, r.quant_comp_sel, r.quant_curada, r.orcamento_excl
         FROM servico s
         JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = 1
         ORDER BY s.grupo_ordem, s.ordem
@@ -90,6 +90,7 @@ try {
             'curado_verba'    => (bool)((int)($r['verba_curada'] ?? 0)),
             'curado_data'     => (bool)$r['data_necessaria_override'],
             'orcamento_refs'  => $r['orcamento_refs'] ? json_decode($r['orcamento_refs'], true) : [],
+            'orcamento_excl'  => !empty($r['orcamento_excl']) ? json_decode($r['orcamento_excl'], true) : [],
             'quantitativo'         => $r['quantitativo_valor'] !== null ? (float)$r['quantitativo_valor'] : null,
             'quantitativo_unidade' => $r['quantitativo_unidade'],
             'quantitativo_fonte'   => $r['quantitativo_fonte'],

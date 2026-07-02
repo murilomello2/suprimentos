@@ -69,7 +69,7 @@ function db_schema_mysql($pdo) {
         verba_override DOUBLE, lead_override INT, crono_marco_override VARCHAR(255), data_necessaria_override VARCHAR(40),
         orcamento_refs TEXT, quantitativo_valor DOUBLE, quantitativo_unidade VARCHAR(40), quantitativo_refs TEXT,
         quantitativo_fonte VARCHAR(64), updated_at VARCHAR(40), composicao_sel TEXT, verba_curada INT DEFAULT 0,
-        quant_comp_sel TEXT, quant_curada INT DEFAULT 0,
+        quant_comp_sel TEXT, quant_curada INT DEFAULT 0, orcamento_excl TEXT,
         PRIMARY KEY (id), UNIQUE KEY uq_obra_servico (obra_id, servico_id)
     ) $E");
     $pdo->exec("CREATE TABLE IF NOT EXISTS orcamento_linha (
@@ -98,6 +98,11 @@ function db_schema_mysql($pdo) {
         bitrix_id VARCHAR(64), usuario_nome VARCHAR(191), campo VARCHAR(120), valor_antes TEXT, valor_depois TEXT,
         created_at VARCHAR(40), PRIMARY KEY (id), KEY idx_hist_serv (servico_id)
     ) $E");
+    // colunas ADITIVAS na produção (radar_item já existe da migração; CREATE IF NOT EXISTS não adiciona coluna).
+    // Usa ALTER (privilégio concedido) só se faltar. Espelha o self-heal do caminho SQLite.
+    $rc = [];
+    foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='radar_item'") as $c) $rc[$c['COLUMN_NAME']] = true;
+    if (!isset($rc['orcamento_excl'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN orcamento_excl TEXT");
 }
 
 /** Auto-migração simples: se a versão do schema mudou, recria as tabelas e força reseed. */
@@ -187,6 +192,9 @@ function db_schema($pdo) {
     if (!isset($rcols['quant_comp_sel'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN quant_comp_sel TEXT");
     // quant_curada (0/1): igual à verba — só "curado" quando alguém altera+confirma. Default 0 => reseta todos.
     if (!isset($rcols['quant_curada'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN quant_curada INTEGER DEFAULT 0");
+    // orcamento_excl (JSON): insumos EXCLUÍDOS de dentro de linhas analíticas selecionadas (ex.: tirar o
+    // espaçador de uma linha) — lista [{l:lineId, d:descrição}]. Verba = Σ linhas − Σ insumos excluídos.
+    if (!isset($rcols['orcamento_excl'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN orcamento_excl TEXT");
     $pdo->exec("CREATE TABLE IF NOT EXISTS orcamento_linha (
         id INTEGER PRIMARY KEY,
         obra_id INTEGER NOT NULL DEFAULT 1,

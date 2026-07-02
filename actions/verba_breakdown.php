@@ -15,13 +15,19 @@ require_once __DIR__ . '/../includes/db.php';
 try {
     $pdo = db();
     $ordem = (int)($_GET['ordem'] ?? 0);
-    $st = $pdo->prepare("SELECT tipo, orcamento_refs, composicao_sel FROM radar_item WHERE servico_id=? AND obra_id=1");
+    $st = $pdo->prepare("SELECT tipo, orcamento_refs, composicao_sel, orcamento_excl FROM radar_item WHERE servico_id=? AND obra_id=1");
     $st->execute([$ordem]);
     $it = $st->fetch();
     if (!$it) { echo json_encode(['error'=>'item não encontrado']); exit; }
 
     $refs = json_decode($it['orcamento_refs'] ?? '[]', true) ?: [];
     $csel = json_decode($it['composicao_sel'] ?? '[]', true) ?: [];
+    // Overrides p/ EDIÇÃO ao vivo (seleção/exclusões ainda não salvas). excl = [{l:lineId, d:descrição}]
+    if (isset($_GET['refs'])) $refs = array_values(array_filter(array_map('intval', explode(',', $_GET['refs']))));
+    $excl = isset($_GET['excl']) ? (json_decode($_GET['excl'], true) ?: [])
+                                 : (!empty($it['orcamento_excl']) ? (json_decode($it['orcamento_excl'], true) ?: []) : []);
+    $exclSet = [];
+    foreach ($excl as $e) $exclSet[((int)($e['l'] ?? 0)) . '|' . ($e['d'] ?? '')] = true;
     $tpc  = function($t){ return in_array($t, ['material','mo','mat_mo','equip'], true) ? $t : 'material'; };
 
     $linhas = [];
@@ -58,14 +64,16 @@ try {
             if ($cid && !empty($insByCid[$cid])) {
                 foreach ($insByCid[$cid] as $ins) {
                     $q = $lq * (float)$ins['coef']; $v = $q * (float)$ins['rs_unit']; $t = $tpc($ins['tipo']);
-                    $insumos[] = ['desc'=>$ins['descricao'], 'tipo'=>$t, 'unidade'=>$ins['unidade'], 'qtde'=>$q, 'rs_unit'=>(float)$ins['rs_unit'], 'valor'=>$v];
-                    $lt[$t] += $v; $totItem[$t] += $v; $addAgg($t, $ins['descricao'], $ins['unidade'], $q, $v);
+                    $isX = isset($exclSet[$l['id'] . '|' . $ins['descricao']]);   // insumo excluído desta linha?
+                    $insumos[] = ['desc'=>$ins['descricao'], 'tipo'=>$t, 'unidade'=>$ins['unidade'], 'qtde'=>$q, 'rs_unit'=>(float)$ins['rs_unit'], 'valor'=>$v, 'excl'=>$isX];
+                    if (!$isX) { $lt[$t] += $v; $totItem[$t] += $v; $addAgg($t, $ins['descricao'], $ins['unidade'], $q, $v); }
                 }
             } else {
                 // linha sem composição (material direto) → conta como material, valor da linha
                 $semc = true; $v = (float)$l['valor'];
-                $insumos[] = ['desc'=>$l['descricao'], 'tipo'=>'material', 'unidade'=>$l['unidade'], 'qtde'=>$lq, 'rs_unit'=>($lq?($v/$lq):0), 'valor'=>$v];
-                $lt['material'] += $v; $totItem['material'] += $v; $addAgg('material', $l['descricao'], $l['unidade'], $lq, $v);
+                $isX = isset($exclSet[$l['id'] . '|' . $l['descricao']]);
+                $insumos[] = ['desc'=>$l['descricao'], 'tipo'=>'material', 'unidade'=>$l['unidade'], 'qtde'=>$lq, 'rs_unit'=>($lq?($v/$lq):0), 'valor'=>$v, 'excl'=>$isX];
+                if (!$isX) { $lt['material'] += $v; $totItem['material'] += $v; $addAgg('material', $l['descricao'], $l['unidade'], $lq, $v); }
             }
             $linhas[] = ['id'=>(int)$l['id'], 'descricao'=>$l['descricao'], 'path'=>$l['path_str'], 'valor'=>(float)$l['valor'],
                          'sem_composicao'=>$semc, 'tot_por_tipo'=>$lt, 'insumos'=>$insumos];

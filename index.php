@@ -810,10 +810,14 @@ async function grupoRenomear(idx){
   if(COLLAPSED.has(g)){ COLLAPSED.delete(g); COLLAPSED.add(to); saveCollapsed(); }
   await load(); toast('Grupo renomeado');
 }
+// verba DEFINIDA (vinculada/curada) — 0 quando não há vínculo; a estimativa preliminar NÃO conta como verba (é só referência no modal)
+function verbaDefinida(i){ return i.verba_override!=null && i.verba_override!==''; }
+function verbaDef(i){ return verbaDefinida(i) ? +i.verba_override : 0; }
 function groupHeaderHtml(g,items,idx){
   const collapsed=COLLAPSED.has(g);
   const n=items.length;
-  const verba=items.reduce((s,i)=>s+(i.verba||0),0);
+  const verba=items.reduce((s,i)=>s+(i.verba||0),0);          // BASE (definida ?? estimativa) — só denominador do chip de curadoria
+  const verbaDefSum=items.reduce((s,i)=>s+verbaDef(i),0);      // só a verba DEFINIDA — é o que aparece no total do grupo
   const datas=items.map(i=>i.data_gatilho).filter(Boolean).sort();
   const prox=datas.length?` · próx. início ${D(datas[0])}`:'';
   // progresso de curadoria do grupo: verba curada (itens com verba_curada) / verba total do grupo
@@ -831,7 +835,7 @@ function groupHeaderHtml(g,items,idx){
   return `<tr class="grp" onclick="toggleGroup(${idx})"><td colspan="12"><span class="gwrap">
       <span class="material-icons gcaret">${collapsed?'chevron_right':'expand_more'}</span>
       <span class="gname">${esc(g)}</span>${adm}
-      <span class="gcount">· ${n} ${n>1?'itens':'item'} · ${BRL(verba)}${prox}</span>
+      <span class="gcount">· ${n} ${n>1?'itens':'item'} · ${BRL(verbaDefSum)}${prox}</span>
       ${chip}
     </span></td></tr>`;
 }
@@ -879,7 +883,7 @@ function rowHtml(i){
     <td><div class="svc">${esc(i.nome)} ${tipoChip(i.tipo)}</div><div class="svc-sub">${esc(i.forma_contratacao||'')}</div></td>
     <td><span class="curva c-${i.curva||'C'}">${esc(i.curva||'—')}</span></td>
     <td>${i.responsavel?esc(i.responsavel):`<button class="resp-miss" onclick="event.stopPropagation();openModal(${i.ordem})">definir</button>`}</td>
-    <td class="money">${BRL(i.verba)}${i.curado_verba?' <span class="material-icons" title="verba curada" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':''}</td>
+    <td class="money">${verbaDefinida(i)?`${BRL(verbaDef(i))}${i.curado_verba?' <span class="material-icons" title="verba curada" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':''}`:`<span class="muted" title="sem verba definida — a estimativa preliminar do orçamento não conta como verba">R$ 0 <span style="font-size:10px">· a definir</span></span>`}</td>
     <td>${i.quantitativo!=null?`<div class="qcell" title="${esc(QNUM(i.quantitativo)+' '+(i.quantitativo_unidade||''))}"><b>${QNUM(i.quantitativo)}</b> <span class="muted">${esc(i.quantitativo_unidade||'')}</span>${i.curado_quant?' <span class="material-icons" title="quantitativo curado" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':''}</div>`:'<span class="muted">—</span>'}</td>
     <td class="date">${D(i.data_necessaria)}${i.curado_data?' <span class="material-icons" title="data curada" style="font-size:12px;color:var(--ok);vertical-align:-2px">verified</span>':''}</td>
     <td>${pctChip(i.cronograma_pct)}</td>
@@ -1353,7 +1357,7 @@ function orcTab(i){
     <div class="box"><div class="bl">Verba atual</div>
       ${semDef
         ? `<div class="bv"><b style="font-size:15px;color:var(--and)">Sem verba definida</b> <span style="color:var(--and);font-size:12px">· a curar</span></div>
-           <div class="muted" style="font-size:12px;margin-top:5px;line-height:1.5">Estimativa preliminar do orçamento: <b>${BRL(i.verba)}</b> — apenas <b>referência</b> (ainda não curada; conta na curva ABC até você definir). Clique em <b>“Editar vínculo de verba”</b> pra montar a verba do zero.</div>`
+           <div class="muted" style="font-size:12px;margin-top:5px;line-height:1.5">Estimativa preliminar do orçamento: <b>${BRL(i.verba)}</b> — apenas <b>referência</b> (NÃO conta como verba enquanto você não vincular; na lista aparece R$ 0). Clique em <b>“Editar vínculo de verba”</b> pra montar a verba do zero.</div>`
         : `<div class="bv"><b style="font-size:16px">${BRL(i.verba)}</b> <span class="muted" style="font-size:12px">— método: ${metodo}</span>${i.curado_verba?'<span style="color:var(--ok);font-weight:700;font-size:12px"> · curada ✓</span>':'<span style="color:var(--and);font-size:12px"> · a curar</span>'}</div>`}
       <div id="orcLastChange" style="font-size:11.5px;margin-top:5px;color:var(--muted)"></div></div>
     ${editBar}
@@ -1836,6 +1840,12 @@ function massaGrupos(){
   else keys.sort((a,b)=>by[b].reduce((s,l)=>s+l.valor,0)-by[a].reduce((s,l)=>s+l.valor,0));
   return keys.map(k=>({key:k, label:(MASSA_GROUP==='material'&&MAT_INFO[k])?(MAT_INFO[k].ico+' '+MAT_INFO[k].lbl):k, linhas:by[k]}));
 }
+// preserva a rolagem das árvores (.tree criadas DENTRO do innerHTML) ao reconstruir — senão cada expandir/marcar volta pro topo
+function keepTreeScroll(box, html){
+  const olds=[...box.querySelectorAll('.tree')].map(t=>t.scrollTop);
+  box.innerHTML=html;
+  box.querySelectorAll('.tree').forEach((t,i)=>{ if(olds[i]!=null) t.scrollTop=olds[i]; });
+}
 function massaRender(){
   const box=document.getElementById('massaRes'); if(!box)return;
   if(!MASSA||!(MASSA.linhas||[]).length){ box.innerHTML='<div class="muted" style="font-size:12px">Nada encontrado.</div>'; return; }
@@ -1860,13 +1870,13 @@ function massaRender(){
         <span class="tname" style="font-size:11px">${esc((l.desc||'').slice(0,44))} <span class="muted">· ${esc(l.local)}${MASSA_GROUP==='material'?' · '+esc(l.termo):''}</span></span>
         <span class="tval">${BRL(l.valor)}</span></div>`;}).join(''):'');
   }).join('');
-  box.innerHTML=`<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px;font-size:11.5px">
+  keepTreeScroll(box,`<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px;font-size:11.5px">
       <span class="muted">Agrupar por:</span>
       <button class="btn-ghost" style="padding:3px 9px${MASSA_GROUP==='material'?';background:var(--azul);color:#fff':''}" onclick="massaSetGroup('material')">Material / fornecedor</button>
       <button class="btn-ghost" style="padding:3px 9px${MASSA_GROUP==='termo'?';background:var(--azul);color:#fff':''}" onclick="massaSetGroup('termo')">Tipo de peça</button></div>
     <div class="tree" style="max-height:300px">${gh}</div>
     <div class="box" style="margin-top:6px;padding:8px 12px"><div class="bv"><b>Selecionado: ${selN} linhas · ${BRL(selV)}</b> <span class="muted" style="font-size:11.5px">de ${MASSA.n_linhas} · ${BRL(MASSA.total)} encontrados</span></div></div>
-    <div style="margin-top:6px"><button class="btn-prim" onclick="massaAdd()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar à verba (${selN} linhas)</button></div>`;
+    <div style="margin-top:6px"><button class="btn-prim" onclick="massaAdd()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar à verba (${selN} linhas)</button></div>`);
 }
 function massaSetGroup(g){ MASSA_GROUP=g; MASSA_OPEN=new Set(); massaRender(); }
 function massaToggleGrupo(key){ const g=massaGrupos().find(x=>x.key===key); if(!g)return;
@@ -1999,7 +2009,7 @@ function compRenderDetail(){
   ` : `
     <div class="fld"><label>Área/quantidade desta composição (vale para os insumos que marcar; padrão = total)</label>
       <input id="compArea" type="number" step="any" value="${COMP_AREA}" oninput="COMP_AREA=parseFloat(this.value)||0;compSyncSelArea();compRenderBasket()"></div>`;
-  box.innerHTML=`
+  keepTreeScroll(box,`
     <div class="box"><div class="bl">${esc(c.descricao)}</div>
       <div class="bv muted" style="font-size:12px">unidade ${un} · total no orçamento ${QNUM(c.qtde_total)} ${un}</div></div>
     ${locaisHtml}
@@ -2021,7 +2031,7 @@ function compRenderDetail(){
         <span class="tval">${QNUM(in_.coef)} ${esc(in_.unidade||'')} × R$${QNUM(in_.rs_unit)}</span>
       </div>`;}).join(''); })()}
     </div>
-    <div class="muted" style="font-size:11.5px;margin-top:4px">Ex.: marque só a MO do reboco. Insumo/local já usado em outro item aparece 🔒/⚠️ e não conta de novo.</div>`;
+    <div class="muted" style="font-size:11.5px;margin-top:4px">Ex.: marque só a MO do reboco. Insumo/local já usado em outro item aparece 🔒/⚠️ e não conta de novo.</div>`);
 }
 function compToggleInsumo(ix){
   const c=COMP_DATA; const in_=c&&c.insumos[ix]; if(!in_)return;
@@ -2177,10 +2187,10 @@ function insMassaRender(){
   }).join('');
   const blkArr=Object.entries(blk).sort((a,b)=>b[1]-a[1]);
   const blkHtml=lockN?`<div class="note" style="margin:6px 0;font-size:11.5px">🔒 ${lockN} já em outro item — ${blkArr.slice(0,4).map(e=>esc(e[0])+' ('+e[1]+')').join(' · ')}${blkArr.length>4?' …':''}. Pra liberar: abra o item (ícone ↗) e use “Separar material × MO” (se for item de material) ou tire de lá.</div>`:'';
-  box.innerHTML=`<div class="muted" style="font-size:11px;margin-bottom:4px">Navegue por local → subsistema e marque o que entra (ex.: só as Torres › Instalações). 🔒 = já em outro item.</div>
+  keepTreeScroll(box,`<div class="muted" style="font-size:11px;margin-bottom:4px">Navegue por local → subsistema e marque o que entra (ex.: só as Torres › Instalações). 🔒 = já em outro item.</div>
     <div class="tree" style="max-height:320px">${html}</div>${blkHtml}
     <div class="box" style="margin-top:6px;padding:8px 12px"><div class="bv"><b>Selecionado: ${selN} · ${BRL(selV)}</b> <span class="muted" style="font-size:11.5px">de ${INSMASSA_LEAVES.length} linhas · ${lockN} travadas</span></div></div>
-    <div style="margin-top:6px"><button class="btn-prim" onclick="insMassaAdd()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar à verba (${selN})</button></div>`;
+    <div style="margin-top:6px"><button class="btn-prim" onclick="insMassaAdd()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar à verba (${selN})</button></div>`);
 }
 function insMassaAdd(){
   const sel=INSMASSA_LEAVES.filter(x=>!x.locked && INSMASSA_SEL.has(x.key));
@@ -2231,10 +2241,10 @@ function resumoTab(i){
   const TIPOS=['','Material','Mão de obra','Empreitada','Material + MO','Locação'];
   const tp=i.tipo||'';
   const verbaLbl = (i.verba_material!=null||i.verba_mo!=null)
-    ? `Material ${BRL(i.verba_material||0)} + MO ${BRL(i.verba_mo||0)}` : BRL(i.verba);
+    ? `Material ${BRL(i.verba_material||0)} + MO ${BRL(i.verba_mo||0)}` : (verbaDefinida(i)?BRL(verbaDef(i)):'R$ 0 · a definir');
   // blocos read-only (verba/datas/quant são editados nas abas próprias)
   const ro = `
-    <div class="fld"><label>Verba ${i.curado_verba?'(curada ✓)':'(estimada)'} ${i.verba_metodo?'· '+esc(i.verba_metodo):''}</label><input value="${esc(verbaLbl)}" disabled></div>
+    <div class="fld"><label>Verba ${i.curado_verba?'(curada ✓)':(verbaDefinida(i)?'(definida)':'(a definir)')} ${i.verba_metodo?'· '+esc(i.verba_metodo):''}</label><input value="${esc(verbaLbl)}" disabled></div>
     <div class="grid2">
       <div class="fld"><label>Início da cotação</label><input value="${D(i.inicio_cotacao)}" disabled></div>
       <div class="fld"><label>Fim da cotação <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— prazo de Suprimentos</span></label><input value="${D(i.fim_cotacao)}" disabled></div>

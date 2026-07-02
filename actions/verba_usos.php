@@ -24,7 +24,7 @@ require_once __DIR__ . '/../includes/db.php';
 
 try {
     $pdo = db();
-    $rows = $pdo->query("SELECT r.servico_id, s.nome, r.orcamento_refs, r.composicao_sel
+    $rows = $pdo->query("SELECT r.servico_id, s.nome, r.orcamento_refs, r.composicao_sel, r.orcamento_excl
                          FROM radar_item r JOIN servico s ON s.id=r.servico_id WHERE r.obra_id=1")->fetchAll();
 
     $usos = [];      // L => [ ['ordem'=>, 'kind'=>'A'|'C', 'ins'=>cid#idx|null, 'desc'=>insumoDesc] ]
@@ -44,8 +44,17 @@ try {
 
     foreach ($rows as $r) {
         $ordem = (int)$r['servico_id']; $nomes[$ordem] = $r['nome'];
-        foreach ((json_decode($r['orcamento_refs'] ?? '[]', true) ?: []) as $id)
-            $usos[(int)$id][] = ['ordem'=>$ordem, 'kind'=>'A', 'ins'=>null, 'desc'=>null];
+        // exclusões de insumo por linha (analítico): lineId => [descrição excluída] — o item NÃO reivindica esses
+        $exByLine = [];
+        foreach ((json_decode($r['orcamento_excl'] ?? '[]', true) ?: []) as $e) {
+            $l = (int)($e['l'] ?? 0); $d = (string)($e['d'] ?? '');
+            if ($l && $d !== '') $exByLine[$l][$d] = 1;
+        }
+        foreach ((json_decode($r['orcamento_refs'] ?? '[]', true) ?: []) as $id) {
+            $id = (int)$id;
+            $usos[$id][] = ['ordem'=>$ordem, 'kind'=>'A', 'ins'=>null, 'desc'=>null,
+                            'excl'=> isset($exByLine[$id]) ? array_keys($exByLine[$id]) : []];
+        }
         foreach ((json_decode($r['composicao_sel'] ?? '[]', true) ?: []) as $ins) {
             $cid = (int)($ins['cid'] ?? 0); if (!$cid) continue;
             $insKey = $cid . '#' . ($ins['idx'] ?? ($ins['desc'] ?? '?'));
@@ -53,7 +62,7 @@ try {
             $lineIds = (isset($ins['locais']) && is_array($ins['locais']) && $ins['locais'])
                        ? array_map('intval', $ins['locais']) : $compLines($cid);
             foreach ($lineIds as $id)
-                $usos[(int)$id][] = ['ordem'=>$ordem, 'kind'=>'C', 'ins'=>$insKey, 'desc'=>$insDesc];
+                $usos[(int)$id][] = ['ordem'=>$ordem, 'kind'=>'C', 'ins'=>$insKey, 'desc'=>$insDesc, 'excl'=>[]];
         }
     }
 
@@ -63,21 +72,33 @@ try {
         $items = []; foreach ($claims as $c) $items[$c['ordem']] = 1;
         $usosFlat[$L] = array_map('intval', array_keys($items));
 
-        $whole = []; $byIns = [];
+        $whole = []; $wx = []; $byIns = []; $byDesc = [];
         foreach ($claims as $c) {
-            if ($c['kind'] === 'A') $whole[$c['ordem']] = 1;
-            else { if (!isset($byIns[$c['ins']])) $byIns[$c['ins']] = []; $byIns[$c['ins']][$c['ordem']] = 1; }
+            if ($c['kind'] === 'A') {
+                $whole[$c['ordem']] = 1;
+                if (!empty($c['excl'])) $wx[$c['ordem']] = $c['excl'];   // descrições que ESSE item tirou da linha
+            } else {
+                if (!isset($byIns[$c['ins']])) $byIns[$c['ins']] = []; $byIns[$c['ins']][$c['ordem']] = 1;
+                if ($c['desc'] !== null && $c['desc'] !== '') $byDesc[$c['desc']][$c['ordem']] = 1;
+            }
         }
-        // claims detalhadas: w = itens que usam a linha INTEIRA (analítico); i = {cid#idx: [itens]} por insumo
+        // claims detalhadas: w = itens que usam a linha INTEIRA (analítico); wx = {ordem:[descrições excluídas]}; i = {cid#idx:[itens]}
         $entry = [];
         if ($whole) $entry['w'] = array_map('intval', array_keys($whole));
+        if ($wx)    $entry['wx'] = $wx;
         if ($byIns) { $entry['i'] = []; foreach ($byIns as $k => $os) $entry['i'][$k] = array_map('intval', array_keys($os)); }
         $linhasOut[$L] = $entry;
 
+        // conflito (double-count) exclusão-aware: um 'w' que EXCLUIU a descrição não a reivindica.
         $conflict = false;
-        if (count($whole) >= 2) $conflict = true;
-        elseif (count($whole) >= 1 && count($items) >= 2) $conflict = true;
-        else foreach ($byIns as $os) if (count($os) >= 2) { $conflict = true; break; }
+        if (count($whole) >= 2) $conflict = true;   // 2+ usam a linha inteira → sobrepõem
+        else {
+            foreach ($byDesc as $D => $os) {
+                $claimers = $os;   // itens (composição) que usam a descrição D
+                foreach ($whole as $O => $_) if (!in_array($D, $wx[$O] ?? [], true)) $claimers[$O] = 1;  // + 'w' que NÃO excluiu D
+                if (count($claimers) >= 2) { $conflict = true; break; }
+            }
+        }
         if ($conflict) $dupLids[] = $L;
     }
 

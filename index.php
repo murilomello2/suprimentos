@@ -1673,12 +1673,17 @@ function _curOrdem(){ return (typeof CUR!=='undefined'&&CUR)?Number(CUR.ordem):-
 function nomeItem(o){ return (VERBA_USOS&&VERBA_USOS.nomes&&(VERBA_USOS.nomes[o]||VERBA_USOS.nomes[String(o)]))||('item '+o); }
 function lineClaims(L){ return (VERBA_USOS&&VERBA_USOS.linhas&&(VERBA_USOS.linhas[L]||VERBA_USOS.linhas[String(L)]))||{}; }
 // linha tomada INTEIRA (analítico) por outro item → bloqueia QUALQUER insumo dela
-function compLocalBloqueado(L){ const w=((lineClaims(L).w)||[]).filter(o=>Number(o)!==_curOrdem()); return w.length?{item:nomeItem(w[0])}:null; }
+function compLocalBloqueado(L){ const c=lineClaims(L); const wx=c.wx||{};
+  // só trava o LOCAL quem tomou a linha INTEIRA sem excluir nada; quem excluiu deixa os insumos livres pra outro item
+  const w=((c.w)||[]).filter(o=>Number(o)!==_curOrdem() && !(wx[o]&&wx[o].length)); return w.length?{item:nomeItem(w[0])}:null; }
 // separa um conjunto de linhas em livres × em conflito p/ o insumo (cid#idx): conflito = linha inteira por outro OU MESMO insumo por outro
-function compInsumoSplit(cid, idx, lineIds){
+function compInsumoSplit(cid, idx, lineIds, insDesc){
   const key=cid+'#'+idx, livres=[], conf=[], items=new Set();
-  (lineIds||[]).forEach(L=>{ const c=lineClaims(L);
-    const w=((c.w)||[]).filter(o=>Number(o)!==_curOrdem());
+  // descrição do insumo (pra casar com exclusões guardadas por descrição). Cai no COMP_DATA se não vier.
+  const D=(insDesc!=null)?insDesc:((COMP_DATA&&COMP_DATA.id===cid&&COMP_DATA.insumos&&COMP_DATA.insumos[idx])?COMP_DATA.insumos[idx].descricao:null);
+  (lineIds||[]).forEach(L=>{ const c=lineClaims(L); const wx=c.wx||{};
+    // um item que tomou a linha inteira MAS excluiu este insumo NÃO o reivindica
+    const w=((c.w)||[]).filter(o=>Number(o)!==_curOrdem() && !(D!=null && wx[o] && wx[o].indexOf(D)>=0));
     const ins=(((c.i)&&c.i[key])||[]).filter(o=>Number(o)!==_curOrdem());
     if(w.length||ins.length){ conf.push(L); [...w,...ins].forEach(o=>items.add(o)); } else livres.push(L);
   });
@@ -1783,7 +1788,7 @@ async function massaAdd(){
   let added=0, skip=0, restr=0;
   (d.composicao_sel||[]).forEach(s=>{
     if(COMP_SEL.some(x=>x.cid===s.cid&&x.idx===s.idx)){ skip++; return; }
-    const ids=(s.locais||[]).map(l=>l.id); const sp=compInsumoSplit(s.cid,s.idx,ids);
+    const ids=(s.locais||[]).map(l=>l.id); const sp=compInsumoSplit(s.cid,s.idx,ids,s.desc);
     if(ids.length>0 && sp.livres.length===0) return;                                 // 100% em conflito → pula
     const freeSet=new Set(sp.livres);
     const area=ids.length ? (s.locais||[]).filter(l=>freeSet.has(l.id)).reduce((a,l)=>a+l.q,0) : s.area;
@@ -1846,7 +1851,7 @@ function compSyncSelArea(){   // re-restringe a área/locais de cada insumo dest
   const hasLocais=!!(COMP_LOCAIS&&COMP_LOCAIS.grupos&&COMP_LOCAIS.grupos.length);
   const cand=compCandidato();
   COMP_SEL.forEach(s=>{ if(s.cid===COMP_DATA.id){
-    if(hasLocais){ const sp=compInsumoSplit(s.cid,s.idx,cand); s.locais=sp.livres; s.area=somaQtdeDeLinhas(sp.livres); }
+    if(hasLocais){ const sp=compInsumoSplit(s.cid,s.idx,cand,s.desc); s.locais=sp.livres; s.area=somaQtdeDeLinhas(sp.livres); }
     else { s.locais=null; s.area=COMP_AREA; }
   }});
 }
@@ -1895,11 +1900,11 @@ function compRenderDetail(){
     ${locaisHtml}
     <div class="fld" style="margin:6px 0 2px"><label>Insumos — marque o que entra na verba (a área vem dos locais acima)</label></div>
     ${(()=>{ const cand=compCandidato(); let nLock=0,nFree=0;
-      c.insumos.forEach((in_,ix)=>{ const on=COMP_SEL.some(s=>s.cid===c.id&&s.idx===ix); const sp=compInsumoSplit(c.id,ix,cand); if(cand.length>0&&sp.livres.length===0&&!on)nLock++; else nFree++; });
+      c.insumos.forEach((in_,ix)=>{ const on=COMP_SEL.some(s=>s.cid===c.id&&s.idx===ix); const sp=compInsumoSplit(c.id,ix,cand,in_.descricao); if(cand.length>0&&sp.livres.length===0&&!on)nLock++; else nFree++; });
       return nLock?`<div class="note" style="margin:0 0 5px;font-size:11.5px">🔒 <b>${nLock}</b> insumo(s) desta composição já está(ão) em outro item (por isso trava<b>m só eles</b>). <b>Os outros ${nFree} — inclusive a mão de obra — você marca normalmente aqui.</b></div>`:''; })()}
     <div class="tree" style="max-height:170px">
       ${(()=>{ const cand=compCandidato(); return c.insumos.map((in_,ix)=>{ const on=COMP_SEL.some(s=>s.cid===c.id&&s.idx===ix);
-        const sp=compInsumoSplit(c.id,ix,cand); const fully=cand.length>0&&sp.livres.length===0; const partial=!fully&&sp.conf.length>0;
+        const sp=compInsumoSplit(c.id,ix,cand,in_.descricao); const fully=cand.length>0&&sp.livres.length===0; const partial=!fully&&sp.conf.length>0;
         if(fully&&!on) return `<div class="tnode" style="opacity:.55" title="esse insumo já está em outro item em todos os locais selecionados">
           <span class="material-icons" style="color:var(--pend)">lock</span>
           ${tpBadge(in_.tipo)}
@@ -1918,7 +1923,7 @@ function compToggleInsumo(ix){
   const i=COMP_SEL.findIndex(s=>s.cid===c.id&&s.idx===ix);
   if(i>=0){ COMP_SEL.splice(i,1); compRenderDetail(); compRenderBasket(); return; }
   const hasLocais=!!(COMP_LOCAIS&&COMP_LOCAIS.grupos&&COMP_LOCAIS.grupos.length);
-  const cand=compCandidato(); const sp=compInsumoSplit(c.id, ix, cand);
+  const cand=compCandidato(); const sp=compInsumoSplit(c.id, ix, cand, in_.descricao);
   if(cand.length>0 && sp.livres.length===0){ toast('“'+in_.descricao+'” já está em “'+(sp.items[0]||'outro item')+'” em todos os locais — não dá pra contar de novo.'); return; }
   const area=hasLocais?somaQtdeDeLinhas(sp.livres):(COMP_AREA||c.qtde_total||0);
   COMP_SEL.push({cid:c.id, idx:ix, area, q:!COMP_SEL.some(s=>s.cid===c.id&&s.q),
@@ -1991,7 +1996,7 @@ function insMassaBuildLeaves(){
   (INSMASSA&&INSMASSA.matches||[]).forEach(m=>{
     (m.locais||[]).forEach(l=>{
       const c=lineClaims(l.id);
-      const w=((c.w)||[]).filter(o=>Number(o)!==cur);
+      const w=((c.w)||[]).filter(o=>Number(o)!==cur && !(c.wx && c.wx[o] && c.wx[o].indexOf(m.ins)>=0));  // 'inteiro' que excluiu este insumo não trava
       const ins=(((c.i)&&c.i[m.cid+'#'+m.idx])||[]).filter(o=>Number(o)!==cur);
       const blk=[...new Set([...w,...ins])];
       lv.push({key:m.cid+'#'+m.idx+'|'+l.id, cid:m.cid, idx:m.idx, lineId:l.id, q:+l.q||0,

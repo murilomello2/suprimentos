@@ -1206,10 +1206,10 @@ async function quantShowCurrent(i){
     const el2=document.getElementById('qntSel'), tot2=document.getElementById('qntTotal'); if(!el2) return;
     let qval=0;
     el2.innerHTML=`<div style="margin-bottom:6px"><b style="font-size:16px">${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}</b> <span class="muted" style="font-size:12px">— ${origem}:</span></div>`+
-      cesta.map(s=>{const qq=(s.area||0)*(s.coef||0); qval+=qq; const ld=insumoLocaisDet(s, locMap);
+      cesta.map((s,si)=>{const qq=(s.area||0)*(s.coef||0); qval+=qq; const ld=insumoLocaisDet(s, locMap);
         return `<div class="pickrow" style="align-items:flex-start">${tpBadge(s.tipo)}
           <div style="flex:1;min-width:0"><div>${esc(s.desc)}</div>
-            <small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} = <b>${QNUM(qq)} ${esc(s.unidade||'')}</b>${s.compdesc?' · '+esc(s.compdesc.slice(0,40)):''}</small>${locDet(ld.det, ld.todos)}</div></div>`;}).join('');
+            <small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} = <b>${QNUM(qq)} ${esc(s.unidade||'')}</b>${s.compdesc?' · '+esc(s.compdesc.slice(0,40)):''}</small>${locDet(ld,'q'+si)}</div></div>`;}).join('');
     if(tot2) tot2.textContent='Soma: '+QNUM(qval)+' '+(i.quantitativo_unidade||'');
     return;
   }
@@ -1416,28 +1416,43 @@ function orcRenderFonte(){
         <button class="btn-ghost" onclick="orcCancelar()">Cancelar</button></div>`;
   }
 }
-function locDet(det, todos){ if(!det||!det.length) return '';
-  return `<div class="muted" style="font-size:11px;margin-top:3px;line-height:1.6"><span class="material-icons" style="font-size:12px;vertical-align:-2px;color:var(--dourado)">place</span> ${todos?'<b>todos os locais</b> · ':''}${det.map(l=>esc(l.local)+' ('+QNUM(l.qtde)+(l.unidade?' '+esc(l.unidade):'')+')').join(' · ')}</div>`; }
+function locDet(ld, key){
+  if(!ld||!ld.grupos||!ld.grupos.length) return '';
+  const un=(ld.grupos[0]&&ld.grupos[0].unidade)||'';
+  const det=ld.grupos.map(g=>`<div style="margin-top:3px"><b style="font-size:11px;color:var(--verde-d)">${esc(g.local)} — ${QNUM(g.area)} ${esc(g.unidade||un)}</b>`
+      +(g.linhas||[]).map(l=>`<div style="font-size:10.5px;color:var(--muted);padding-left:12px;line-height:1.5">• ${esc((l.sub||'').slice(0,84))} — ${QNUM(l.qtde)} ${esc(l.unidade||un)}</div>`).join('')+`</div>`).join('');
+  return `<div class="muted" style="font-size:11px;margin-top:4px;line-height:1.5">
+      <span class="material-icons" style="font-size:12px;vertical-align:-2px;color:var(--dourado)">place</span>
+      ${ld.todos?'<b>todos os locais</b> · ':''}${ld.n} local(is) · <b>${QNUM(ld.total)} ${esc(un)}</b>
+      <a onclick="locToggle('${key}')" style="cursor:pointer;color:var(--verde);font-weight:600;white-space:nowrap"> · detalhar ▸</a>
+      <div id="locdet-${key}" style="display:none;margin-top:2px">${det}</div></div>`;
+}
+function locToggle(key){ const e=document.getElementById('locdet-'+key); if(e) e.style.display=e.style.display==='none'?'block':'none'; }
 async function loadCompLocais(compSel){   // baixa os locais de cada composição envolvida (1 fetch por composição)
   const cids=[...new Set((compSel||[]).map(s=>s.cid).filter(Boolean))]; const m={};
   await Promise.all(cids.map(async cid=>{ try{ m[cid]=await (await fetch('actions/composicao_locais.php?id='+cid)).json(); }catch(e){} }));
   return m;
 }
-function insumoLocaisDet(s, locMap){      // detalhe salvo (filtrado) OU todos os locais da composição (se não filtrou)
-  if(s.locais_det&&s.locais_det.length) return {det:s.locais_det, todos:false};
-  const L=locMap&&locMap[s.cid];
-  if(L&&L.grupos&&L.grupos.length) return {det:L.grupos.map(g=>({local:g.local,qtde:g.qtde,unidade:g.unidade||''})), todos:true};
-  return {det:null, todos:false};
+function insumoLocaisDet(s, locMap){   // resolve os LOCAIS SELECIONADOS (s.locais = ids das linhas) em detalhe agrupado por topo
+  const L=locMap&&locMap[s.cid]; const grupos=(L&&L.grupos)||[];
+  const sel=(Array.isArray(s.locais)&&s.locais.length)?new Set(s.locais.map(Number)):null;  // null = não restringiu = todos os locais
+  const out=[]; let total=0, n=0;
+  grupos.forEach(g=>{ const linhas=(g.linhas||[]).filter(l=> sel? sel.has(Number(l.id)) : true);
+    if(!linhas.length) return;
+    const area=linhas.reduce((a,l)=>a+(l.qtde||0),0); total+=area; n+=linhas.length;
+    out.push({local:g.local, area, unidade:(linhas[0]&&linhas[0].unidade)||g.unidade||'', linhas});
+  });
+  return {grupos:out, total, n, todos:!sel};
 }
 async function orcShowCurrent(i){
   // composição: mostra a cesta de insumos (read-only) + os LOCAIS de cada um (filtrados ou todos)
   if(i.verba_metodo==='composicao' && (i.composicao_sel||[]).length){
     const locMap=await loadCompLocais(i.composicao_sel);
     const el=document.getElementById('orcSel'); if(el){
-      el.innerHTML=i.composicao_sel.map(s=>{const c=(s.area||0)*(s.coef||0)*(s.rs_unit||0);
+      el.innerHTML=i.composicao_sel.map((s,si)=>{const c=(s.area||0)*(s.coef||0)*(s.rs_unit||0);
         const ld=insumoLocaisDet(s, locMap);
         return `<div class="pickrow" style="align-items:flex-start">${tpBadge(s.tipo)}
-          <div style="min-width:0"><div>${esc(s.desc)}</div><small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} × R$${QNUM(s.rs_unit)} = ${BRL(c)}${s.q?' · define quantitativo':''}</small>${locDet(ld.det, ld.todos)}</div></div>`;}).join('');
+          <div style="min-width:0"><div>${esc(s.desc)}</div><small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} × R$${QNUM(s.rs_unit)} = ${BRL(c)}${s.q?' · define quantitativo':''}</small>${locDet(ld,'o'+si)}</div></div>`;}).join('');
       const t=document.getElementById('orcTotal'); if(t) t.innerHTML=tpSubHtml(i.composicao_sel);
     }
     return;

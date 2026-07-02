@@ -1894,6 +1894,9 @@ function compRenderDetail(){
       <div class="bv muted" style="font-size:12px">unidade ${un} · total no orçamento ${QNUM(c.qtde_total)} ${un}</div></div>
     ${locaisHtml}
     <div class="fld" style="margin:6px 0 2px"><label>Insumos — marque o que entra na verba (a área vem dos locais acima)</label></div>
+    ${(()=>{ const cand=compCandidato(); let nLock=0,nFree=0;
+      c.insumos.forEach((in_,ix)=>{ const on=COMP_SEL.some(s=>s.cid===c.id&&s.idx===ix); const sp=compInsumoSplit(c.id,ix,cand); if(cand.length>0&&sp.livres.length===0&&!on)nLock++; else nFree++; });
+      return nLock?`<div class="note" style="margin:0 0 5px;font-size:11.5px">🔒 <b>${nLock}</b> insumo(s) desta composição já está(ão) em outro item (por isso trava<b>m só eles</b>). <b>Os outros ${nFree} — inclusive a mão de obra — você marca normalmente aqui.</b></div>`:''; })()}
     <div class="tree" style="max-height:170px">
       ${(()=>{ const cand=compCandidato(); return c.insumos.map((in_,ix)=>{ const on=COMP_SEL.some(s=>s.cid===c.id&&s.idx===ix);
         const sp=compInsumoSplit(c.id,ix,cand); const fully=cand.length>0&&sp.livres.length===0; const partial=!fully&&sp.conf.length>0;

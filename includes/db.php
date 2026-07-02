@@ -102,7 +102,16 @@ function db_schema_mysql($pdo) {
     // Usa ALTER (privilégio concedido) só se faltar. Espelha o self-heal do caminho SQLite.
     $rc = [];
     foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='radar_item'") as $c) $rc[$c['COLUMN_NAME']] = true;
-    if (!isset($rc['orcamento_excl'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN orcamento_excl TEXT");
+    if (!isset($rc['orcamento_excl'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN orcamento_excl MEDIUMTEXT");
+    // ALARGA as colunas de JSON de seleção: uma busca EM MASSA por insumo (ex.: "encanador" em N composições × M
+    // locais) gera composicao_sel > 64KB e o MySQL TRUNCA a coluna TEXT (max 65.535 bytes) SILENCIOSAMENTE →
+    // JSON inválido → a seleção "some" (some do read-only) embora a verba/total já tenham sido calculados.
+    // MEDIUMTEXT (16MB) elimina o teto. ALTER MODIFY usa o privilégio ALTER (concedido). Só mexe se ainda for 'text'.
+    $dt = [];
+    foreach ($pdo->query("SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='radar_item'") as $c) $dt[$c['COLUMN_NAME']] = strtolower($c['DATA_TYPE']);
+    foreach (['composicao_sel','quant_comp_sel','orcamento_refs','quantitativo_refs','orcamento_excl'] as $col) {
+        if (isset($dt[$col]) && $dt[$col] === 'text') { try { $pdo->exec("ALTER TABLE radar_item MODIFY `$col` MEDIUMTEXT"); } catch (Throwable $e) {} }
+    }
 }
 
 /** Auto-migração simples: se a versão do schema mudou, recria as tabelas e força reseed. */

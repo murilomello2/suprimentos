@@ -1495,23 +1495,62 @@ function insumoLocaisDet(s, locMap){   // resolve os LOCAIS SELECIONADOS (s.loca
   return {grupos:out, total, n, todos:!sel};
 }
 async function orcShowCurrent(i){
-  // composição: mostra a cesta de insumos (read-only) + os LOCAIS de cada um (filtrados ou todos)
+  // composição: RELATÓRIO de conferência (resumo por tipo + agrupado por insumo, cada um com seus locais) — read-only
   if(i.verba_metodo==='composicao' && (i.composicao_sel||[]).length){
-    const locMap=await loadCompLocais(i.composicao_sel);
-    const el=document.getElementById('orcSel'); if(el){
-      el.innerHTML=i.composicao_sel.map((s,si)=>{const c=(s.area||0)*(s.coef||0)*(s.rs_unit||0);
-        const ld=insumoLocaisDet(s, locMap);
-        const comp=(locMap&&locMap[s.cid]&&locMap[s.cid].descricao)||s.compdesc||'';
-        return `<div class="pickrow" style="align-items:flex-start">${tpBadge(s.tipo)}
-          <div style="min-width:0"><div>${esc(s.desc)}</div>${comp?`<div class="muted" style="font-size:11px;margin-top:1px"><span class="material-icons" style="font-size:12px;vertical-align:-2px;color:var(--verde)">category</span> da composição: <b style="font-weight:600">${esc(comp)}</b></div>`:''}<small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} × R$${QNUM(s.rs_unit)} = ${BRL(c)}${s.q?' · define quantitativo':''}</small>${locDet(ld,'o'+si)}</div></div>`;}).join('');
-      const t=document.getElementById('orcTotal'); if(t) t.innerHTML=tpSubHtml(i.composicao_sel);
-    }
+    orcRenderComposicaoLeitura(i);
     return;
   }
   ORC_SEL=new Set((i.orcamento_refs||[]).map(Number));
   if(EDITO && ORCFONTE==='analitico') await orcLoadEditConf(i);   // edição: conferência interativa (tirar/incluir insumo)
   else if(!EDITO && ORC_SEL.size) await orcRenderBreakdown(i);    // read-only: quebra por tipo (mat/MO/equip) + por linha
   else await orcRenderSel();
+}
+// RELATÓRIO da verba por COMPOSIÇÃO (read-only): resumo por tipo + total no topo, agrupado por insumo,
+// cada grupo expansível mostrando as composições-mãe e os LOCAIS (a partir do locais_det gravado no servidor).
+let ORC_CLEITURA=null;
+function orcRenderComposicaoLeitura(i){
+  const el=document.getElementById('orcSel'); if(!el)return;
+  const sel=i.composicao_sel||[];
+  let vmat=0, vmo=0, vout=0; const locaisSet=new Set(); const groups={};
+  sel.forEach(s=>{ const c=(s.area||0)*(s.coef||0)*(s.rs_unit||0);
+    if(s.tipo==='mo') vmo+=c; else if(s.tipo==='material') vmat+=c; else vout+=c;
+    (s.locais_det||[]).forEach(g=>locaisSet.add(g.local));
+    const k=(s.desc||'?')+'|'+(s.tipo||''); if(!groups[k]) groups[k]={desc:s.desc||'(insumo)',tipo:s.tipo,total:0,entries:[]};
+    groups[k].total+=c; groups[k].entries.push(Object.assign({custo:c}, s)); });
+  const total=vmat+vmo+vout;
+  ORC_CLEITURA=Object.values(groups).sort((a,b)=>b.total-a.total);
+  const chip=(lbl,v,col)=> v>0.5?`<span style="white-space:nowrap">${lbl} <b style="color:${col}">${BRL(v)}</b></span>`:'';
+  const resumo=`<div class="box" style="background:#fbfdf9;border-color:var(--ok);margin-bottom:8px">
+    <div class="bv" style="font-size:12.5px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+      ${chip('Material',vmat,'var(--azul)')} ${chip('Mão de obra',vmo,'var(--dourado)')} ${chip('Outros',vout,'var(--muted)')}
+      <span style="white-space:nowrap;margin-left:auto">Total <b style="font-size:14px">${BRL(total)}</b></span></div>
+    <div class="muted" style="font-size:11px;margin-top:4px">${sel.length} insumo(s) · ${ORC_CLEITURA.length} tipo(s) de insumo · ${locaisSet.size} local(is) — clique num insumo pra ver as composições e locais</div></div>`;
+  const linhas=ORC_CLEITURA.map((g,gi)=>{
+    const nLoc=new Set(); g.entries.forEach(e=>(e.locais_det||[]).forEach(x=>nLoc.add(x.local)));
+    return `<div style="border-bottom:1px solid var(--line)">
+      <div class="pickrow" style="cursor:pointer;gap:6px" onclick="orcCLExpand(${gi})">
+        <span class="material-icons" id="clcar-${gi}" style="font-size:17px;color:var(--muted)">chevron_right</span>${tpBadge(g.tipo)}
+        <div style="flex:1;min-width:0"><div>${esc(g.desc)}</div><small class="muted">${g.entries.length} composição(ões)${nLoc.size?' · '+nLoc.size+' local(is)':''}</small></div>
+        <span class="money">${BRL(g.total)}</span></div>
+      <div id="clins-${gi}" style="display:none;padding:0 0 8px 30px"></div></div>`;
+  }).join('');
+  el.innerHTML=resumo+linhas;
+  const t=document.getElementById('orcTotal'); if(t) t.innerHTML='';
+}
+function orcCLExpand(gi){
+  const ins=document.getElementById('clins-'+gi), car=document.getElementById('clcar-'+gi); if(!ins||!ORC_CLEITURA)return;
+  const show=ins.style.display==='none'; ins.style.display=show?'block':'none'; if(car) car.textContent=show?'expand_more':'chevron_right';
+  if(show && !ins.dataset.loaded){
+    const g=ORC_CLEITURA[gi];
+    ins.innerHTML=g.entries.map(e=>{
+      const locs=(e.locais_det||[]).map(x=>`${esc(x.local)} <span class="muted">(${QNUM(x.qtde)} ${esc(x.unidade||'')})</span>`).join(' · ') || '<span class="muted">todos os locais da composição</span>';
+      return `<div style="padding:5px 0;border-bottom:1px dashed var(--line)">
+        <div style="font-size:11.5px"><span class="material-icons" style="font-size:12px;vertical-align:-2px;color:var(--verde)">category</span> ${esc((e.compdesc||'').slice(0,52)||'(composição)')} <span class="money" style="float:right">${BRL(e.custo)}</span></div>
+        <div style="font-size:11px;margin-top:2px"><span class="material-icons" style="font-size:12px;vertical-align:-2px;color:var(--dourado)">place</span> ${locs}</div>
+        <div class="muted" style="font-size:10.5px;margin-top:1px">${QNUM(e.area)} × ${QNUM(e.coef)} × R$${QNUM(e.rs_unit)}${e.q?' · define o quantitativo':''}</div></div>`;
+    }).join('');
+    ins.dataset.loaded='1';
+  }
 }
 let ORC_BD=null;
 // verba analítica (linhas inteiras) → quebra em Material/MO/Equipamento, com total no topo, ▸ por linha e "agrupar por tipo"

@@ -1942,7 +1942,7 @@ function compToggleInsumo(ix){
   const cand=compCandidato(); const sp=compInsumoSplit(c.id, ix, cand, in_.descricao);
   if(cand.length>0 && sp.livres.length===0){ toast('“'+in_.descricao+'” já está em “'+(sp.items[0]||'outro item')+'” em todos os locais — não dá pra contar de novo.'); return; }
   const area=hasLocais?somaQtdeDeLinhas(sp.livres):(COMP_AREA||c.qtde_total||0);
-  COMP_SEL.push({cid:c.id, idx:ix, area, q:!COMP_SEL.some(s=>s.cid===c.id&&s.q),
+  COMP_SEL.push({cid:c.id, idx:ix, area, q:!COMP_SEL.some(s=>s.q),   // 1 driver de quantitativo por ITEM (não por composição) — evita somar em dobro (ex.: elevador + montagem)
     locais:hasLocais?sp.livres:null,
     desc:in_.descricao, tipo:in_.tipo, unidade:in_.unidade, coef:+in_.coef, rs_unit:+in_.rs_unit, compdesc:c.descricao});
   if(sp.conf.length) toast(sp.conf.length+' local(is) já em “'+(sp.items[0]||'')+'” não entraram neste insumo.');

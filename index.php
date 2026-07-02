@@ -1451,8 +1451,9 @@ async function orcShowCurrent(i){
     const el=document.getElementById('orcSel'); if(el){
       el.innerHTML=i.composicao_sel.map((s,si)=>{const c=(s.area||0)*(s.coef||0)*(s.rs_unit||0);
         const ld=insumoLocaisDet(s, locMap);
+        const comp=(locMap&&locMap[s.cid]&&locMap[s.cid].descricao)||s.compdesc||'';
         return `<div class="pickrow" style="align-items:flex-start">${tpBadge(s.tipo)}
-          <div style="min-width:0"><div>${esc(s.desc)}</div><small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} × R$${QNUM(s.rs_unit)} = ${BRL(c)}${s.q?' · define quantitativo':''}</small>${locDet(ld,'o'+si)}</div></div>`;}).join('');
+          <div style="min-width:0"><div>${esc(s.desc)}</div>${comp?`<div class="muted" style="font-size:11px;margin-top:1px"><span class="material-icons" style="font-size:12px;vertical-align:-2px;color:var(--verde)">category</span> da composição: <b style="font-weight:600">${esc(comp)}</b></div>`:''}<small class="muted">${QNUM(s.area)} × ${QNUM(s.coef)} × R$${QNUM(s.rs_unit)} = ${BRL(c)}${s.q?' · define quantitativo':''}</small>${locDet(ld,'o'+si)}</div></div>`;}).join('');
       const t=document.getElementById('orcTotal'); if(t) t.innerHTML=tpSubHtml(i.composicao_sel);
     }
     return;

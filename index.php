@@ -127,6 +127,12 @@
   .tab{padding:12px 14px;font-size:13px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;cursor:pointer;background:none;border-top:0;border-left:0;border-right:0}
   .tab.active{color:var(--verde-d);border-bottom-color:var(--dourado)}
   .tabbody{padding:20px 22px;max-height:78vh;overflow:auto}
+  .editbar-top{position:sticky;top:0;z-index:6;display:flex;gap:8px;align-items:center;background:#f4faf0;border:1px solid var(--ok);border-radius:10px;padding:8px 12px;margin-bottom:12px;box-shadow:0 3px 8px rgba(0,0,0,.07)}
+  .savedlg-ov{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:2000;padding:16px}
+  .savedlg{background:#fff;border-radius:14px;padding:20px 22px;max-width:440px;width:100%;box-shadow:0 14px 44px rgba(0,0,0,.28)}
+  .savedlg-t{font-weight:800;font-size:15px;margin-bottom:8px}
+  .savedlg-m{color:var(--muted);font-size:13px;margin-bottom:16px;line-height:1.5}
+  .savedlg-b{display:flex;gap:8px;flex-wrap:wrap}
   .box{background:#fafbfa;border:1px solid var(--line);border-radius:10px;padding:13px 15px;margin-bottom:12px}
   .box .bl{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--dourado);font-weight:800;margin-bottom:5px}
   .box .bv{font-size:13.5px;line-height:1.5}
@@ -915,8 +921,48 @@ let CAN_EDIT=false;                       // editor geral da obra (status/fornec
 let CAN_CRONO=false, CAN_ORC=false, CAN_QUANT=false, CAN_DIC=false; // permissões específicas (vínculos + dicionário)
 let EU=null;                             // usuário logado + permissões efetivas
 function openModal(o){CUR=byOrdem(o);TAB='Resumo';EDITC=EDITO=EDITQ=EDITD=EDITR=false;drawModal();document.getElementById('ov').classList.add('open');}
-function closeModal(){document.getElementById('ov').classList.remove('open');render();renderMatriz();}
-function setTab(t){TAB=t;EDITC=EDITO=EDITQ=EDITD=EDITR=false;drawModal();}
+function closeModal(force){ if(!force && anyEditing()){ confirmSaveDialog(async()=>{ await saveCurrentEdit(); _closeModal(); }, ()=>{ _resetEdits(); _closeModal(); }); return; } _resetEdits(); _closeModal(); }
+function _closeModal(){document.getElementById('ov').classList.remove('open');render();renderMatriz();}
+function _resetEdits(){ EDITC=EDITO=EDITQ=EDITD=EDITR=false; }
+function anyEditing(){ return EDITC||EDITO||EDITQ||EDITD||EDITR; }
+// qual função de salvar corresponde à edição ativa (considera a fonte no Orçamento/Quantitativo)
+function currentSaveFn(){
+  if(EDITR) return resumoSalvar;
+  if(EDITC) return cronoSalvar;
+  if(EDITO) return ORCFONTE==='composicao'?compSalvar:orcSalvar;
+  if(EDITQ) return QNTFONTE==='composicao'?qcompSalvar:(QNTFONTE==='analitico'?qntSalvar:qntManualSalvar);
+  if(EDITD) return dicSalvar;
+  return null;
+}
+async function saveCurrentEdit(){ const fn=currentSaveFn(); if(fn){ try{ await fn(); }catch(e){ toast('Falha ao salvar'); } } }
+function cancelCurrentEdit(){ _resetEdits(); drawModal(); }
+function setTab(t){ if(t===TAB) return;
+  if(anyEditing()){ confirmSaveDialog(async()=>{ await saveCurrentEdit(); _setTab(t); }, ()=>{ _resetEdits(); _setTab(t); }); return; }
+  _setTab(t); }
+function _setTab(t){ TAB=t; EDITC=EDITO=EDITQ=EDITD=EDITR=false; drawModal(); }
+// barra FIXA no topo do corpo do modal: quando editando, Salvar/Cancelar sempre à mão (sem rolar até o fim)
+function editActionBar(){
+  if(!anyEditing()) return '';
+  return `<div class="editbar-top">
+    <button class="btn-prim" style="padding:7px 14px" onclick="saveCurrentEdit()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">save</span> Salvar</button>
+    <button class="btn-ghost" onclick="cancelCurrentEdit()">Cancelar</button>
+    <span class="muted" style="font-size:11px;margin-left:auto"><span class="material-icons" style="font-size:13px;vertical-align:-2px;color:var(--and)">edit</span> editando — salve pra não perder</span>
+  </div>`;
+}
+// diálogo 3 opções ao sair da aba/fechar com edição pendente
+function confirmSaveDialog(onSave, onDiscard){
+  const d=document.createElement('div'); d.className='savedlg-ov';
+  d.innerHTML=`<div class="savedlg">
+    <div class="savedlg-t"><span class="material-icons" style="font-size:18px;vertical-align:-4px;color:var(--and)">warning</span> Alterações não salvas</div>
+    <div class="savedlg-m">Você está editando e ainda não salvou. O que deseja fazer?</div>
+    <div class="savedlg-b">
+      <button class="btn-prim" data-a="save"><span class="material-icons" style="font-size:16px;vertical-align:-3px">save</span> Salvar e sair</button>
+      <button class="btn-ghost" data-a="discard">Sair sem salvar</button>
+      <button class="btn-ghost" data-a="stay">Continuar editando</button>
+    </div></div>`;
+  document.body.appendChild(d);
+  d.addEventListener('click',e=>{ const b=e.target.closest('[data-a]'); if(!b && e.target!==d) return; const a=b?b.dataset.a:'stay'; d.remove(); if(a==='save') onSave(); else if(a==='discard') onDiscard(); });
+}
 function drawModal(){
   const i=CUR;if(!i)return;
   const tabs=['Resumo','Cronograma','Orçamento','Quantitativo','Dicionário','Mapa de cotação','Histórico'];
@@ -933,7 +979,7 @@ function drawModal(){
       </div>
     </div>
     <div class="tabs">${tabs.map(t=>`<button class="tab ${t===TAB?'active':''}" onclick="setTab('${t}')">${t}</button>`).join('')}</div>
-    <div class="tabbody">${tabBody(i)}</div>`;
+    <div class="tabbody">${editActionBar()}${tabBody(i)}</div>`;
   postDraw(i);
 }
 function postDraw(i){
@@ -2297,20 +2343,20 @@ async function novoItemSalvar(){
   // responsável NÃO é obrigatório na criação — pode ser atribuído depois (inclusive em massa por grupo/categoria)
   const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
   if(d.error){toast('Erro: '+d.error);return;}
-  closeModal(); await load(); toast('Item criado');
+  closeModal(true); await load(); toast('Item criado');
 }
 async function desdobrarItem(){
   if(!CUR)return;
   const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'desdobrar',ordem:CUR.ordem,me:EU&&EU.bitrix_id})})).json();
   if(d.error){toast('Erro: '+d.error);return;}
-  closeModal(); await load(); toast('Desdobrado em (MAT) e (MO)');
+  closeModal(true); await load(); toast('Desdobrado em (MAT) e (MO)');
 }
 async function excluirItem(){
   if(!CUR)return;
   if(!confirm('Excluir o item "'+CUR.nome+'" do radar? Esta ação não pode ser desfeita.'))return;
   const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',ordem:CUR.ordem,me:EU&&EU.bitrix_id})})).json();
   if(d.error){toast('Erro: '+d.error);return;}
-  closeModal(); await load(); toast('Item excluído');
+  closeModal(true); await load(); toast('Item excluído');
 }
 /* ===== Configuração / Permissões (Bloco 2) ===== */
 let CFG={usuarios:[],obras:[]}, NUSER=null;
@@ -2474,7 +2520,7 @@ async function userSave(){
     const dbg=d.debug?` · (servidor recebeu me=${JSON.stringify(d.debug.me_recebido)}; eu enviei=${JSON.stringify(EU&&EU.bitrix_id)})`:'';
     console.warn('userSave erro:',d,'EU=',EU); toast('Erro: '+d.error+dbg); return;
   }
-  closeModal(); await renderConfig(); toast('Usuário salvo');
+  closeModal(true); await renderConfig(); toast('Usuário salvo');
 }
 async function userDelete(bid){
   if(!confirm('Remover o acesso deste usuário?'))return;

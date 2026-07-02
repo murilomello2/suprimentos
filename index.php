@@ -1348,9 +1348,13 @@ function orcTab(i){
     CAN_ORC ? `<button class="btn-prim" onclick="orcEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar vínculo de verba</button>`+(i.verba_metodo?`<button class="btn-ghost" onclick="orcLimpar()">↺ Limpar</button>`:'')+(i.verba_metodo==='analitico'?`<button class="btn-ghost" onclick="separarMO()" title="Tira a mão de obra embutida nas linhas inteiras, deixando o item só com o material — a MO fica livre pro item de Mão de Obra"><span class="material-icons" style="font-size:15px;vertical-align:-3px">content_cut</span> Separar material × MO</button>`:'')
             : `<span class="muted" style="font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">lock</span> Você não tem permissão para editar a verba.</span>`
   }</div>` : '';
+  const semDef = !i.verba_metodo;   // sem vínculo/definição → o número é só a ESTIMATIVA PRELIMINAR do orçamento, não verba curada
   let h=`
     <div class="box"><div class="bl">Verba atual</div>
-      <div class="bv"><b style="font-size:16px">${BRL(i.verba)}</b> <span class="muted" style="font-size:12px">— método: ${metodo}</span>${i.curado_verba?'<span style="color:var(--ok);font-weight:700;font-size:12px"> · curada ✓</span>':'<span style="color:var(--and);font-size:12px"> · a curar</span>'}</div>
+      ${semDef
+        ? `<div class="bv"><b style="font-size:15px;color:var(--and)">Sem verba definida</b> <span style="color:var(--and);font-size:12px">· a curar</span></div>
+           <div class="muted" style="font-size:12px;margin-top:5px;line-height:1.5">Estimativa preliminar do orçamento: <b>${BRL(i.verba)}</b> — apenas <b>referência</b> (ainda não curada; conta na curva ABC até você definir). Clique em <b>“Editar vínculo de verba”</b> pra montar a verba do zero.</div>`
+        : `<div class="bv"><b style="font-size:16px">${BRL(i.verba)}</b> <span class="muted" style="font-size:12px">— método: ${metodo}</span>${i.curado_verba?'<span style="color:var(--ok);font-weight:700;font-size:12px"> · curada ✓</span>':'<span style="color:var(--and);font-size:12px"> · a curar</span>'}</div>`}
       <div id="orcLastChange" style="font-size:11.5px;margin-top:5px;color:var(--muted)"></div></div>
     ${editBar}
     <div class="box"><div class="bl">Composição selecionada${EDITO?'':' <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— somente leitura (clique em Editar pra alterar)</span>'}</div>

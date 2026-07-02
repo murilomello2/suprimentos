@@ -1412,14 +1412,32 @@ function orcRenderFonte(){
       <div style="margin:10px 0 0"><button class="btn-ghost" id="insMassaBtn" onclick="insMassaToggle()" style="padding:6px 11px;font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--dourado)">groups</span> Busca em massa por insumo <span class="material-icons mtcaret" style="font-size:16px;vertical-align:-3px">expand_more</span></button></div>
       <div id="insMassaPanel" style="display:none;margin-top:8px">
         <div class="box" style="background:#fbfdf9;border-color:var(--ok)">
-          <div class="muted" style="font-size:11.5px;margin-bottom:6px">Pra insumo/MO pulverizado em muitas composições (ex.: encanador dentro de cada peça). Busca o insumo e traz de TODAS as composições, agrupado por sistema. Já usado em outro item = 🔒.</div>
+          <div class="muted" style="font-size:11.5px;margin-bottom:6px">Pra insumo/MO pulverizado em muitas composições (ex.: encanador dentro de cada peça). <b>Recorte por SISTEMA</b> (gás, esgoto, água fria…) <b>e por TIPO</b> (material × mão de obra) pra separar limpo. Já usado em outro item = 🔒.</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;align-items:center">
             <span class="muted" style="font-size:11.5px">Atalho:</span>
             <button class="btn-ghost" style="padding:5px 10px" onclick="insMassaPreset('encanador')">👷 MO hidráulica (encanador)</button>
             <button class="btn-ghost" style="padding:5px 10px" onclick="insMassaPreset('eletricista')">⚡ MO elétrica (eletricista)</button>
+            <button class="btn-ghost" style="padding:5px 10px" onclick="insMassaPresetSis('Gás','material')">🔥 Materiais de gás</button>
+            <button class="btn-ghost" style="padding:5px 10px" onclick="insMassaPresetSis('Gás','mo')">🔥 MO de gás</button>
           </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            <input id="insMassaTermos" style="flex:1;min-width:170px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px" placeholder="ex.: encanador">
+          <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center">
+            <select id="insMassaSis" style="border:1px solid var(--line);border-radius:8px;padding:7px 8px;font-size:12.5px" title="recorta por subsistema (pelo local no orçamento)">
+              <option value="">Todos os sistemas</option>
+              <option value="Gás">🔥 Gás</option>
+              <option value="Água Fria">💧 Água Fria</option>
+              <option value="Água Quente">♨️ Água Quente</option>
+              <option value="Esgoto / Sanitário">🚽 Esgoto / Sanitário</option>
+              <option value="Águas Pluviais">🌧️ Águas Pluviais</option>
+              <option value="Incêndio">🧯 Incêndio</option>
+              <option value="Hidráulica (geral)">🔧 Hidráulica (geral)</option>
+              <option value="Outras">Outras</option>
+            </select>
+            <select id="insMassaTipo" style="border:1px solid var(--line);border-radius:8px;padding:7px 8px;font-size:12.5px" title="material × mão de obra">
+              <option value="">Material + MO</option>
+              <option value="material">Só materiais</option>
+              <option value="mo">Só mão de obra</option>
+            </select>
+            <input id="insMassaTermos" style="flex:1;min-width:130px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12.5px" placeholder="termo (opcional se escolher um sistema)">
             <button class="btn-prim" style="padding:6px 12px" onclick="insMassaBuscar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">search</span> Buscar</button>
           </div>
           <div id="insMassaRes" style="margin-top:8px"></div>
@@ -2104,7 +2122,9 @@ function insMassaToggle(){ const p=document.getElementById('insMassaPanel'), b=d
   const open=p.style.display==='none'; p.style.display=open?'block':'none';
   const ic=b&&b.querySelector('.mtcaret'); if(ic) ic.textContent=open?'expand_less':'expand_more';
 }
-function insMassaPreset(k){ const t=document.getElementById('insMassaTermos'); if(t) t.value=k; insMassaBuscar(); }
+function insMassaPreset(k){ const t=document.getElementById('insMassaTermos'); if(t) t.value=k; const s=document.getElementById('insMassaSis'); if(s) s.value=''; const tp=document.getElementById('insMassaTipo'); if(tp) tp.value=''; insMassaBuscar(); }
+// atalho por SISTEMA (ex.: Gás materiais / Gás MO) — seta os filtros e busca sem termo
+function insMassaPresetSis(sis, tipo){ const s=document.getElementById('insMassaSis'); if(s) s.value=sis; const tp=document.getElementById('insMassaTipo'); if(tp) tp.value=tipo||''; const t=document.getElementById('insMassaTermos'); if(t) t.value=''; insMassaBuscar(); }
 // uma FOLHA = um insumo (cid#idx) numa linha do orçamento (local). Trava por linha: linha inteira (w) OU mesmo insumo (i) em outro item.
 function insMassaBuildLeaves(){
   const lv=[], cur=_curOrdem();
@@ -2115,7 +2135,7 @@ function insMassaBuildLeaves(){
       const ins=(((c.i)&&c.i[m.cid+'#'+m.idx])||[]).filter(o=>Number(o)!==cur);
       const blk=[...new Set([...w,...ins])];
       lv.push({key:m.cid+'#'+m.idx+'|'+l.id, cid:m.cid, idx:m.idx, lineId:l.id, q:+l.q||0,
-        local:l.local||'(sem local)', sub:l.sub||'—', ins:m.ins, comp:m.comp, tipo:m.tipo, unidade:m.unidade||'',
+        local:l.local||'(sem local)', sub:l.sub||'—', sis:l.sis||m.sistema||'', ins:m.ins, comp:m.comp, tipo:m.tipo, unidade:m.unidade||'',
         coef:+m.coef, rs:+m.rs_unit, valor:(+l.q||0)*(+m.coef)*(+m.rs_unit),
         locked:blk.length>0, blocker:blk.length?nomeItem(blk[0]):null, blockerOrdem:blk.length?blk[0]:null});
     });
@@ -2132,11 +2152,14 @@ function insMassaTree(){
 }
 async function insMassaBuscar(){
   const termos=(document.getElementById('insMassaTermos')?.value||'').trim();
+  const sis=(document.getElementById('insMassaSis')?.value||'');
+  const tipo=(document.getElementById('insMassaTipo')?.value||'');
   const box=document.getElementById('insMassaRes'); if(!box)return;
-  if(!termos){ box.innerHTML='<div class="muted" style="font-size:12px">Informe o insumo (ex.: encanador).</div>'; return; }
+  if(!termos && !sis){ box.innerHTML='<div class="muted" style="font-size:12px">Escolha um <b>sistema</b> (ex.: 🔥 Gás) ou digite um <b>termo</b> (ex.: encanador).</div>'; return; }
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
   await loadVerbaUsos();
-  let d; try{ d=await (await fetch('actions/composicao_insumo_massa.php?termos='+encodeURIComponent(termos))).json(); }
+  const qs='termos='+encodeURIComponent(termos)+'&sistema='+encodeURIComponent(sis)+'&tipo='+encodeURIComponent(tipo);
+  let d; try{ d=await (await fetch('actions/composicao_insumo_massa.php?'+qs)).json(); }
   catch(e){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Falha: '+esc(e.message)+'</div>'; return; }
   if(d.error){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Erro: '+esc(d.error)+'</div>'; return; }
   INSMASSA=d; INSMASSA_OPEN=new Set(); INSMASSA_SEL=new Set();
@@ -2157,8 +2180,10 @@ function insMassaRender(){
   const box=document.getElementById('insMassaRes'); if(!box)return;
   if(!INSMASSA_LEAVES.length){ box.innerHTML='<div class="muted" style="font-size:12px">Nada encontrado.</div>'; return; }
   const tree=insMassaTree();
-  let selN=0, selV=0, lockN=0; const blk={};
-  INSMASSA_LEAVES.forEach(x=>{ if(x.locked){ lockN++; if(x.blocker) blk[x.blocker]=(blk[x.blocker]||0)+1; } else if(INSMASSA_SEL.has(x.key)){ selN++; selV+=x.valor; } });
+  let selN=0, selV=0, lockN=0; const blk={}; const bySis={};
+  INSMASSA_LEAVES.forEach(x=>{ if(x.locked){ lockN++; if(x.blocker) blk[x.blocker]=(blk[x.blocker]||0)+1; } else { if(INSMASSA_SEL.has(x.key)){ selN++; selV+=x.valor; } const k=x.sis||'—'; (bySis[k]=bySis[k]||{n:0,v:0}); bySis[k].n++; bySis[k].v+=x.valor; } });
+  const sisKeys=Object.keys(bySis).sort((a,b)=>bySis[b].v-bySis[a].v);
+  const sisHtml=sisKeys.length>1?`<div class="muted" style="font-size:11px;margin-bottom:5px;line-height:1.6">⚠️ resultado tem <b>${sisKeys.length} sistemas</b> misturados — use o filtro acima pra separar: ${sisKeys.map(k=>`<b style="color:var(--verde-d)">${esc(k)}</b> ${BRL(bySis[k].v)}`).join(' · ')}</div>`:'';
   const sum=a=>a.reduce((s,x)=>s+x.valor,0), lk=a=>a.filter(x=>x.locked).length;
   const html=tree.map((L,li)=>{
     const open=INSMASSA_OPEN.has(''+li), nl=lk(L.leaves);
@@ -2187,7 +2212,7 @@ function insMassaRender(){
   }).join('');
   const blkArr=Object.entries(blk).sort((a,b)=>b[1]-a[1]);
   const blkHtml=lockN?`<div class="note" style="margin:6px 0;font-size:11.5px">🔒 ${lockN} já em outro item — ${blkArr.slice(0,4).map(e=>esc(e[0])+' ('+e[1]+')').join(' · ')}${blkArr.length>4?' …':''}. Pra liberar: abra o item (ícone ↗) e use “Separar material × MO” (se for item de material) ou tire de lá.</div>`:'';
-  keepTreeScroll(box,`<div class="muted" style="font-size:11px;margin-bottom:4px">Navegue por local → subsistema e marque o que entra (ex.: só as Torres › Instalações). 🔒 = já em outro item.</div>
+  keepTreeScroll(box,`${sisHtml}<div class="muted" style="font-size:11px;margin-bottom:4px">Navegue por local → subsistema e marque o que entra (ex.: só as Torres › Instalações). 🔒 = já em outro item.</div>
     <div class="tree" style="max-height:320px">${html}</div>${blkHtml}
     <div class="box" style="margin-top:6px;padding:8px 12px"><div class="bv"><b>Selecionado: ${selN} · ${BRL(selV)}</b> <span class="muted" style="font-size:11.5px">de ${INSMASSA_LEAVES.length} linhas · ${lockN} travadas</span></div></div>
     <div style="margin-top:6px"><button class="btn-prim" onclick="insMassaAdd()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar à verba (${selN})</button></div>`);

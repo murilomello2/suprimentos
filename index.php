@@ -2186,7 +2186,7 @@ function resumoTab(i){
          :`<div class="fld"><label>Tipo do item</label><input value="${esc(tp||'— a classificar —')}" disabled></div>`}
       <div class="fld"><label>Status</label>
         <select id="rStatus">${STATUSES.map(s=>`<option ${s===st?'selected':''}>${s}</option>`).join('')}</select></div>
-      ${a?`<div class="fld"><label>Responsável <span style="color:var(--pend)">*</span></label><select id="rResp">${respOptions(i.responsavel)}</select></div>`
+      ${a?`<div class="fld"><label>Responsável <span class="muted" style="font-weight:400;font-size:11px">(recomendado)</span></label><select id="rResp">${respOptions(i.responsavel)}</select></div>`
          :`<div class="fld"><label>Responsável</label><input value="${esc(i.responsavel||'—')}" disabled></div>`}
     </div>
     <div class="grid2">
@@ -2204,9 +2204,9 @@ async function resumoSalvar(){
   // editor geral salva só status/fornecedor/observações
   const campos={ status:val('rStatus'), fornecedor:val('rForn'), observacoes:val('rObs') };
   if(IS_ADMIN){
+    campos.nome=val('rNome'); campos.tipo=val('rTipo');
     const resp=val('rResp');
-    if(!resp){ toast('Responsável é obrigatório'); return; }
-    campos.nome=val('rNome'); campos.tipo=val('rTipo'); campos.responsavel=resp;
+    if(resp) campos.responsavel=resp;   // responsável NÃO é obrigatório (pode atribuir depois); só grava se escolheu, não zera o atual
     const lead=val('rLead');
     if(lead!==String(CUR.lead_efetivo??'')) campos.lead_override=lead; // só grava override se mudou (senão congela o lead do template)
     let g=val('rGrupo');

@@ -40,7 +40,7 @@ try {
                r.verba_override, r.lead_override, r.crono_marco_override,
                r.data_necessaria_override, r.orcamento_refs,
                r.quantitativo_valor, r.quantitativo_unidade, r.quantitativo_refs, r.quantitativo_fonte,
-               r.tipo, r.verba_metodo, r.verba_material, r.verba_mo, r.composicao_id, r.area_base, r.composicao_sel, r.verba_curada, r.quant_comp_sel, r.quant_curada, r.orcamento_excl
+               r.tipo, r.verba_metodo, r.verba_material, r.verba_mo, r.composicao_id, r.area_base, r.composicao_sel, r.verba_curada, r.quant_comp_sel, r.quant_curada, r.orcamento_excl, r.auto_flags
         FROM servico s
         JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = ?
         ORDER BY s.grupo_ordem, s.ordem
@@ -82,6 +82,8 @@ try {
         $verba    = ($r['verba_override'] !== null && $r['verba_override'] !== '')
                 ? (float)$r['verba_override'] : (float)$r['verba_estim'];
 
+        // AUTO-VÍNCULO: dimensões preenchidas por receita e ainda não confirmadas — não contam como curadas
+        $aflags = !empty($r['auto_flags']) ? (json_decode($r['auto_flags'], true) ?: []) : [];
         $d = [
             'data_necessaria' => $data_nec,
             'inicio_cotacao'  => $inicio,
@@ -90,11 +92,14 @@ try {
             'marco_casado'    => $marco,
             'marco_path'      => $marco_path,
             'cronograma_pct'  => $crono_pct,
-            'confianca'       => $r['data_necessaria_override'] ? 'curado (manual)' : $auto['confianca'],
+            'confianca'       => $r['data_necessaria_override']
+                                   ? (!empty($aflags['crono']) ? 'sugerido (auto-vínculo)' : 'curado (manual)')
+                                   : $auto['confianca'],
             'lead_efetivo'    => $lead,
             'verba'           => $verba,
+            'auto'            => $aflags,
             'curado_verba'    => (bool)((int)($r['verba_curada'] ?? 0)),
-            'curado_data'     => (bool)$r['data_necessaria_override'],
+            'curado_data'     => (bool)$r['data_necessaria_override'] && empty($aflags['crono']),
             'orcamento_refs'  => $r['orcamento_refs'] ? json_decode($r['orcamento_refs'], true) : [],
             'orcamento_excl'  => !empty($r['orcamento_excl']) ? json_decode($r['orcamento_excl'], true) : [],
             'quantitativo'         => $r['quantitativo_valor'] !== null ? (float)$r['quantitativo_valor'] : null,

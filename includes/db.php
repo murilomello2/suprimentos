@@ -112,6 +112,9 @@ function db_schema_mysql($pdo) {
     $rc = [];
     foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='radar_item'") as $c) $rc[$c['COLUMN_NAME']] = true;
     if (!isset($rc['orcamento_excl'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN orcamento_excl MEDIUMTEXT");
+    // auto_flags (JSON {crono:1,verba:1,quant:1}): dimensões preenchidas pelo AUTO-VÍNCULO (receitas) e ainda
+    // NÃO confirmadas por humano — o item_update limpa a flag da dimensão quando alguém salva aquela aba.
+    if (!isset($rc['auto_flags'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN auto_flags MEDIUMTEXT");
     // multi-obra: método construtivo por obra (receitas não podem cruzar métodos às cegas — ex.: bloco de
     // vedação não existe em alvenaria estrutural)
     $oc = [];
@@ -218,6 +221,8 @@ function db_schema($pdo) {
     // orcamento_excl (JSON): insumos EXCLUÍDOS de dentro de linhas analíticas selecionadas (ex.: tirar o
     // espaçador de uma linha) — lista [{l:lineId, d:descrição}]. Verba = Σ linhas − Σ insumos excluídos.
     if (!isset($rcols['orcamento_excl'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN orcamento_excl TEXT");
+    // auto_flags: dimensões sugeridas pelo auto-vínculo, pendentes de confirmação humana
+    if (!isset($rcols['auto_flags'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN auto_flags TEXT");
     // DICIONÁRIO DE APRENDIZADO (espelha o MySQL): receita por serviço × método construtivo, por NOME (nunca ID)
     $pdo->exec("CREATE TABLE IF NOT EXISTS receita (
         servico_id INTEGER NOT NULL,

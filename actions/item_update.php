@@ -28,6 +28,7 @@ try {
     $me     = $in['me'] ?? null;
     $OBRA   = max(1, (int)($in['obra'] ?? 1));   // multi-obra: edição é POR OBRA (default Trinity)
     if (!$ordem || !is_array($campos) || !$campos) throw new Exception('payload inválido (precisa de ordem + campos)');
+    $keysIn = array_keys($campos);   // capturado ANTES dos unset() — usado pra limpar auto_flags por dimensão
 
     $pdo = db();
 
@@ -373,6 +374,21 @@ try {
         if ($k === 'verba_override')    { $vc=nullable($v); $set[]="$k = ?"; $vals[]= $vc===null?null:(float)$v; $set[]="verba_curada = ?"; $vals[]= $vc===null?0:1; continue; }
         if ($k === 'quantitativo_valor'){ $qc=nullable($v); $set[]="$k = ?"; $vals[]= $qc===null?null:(float)$v; $set[]="quant_curada = ?"; $vals[]= $qc===null?0:1; continue; }
         $set[] = "$k = ?"; $vals[] = nullable($v);
+    }
+
+    // ---- confirma sugestões do AUTO-VÍNCULO: salvar uma dimensão limpa a flag 'sugerido' dela ----
+    $GRUPO_AUTO = [
+        'crono' => ['crono_marco_override','data_necessaria_override'],
+        'verba' => ['orcamento_refs','orcamento_excl','composicao_sel','composicao','verba_override'],
+        'quant' => ['quant_refs','quant_comp_sel','quantitativo_valor','quantitativo_unidade','quantitativo_fonte','orcamento_refs'],
+    ];
+    $aflags = !empty($before['auto_flags']) ? (json_decode($before['auto_flags'], true) ?: []) : [];
+    if ($aflags) {
+        $mudou = false;
+        foreach ($GRUPO_AUTO as $dim => $ks) {
+            if (!empty($aflags[$dim]) && array_intersect($ks, $keysIn)) { unset($aflags[$dim]); $mudou = true; }
+        }
+        if ($mudou) { $set[] = "auto_flags = ?"; $vals[] = $aflags ? json_encode($aflags) : null; }
     }
 
     if (!$set && !$hist) throw new Exception('nenhuma alteração');

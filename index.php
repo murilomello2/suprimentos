@@ -349,6 +349,7 @@
         <div class="bar" style="flex-wrap:wrap;gap:10px;font-size:12.5px;align-items:center">
           <span class="muted">A receita guarda a REGRA de cronograma (âncora → primeira data), a RECEITA de verba (linhas/insumos/recortes/exclusões) e a fonte do quantitativo. Pra corrigir uma receita: re-cure o item no radar e clique em re-derivar.</span>
           <button class="btn-prim" style="padding:6px 12px" onclick="receitasDerivar(1)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Re-derivar da Trinity</button>
+          <button class="btn-ghost" style="padding:6px 12px" onclick="receitasAplicar(2)" title="preenche cronograma/verba/quantitativo da obra 2 com as receitas — tudo entra como sugerido 🤖 (não curado)"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--dourado)">smart_toy</span> Aplicar na Imperiale (auto-vínculo)</button>
         </div>
       </div>
       <div class="wrap" id="rcwrap"><div class="empty">Carregando…</div></div>
@@ -922,9 +923,9 @@ function rowHtml(i){
     <td><div class="svc">${esc(i.nome)} ${tipoChip(i.tipo)}</div><div class="svc-sub">${esc(i.forma_contratacao||'')}</div></td>
     <td><span class="curva c-${i.curva||'C'}">${esc(i.curva||'—')}</span></td>
     <td>${i.responsavel?esc(i.responsavel):`<button class="resp-miss" onclick="event.stopPropagation();openModal(${i.ordem})">definir</button>`}</td>
-    <td class="money">${verbaDefinida(i)?`${BRL(verbaDef(i))}${i.curado_verba?' <span class="material-icons" title="verba curada" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':''}`:`<span class="muted" title="sem verba definida — a estimativa preliminar do orçamento não conta como verba">R$ 0 <span style="font-size:10px">· a definir</span></span>`}</td>
-    <td>${i.quantitativo!=null?`<div class="qcell" title="${esc(QNUM(i.quantitativo)+' '+(i.quantitativo_unidade||''))}"><b>${QNUM(i.quantitativo)}</b> <span class="muted">${esc(i.quantitativo_unidade||'')}</span>${i.curado_quant?' <span class="material-icons" title="quantitativo curado" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':''}</div>`:'<span class="muted">—</span>'}</td>
-    <td class="date">${D(i.data_necessaria)}${i.curado_data?' <span class="material-icons" title="data curada" style="font-size:12px;color:var(--ok);vertical-align:-2px">verified</span>':''}</td>
+    <td class="money">${verbaDefinida(i)?`${BRL(verbaDef(i))}${i.curado_verba?' <span class="material-icons" title="verba curada" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':(i.auto&&i.auto.verba?' <span title="sugerido pelo auto-vínculo (receita) — confira e salve pra confirmar" style="font-size:11px">🤖</span>':'')}`:`<span class="muted" title="sem verba definida — a estimativa preliminar do orçamento não conta como verba">R$ 0 <span style="font-size:10px">· a definir</span></span>`}</td>
+    <td>${i.quantitativo!=null?`<div class="qcell" title="${esc(QNUM(i.quantitativo)+' '+(i.quantitativo_unidade||''))}"><b>${QNUM(i.quantitativo)}</b> <span class="muted">${esc(i.quantitativo_unidade||'')}</span>${i.curado_quant?' <span class="material-icons" title="quantitativo curado" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':(i.auto&&i.auto.quant?' <span title="sugerido pelo auto-vínculo (receita)" style="font-size:11px">🤖</span>':'')}</div>`:'<span class="muted">—</span>'}</td>
+    <td class="date">${D(i.data_necessaria)}${i.curado_data?' <span class="material-icons" title="data curada" style="font-size:12px;color:var(--ok);vertical-align:-2px">verified</span>':(i.auto&&i.auto.crono?' <span title="sugerido pelo auto-vínculo (receita) — abra o Cronograma e salve pra confirmar" style="font-size:11px">🤖</span>':'')}</td>
     <td>${pctChip(i.cronograma_pct)}</td>
     <td class="date">${D(i.inicio_cotacao)}${chipIni}</td>
     <td class="date">${D(i.fim_cotacao)}${chipFim}</td>
@@ -2557,6 +2558,14 @@ async function receitasDerivar(obraId){
     body:JSON.stringify({acao:'derivar',obra_id:obraId,me:EU&&EU.bitrix_id})})).json();
   if(r.error){ toast(r.error); return; }
   toast(r.derivadas+' receitas derivadas de '+r.obra); RCDATA=null; renderReceitas();
+}
+async function receitasAplicar(obraId){
+  if(!confirm('Aplicar as receitas na obra '+obraId+'? Só preenche o que está VAZIO, tudo entra como sugerido 🤖 (não curado).')) return;
+  toast('Aplicando receitas… (pode levar ~1 min)');
+  const r=await (await fetch('actions/aplicar_receitas.php',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({acao:'aplicar',obra_id:obraId,me:EU&&EU.bitrix_id})})).json();
+  if(r.error){ toast(r.error); return; }
+  toast(`Auto-vínculo em ${r.obra}: ${r.sugeridos.crono} cronogramas · ${r.sugeridos.verba} verbas · ${r.sugeridos.quant} quantitativos sugeridos`);
 }
 function rcCronoTxt(c){ if(!c) return '—';
   return c.ancora_nome ? `Buscar “${esc(c.ancora_nome)}” → 1ª data` : ('automático'+(c.termos_template?` (${esc(c.termos_template)})`:'')); }

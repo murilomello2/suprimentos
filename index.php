@@ -236,7 +236,6 @@
     <div class="top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
       <div>
         <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">radar</span> Radar de Aquisições</h1>
-        <p class="sub" id="sub">Carregando…</p>
       </div>
       <div style="display:flex;gap:8px;flex:0 0 auto;margin-top:4px">
         <button class="btn-ghost" onclick="recarregar()" title="Recarregar do servidor — evita trabalhar com dado que outra pessoa já curou"><span class="material-icons" style="font-size:18px">refresh</span> Atualizar</button>
@@ -452,7 +451,7 @@ function obraMenuRender(){
       return `<label style="display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;cursor:pointer;font-size:12.5px" onmouseover="this.style.background='#eff7f1'" onmouseout="this.style.background=''">
         <input type="checkbox" ${on?'checked':''} onchange="obraSet(${o.id},this.checked)">
         <span style="width:9px;height:9px;border-radius:50%;background:${obraCor(o.id)};flex:0 0 auto"></span>
-        <span style="flex:1"><b>${esc(o.nome)}</b>${o.codinome?` <span class="muted" style="font-size:11px">· ${esc(o.codinome)}${o.local?' — '+esc(o.local):''}</span>`:''}</span>
+        <span style="flex:1"><b>${esc(o.nome)}</b></span>
       </label>`; }).join(''):'<div class="muted" style="padding:8px;font-size:12px">carregando…</div>');
 }
 function obraSet(id,checked){
@@ -489,12 +488,7 @@ async function load(){
     }
     DATA.itens=itens;
     const cobertura=covLeaf?Math.round(covVal/covLeaf*1000)/10:null;
-    // "Mostrando:" reflete a SELEÇÃO de obras (com codinome/local quando 1 só)
-    const selObras=oks.map(x=>x.d.obra).filter(Boolean);
-    const obraTxt=selObras.length===1
-      ? `<b style="color:var(--verde-d)">${esc(selObras[0].nome)}</b> · ${esc(selObras[0].codinome||'')} — ${esc(selObras[0].local||'')}`
-      : selObras.map(o=>`<b style="color:${obraCor(o.id)}">${esc(o.nome)}</b>`).join(' + ')+` · ${selObras.length} obras`;
-    document.getElementById('sub').innerHTML=`Mostrando: ${obraTxt} · ligado ao cronograma, orçamento e dicionário · hoje: ${D(today)}`+(cronoErro?` · <span style="color:var(--pend)">cronograma offline</span>`:'');
+    // obra(s) selecionada(s) aparecem SÓ no dropdown (botão + checkboxes) — sem linha de texto no topo
     obraUpdateUI();
     // KPIs (sobre o conjunto selecionado)
     const comData=itens.filter(i=>i.data_necessaria).length;
@@ -502,7 +496,7 @@ async function load(){
     const atrasados=itens.filter(i=>alertLevel(i)==='atrasado').length;
     const cv=k=>itens.filter(i=>i.curva===k).length;
     document.getElementById('kpis').innerHTML=`
-      <div class="kpi"><div class="v">${itens.length}</div><div class="l">Itens no radar${selObras.length>1?' ('+selObras.length+' obras)':''}</div></div>
+      <div class="kpi"><div class="v">${itens.length}</div><div class="l">Itens no radar${oks.length>1?' ('+oks.length+' obras)':''}</div></div>
       <div class="kpi"><div class="v">${comData} / ${itens.length}</div><div class="l">Com data definida</div></div>
       <div class="kpi"><div class="v ${criticos?'alert':''}">${criticos}</div><div class="l">Críticos (fim da cotação venceu)${atrasados?` · ${atrasados} atrasados`:''}</div></div>
       <div class="kpi"><div class="v">${cv('A')} · ${cv('B')} · ${cv('C')}</div><div class="l">Curva A / B / C</div></div>

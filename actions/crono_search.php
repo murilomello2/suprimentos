@@ -35,31 +35,11 @@ try {
         $filter = '&and=(' . implode(',', array_map(function ($v) { return 'nome.ilike.' . $v; }, $vals)) . ')';
     }
 
+    // 1 SÓ chamada ao Supabase por busca (o caminho por ancestrais foi removido — fazia uma 2ª chamada por tecla
+    // e sobrecarregava o Supabase, agravando a lentidão. O front mostra o WBS, que já situa a tarefa.)
     $rows = sb_get($base . $filter
           . '&select=outline_number,nome,wbs,start,finish,is_milestone,is_summary,outline_level'
           . '&order=start.asc&limit=60');
-
-    // CAMINHO: resolve os nomes dos ancestrais (pelo outline_number) → "TORRE 3 › TÉRREO › …" pra desambiguar.
-    // Opcional: se falhar, devolve sem caminho (não quebra a busca).
-    try {
-        $need = [];
-        foreach ($rows as $r) {
-            $parts = explode('.', (string)($r['outline_number'] ?? ''));
-            for ($i = 1; $i < count($parts); $i++) $need[implode('.', array_slice($parts, 0, $i))] = 1;
-        }
-        if ($need) {
-            $in  = implode(',', array_map('rawurlencode', array_keys($need)));
-            $anc = sb_get($base . '&outline_number=in.(' . $in . ')&select=outline_number,nome');
-            $nm  = [];
-            foreach ($anc as $a) $nm[$a['outline_number']] = $a['nome'];
-            foreach ($rows as &$r) {
-                $parts = explode('.', (string)($r['outline_number'] ?? '')); $p = [];
-                for ($i = 1; $i < count($parts); $i++) { $k = implode('.', array_slice($parts, 0, $i)); if (isset($nm[$k])) $p[] = $nm[$k]; }
-                $r['path'] = implode(' › ', $p);
-            }
-            unset($r);
-        }
-    } catch (Throwable $e) { /* caminho é opcional */ }
 
     echo json_encode(['tarefas'=>$rows], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 } catch (Throwable $e) {

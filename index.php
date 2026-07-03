@@ -1118,13 +1118,17 @@ async function cronoSalvar(){
   await saveAndReload({crono_marco_override:n.nome, data_necessaria_override:n.start});
   toast('Vínculo salvo: '+D(n.start));
 }
-async function cronoBuscar(){
-  const q=document.getElementById('cronoQ').value.trim();
-  const box=document.getElementById('cronoSearch');
-  if(q.length<2){box.innerHTML='';return;}
+let CRONO_DEB=null, CRONO_SEQ=0;
+function cronoBuscar(){ clearTimeout(CRONO_DEB); CRONO_DEB=setTimeout(cronoBuscarNow,280); }   // debounce: menos carga no Supabase + evita corrida
+async function cronoBuscarNow(){
+  const q=(document.getElementById('cronoQ')||{}).value; if(q==null){return;} const qt=q.trim();
+  const box=document.getElementById('cronoSearch'); if(!box)return;
+  if(qt.length<2){box.innerHTML='';return;}
+  const my=++CRONO_SEQ;
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
   try{
-    const d=await (await fetch('actions/crono_search.php?q='+encodeURIComponent(q))).json();
+    const d=await (await fetch('actions/crono_search.php?q='+encodeURIComponent(qt))).json();
+    if(my!==CRONO_SEQ) return;   // resposta atrasada de uma tecla anterior — descarta (senão sobrescreve os resultados certos com lixo)
     if(d.error){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px;color:var(--pend)">Erro na busca: '+esc(d.error)+'</div>';return;}
     CRONO_SEARCH=(d.tarefas||[]).map(t=>({outline:t.outline_number||t.wbs,nome:t.nome,start:t.start,wbs:t.wbs,path:t.path,summary:t.is_summary}));
     if(!CRONO_SEARCH.length){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Nada encontrado.</div>';return;}
@@ -1974,28 +1978,35 @@ function orcTreeToggle(){ const w=document.getElementById('orcTreeWrap'), b=docu
 /* ----- Composição — CESTA de insumos (de 1+ composições): verba = soma do que você marcar ----- */
 let COMP_DATA=null, COMP_AREA=0, COMP_LAST=[], COMP_SEL=[];
 let COMP_LOCAIS=null, COMP_LOCAIS_SEL=new Set();   // locais (linhas do orçamento) da composição aberta + selecionados
+let COMPB_SEQ=0;
 async function compBuscar(){
   const q=document.getElementById('compQ').value.trim();
   const box=document.getElementById('compSearch'); if(!box)return;
   if(q.length<2){box.innerHTML='';return;}
+  const my=++COMPB_SEQ;
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
   const d=await (await fetch('actions/composicao.php?q='+encodeURIComponent(q))).json();
+  if(my!==COMPB_SEQ) return;   // resposta atrasada de uma tecla anterior — descarta
   COMP_LAST=d.composicoes||[];
   if(!COMP_LAST.length){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Nada encontrado. É <b>mão de obra ou insumo</b> (ex.: eletricista, encanador)? Eles ficam <b>dentro</b> das composições — use a <b>Busca em massa por insumo</b> logo abaixo.</div>';return;}
   box.innerHTML='<div class="srbox">'+COMP_LAST.map(c=>`<div class="pickrow" onclick="compEscolher(${c.id})">
     <span class="material-icons" style="font-size:16px;color:var(--verde)">playlist_add</span>
     <div><div>${esc(c.descricao)}</div><small class="muted">${QNUM(c.qtde_total)} ${esc(c.unidade||'')} · R$${QNUM(c.rs_unit)}/un</small></div></div>`).join('')+'</div>';
 }
+let COMP_SEQ=0;
 async function compEscolher(id){
+  const my=++COMP_SEQ;
   await loadVerbaUsos();   // pra travar locais/insumos já usados em outro item
-  COMP_DATA=await (await fetch('actions/composicao.php?id='+id)).json();
-  COMP_LOCAIS=await (await fetch('actions/composicao_locais.php?id='+id)).json();
+  const cd=await (await fetch('actions/composicao.php?id='+id)).json();
+  const cl=await (await fetch('actions/composicao_locais.php?id='+id)).json();
+  if(my!==COMP_SEQ) return;   // outra composição foi clicada enquanto esta carregava — descarta (senão abre a ERRADA)
+  COMP_DATA=cd; COMP_LOCAIS=cl;
   const allIds=(COMP_LOCAIS.grupos||[]).flatMap(g=>g.linhas.map(l=>l.id));
   // se já há insumo desta composição na cesta com locais salvos, reusa a seleção; senão, todos os locais
   const ex=COMP_SEL.find(s=>s.cid===id && Array.isArray(s.locais) && s.locais.length);
   COMP_LOCAIS_SEL=new Set((ex?ex.locais:allIds).filter(L=>!compLocalBloqueado(L)));  // não marca locais tomados inteiros por outro item
   compRecalcArea();
-  document.getElementById('compSearch').innerHTML='';
+  const cs=document.getElementById('compSearch'); if(cs) cs.innerHTML='';
   compRenderDetail();
 }
 function compRecalcArea(){

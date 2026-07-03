@@ -1126,12 +1126,14 @@ async function cronoBuscar(){
   try{
     const d=await (await fetch('actions/crono_search.php?q='+encodeURIComponent(q))).json();
     if(d.error){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px;color:var(--pend)">Erro na busca: '+esc(d.error)+'</div>';return;}
-    CRONO_SEARCH=(d.tarefas||[]).map(t=>({outline:t.outline_number||t.wbs,nome:t.nome,start:t.start,wbs:t.wbs}));
+    CRONO_SEARCH=(d.tarefas||[]).map(t=>({outline:t.outline_number||t.wbs,nome:t.nome,start:t.start,wbs:t.wbs,path:t.path,summary:t.is_summary}));
     if(!CRONO_SEARCH.length){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Nada encontrado.</div>';return;}
     box.innerHTML='<div class="srbox">'+CRONO_SEARCH.map(t=>`
-      <div class="pickrow" onclick="cronoSelecionar('${esc(t.outline)}')">
-        <span class="material-icons" style="font-size:16px;color:var(--verde)">radio_button_checked</span>
-        <div><div>${esc(t.nome)}</div><small class="muted">WBS ${esc(t.wbs||'—')} · ${D(t.start)}</small></div>
+      <div class="pickrow" onclick="cronoSelecionar('${esc(t.outline)}')" style="align-items:flex-start">
+        <span class="material-icons" style="font-size:16px;color:var(--verde);margin-top:2px">radio_button_checked</span>
+        <div style="min-width:0"><div>${esc(t.nome)}${t.summary?' <span style="font-size:9px;font-weight:700;background:var(--verde);color:#fff;border-radius:4px;padding:1px 5px;vertical-align:1px">GRUPO</span>':''}</div>
+          ${t.path?`<small class="muted" style="display:block"><span class="material-icons" style="font-size:11px;vertical-align:-1px;color:var(--dourado)">place</span> ${esc(t.path)}</small>`:''}
+          <small class="muted">WBS ${esc(t.wbs||'—')} · ${D(t.start)}</small></div>
       </div>`).join('')+'</div>';
   }catch(e){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Falha na busca.</div>';}
 }

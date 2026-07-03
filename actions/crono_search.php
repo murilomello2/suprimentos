@@ -1,7 +1,8 @@
 <?php
 /**
  * Busca tarefas do cronograma vivo (Supabase) para o seletor de match manual.
- * GET: q (termo). Retorna tarefas cujo nome contém o termo, com nome/wbs/start.
+ * GET: q (termo). Retorna tarefas cujo nome casa TODAS as palavras (ordem livre, níveis acima e abaixo),
+ * tolerando PLURAL (ex.: "acabamentos elétricos" acha "ACABAMENTO ELÉTRICOS"), com o CAMINHO (WBS por nome).
  * Busca direto no Supabase (não só no cache de resumo) para achar tarefas profundas.
  */
 header('Content-Type: application/json; charset=utf-8');
@@ -15,12 +16,51 @@ try {
     $q    = trim($_GET['q'] ?? '');
     if (!$cid || strlen($q) < 2) { echo json_encode(['tarefas'=>[]]); exit; }  // strlen: servidor não tem mbstring
 
-    // ilike no nome; pega tarefas (não-resumo de preferência) com data
-    $path = 'obra_cronograma_tarefas?cronograma_id=eq.' . rawurlencode($cid)
-          . '&nome=ilike.' . rawurlencode('*' . $q . '*')
+    $base = 'obra_cronograma_tarefas?cronograma_id=eq.' . rawurlencode($cid);
+
+    // TOKENIZA: cada palavra vira um ilike; o nó tem que conter TODAS (ordem livre → acha em qualquer nível).
+    // PLURAL: tira o "s" final de cada palavra (ASCII, sem mbstring) — assim "acabamentos" casa "ACABAMENTO".
+    $vals = [];
+    foreach (preg_split('/\s+/', $q) as $t) {
+        $t = trim($t);
+        if (strlen($t) < 3) continue;                                       // ignora "de","e","1"…
+        if (substr($t, -1) === 's' && strlen($t) > 3) $t = substr($t, 0, -1); // stem plural
+        $vals[] = rawurlencode('*' . $t . '*');
+    }
+    if (!$vals) $vals[] = rawurlencode('*' . $q . '*');                      // fallback: frase inteira
+    // 1 palavra = filtro top-level (nome=ilike.); 2+ = grupo AND (nome.ilike. dentro de and=())
+    if (count($vals) === 1) {
+        $filter = '&nome=ilike.' . $vals[0];
+    } else {
+        $filter = '&and=(' . implode(',', array_map(function ($v) { return 'nome.ilike.' . $v; }, $vals)) . ')';
+    }
+
+    $rows = sb_get($base . $filter
           . '&select=outline_number,nome,wbs,start,finish,is_milestone,is_summary,outline_level'
-          . '&order=start.asc&limit=40';
-    $rows = sb_get($path);
+          . '&order=start.asc&limit=60');
+
+    // CAMINHO: resolve os nomes dos ancestrais (pelo outline_number) → "TORRE 3 › TÉRREO › …" pra desambiguar.
+    // Opcional: se falhar, devolve sem caminho (não quebra a busca).
+    try {
+        $need = [];
+        foreach ($rows as $r) {
+            $parts = explode('.', (string)($r['outline_number'] ?? ''));
+            for ($i = 1; $i < count($parts); $i++) $need[implode('.', array_slice($parts, 0, $i))] = 1;
+        }
+        if ($need) {
+            $in  = implode(',', array_map('rawurlencode', array_keys($need)));
+            $anc = sb_get($base . '&outline_number=in.(' . $in . ')&select=outline_number,nome');
+            $nm  = [];
+            foreach ($anc as $a) $nm[$a['outline_number']] = $a['nome'];
+            foreach ($rows as &$r) {
+                $parts = explode('.', (string)($r['outline_number'] ?? '')); $p = [];
+                for ($i = 1; $i < count($parts); $i++) { $k = implode('.', array_slice($parts, 0, $i)); if (isset($nm[$k])) $p[] = $nm[$k]; }
+                $r['path'] = implode(' › ', $p);
+            }
+            unset($r);
+        }
+    } catch (Throwable $e) { /* caminho é opcional */ }
+
     echo json_encode(['tarefas'=>$rows], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 } catch (Throwable $e) {
     http_response_code(500);

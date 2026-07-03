@@ -10,12 +10,16 @@
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
 
+// canônicos em includes/db.php (sup_normt/sup_sistema — a MESMA lógica da derivação de receitas,
+// pra classificação nunca divergir); fallback local só p/ deploy parcial (db.php antigo no FTP)
 function _normt($s){
+    if (function_exists('sup_normt')) return sup_normt($s);
     $map = ['á'=>'a','à'=>'a','â'=>'a','ã'=>'a','é'=>'e','ê'=>'e','í'=>'i','ó'=>'o','ô'=>'o','õ'=>'o','ú'=>'u','ç'=>'c',
             'Á'=>'a','À'=>'a','Â'=>'a','Ã'=>'a','É'=>'e','Ê'=>'e','Í'=>'i','Ó'=>'o','Ô'=>'o','Õ'=>'o','Ú'=>'u','Ç'=>'c'];
     return strtolower(strtr((string)$s, $map));
 }
 function _sistema($p){ // p = path normalizado (minúsculo, sem acento)
+    if (function_exists('sup_sistema')) return sup_sistema($p) ?: 'Outras';
     // PALAVRA INTEIRA nas ambíguas curtas: "gas" NÃO pode casar dentro de "vigas"/"desgaste"; "fria" idem.
     $w = function($re) use ($p){ return preg_match('#\b'.$re.'\b#', $p) === 1; };
     if ($w('gas'))                                        return 'Gás';
@@ -30,15 +34,19 @@ function _sistema($p){ // p = path normalizado (minúsculo, sem acento)
 
 try {
     $pdo = db();
+    $OBRA = max(1, (int)($_GET['obra'] ?? 1));   // multi-obra: insumos/composições/linhas só DESTA obra
     $termos = array_values(array_filter(array_map(function($t){ return _normt(trim($t)); }, explode(',', $_GET['termos'] ?? ''))));
     $sisFilter = trim($_GET['sistema'] ?? '');   // LABEL de _sistema() (ex.: 'Gás', 'Água Fria') — escopo por subsistema; '' = todos
     $tipoF     = strtolower(trim($_GET['tipo'] ?? ''));   // '', 'material' (não-MO), 'mo'
     // precisa de PELO MENOS um critério: termo OU sistema (senão traria o catálogo inteiro)
     if (!$termos && $sisFilter === '') { echo json_encode(['matches'=>[], 'total'=>0, 'n'=>0, 'nota'=>'informe um termo ou um sistema']); exit; }
 
-    // todos os insumos, agrupados por composição (ordenados por id p/ bater o idx do front)
-    $rows = $pdo->query("SELECT composicao_id, id, descricao, unidade, coef, rs_unit, tipo
-                         FROM composicao_insumo ORDER BY composicao_id, id")->fetchAll();
+    // todos os insumos DA OBRA, agrupados por composição (ordenados por id p/ bater o idx do front)
+    $st = $pdo->prepare("SELECT ci.composicao_id, ci.id, ci.descricao, ci.unidade, ci.coef, ci.rs_unit, ci.tipo
+                         FROM composicao_insumo ci JOIN composicao c ON c.id = ci.composicao_id
+                         WHERE c.obra_id = ? ORDER BY ci.composicao_id, ci.id");
+    $st->execute([$OBRA]);
+    $rows = $st->fetchAll();
     $byComp = []; foreach ($rows as $r) $byComp[$r['composicao_id']][] = $r;
 
     $matchIns = []; $cids = [];
@@ -71,8 +79,8 @@ try {
     $linhasByDesc = [];
     if ($descs) {
         $ph = implode(',', array_fill(0, count($descs), '?'));
-        $st = $pdo->prepare("SELECT id, descricao, path_str, qtde FROM orcamento_linha WHERE folha=1 AND descricao IN ($ph)");
-        $st->execute($descs);
+        $st = $pdo->prepare("SELECT id, descricao, path_str, qtde FROM orcamento_linha WHERE obra_id=? AND folha=1 AND descricao IN ($ph)");
+        $st->execute(array_merge([$OBRA], $descs));
         foreach ($st->fetchAll() as $l) $linhasByDesc[$l['descricao']][] = $l;
     }
 

@@ -14,9 +14,10 @@ require_once __DIR__ . '/../includes/db.php';
 
 try {
     $pdo = db();
+    $OBRA = max(1, (int)($_GET['obra'] ?? 1));   // multi-obra
     $ordem = (int)($_GET['ordem'] ?? 0);
-    $st = $pdo->prepare("SELECT tipo, orcamento_refs, composicao_sel, orcamento_excl FROM radar_item WHERE servico_id=? AND obra_id=1");
-    $st->execute([$ordem]);
+    $st = $pdo->prepare("SELECT tipo, orcamento_refs, composicao_sel, orcamento_excl FROM radar_item WHERE servico_id=? AND obra_id=?");
+    $st->execute([$ordem, $OBRA]);
     $it = $st->fetch();
     if (!$it) { echo json_encode(['error'=>'item não encontrado']); exit; }
 
@@ -47,7 +48,8 @@ try {
         $compByDesc = [];
         if ($descs) {
             $ph = implode(',', array_fill(0, count($descs), '?'));
-            $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE descricao IN ($ph)"); $q->execute($descs);
+            $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE obra_id=? AND descricao IN ($ph)");
+            $q->execute(array_merge([$OBRA], $descs));   // multi-obra: composição da MESMA obra
             foreach ($q->fetchAll() as $c) $compByDesc[$c['descricao']] = (int)$c['id'];
         }
         $cids = array_values(array_unique(array_values($compByDesc)));

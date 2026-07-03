@@ -24,9 +24,13 @@ try {
         }
     } catch (Throwable $e) { /* nunca derruba o endpoint por causa da auto-cura */ }
 
-    $obra = $pdo->query("SELECT * FROM obra WHERE id=1")->fetch();
+    // multi-obra: default = obra 1 (Trinity) — o front pede outra via ?obra=N
+    $OBRA = max(1, (int)($_GET['obra'] ?? 1));
+    $ob = $pdo->prepare("SELECT * FROM obra WHERE id=?"); $ob->execute([$OBRA]);
+    $obra = $ob->fetch();
+    if (!$obra) { echo json_encode(['error'=>'obra não encontrada: '.$OBRA]); exit; }
 
-    $rows = $pdo->query("
+    $st = $pdo->prepare("
         SELECT s.ordem, s.nome, s.fase, s.grupo, s.grupo_ordem, s.curva, s.unidade, s.forma_contratacao,
                s.lead_dias, s.marco_cronograma, s.termos_cronograma, s.quantitativo AS quantitativo_txt,
                s.escopo, s.variaveis_cotar, s.licoes, s.documentos, s.verba_linhas,
@@ -38,9 +42,11 @@ try {
                r.quantitativo_valor, r.quantitativo_unidade, r.quantitativo_refs, r.quantitativo_fonte,
                r.tipo, r.verba_metodo, r.verba_material, r.verba_mo, r.composicao_id, r.area_base, r.composicao_sel, r.verba_curada, r.quant_comp_sel, r.quant_curada, r.orcamento_excl
         FROM servico s
-        JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = 1
+        JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = ?
         ORDER BY s.grupo_ordem, s.ordem
-    ")->fetchAll();
+    ");
+    $st->execute([$OBRA]);
+    $rows = $st->fetchAll();
 
     // datas vivas do cronograma (com cache); se falhar, segue sem datas
     $tasks = [];
@@ -120,10 +126,12 @@ try {
     $cov_analitico = 0;
     if ($used) {
         $valmap = [];
-        foreach ($pdo->query("SELECT id, valor FROM orcamento_linha") as $l) $valmap[(int)$l['id']] = (float)$l['valor'];
+        $vq = $pdo->prepare("SELECT id, valor FROM orcamento_linha WHERE obra_id=?"); $vq->execute([$OBRA]);
+        foreach ($vq->fetchAll() as $l) $valmap[(int)$l['id']] = (float)$l['valor'];
         foreach (array_keys($used) as $id) $cov_analitico += ($valmap[$id] ?? 0);
     }
-    $total_leaf = (float)$pdo->query("SELECT COALESCE(SUM(valor),0) FROM orcamento_linha WHERE folha=1")->fetchColumn();
+    $tq = $pdo->prepare("SELECT COALESCE(SUM(valor),0) FROM orcamento_linha WHERE obra_id=? AND folha=1"); $tq->execute([$OBRA]);
+    $total_leaf = (float)$tq->fetchColumn();
     $cov_real = $cov_analitico + $comp_verba;
     $cobertura_real = $total_leaf ? round($cov_real / $total_leaf * 100, 1) : null;
 

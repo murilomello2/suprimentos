@@ -12,10 +12,11 @@ require_once __DIR__ . '/../includes/db.php';
 
 try {
     $pdo = db();
+    $OBRA = max(1, (int)($_GET['obra'] ?? 1));   // multi-obra
     $ordem = (int)($_GET['ordem'] ?? 0);
     $manter = ($_GET['manter'] ?? 'material') === 'mo' ? 'mo' : 'material'; // o que FICA no item (o resto é liberado)
-    $st = $pdo->prepare("SELECT orcamento_refs FROM radar_item WHERE servico_id=? AND obra_id=1");
-    $st->execute([$ordem]);
+    $st = $pdo->prepare("SELECT orcamento_refs FROM radar_item WHERE servico_id=? AND obra_id=?");
+    $st->execute([$ordem, $OBRA]);
     $refs = json_decode($st->fetchColumn() ?: '[]', true) ?: [];
     if (!$refs) { echo json_encode(['error'=>'Esse item não tem verba analítica (linhas do orçamento) pra separar.']); exit; }
 
@@ -28,8 +29,8 @@ try {
     $compByDesc = [];
     if ($descs) {
         $ph = implode(',', array_fill(0, count($descs), '?'));
-        $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE descricao IN ($ph)");
-        $q->execute($descs);
+        $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE obra_id=? AND descricao IN ($ph)");
+        $q->execute(array_merge([$OBRA], $descs));
         foreach ($q->fetchAll() as $c) $compByDesc[$c['descricao']] = (int)$c['id'];
     }
     // insumos por composição (idx = posição ORDER BY id)

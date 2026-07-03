@@ -11,14 +11,16 @@ require_once __DIR__ . '/../includes/db.php';
 try {
     $pdo = db();
     $id  = (int)($_GET['id'] ?? 0);
-    $c   = $pdo->prepare("SELECT descricao FROM composicao WHERE id=?");
+    $c   = $pdo->prepare("SELECT descricao, obra_id FROM composicao WHERE id=?");
     $c->execute([$id]);
-    $desc = $c->fetchColumn();
-    if ($desc === false) { echo json_encode(['grupos'=>[], 'total'=>0]); exit; }
+    $comp = $c->fetch();
+    if (!$comp) { echo json_encode(['grupos'=>[], 'total'=>0]); exit; }
+    $desc = $comp['descricao'];
+    $obraId = (int)($comp['obra_id'] ?: 1);   // multi-obra: o casamento por descrição NÃO pode vazar pra outra obra
 
-    // linhas-folha do orçamento com a MESMA descrição (cada uma = a composição aplicada num local)
-    $st = $pdo->prepare("SELECT id, path_str, qtde, valor, unidade FROM orcamento_linha WHERE descricao=? AND folha=1 ORDER BY path_str");
-    $st->execute([$desc]);
+    // linhas-folha do orçamento DA MESMA OBRA com a MESMA descrição (cada uma = a composição aplicada num local)
+    $st = $pdo->prepare("SELECT id, path_str, qtde, valor, unidade FROM orcamento_linha WHERE obra_id=? AND descricao=? AND folha=1 ORDER BY path_str");
+    $st->execute([$obraId, $desc]);
     $rows = $st->fetchAll();
 
     $grupos = []; $total = 0.0;

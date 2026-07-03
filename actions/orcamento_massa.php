@@ -38,9 +38,12 @@ try {
     $escopo = ($_GET['escopo'] ?? 'hidr');
     $matFiltro = array_values(array_filter(array_map(function($t){ return _normt(trim($t)); }, explode(',', $_GET['material'] ?? ''))));
 
-    $where = "folha=1";
+    $OBRA = max(1, (int)($_GET['obra'] ?? 1));   // multi-obra
+    $where = "obra_id=? AND folha=1";
     if ($escopo === 'hidr') $where .= " AND (lower(path_str) LIKE '%hidr%' OR lower(path_str) LIKE '%sanit%')";
-    $rows = $pdo->query("SELECT id, descricao, path_str, qtde, unidade, valor FROM orcamento_linha WHERE $where")->fetchAll();
+    $stq = $pdo->prepare("SELECT id, descricao, path_str, qtde, unidade, valor FROM orcamento_linha WHERE $where");
+    $stq->execute([$OBRA]);
+    $rows = $stq->fetchAll();
 
     $linhas = []; $total = 0.0;
     foreach ($rows as $r) {

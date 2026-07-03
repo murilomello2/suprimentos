@@ -24,28 +24,30 @@ function rows_out($rows){
 try {
     $pdo = db();
     db_seed_if_empty();
+    // multi-obra: os códigos da árvore ("1", "1.2"…) se repetem entre obras — TODA query escopa por obra
+    $OBRA = max(1, (int)($_GET['obra'] ?? 1));
 
     if (isset($_GET['ids'])) {
         $arr = array_values(array_filter(array_map('intval', explode(',', $_GET['ids']))));
         if (!$arr) { echo json_encode(['linhas'=>[]]); exit; }
         $in = implode(',', array_fill(0, count($arr), '?'));
-        $st = $pdo->prepare("SELECT * FROM orcamento_linha WHERE id IN ($in)");
-        $st->execute($arr);
+        $st = $pdo->prepare("SELECT * FROM orcamento_linha WHERE obra_id=? AND id IN ($in)");
+        $st->execute(array_merge([$OBRA], $arr));
         echo json_encode(['linhas'=>rows_out($st->fetchAll())], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if (isset($_GET['q']) && trim($_GET['q']) !== '') {
         $q = '%' . trim($_GET['q']) . '%';
         $st = $pdo->prepare("SELECT * FROM orcamento_linha
-            WHERE folha=1 AND (descricao LIKE ? OR path_str LIKE ?)
+            WHERE obra_id=? AND folha=1 AND (descricao LIKE ? OR path_str LIKE ?)
             ORDER BY valor DESC LIMIT 60");
-        $st->execute([$q, $q]);
+        $st->execute([$OBRA, $q, $q]);
         echo json_encode(['modo'=>'busca','linhas'=>rows_out($st->fetchAll())], JSON_UNESCAPED_UNICODE); exit;
     }
 
-    $codigo = $_GET['children_of'] ?? '1'; // raiz = filhos de "1" (Café Filho)
-    $st = $pdo->prepare("SELECT * FROM orcamento_linha WHERE parent = ? ORDER BY id");
-    $st->execute([$codigo]);
+    $codigo = $_GET['children_of'] ?? '1'; // raiz = filhos de "1" (nó-raiz da obra)
+    $st = $pdo->prepare("SELECT * FROM orcamento_linha WHERE obra_id=? AND parent = ? ORDER BY id");
+    $st->execute([$OBRA, $codigo]);
     echo json_encode(['modo'=>'arvore','parent'=>$codigo,'linhas'=>rows_out($st->fetchAll())], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     http_response_code(500);

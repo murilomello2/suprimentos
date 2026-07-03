@@ -17,14 +17,16 @@ try {
     if (!$ids) { echo json_encode(['composicao_sel'=>[], 'resumo'=>['valor'=>0,'n_composicoes'=>0,'n_insumos'=>0,'sem_composicao'=>[]]]); exit; }
 
     $in = implode(',', $ids);
-    $linhas = $pdo->query("SELECT id, descricao, qtde FROM orcamento_linha WHERE id IN ($in)")->fetchAll();
+    $linhas = $pdo->query("SELECT id, obra_id, descricao, qtde FROM orcamento_linha WHERE id IN ($in)")->fetchAll();
 
+    // multi-obra: a obra vem das PRÓPRIAS linhas (ids já são únicos entre obras) — a composição tem que ser da mesma
+    $OBRA = $linhas ? (int)($linhas[0]['obra_id'] ?: 1) : 1;
     $descs = array_values(array_unique(array_map(function($l){ return $l['descricao']; }, $linhas)));
     $compByDesc = [];
     if ($descs) {
         $ph = implode(',', array_fill(0, count($descs), '?'));
-        $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE descricao IN ($ph)");
-        $q->execute($descs);
+        $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE obra_id=? AND descricao IN ($ph)");
+        $q->execute(array_merge([$OBRA], $descs));
         foreach ($q->fetchAll() as $c) $compByDesc[$c['descricao']] = (int)$c['id'];
     }
     $cids = array_values(array_unique(array_values($compByDesc)));

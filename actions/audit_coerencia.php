@@ -23,19 +23,27 @@ function _classeTipo($t){
 
 try {
     $pdo = db();
-    // pré-carrega tudo (sem N queries por item)
+    $OBRA = max(1, (int)($_GET['obra'] ?? 1));   // multi-obra
+    // pré-carrega tudo DA OBRA (sem N queries por item)
     $lineById = [];
-    foreach ($pdo->query("SELECT id, descricao, qtde, valor FROM orcamento_linha WHERE folha=1")->fetchAll() as $l)
+    $lq = $pdo->prepare("SELECT id, descricao, qtde, valor FROM orcamento_linha WHERE obra_id=? AND folha=1"); $lq->execute([$OBRA]);
+    foreach ($lq->fetchAll() as $l)
         $lineById[(int)$l['id']] = $l;
     $cidByDesc = [];
-    foreach ($pdo->query("SELECT id, descricao FROM composicao")->fetchAll() as $c)
+    $cq = $pdo->prepare("SELECT id, descricao FROM composicao WHERE obra_id=?"); $cq->execute([$OBRA]);
+    foreach ($cq->fetchAll() as $c)
         $cidByDesc[$c['descricao']] = (int)$c['id'];
     $insByCid = [];
-    foreach ($pdo->query("SELECT composicao_id, descricao, tipo, coef, rs_unit FROM composicao_insumo ORDER BY composicao_id, id")->fetchAll() as $ci)
+    $iq = $pdo->prepare("SELECT ci.composicao_id, ci.descricao, ci.tipo, ci.coef, ci.rs_unit
+                         FROM composicao_insumo ci JOIN composicao c ON c.id=ci.composicao_id
+                         WHERE c.obra_id=? ORDER BY ci.composicao_id, ci.id"); $iq->execute([$OBRA]);
+    foreach ($iq->fetchAll() as $ci)
         $insByCid[(int)$ci['composicao_id']][] = $ci;
 
-    $rows = $pdo->query("SELECT r.servico_id ordem, s.nome, r.tipo, r.orcamento_refs, r.composicao_sel
-                         FROM radar_item r JOIN servico s ON s.id=r.servico_id WHERE r.obra_id=1")->fetchAll();
+    $rq = $pdo->prepare("SELECT r.servico_id ordem, s.nome, r.tipo, r.orcamento_refs, r.composicao_sel
+                         FROM radar_item r JOIN servico s ON s.id=r.servico_id WHERE r.obra_id=?");
+    $rq->execute([$OBRA]);
+    $rows = $rq->fetchAll();
 
     $flagged = []; $totalEmbutido = 0.0;
     foreach ($rows as $r) {

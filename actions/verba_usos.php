@@ -24,20 +24,23 @@ require_once __DIR__ . '/../includes/db.php';
 
 try {
     $pdo = db();
-    $rows = $pdo->query("SELECT r.servico_id, s.nome, r.orcamento_refs, r.composicao_sel, r.orcamento_excl
-                         FROM radar_item r JOIN servico s ON s.id=r.servico_id WHERE r.obra_id=1")->fetchAll();
+    $OBRA = max(1, (int)($_GET['obra'] ?? 1));   // multi-obra: usos/conflitos são POR OBRA
+    $st = $pdo->prepare("SELECT r.servico_id, s.nome, r.orcamento_refs, r.composicao_sel, r.orcamento_excl
+                         FROM radar_item r JOIN servico s ON s.id=r.servico_id WHERE r.obra_id=?");
+    $st->execute([$OBRA]);
+    $rows = $st->fetchAll();
 
     $usos = [];      // L => [ ['ordem'=>, 'kind'=>'A'|'C', 'ins'=>cid#idx|null, 'desc'=>insumoDesc] ]
     $nomes = [];
     $compCache = [];
-    $compLines = function($cid) use ($pdo, &$compCache) {
+    $compLines = function($cid) use ($pdo, &$compCache, $OBRA) {
         if (isset($compCache[$cid])) return $compCache[$cid];
         $ids = [];
         $d = $pdo->prepare("SELECT descricao FROM composicao WHERE id=?"); $d->execute([$cid]);
         $desc = $d->fetchColumn();
         if ($desc !== false) {
-            $q = $pdo->prepare("SELECT id FROM orcamento_linha WHERE descricao=? AND folha=1");
-            $q->execute([$desc]); $ids = array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
+            $q = $pdo->prepare("SELECT id FROM orcamento_linha WHERE obra_id=? AND descricao=? AND folha=1");
+            $q->execute([$OBRA, $desc]); $ids = array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
         }
         return $compCache[$cid] = $ids;
     };

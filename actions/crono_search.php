@@ -11,7 +11,9 @@ require_once __DIR__ . '/../includes/supabase.php';
 
 try {
     $pdo  = db();
-    $obra = $pdo->query("SELECT cronograma_id FROM obra WHERE id=1")->fetch();
+    $OBRA = max(1, (int)($_GET['obra'] ?? 1));   // multi-obra: cada obra tem seu cronograma
+    $oq = $pdo->prepare("SELECT cronograma_id FROM obra WHERE id=?"); $oq->execute([$OBRA]);
+    $obra = $oq->fetch();
     $cid  = $obra['cronograma_id'] ?? '';
     $q    = trim($_GET['q'] ?? '');
     if (!$cid || strlen($q) < 2) { echo json_encode(['tarefas'=>[]]); exit; }  // strlen: servidor não tem mbstring

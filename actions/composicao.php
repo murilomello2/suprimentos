@@ -10,10 +10,11 @@ require_once __DIR__ . '/../includes/db.php';
 
 try {
     $pdo = db(); db_seed_if_empty();
+    $OBRA = max(1, (int)($_GET['obra'] ?? 1));   // multi-obra: cada obra tem suas composições
 
     if (isset($_GET['id'])) {
         $id = (int)$_GET['id'];
-        $c = $pdo->prepare("SELECT * FROM composicao WHERE id=?");
+        $c = $pdo->prepare("SELECT * FROM composicao WHERE id=?");   // id é único ENTRE obras (offset por obra)
         $c->execute([$id]);
         $comp = $c->fetch();
         if (!$comp) { echo json_encode(['error'=>'composição não encontrada']); exit; }
@@ -26,8 +27,8 @@ try {
     $q = trim($_GET['q'] ?? '');
     if ($q === '') { echo json_encode(['composicoes'=>[]]); exit; }
     $st = $pdo->prepare("SELECT id,descricao,unidade,qtde_total,rs_unit FROM composicao
-                         WHERE descricao LIKE ? ORDER BY rs_total DESC LIMIT 40");
-    $st->execute(["%$q%"]);
+                         WHERE obra_id=? AND descricao LIKE ? ORDER BY rs_total DESC LIMIT 40");
+    $st->execute([$OBRA, "%$q%"]);
     echo json_encode(['composicoes'=>$st->fetchAll()], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     http_response_code(500);

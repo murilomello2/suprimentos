@@ -26,6 +26,7 @@ try {
     $ordem  = isset($in['ordem']) ? (int)$in['ordem'] : 0;
     $campos = $in['campos'] ?? [];
     $me     = $in['me'] ?? null;
+    $OBRA   = max(1, (int)($in['obra'] ?? 1));   // multi-obra: edição é POR OBRA (default Trinity)
     if (!$ordem || !is_array($campos) || !$campos) throw new Exception('payload inválido (precisa de ordem + campos)');
 
     $pdo = db();
@@ -46,7 +47,7 @@ try {
         } catch (Throwable $e) {}
     }
     $is_admin = !empty($perms['perm_admin']);
-    $editor   = $is_admin || can_edit_obra($perms, 1);
+    $editor   = $is_admin || can_edit_obra($perms, $OBRA);
     $FG = [
         'status'=>'geral','fornecedor'=>'geral','observacoes'=>'geral',
         'crono_marco_override'=>'crono','data_necessaria_override'=>'crono',
@@ -74,7 +75,7 @@ try {
     }
 
     // snapshot ANTES (p/ histórico)
-    $r0 = $pdo->prepare("SELECT * FROM radar_item WHERE obra_id=1 AND servico_id=?"); $r0->execute([$ordem]);
+    $r0 = $pdo->prepare("SELECT * FROM radar_item WHERE obra_id=? AND servico_id=?"); $r0->execute([$OBRA, $ordem]);
     $before = $r0->fetch() ?: [];
     $s0 = $pdo->prepare("SELECT nome, grupo FROM servico WHERE id=?"); $s0->execute([$ordem]);
     $beforeS = $s0->fetch() ?: ['nome'=>'','grupo'=>''];
@@ -108,7 +109,7 @@ try {
             $cidByDesc = [];
             if ($descs) {
                 $ph = implode(',', array_fill(0, count($descs), '?'));
-                $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE descricao IN ($ph)"); $q->execute($descs);
+                $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE obra_id=? AND descricao IN ($ph)"); $q->execute(array_merge([$OBRA], $descs));
                 foreach ($q->fetchAll() as $c) $cidByDesc[$c['descricao']] = (int)$c['id'];
             }
             $insUnit = []; $cids = array_values(array_unique(array_values($cidByDesc)));
@@ -377,15 +378,15 @@ try {
     if (!$set && !$hist) throw new Exception('nenhuma alteração');
 
     if ($set) {
-        $set[] = "updated_at = ?"; $vals[] = date('c'); $vals[] = $ordem;
-        $pdo->prepare("UPDATE radar_item SET " . implode(', ', $set) . " WHERE obra_id=1 AND servico_id=?")->execute($vals);
+        $set[] = "updated_at = ?"; $vals[] = date('c'); $vals[] = $OBRA; $vals[] = $ordem;
+        $pdo->prepare("UPDATE radar_item SET " . implode(', ', $set) . " WHERE obra_id=? AND servico_id=?")->execute($vals);
     }
 
     // grava o histórico (quem/quando/item/campo/antes→depois)
-    foreach ($hist as $e) log_historico($pdo, 1, $ordem, $item_nome, $me, $perms['nome'], $e[0], $e[1], $e[2]);
+    foreach ($hist as $e) log_historico($pdo, $OBRA, $ordem, $item_nome, $me, $perms['nome'], $e[0], $e[1], $e[2]);
     $pdo->commit();
 
-    $row = $pdo->prepare("SELECT * FROM radar_item WHERE obra_id=1 AND servico_id=?"); $row->execute([$ordem]);
+    $row = $pdo->prepare("SELECT * FROM radar_item WHERE obra_id=? AND servico_id=?"); $row->execute([$OBRA, $ordem]);
     echo json_encode(['ok'=>true, 'item'=>$row->fetch(), 'hist'=>count($hist)], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();

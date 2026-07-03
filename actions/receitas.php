@@ -1,0 +1,230 @@
+<?php
+/**
+ * DICIONÁRIO DE APRENDIZADO — receitas de curadoria por serviço × método construtivo.
+ *
+ * A receita captura COMO cada decisão foi tomada, por NOME/semântica (nunca IDs — outra obra
+ * tem outros IDs de linha/composição):
+ *   crono: tarefa-âncora (nome) + regra "buscar nome → PRIMEIRA data" + termos de fallback
+ *   verba: analitico (descrições, escopo parcial, exclusões) | composicao (insumos nome/tipo/
+ *          sistema/escopo + recorte sugerido, ex. Gás+MO) | manual
+ *   quant: fonte + drivers
+ * (responsavel_padrao fica FORA da receita — modelo de responsabilidades ainda em definição.)
+ *
+ * GET                                      -> { receitas: [...] } (join servico p/ nome/grupo)
+ * POST {acao:'derivar', obra_id, me}       -> re-deriva da curadoria da obra (ADMIN). Upsert por
+ *                                             (servico_id, metodo_construtivo da obra). Corrigir
+ *                                             receita = re-curar o item e re-derivar.
+ * POST {acao:'nota', servico_id, metodo_construtivo, nota, me} -> anotação manual (ADMIN)
+ */
+header('Content-Type: application/json; charset=utf-8');
+require_once __DIR__ . '/../includes/db.php';
+
+// canônicos em includes/db.php (sup_normt/sup_sistema); fallback local só p/ deploy parcial (db.php antigo no FTP)
+if (!function_exists('sup_normt')) {
+    function sup_normt($s) {
+        $map = ['á'=>'a','à'=>'a','â'=>'a','ã'=>'a','é'=>'e','ê'=>'e','í'=>'i','ó'=>'o','ô'=>'o','õ'=>'o','ú'=>'u','ç'=>'c',
+                'Á'=>'a','À'=>'a','Â'=>'a','Ã'=>'a','É'=>'e','Ê'=>'e','Í'=>'i','Ó'=>'o','Ô'=>'o','Õ'=>'o','Ú'=>'u','Ç'=>'c'];
+        return strtolower(strtr((string)$s, $map));
+    }
+}
+if (!function_exists('sup_sistema')) {
+    function sup_sistema($p) {
+        $w = function($re) use ($p){ return preg_match('#\b'.$re.'\b#', $p) === 1; };
+        if ($w('gas'))                                      return 'Gás';
+        if (strpos($p,'quente') !== false)                  return 'Água Quente';
+        if (strpos($p,'agua fria') !== false || $w('fria')) return 'Água Fria';
+        if (strpos($p,'esgoto') !== false || strpos($p,'sanit') !== false) return 'Esgoto / Sanitário';
+        if (strpos($p,'pluvia') !== false)                  return 'Águas Pluviais';
+        if (strpos($p,'incendio') !== false)                return 'Incêndio';
+        if (strpos($p,'hidr') !== false)                    return 'Hidráulica (geral)';
+        return null;
+    }
+}
+
+try {
+    $pdo = db();
+
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        $rows = $pdo->query("SELECT rc.*, s.nome, s.grupo, s.curva
+                             FROM receita rc JOIN servico s ON s.id = rc.servico_id
+                             ORDER BY s.grupo, s.ordem")->fetchAll();
+        foreach ($rows as &$r) foreach (['crono','verba','quant'] as $k) $r[$k] = $r[$k] ? json_decode($r[$k], true) : null;
+        unset($r);
+        echo json_encode(['receitas'=>$rows, 'n'=>count($rows)], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    // ---- POST: só ADMIN mexe no dicionário ----
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $perms = user_perms($pdo, $in['me'] ?? null);
+    if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
+    $acao = $in['acao'] ?? '';
+
+    if ($acao === 'nota') {
+        $sid = (int)($in['servico_id'] ?? 0); $mc = (string)($in['metodo_construtivo'] ?? '');
+        if (!$sid || $mc === '') throw new Exception('servico_id + metodo_construtivo obrigatórios');
+        $pdo->prepare("UPDATE receita SET nota=?, updated_at=? WHERE servico_id=? AND metodo_construtivo=?")
+            ->execute([(string)($in['nota'] ?? ''), date('c'), $sid, $mc]);
+        echo json_encode(['ok'=>true]); exit;
+    }
+
+    if ($acao !== 'derivar') throw new Exception('acao inválida');
+    $obraId = (int)($in['obra_id'] ?? 1);
+    $obra = $pdo->prepare("SELECT * FROM obra WHERE id=?"); $obra->execute([$obraId]);
+    $obra = $obra->fetch();
+    if (!$obra) throw new Exception('obra não encontrada');
+    $mc = $obra['metodo_construtivo'] ?: 'concreto armado convencional';
+
+    // ---- bases da obra: linhas-folha (id→desc/path) + composições (id→desc) ----
+    $LIN = []; $descCount = [];
+    $q = $pdo->prepare("SELECT id, descricao, path_str FROM orcamento_linha WHERE obra_id=? AND folha=1");
+    $q->execute([$obraId]);
+    foreach ($q->fetchAll() as $l) {
+        $LIN[(int)$l['id']] = $l;
+        $descCount[$l['descricao']] = ($descCount[$l['descricao']] ?? 0) + 1;
+    }
+    $COMPD = [];
+    $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE obra_id=?"); $q->execute([$obraId]);
+    foreach ($q->fetchAll() as $c) $COMPD[(int)$c['id']] = $c['descricao'];
+
+    $topo = function($lid) use ($LIN) {
+        $l = $LIN[(int)$lid] ?? null; $p = $l ? (string)($l['path_str'] ?? '') : '';
+        if ($p === '') return '';
+        $parts = explode('›', $p); return trim($parts[0]);
+    };
+
+    $rows = $pdo->prepare("
+        SELECT s.id AS sid, s.nome, s.grupo, s.curva, s.termos_cronograma, s.termos_orcamento, s.marco_cronograma,
+               r.tipo, r.crono_marco_override, r.data_necessaria_override, r.verba_metodo, r.verba_override,
+               r.orcamento_refs, r.orcamento_excl, r.composicao_sel, r.verba_curada,
+               r.quantitativo_fonte, r.quantitativo_valor, r.quantitativo_unidade, r.quantitativo_refs,
+               r.quant_comp_sel, r.quant_curada
+        FROM servico s JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = ?
+        ORDER BY s.id");
+    $rows->execute([$obraId]);
+    $rows = $rows->fetchAll();
+
+    // REPLACE apaga a linha inteira — lê as notas manuais ANTES pra preservá-las no upsert
+    $NOTAS = [];
+    $q = $pdo->prepare("SELECT servico_id, nota FROM receita WHERE metodo_construtivo=?"); $q->execute([$mc]);
+    foreach ($q->fetchAll() as $x) if ($x['nota'] !== null && $x['nota'] !== '') $NOTAS[(int)$x['servico_id']] = $x['nota'];
+    $up = $pdo->prepare("REPLACE INTO receita (servico_id, metodo_construtivo, obra_origem, crono, verba, quant, nota, updated_at)
+                         VALUES (?,?,?,?,?,?,?,?)");
+
+    $n = 0; $stats = ['crono_com_ancora'=>0,'verba_analitico'=>0,'verba_composicao'=>0,'verba_manual'=>0,'verba_sem'=>0];
+    foreach ($rows as $r) {
+        // ---------- CRONO ----------
+        $anc = trim((string)($r['crono_marco_override'] ?? ''));
+        $cr = ['curado' => (bool)$r['data_necessaria_override']];
+        if ($anc !== '') { $cr['regra'] = 'buscar_nome_pegar_primeira_data'; $cr['ancora_nome'] = $anc; $stats['crono_com_ancora']++; }
+        else { $cr['regra'] = 'auto_por_termos'; $cr['ancora_nome'] = null; }
+        if (trim((string)$r['termos_cronograma'])) $cr['termos_template'] = trim($r['termos_cronograma']);
+        if (trim((string)$r['marco_cronograma']))  $cr['marco_template']  = trim($r['marco_cronograma']);
+
+        // ---------- VERBA ----------
+        $met = $r['verba_metodo'] ?: null;
+        $vb = ['metodo'=>$met, 'curado'=>(bool)(int)($r['verba_curada'] ?? 0)];
+        if ($met === 'analitico') {
+            $refs = json_decode($r['orcamento_refs'] ?? '[]', true) ?: [];
+            $descs = [];
+            foreach ($refs as $L) {
+                $l = $LIN[(int)$L] ?? null; if (!$l) continue;
+                $d = $l['descricao'];
+                if (!isset($descs[$d])) $descs[$d] = ['n'=>0,'topos'=>[]];
+                $descs[$d]['n']++; $descs[$d]['topos'][$topo($L)] = 1;
+            }
+            uasort($descs, function($a,$b){ return $b['n'] <=> $a['n']; });
+            $vb['linhas'] = []; $parciais = [];
+            foreach ($descs as $d => $v) {
+                $vb['linhas'][] = ['descricao'=>$d, 'ocorrencias'=>$v['n'], 'locais_topo'=>array_keys($v['topos'])];
+                if ($v['n'] < ($descCount[$d] ?? $v['n']))
+                    $parciais[] = ['descricao'=>$d, 'pegou'=>$v['n'], 'de'=>$descCount[$d], 'locais'=>array_keys($v['topos'])];
+            }
+            $vb['n_linhas'] = count($refs);
+            if ($parciais) $vb['escopo_parcial'] = $parciais;
+            $ex = json_decode($r['orcamento_excl'] ?? '[]', true) ?: [];
+            if ($ex) {
+                $exd = [];
+                foreach ($ex as $e) { $d = $e['d'] ?? '?'; $exd[$d] = ($exd[$d] ?? 0) + 1; }
+                arsort($exd);
+                $vb['exclusoes'] = [];
+                foreach ($exd as $k=>$v) $vb['exclusoes'][] = ['insumo'=>$k, 'de_n_linhas'=>$v];
+            }
+            $stats['verba_analitico']++;
+        } elseif ($met === 'composicao') {
+            $sel = json_decode($r['composicao_sel'] ?? '[]', true) ?: [];
+            $agg = []; $todosSis = [];
+            foreach ($sel as $s) {
+                $key = ($s['desc'] ?? '?') . '|' . ($s['tipo'] ?? '');
+                if (!isset($agg[$key])) $agg[$key] = ['insumo'=>$s['desc'] ?? '?','tipo'=>$s['tipo'] ?? '','n_comp'=>0,
+                                                     'comps'=>[],'sistemas'=>[],'escopo_total'=>true,'custo'=>0.0];
+                $a = &$agg[$key]; $a['n_comp']++;
+                $cd = $COMPD[(int)($s['cid'] ?? 0)] ?? null;
+                if ($cd) $a['comps'][$cd] = 1;
+                $a['custo'] += (float)($s['area'] ?? 0) * (float)($s['coef'] ?? 0) * (float)($s['rs_unit'] ?? 0);
+                $locais = $s['locais'] ?? null;
+                if (is_array($locais) && $locais) {
+                    foreach ($locais as $L) {
+                        $l = $LIN[(int)$L] ?? null;
+                        $sis = $l ? (sup_sistema(sup_normt($l['path_str'])) ?: '(geral)') : '(geral)';
+                        $a['sistemas'][$sis] = ($a['sistemas'][$sis] ?? 0) + 1;
+                        $todosSis[$sis] = ($todosSis[$sis] ?? 0) + 1;
+                    }
+                    if ($cd !== null && count($locais) < ($descCount[$cd] ?? count($locais))) $a['escopo_total'] = false;
+                }
+                unset($a);
+            }
+            uasort($agg, function($a,$b){ return $b['custo'] <=> $a['custo']; });
+            $vb['insumos'] = [];
+            foreach ($agg as $a) {
+                arsort($a['sistemas']);
+                $vb['insumos'][] = ['insumo'=>$a['insumo'], 'tipo'=>$a['tipo'], 'em_n_composicoes'=>$a['n_comp'],
+                    'composicoes_exemplo'=>array_slice(array_keys($a['comps']), 0, 4),
+                    'sistemas'=>($a['sistemas'] ?: null),
+                    'escopo'=>$a['escopo_total'] ? 'todos_os_locais' : 'recorte_de_locais',
+                    'custo_origem'=>round($a['custo'], 2)];
+            }
+            if ($todosSis) {
+                arsort($todosSis);
+                $top = array_key_first($todosSis); $nTop = $todosSis[$top]; $tot = array_sum($todosSis);
+                if ($top !== '(geral)' && $tot > 0 && $nTop / $tot >= 0.85) {
+                    $tipos = array_unique(array_map(function($a){ return $a['tipo']; }, array_values($agg)));
+                    $vb['recorte_sugerido'] = ['sistema'=>$top, 'tipo'=>(count($tipos) === 1 ? $tipos[0] : null)];
+                }
+            }
+            $stats['verba_composicao']++;
+        } elseif ($met === 'manual') {
+            $vb['valor_manual_origem'] = $r['verba_override'] !== null ? (float)$r['verba_override'] : null;
+            $stats['verba_manual']++;
+        } else { $stats['verba_sem']++; }
+        if (trim((string)$r['termos_orcamento'])) $vb['termos_template'] = trim($r['termos_orcamento']);
+
+        // ---------- QUANT ----------
+        $qf = $r['quantitativo_fonte'] ?: null;
+        $qt = ['fonte'=>$qf, 'curado'=>(bool)(int)($r['quant_curada'] ?? 0), 'unidade'=>$r['quantitativo_unidade'] ?: null];
+        if ($qf === 'orcamento') {
+            $qrefs = json_decode($r['quantitativo_refs'] ?? '[]', true) ?: [];
+            $qd = [];
+            foreach ($qrefs as $L) { $l = $LIN[(int)$L] ?? null; if ($l) $qd[$l['descricao']] = ($qd[$l['descricao']] ?? 0) + 1; }
+            arsort($qd);
+            if ($qd) { $qt['linhas'] = []; foreach ($qd as $k=>$v) $qt['linhas'][] = ['descricao'=>$k,'ocorrencias'=>$v]; }
+        } elseif ($qf === 'composicao') {
+            $qs = json_decode($r['quant_comp_sel'] ?? '[]', true) ?: [];
+            $qt['insumos'] = array_values(array_unique(array_map(function($s){ return $s['desc'] ?? '?'; }, $qs)));
+            $drv = [];
+            foreach ((json_decode($r['composicao_sel'] ?? '[]', true) ?: []) as $s) if (!empty($s['q'])) $drv[$s['desc'] ?? '?'] = 1;
+            if ($drv) $qt['driver_na_verba'] = array_keys($drv);
+        } elseif ($qf === 'manual') {
+            $qt['valor_manual_origem'] = $r['quantitativo_valor'] !== null ? (float)$r['quantitativo_valor'] : null;
+        }
+
+        $up->execute([(int)$r['sid'], $mc, $obra['nome'],
+                      json_encode($cr, JSON_UNESCAPED_UNICODE), json_encode($vb, JSON_UNESCAPED_UNICODE),
+                      json_encode($qt, JSON_UNESCAPED_UNICODE),
+                      $NOTAS[(int)$r['sid']] ?? null, date('c')]);
+        $n++;
+    }
+    echo json_encode(['ok'=>true, 'derivadas'=>$n, 'obra'=>$obra['nome'], 'metodo_construtivo'=>$mc, 'stats'=>$stats], JSON_UNESCAPED_UNICODE);
+} catch (Throwable $e) {
+    http_response_code(500);
+    echo json_encode(['error'=>$e->getMessage()], JSON_UNESCAPED_UNICODE);
+}

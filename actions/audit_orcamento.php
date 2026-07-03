@@ -12,14 +12,19 @@ require_once __DIR__ . '/../includes/db.php';
 
 try {
     $pdo = db();
-    $obra = $pdo->query("SELECT orcamento_total FROM obra WHERE id=1")->fetch();
+    $OBRA = max(1, (int)($_GET['obra'] ?? 1));   // multi-obra
+    $oq = $pdo->prepare("SELECT orcamento_total FROM obra WHERE id=?"); $oq->execute([$OBRA]);
+    $obra = $oq->fetch();
     $total_obra = (float)($obra['orcamento_total'] ?? 0);
-    $total_leaf = (float)$pdo->query("SELECT COALESCE(SUM(valor),0) FROM orcamento_linha WHERE folha=1")->fetchColumn();
+    $tq = $pdo->prepare("SELECT COALESCE(SUM(valor),0) FROM orcamento_linha WHERE obra_id=? AND folha=1"); $tq->execute([$OBRA]);
+    $total_leaf = (float)$tq->fetchColumn();
 
-    $rows = $pdo->query("SELECT s.ordem, s.nome, s.grupo, r.orcamento_refs
+    $rq = $pdo->prepare("SELECT s.ordem, s.nome, s.grupo, r.orcamento_refs
         FROM radar_item r JOIN servico s ON s.id = r.servico_id
-        WHERE r.obra_id=1 AND r.orcamento_refs IS NOT NULL
-              AND r.orcamento_refs <> '' AND r.orcamento_refs <> '[]'")->fetchAll();
+        WHERE r.obra_id=? AND r.orcamento_refs IS NOT NULL
+              AND r.orcamento_refs <> '' AND r.orcamento_refs <> '[]'");
+    $rq->execute([$OBRA]);
+    $rows = $rq->fetchAll();
 
     $uso = [];                 // id_linha => [ {ordem,nome,grupo} ]
     $itens_refs = 0;
@@ -34,7 +39,8 @@ try {
 
     // carrega TODAS as linhas num mapa (sem IN gigante — evita o limite de variáveis do SQLite)
     $val = []; $desc = []; $path = [];
-    foreach ($pdo->query("SELECT id, valor, descricao, path_str FROM orcamento_linha") as $l) {
+    $lq = $pdo->prepare("SELECT id, valor, descricao, path_str FROM orcamento_linha WHERE obra_id=?"); $lq->execute([$OBRA]);
+    foreach ($lq->fetchAll() as $l) {
         $val[$l['id']] = (float)$l['valor']; $desc[$l['id']] = $l['descricao']; $path[$l['id']] = $l['path_str'];
     }
 
@@ -51,8 +57,10 @@ try {
     }
     usort($dups, fn($a,$b) => ($b['valor']*$b['n']) <=> ($a['valor']*$a['n']));
 
-    $comp = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(COALESCE(verba_override,0)),0) v
-                         FROM radar_item WHERE obra_id=1 AND verba_metodo='composicao'")->fetch();
+    $cq = $pdo->prepare("SELECT COUNT(*) c, COALESCE(SUM(COALESCE(verba_override,0)),0) v
+                         FROM radar_item WHERE obra_id=? AND verba_metodo='composicao'");
+    $cq->execute([$OBRA]);
+    $comp = $cq->fetch();
 
     // COBERTURA REAL = analítico (linhas distintas) + composição (verba dos itens por composição).
     // Mesmo critério do KPI do Radar (matriz.php): por isso os dois passam a bater.

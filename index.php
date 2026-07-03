@@ -321,22 +321,38 @@
    <section id="view-config" style="display:none">
     <div class="top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
       <div>
-        <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">settings</span> Configurações — Usuários e Permissões</h1>
-        <p class="sub">Controle de acesso atrelado ao Bitrix24. Quem não estiver aqui não vê nada no sistema.</p>
+        <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">settings</span> Configurações</h1>
+        <p class="sub">Área administrativa — acesso, permissões e o dicionário de aprendizado das obras.</p>
       </div>
-      <button class="btn-prim" onclick="userForm()" style="flex:0 0 auto;margin-top:4px"><span class="material-icons" style="font-size:18px">person_add</span> Adicionar usuário</button>
+      <button class="btn-prim" id="cfgAddBtn" onclick="userForm()" style="flex:0 0 auto;margin-top:4px"><span class="material-icons" style="font-size:18px">person_add</span> Adicionar usuário</button>
     </div>
-    <div class="panel">
-      <h3>O que cada papel faz</h3>
-      <div class="bar" style="flex-wrap:wrap;gap:14px;font-size:12.5px">
-        <span><b>Administrador</b> — tudo + esta tela</span>
-        <span><b>Diretor</b> — vê todas as obras (leitura)</span>
-        <span><b>Suprimentos</b> — pode ser responsável por itens; vê todas, edita as obras liberadas</span>
-        <span><b>Coordenador</b> — vê só as obras liberadas (leitura)</span>
-        <span><b>Personalizado</b> — você define tudo</span>
+    <div class="bar" style="gap:6px;padding:0 2px 8px">
+      <button class="btn-ghost" id="cfgtab-users" onclick="cfgTab('users')" style="padding:6px 14px">👥 Usuários &amp; Permissões</button>
+      <button class="btn-ghost" id="cfgtab-receitas" onclick="cfgTab('receitas')" style="padding:6px 14px">📚 Aprendizado (receitas)</button>
+    </div>
+    <div id="cfg-users">
+      <div class="panel">
+        <h3>O que cada papel faz</h3>
+        <div class="bar" style="flex-wrap:wrap;gap:14px;font-size:12.5px">
+          <span><b>Administrador</b> — tudo + esta tela</span>
+          <span><b>Diretor</b> — vê todas as obras (leitura)</span>
+          <span><b>Suprimentos</b> — pode ser responsável por itens; vê todas, edita as obras liberadas</span>
+          <span><b>Coordenador</b> — vê só as obras liberadas (leitura)</span>
+          <span><b>Personalizado</b> — você define tudo</span>
+        </div>
       </div>
+      <div class="wrap" id="cfgwrap"></div>
     </div>
-    <div class="wrap" id="cfgwrap"></div>
+    <div id="cfg-receitas" style="display:none">
+      <div class="panel">
+        <h3>📚 Dicionário de aprendizado — como cada item foi decidido (por nome, replicável em obra nova)</h3>
+        <div class="bar" style="flex-wrap:wrap;gap:10px;font-size:12.5px;align-items:center">
+          <span class="muted">A receita guarda a REGRA de cronograma (âncora → primeira data), a RECEITA de verba (linhas/insumos/recortes/exclusões) e a fonte do quantitativo. Pra corrigir uma receita: re-cure o item no radar e clique em re-derivar.</span>
+          <button class="btn-prim" style="padding:6px 12px" onclick="receitasDerivar(1)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Re-derivar da Trinity</button>
+        </div>
+      </div>
+      <div class="wrap" id="rcwrap"><div class="empty">Carregando…</div></div>
+    </div>
    </section>
 
    <section id="view-audit" style="display:none">
@@ -2526,7 +2542,55 @@ function toggleSide(){
   app.classList.toggle('sidecollapsed', c);
   try{ localStorage.setItem('sideCollapsed', c?'1':'0'); }catch(e){}
 }
+/* ===== Config » sub-aba Aprendizado (receitas) ===== */
+let RCDATA=null, RC_OPEN=new Set();
+function cfgTab(t){
+  document.getElementById('cfg-users').style.display = t==='users'?'':'none';
+  document.getElementById('cfg-receitas').style.display = t==='receitas'?'':'none';
+  const ab=document.getElementById('cfgAddBtn'); if(ab) ab.style.display = t==='users'?'':'none';
+  ['users','receitas'].forEach(x=>{ const b=document.getElementById('cfgtab-'+x); if(b){ b.style.background = x===t?'var(--verde)':''; b.style.color = x===t?'#fff':''; } });
+  if(t==='receitas') renderReceitas();
+}
+async function receitasDerivar(obraId){
+  if(!confirm('Re-derivar as receitas a partir da curadoria atual da obra? (as notas manuais são preservadas)')) return;
+  const r=await (await fetch('actions/receitas.php',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({acao:'derivar',obra_id:obraId,me:EU&&EU.bitrix_id})})).json();
+  if(r.error){ toast(r.error); return; }
+  toast(r.derivadas+' receitas derivadas de '+r.obra); RCDATA=null; renderReceitas();
+}
+function rcCronoTxt(c){ if(!c) return '—';
+  return c.ancora_nome ? `Buscar “${esc(c.ancora_nome)}” → 1ª data` : ('automático'+(c.termos_template?` (${esc(c.termos_template)})`:'')); }
+function rcVerbaTxt(v){ if(!v||!v.metodo) return '(sem verba)';
+  if(v.metodo==='analitico'){ const ls=v.linhas||[]; let t=`ANALÍTICO · ${v.n_linhas||0} linhas`;
+    if(v.escopo_parcial) t+=' · ⚠ recorte de local'; if(v.exclusoes) t+=` · exclui ${v.exclusoes.length} insumo(s)`; return t; }
+  if(v.metodo==='composicao'){ const xs=v.insumos||[]; let t=`COMPOSIÇÃO · ${xs.length} insumo(s)`;
+    if(v.recorte_sugerido) t+=` · 🔎 sistema=${esc(v.recorte_sugerido.sistema)}${v.recorte_sugerido.tipo?(' tipo='+esc(v.recorte_sugerido.tipo)):''}`; return t; }
+  if(v.metodo==='manual') return 'MANUAL: '+BRL(v.valor_manual_origem||0);
+  return v.metodo;
+}
+async function renderReceitas(){
+  const box=document.getElementById('rcwrap'); if(!box) return;
+  if(!RCDATA){ box.innerHTML='<div class="empty">Carregando…</div>';
+    try{ RCDATA=await (await fetch('actions/receitas.php?_='+Date.now())).json(); }catch(e){ box.innerHTML='<div class="empty">Falha ao carregar.</div>'; return; } }
+  const rs=RCDATA.receitas||[];
+  if(!rs.length){ box.innerHTML='<div class="empty">Nenhuma receita ainda — clique em “Re-derivar da Trinity”.</div>'; return; }
+  box.innerHTML=`<table><thead><tr><th style="width:26px"></th><th>Item</th><th>Grupo</th><th>Cronograma (regra)</th><th>Verba (receita)</th><th>Quant.</th><th>Origem</th></tr></thead><tbody>`+
+    rs.map((r,ix)=>{
+      const open=RC_OPEN.has(ix);
+      const det=open?`<tr><td></td><td colspan="6" style="background:#fbfdf9"><pre style="white-space:pre-wrap;font-size:11px;margin:6px 0;max-height:300px;overflow:auto">${esc(JSON.stringify({crono:r.crono,verba:r.verba,quant:r.quant},null,1))}</pre>${r.nota?`<div class="note" style="margin:4px 0">📝 ${esc(r.nota)}</div>`:''}</td></tr>`:'';
+      return `<tr class="item" onclick="rcToggle(${ix})" style="cursor:pointer">
+        <td><span class="material-icons" style="font-size:16px;color:var(--muted)">${open?'expand_more':'chevron_right'}</span></td>
+        <td><b>${esc(r.nome)}</b></td><td class="muted">${esc(r.grupo||'')}</td>
+        <td style="font-size:12px">${rcCronoTxt(r.crono)}</td>
+        <td style="font-size:12px">${rcVerbaTxt(r.verba)}</td>
+        <td style="font-size:12px">${esc((r.quant&&r.quant.fonte)||'—')}</td>
+        <td class="muted" style="font-size:11.5px">${esc(r.obra_origem||'')}<br>${esc(r.metodo_construtivo||'')}</td></tr>`+det;
+    }).join('')+'</tbody></table>';
+}
+function rcToggle(ix){ RC_OPEN.has(ix)?RC_OPEN.delete(ix):RC_OPEN.add(ix); renderReceitas(); }
+
 async function renderConfig(){
+  cfgTab('users');
   const box=document.getElementById('cfgwrap'); box.innerHTML='<div class="empty">Carregando…</div>';
   CFG=await (await fetch('actions/usuarios.php')).json();
   if(!CFG.usuarios.length){ box.innerHTML='<div class="empty">Nenhum usuário autorizado ainda. Clique em "Adicionar usuário".</div>'; return; }

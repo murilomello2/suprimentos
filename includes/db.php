@@ -98,11 +98,25 @@ function db_schema_mysql($pdo) {
         bitrix_id VARCHAR(64), usuario_nome VARCHAR(191), campo VARCHAR(120), valor_antes TEXT, valor_depois TEXT,
         created_at VARCHAR(40), PRIMARY KEY (id), KEY idx_hist_serv (servico_id)
     ) $E");
+    // DICIONÁRIO DE APRENDIZADO: receita de curadoria por serviço × método construtivo, derivada da(s)
+    // obra(s) curada(s). Guardada por NOME/semântica (nunca IDs — outra obra tem outros IDs). JSON = MEDIUMTEXT
+    // (lição do truncamento do composicao_sel). Corrigir receita = re-curar o item e re-derivar.
+    $pdo->exec("CREATE TABLE IF NOT EXISTS receita (
+        servico_id INT NOT NULL, metodo_construtivo VARCHAR(64) NOT NULL DEFAULT 'concreto armado convencional',
+        obra_origem VARCHAR(64), crono MEDIUMTEXT, verba MEDIUMTEXT, quant MEDIUMTEXT,
+        nota TEXT, updated_at VARCHAR(40),
+        PRIMARY KEY (servico_id, metodo_construtivo)
+    ) $E");
     // colunas ADITIVAS na produção (radar_item já existe da migração; CREATE IF NOT EXISTS não adiciona coluna).
     // Usa ALTER (privilégio concedido) só se faltar. Espelha o self-heal do caminho SQLite.
     $rc = [];
     foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='radar_item'") as $c) $rc[$c['COLUMN_NAME']] = true;
     if (!isset($rc['orcamento_excl'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN orcamento_excl MEDIUMTEXT");
+    // multi-obra: método construtivo por obra (receitas não podem cruzar métodos às cegas — ex.: bloco de
+    // vedação não existe em alvenaria estrutural)
+    $oc = [];
+    foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='obra'") as $c) $oc[$c['COLUMN_NAME']] = true;
+    if (!isset($oc['metodo_construtivo'])) $pdo->exec("ALTER TABLE obra ADD COLUMN metodo_construtivo VARCHAR(64) DEFAULT 'concreto armado convencional'");
     // ALARGA as colunas de JSON de seleção: uma busca EM MASSA por insumo (ex.: "encanador" em N composições × M
     // locais) gera composicao_sel > 64KB e o MySQL TRUNCA a coluna TEXT (max 65.535 bytes) SILENCIOSAMENTE →
     // JSON inválido → a seleção "some" (some do read-only) embora a verba/total já tenham sido calculados.
@@ -204,6 +218,17 @@ function db_schema($pdo) {
     // orcamento_excl (JSON): insumos EXCLUÍDOS de dentro de linhas analíticas selecionadas (ex.: tirar o
     // espaçador de uma linha) — lista [{l:lineId, d:descrição}]. Verba = Σ linhas − Σ insumos excluídos.
     if (!isset($rcols['orcamento_excl'])) $pdo->exec("ALTER TABLE radar_item ADD COLUMN orcamento_excl TEXT");
+    // DICIONÁRIO DE APRENDIZADO (espelha o MySQL): receita por serviço × método construtivo, por NOME (nunca ID)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS receita (
+        servico_id INTEGER NOT NULL,
+        metodo_construtivo TEXT NOT NULL DEFAULT 'concreto armado convencional',
+        obra_origem TEXT, crono TEXT, verba TEXT, quant TEXT, nota TEXT, updated_at TEXT,
+        PRIMARY KEY (servico_id, metodo_construtivo)
+    )");
+    // multi-obra: método construtivo por obra
+    $ocols = [];
+    foreach ($pdo->query("PRAGMA table_info(obra)") as $c) $ocols[$c['name']] = true;
+    if (!isset($ocols['metodo_construtivo'])) $pdo->exec("ALTER TABLE obra ADD COLUMN metodo_construtivo TEXT DEFAULT 'concreto armado convencional'");
     $pdo->exec("CREATE TABLE IF NOT EXISTS orcamento_linha (
         id INTEGER PRIMARY KEY,
         obra_id INTEGER NOT NULL DEFAULT 1,
@@ -374,6 +399,25 @@ function _slugify($s){
 }
 
 /** Cria um novo item (servico catálogo + radar_item da obra 1). Copia dicionário de copy_from se dado. Retorna ordem. */
+/** CANÔNICOS de normalização/classificação — usados pela busca em massa E pela derivação de receitas.
+ *  Mantenha AQUI a única implementação; os consumidores têm fallback guarded (resiliência a deploy parcial). */
+function sup_normt($s) {
+    $map = ['á'=>'a','à'=>'a','â'=>'a','ã'=>'a','é'=>'e','ê'=>'e','í'=>'i','ó'=>'o','ô'=>'o','õ'=>'o','ú'=>'u','ç'=>'c',
+            'Á'=>'a','À'=>'a','Â'=>'a','Ã'=>'a','É'=>'e','Ê'=>'e','Í'=>'i','Ó'=>'o','Ô'=>'o','Õ'=>'o','Ú'=>'u','Ç'=>'c'];
+    return strtolower(strtr((string)$s, $map));
+}
+function sup_sistema($p) { // path normalizado → subsistema. PALAVRA INTEIRA nas ambíguas ("gas" ≠ "vigas", "fria" idem)
+    $w = function($re) use ($p){ return preg_match('#\b'.$re.'\b#', $p) === 1; };
+    if ($w('gas'))                                      return 'Gás';
+    if (strpos($p,'quente') !== false)                  return 'Água Quente';
+    if (strpos($p,'agua fria') !== false || $w('fria')) return 'Água Fria';
+    if (strpos($p,'esgoto') !== false || strpos($p,'sanit') !== false) return 'Esgoto / Sanitário';
+    if (strpos($p,'pluvia') !== false)                  return 'Águas Pluviais';
+    if (strpos($p,'incendio') !== false)                return 'Incêndio';
+    if (strpos($p,'hidr') !== false)                    return 'Hidráulica (geral)';
+    return null;
+}
+
 function criar_item($pdo, $nome, $grupo, $tipo = '', $curva = '', $copy_from = null) {
     $nome = trim($nome);
     if ($nome === '') throw new Exception('nome obrigatório');
@@ -402,8 +446,10 @@ function criar_item($pdo, $nome, $grupo, $tipo = '', $curva = '', $copy_from = n
             $curva ?: $g('curva','C'),$g('forma_contratacao'),$g('unidade'),$g('quantitativo'),$g('lead_dias'),
             $g('marco_cronograma'),$g('termos_orcamento'),$g('termos_cronograma'),$g('responsavel_padrao'),
             $g('escopo'),$g('variaveis_cotar'),$g('licoes'),$g('documentos'),$g('verba_linhas')]);
-    $pdo->prepare("INSERT INTO radar_item (obra_id,servico_id,status,tipo,updated_at) VALUES (1,?,?,?,?)")
-        ->execute([$nid,'Não Iniciado',$tipo,date('c')]);
+    // serviço é CATÁLOGO (global) → cria a célula do radar em TODAS as obras existentes
+    $ins = $pdo->prepare("INSERT INTO radar_item (obra_id,servico_id,status,tipo,updated_at) VALUES (?,?,?,?,?)");
+    foreach ($pdo->query("SELECT id FROM obra ORDER BY id")->fetchAll() as $ob)
+        $ins->execute([(int)$ob['id'],$nid,'Não Iniciado',$tipo,date('c')]);
     return $nid;
 }
 

@@ -17,10 +17,11 @@ try {
     $in = json_decode(file_get_contents('php://input'), true);
     $acao = $in['acao'] ?? 'novo';
     $me = $in['me'] ?? null;
+    $OBRA = max(1, (int)($in['obra'] ?? 1));   // multi-obra (criação replica p/ todas; responsável/exclusão usam a obra)
 
     // ---- PERMISSÃO (servidor): só cria/altera quem tem escopo de edição ----
     $perms = user_perms($pdo, $me);
-    if (!can_edit_obra($perms, 1)) {
+    if (!can_edit_obra($perms, $OBRA)) {
         http_response_code(403);
         echo json_encode(['error'=>'Sem permissão de edição.'], JSON_UNESCAPED_UNICODE); exit;
     }
@@ -29,9 +30,9 @@ try {
     if ($acao === 'excluir') {
         $ordem = (int)($in['ordem'] ?? 0);
         $nm = $pdo->prepare("SELECT nome FROM servico WHERE id=?"); $nm->execute([$ordem]); $nome = $nm->fetchColumn() ?: ('#'.$ordem);
-        $pdo->prepare("DELETE FROM radar_item WHERE obra_id=1 AND servico_id=?")->execute([$ordem]);
+        $pdo->prepare("DELETE FROM radar_item WHERE servico_id=?")->execute([$ordem]);   // catálogo: sai de TODAS as obras
         $pdo->prepare("DELETE FROM servico WHERE id=?")->execute([$ordem]);
-        log_historico($pdo, 1, $ordem, $nome, $me, $perms['nome'], 'Item excluído', $nome, '');
+        log_historico($pdo, $OBRA, $ordem, $nome, $me, $perms['nome'], 'Item excluído', $nome, '');
         $pdo->commit();
         echo json_encode(['ok'=>true]); exit;
     }
@@ -64,10 +65,10 @@ try {
     $resp = trim($in['responsavel'] ?? '');
     if ($resp !== '') {
         if (stripos($resp, 'camila') !== false) throw new Exception('responsável inválido'); // mesma regra do item_update
-        $pdo->prepare("UPDATE radar_item SET responsavel=? WHERE obra_id=1 AND servico_id=?")
-            ->execute([$resp, $ordem]);
+        $pdo->prepare("UPDATE radar_item SET responsavel=? WHERE obra_id=? AND servico_id=?")
+            ->execute([$resp, $OBRA, $ordem]);
     }
-    log_historico($pdo, 1, $ordem, $nome, $me, $perms['nome'], 'Item criado', '', $nome.' · grupo '.$grupo);
+    log_historico($pdo, $OBRA, $ordem, $nome, $me, $perms['nome'], 'Item criado', '', $nome.' · grupo '.$grupo);
     $pdo->commit();
     echo json_encode(['ok'=>true, 'ordem'=>$ordem]);
 } catch (Throwable $e) {

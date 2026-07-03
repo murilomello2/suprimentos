@@ -74,17 +74,25 @@ try {
     if (!$obra) throw new Exception('obra não encontrada');
     $mc = $obra['metodo_construtivo'] ?: 'concreto armado convencional';
 
-    // ---- bases da obra: linhas-folha (id→desc/path) + composições (id→desc) ----
-    $LIN = []; $descCount = [];
+    // ---- bases da obra: linhas-folha (id→desc/path) + composições (id→desc) + insumos ----
+    $LIN = []; $descCount = []; $linesByDesc = []; $SIS = [];
     $q = $pdo->prepare("SELECT id, descricao, path_str FROM orcamento_linha WHERE obra_id=? AND folha=1");
     $q->execute([$obraId]);
     foreach ($q->fetchAll() as $l) {
-        $LIN[(int)$l['id']] = $l;
+        $id = (int)$l['id'];
+        $LIN[$id] = $l;
+        $SIS[$id] = sup_sistema(sup_normt($l['path_str'])) ?: '(geral)';
         $descCount[$l['descricao']] = ($descCount[$l['descricao']] ?? 0) + 1;
+        $linesByDesc[$l['descricao']][] = $id;
     }
     $COMPD = [];
     $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE obra_id=?"); $q->execute([$obraId]);
     foreach ($q->fetchAll() as $c) $COMPD[(int)$c['id']] = $c['descricao'];
+    $INSCNT = [];   // cid => contagem de insumos por tipo (p/ teste de COBERTURA do recorte)
+    $q = $pdo->prepare("SELECT ci.composicao_id, ci.tipo, COUNT(*) n FROM composicao_insumo ci
+                        JOIN composicao c ON c.id=ci.composicao_id WHERE c.obra_id=? GROUP BY ci.composicao_id, ci.tipo");
+    $q->execute([$obraId]);
+    foreach ($q->fetchAll() as $r) $INSCNT[(int)$r['composicao_id']][$r['tipo']] = (int)$r['n'];
 
     $topo = function($lid) use ($LIN) {
         $l = $LIN[(int)$lid] ?? null; $p = $l ? (string)($l['path_str'] ?? '') : '';
@@ -188,7 +196,23 @@ try {
                 $top = array_key_first($todosSis); $nTop = $todosSis[$top]; $tot = array_sum($todosSis);
                 if ($top !== '(geral)' && $tot > 0 && $nTop / $tot >= 0.85) {
                     $tipos = array_unique(array_map(function($a){ return $a['tipo']; }, array_values($agg)));
-                    $vb['recorte_sugerido'] = ['sistema'=>$top, 'tipo'=>(count($tipos) === 1 ? $tipos[0] : null)];
+                    $tipoR = (count($tipos) === 1 ? $tipos[0] : null);
+                    // COBERTURA: o recorte "pegue o sistema inteiro" só vale se a seleção da origem COBRIU
+                    // a maior parte das folhas disponíveis nesse sistema (senão 1 insumo concentrado num
+                    // sistema viraria "pegue tudo" — ex.: Ligação Provisória classificada em Esgoto).
+                    $avail = 0;
+                    foreach ($COMPD as $cid => $cdesc) {
+                        $ls = $linesByDesc[$cdesc] ?? []; if (!$ls) continue;
+                        $nS = 0; foreach ($ls as $L) if ($SIS[$L] === $top) $nS++;
+                        if (!$nS) continue;
+                        $cnt = $INSCNT[$cid] ?? [];
+                        $nIns = $tipoR !== null ? (int)($cnt[$tipoR] ?? 0) : array_sum($cnt);
+                        $avail += $nS * $nIns;
+                    }
+                    if ($avail > 0 && $nTop / $avail >= 0.6) {
+                        $vb['recorte_sugerido'] = ['sistema'=>$top, 'tipo'=>$tipoR,
+                                                   'cobertura_origem'=>round($nTop / $avail, 2)];
+                    }
                 }
             }
             $stats['verba_composicao']++;

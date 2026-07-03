@@ -131,17 +131,30 @@ try {
         if ($it['data_necessaria_override']) { $R['crono'] = 'já definido'; continue; }
         if (!$anc) { $R['crono'] = 'sem âncora (auto por termos segue valendo)'; continue; }
         $toks = av_tokens($anc);
-        $best = null; $bestNome = null;
-        foreach ($TASKS as $t) {
+        $best = null; $bestNome = null; $aprox = false;
+        foreach ($TASKS as $t) {   // 1º: match EXATO (todas as palavras) → primeira data
             $ok = true;
             foreach ($toks as $tk) if (strpos($t['n'], $tk) === false) { $ok = false; break; }
             if ($ok && ($best === null || $t['start'] < $best)) { $best = $t['start']; $bestNome = $t['nome']; }
+        }
+        if (!$best && count($toks) >= 2) {   // 2º: APROXIMADO — melhor pontuação de palavras (regra do usuário:
+            $minHit = max(2, (int)ceil(count($toks) * 0.5));   // se a tarefa exata não existe, algo de prazo similar)
+            $bestScore = 0;
+            foreach ($TASKS as $t) {
+                $hit = 0;
+                foreach ($toks as $tk) if (strpos($t['n'], $tk) !== false) $hit++;
+                if ($hit < $minHit) continue;
+                if ($hit > $bestScore || ($hit === $bestScore && $best !== null && $t['start'] < $best)) {
+                    $bestScore = $hit; $best = $t['start']; $bestNome = $t['nome'];
+                }
+            }
+            if ($best) $aprox = true;
         }
         if ($best) {
             $setU($sid, 'crono_marco_override', $bestNome);
             $setU($sid, 'data_necessaria_override', $best);
             $af[$sid]['crono'] = 1; $tot['crono']++;
-            $R['crono'] = "✓ “" . $bestNome . "” → $best";
+            $R['crono'] = ($aprox ? '≈ ' : '✓ ') . "“" . $bestNome . "” → $best" . ($aprox ? ' (aproximado — confira)' : '');
         } else $R['crono'] = "âncora não encontrada: “{$anc}”";
     }
 

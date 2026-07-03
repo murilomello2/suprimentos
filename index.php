@@ -265,6 +265,7 @@
         <select id="fcurada" onchange="render()" title="filtrar pela verba curada"><option value="">Verba: todas</option><option value="sim">Só curadas ✓</option><option value="nao">Só não curadas</option></select>
         <select id="fcrono" onchange="render()" title="filtrar pelo cronograma curado"><option value="">Cronograma: todos</option><option value="sim">Só curados ✓</option><option value="nao">Só não curados</option></select>
         <select id="fquant" onchange="render()" title="filtrar pelo quantitativo curado"><option value="">Quantitativo: todos</option><option value="sim">Só curados ✓</option><option value="nao">Só não curados</option></select>
+        <select id="frespo" onchange="render()" title="filtrar pelo responsável"><option value="">Responsável: todos</option><option value="com">Com responsável</option><option value="sem">Sem responsável</option><option value="naocad">Não cadastrado</option></select>
       </div>
     </div>
 
@@ -611,22 +612,24 @@ function updCat(c){ c=c||'';
   if(/criar|criou|desdobr|exclu|^item|^nome/i.test(c)) return ['item','tp-loc'];
   return ['edição','tp-none'];
 }
-function progCard(label,done,total,icon,filtKey){
+function progCard(label,done,total,icon,filtKey,noun){
+  noun=noun||'curados';
   const falta=Math.max(total-done,0), pct=total?Math.round(done/total*100):0;
-  const clk=(filtKey&&falta>0)?` onclick="progFiltrar('${filtKey}')" title="clique pra filtrar os ${falta} não curados no radar"`:'';
+  const clk=(filtKey&&falta>0)?` onclick="progFiltrar('${filtKey}')" title="clique pra ver os ${falta} que faltam no radar"`:'';
   return `<div class="kpi" style="min-width:210px${filtKey&&falta>0?';cursor:pointer':''}"${clk}>
-    <div class="l" style="display:flex;align-items:center;gap:6px;margin-bottom:2px"><span class="material-icons" style="font-size:16px;color:var(--dourado)">${icon}</span>${label}${filtKey&&falta>0?'<span class="material-icons" style="font-size:14px;color:var(--muted);margin-left:auto" title="filtrar os não curados">filter_alt</span>':''}</div>
-    <div class="v">${done} <span class="muted" style="font-size:15px;font-weight:600">/ ${total}</span> curados</div>
+    <div class="l" style="display:flex;align-items:center;gap:6px;margin-bottom:2px"><span class="material-icons" style="font-size:16px;color:var(--dourado)">${icon}</span>${label}${filtKey&&falta>0?'<span class="material-icons" style="font-size:14px;color:var(--muted);margin-left:auto" title="filtrar o que falta">filter_alt</span>':''}</div>
+    <div class="v">${done} <span class="muted" style="font-size:15px;font-weight:600">/ ${total}</span> ${noun}</div>
     <div style="height:7px;background:var(--line);border-radius:5px;overflow:hidden;margin:7px 0 4px"><div style="height:100%;width:${pct}%;background:var(--ok);transition:width .3s"></div></div>
     <div class="l">${pct}% feito · <b style="color:var(--pend)">faltam ${falta}</b></div>
   </div>`;
 }
-// clique numa card de progresso → vai pro radar, abre os filtros e mostra só os NÃO curados daquela dimensão
+// clique numa card de progresso → vai pro radar, abre os filtros e mostra só o que FALTA naquela dimensão
 function progFiltrar(dim){
-  const id={crono:'fcrono', verba:'fcurada', quant:'fquant'}[dim]; if(!id) return;
+  const id={crono:'fcrono', verba:'fcurada', quant:'fquant', resp:'frespo'}[dim]; if(!id) return;
   showView('radar');
   const adv=document.getElementById('advFilters'); if(adv) adv.style.display='flex';
-  ['fcrono','fcurada','fquant'].forEach(x=>{ const e=document.getElementById(x); if(e) e.value=(x===id?'nao':''); });
+  const val=(dim==='resp'?'sem':'nao');   // responsável: "sem"; curadorias: "não curado"
+  ['fcrono','fcurada','fquant','frespo'].forEach(x=>{ const e=document.getElementById(x); if(e) e.value=(x===id?val:''); });
   render();
 }
 async function renderUpdates(){
@@ -639,6 +642,7 @@ async function renderUpdates(){
       ${progCard('Cronograma', its.filter(i=>i.curado_data).length, tot, 'event', 'crono')}
       ${progCard('Orçamento (verba)', its.filter(i=>i.curado_verba).length, tot, 'request_quote', 'verba')}
       ${progCard('Quantitativo', its.filter(i=>i.curado_quant).length, tot, 'straighten', 'quant')}
+      ${progCard('Responsável', its.filter(i=>(i.responsavel||'').trim()).length, tot, 'person', 'resp', 'com dono')}
     </div>`;
   let d;
   try{ d=await (await fetch('actions/historico.php?_='+Date.now())).json(); }
@@ -859,16 +863,20 @@ function render(){
   const fcd=document.getElementById('fcurada')?document.getElementById('fcurada').value:'';
   const fcr=document.getElementById('fcrono')?document.getElementById('fcrono').value:'';
   const fqt=document.getElementById('fquant')?document.getElementById('fquant').value:'';
+  const fre=document.getElementById('frespo')?document.getElementById('frespo').value:'';
   const flat=document.getElementById('fview').value==='lista';
-  const _naf=[fo,fg,fc,fs,fr].filter(Boolean).length+(oa?1:0)+(fcd?1:0)+(fcr?1:0)+(fqt?1:0);
+  const _naf=[fo,fg,fc,fs,fr].filter(Boolean).length+(oa?1:0)+(fcd?1:0)+(fcr?1:0)+(fqt?1:0)+(fre?1:0);
   const _fb=document.getElementById('filtBadge'); if(_fb) _fb.textContent=_naf?` ·${_naf}`:'';
+  const _respSet=new Set((typeof RESP!=='undefined'?RESP:[]).map(r=>r.nome));   // nomes de comprador cadastrados (Bitrix)
+  const _temResp=i=>!!((i.responsavel||'').trim());
   const rows=DATA.itens.filter(i=>
     (!q||(i.nome+' '+(i.forma_contratacao||'')+' '+(i.responsavel||'')).toLowerCase().includes(q))&&
     (!fg||i.grupo===fg)&&(!fo||i.obra_nome===fo)&&(!fc||i.curva===fc)&&
     (!fs||(i.status||'Não Iniciado')===fs)&&(!fr||i.responsavel===fr)&&(!oa||isAlert(i))&&
     (!fcd||(fcd==='sim'?i.curado_verba:!i.curado_verba))&&
     (!fcr||(fcr==='sim'?i.curado_data:!i.curado_data))&&
-    (!fqt||(fqt==='sim'?i.curado_quant:!i.curado_quant)));
+    (!fqt||(fqt==='sim'?i.curado_quant:!i.curado_quant))&&
+    (!fre||(fre==='com'?_temResp(i):fre==='sem'?!_temResp(i):fre==='naocad'?(_temResp(i)&&!_respSet.has((i.responsavel||'').trim())):true)));
   // ordem completa dos grupos (segue grupo_ordem do backend) — base p/ reordenar
   GORDER=[...new Set(DATA.itens.map(i=>i.grupo||'—'))];
   const tb=document.getElementById('tb');

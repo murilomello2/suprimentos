@@ -247,7 +247,14 @@
 
     <div class="panel" style="margin-top:8px">
       <div class="bar" style="padding:8px 12px;gap:8px">
-        <div id="obraChips" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;padding:4px 8px;border:1.5px solid var(--verde);border-radius:10px;background:#f6faf6"><span style="font-size:11.5px;font-weight:800;color:var(--verde-d)">🏗️ OBRAS</span></div>
+        <div id="obraPick" style="position:relative;flex:0 0 auto">
+          <button type="button" id="obraPickBtn" onclick="obraMenuToggle(event)" title="Selecionar obra(s) a exibir"
+            style="display:flex;align-items:center;gap:6px;border:1.5px solid var(--verde);border-radius:10px;padding:6px 12px;background:#f6faf6;cursor:pointer;font-weight:800;color:var(--verde-d);font-size:12.5px;white-space:nowrap">
+            <span>🏗️</span><span id="obraPickLbl">Trinity</span>
+            <span class="material-icons" style="font-size:18px">expand_more</span>
+          </button>
+          <div id="obraMenu" style="display:none;position:absolute;top:calc(100% + 5px);left:0;z-index:60;background:#fff;border:1px solid var(--line);border-radius:11px;box-shadow:0 10px 28px rgba(0,0,0,.16);padding:7px;min-width:250px;max-height:340px;overflow:auto"></div>
+        </div>
         <div class="search" style="min-width:180px"><span class="material-icons" style="color:var(--muted)">search</span>
           <input id="q" placeholder="Buscar item, contratação ou responsável…" oninput="render()"></div>
         <label class="toggle" style="gap:6px">Ver
@@ -431,20 +438,38 @@ let OBRAS=[];                                    // todas as obras do sistema [{
 let OBRA_SEL=(()=>{ try{ const v=JSON.parse(localStorage.getItem('sup_obras')||'[1]'); return (Array.isArray(v)&&v.length)?v.map(Number):[1]; }catch(e){ return [1]; } })();
 const OBRA_CORES={1:'var(--verde)',2:'#2b5fa8',3:'#7b5ea7',4:'#b5651d'};                 // cor por obra (badge/chip)
 function obraCor(id){ return OBRA_CORES[id]||'#555'; }
-function obraToggle(id){
+// dropdown de obras: abre/fecha o menu de checkboxes
+function obraMenuToggle(e){ if(e) e.stopPropagation(); const m=document.getElementById('obraMenu'); if(!m)return;
+  const abrir=m.style.display==='none'||!m.style.display; m.style.display=abrir?'block':'none'; if(abrir) obraMenuRender(); }
+document.addEventListener('click',e=>{ const p=document.getElementById('obraPick'), m=document.getElementById('obraMenu');
+  if(m && m.style.display==='block' && p && !p.contains(e.target)) m.style.display='none'; });
+function obraMenuRender(){
+  const m=document.getElementById('obraMenu'); if(!m)return;
+  m.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 6px 6px;border-bottom:1px solid var(--line);margin-bottom:4px">
+      <span style="font-size:10px;font-weight:800;letter-spacing:.6px;color:var(--muted)">SELECIONE 1 OU MAIS OBRAS</span>
+      <button class="btn-ghost" style="padding:2px 8px;font-size:11px" onclick="obraSelTodas(event)">Todas</button></div>`+
+    (OBRAS.length?OBRAS.map(o=>{ const on=OBRA_SEL.includes(Number(o.id));
+      return `<label style="display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;cursor:pointer;font-size:12.5px" onmouseover="this.style.background='#eff7f1'" onmouseout="this.style.background=''">
+        <input type="checkbox" ${on?'checked':''} onchange="obraSet(${o.id},this.checked)">
+        <span style="width:9px;height:9px;border-radius:50%;background:${obraCor(o.id)};flex:0 0 auto"></span>
+        <span style="flex:1"><b>${esc(o.nome)}</b>${o.codinome?` <span class="muted" style="font-size:11px">· ${esc(o.codinome)}${o.local?' — '+esc(o.local):''}</span>`:''}</span>
+      </label>`; }).join(''):'<div class="muted" style="padding:8px;font-size:12px">carregando…</div>');
+}
+function obraSet(id,checked){
   id=Number(id);
-  if(OBRA_SEL.includes(id)){ if(OBRA_SEL.length===1){ toast('Pelo menos uma obra selecionada'); return; } OBRA_SEL=OBRA_SEL.filter(x=>x!==id); }
-  else OBRA_SEL=[...OBRA_SEL,id].sort((a,b)=>a-b);
+  if(!checked){ if(OBRA_SEL.length===1){ toast('Pelo menos uma obra selecionada'); obraMenuRender(); return; } OBRA_SEL=OBRA_SEL.filter(x=>x!==id); }
+  else if(!OBRA_SEL.includes(id)) OBRA_SEL=[...OBRA_SEL,id].sort((a,b)=>a-b);
   localStorage.setItem('sup_obras',JSON.stringify(OBRA_SEL));
   load();
 }
-function obraChipsRender(){
-  const box=document.getElementById('obraChips'); if(!box)return;
-  box.innerHTML=`<span style="font-size:11.5px;font-weight:800;color:var(--verde-d)">🏗️ OBRAS</span>`+
-    OBRAS.map(o=>{ const on=OBRA_SEL.includes(Number(o.id));
-      return `<button onclick="obraToggle(${o.id})" title="${esc(o.nome)}${o.codinome?' · '+esc(o.codinome):''}${o.local?' — '+esc(o.local):''} (clique pra ${on?'tirar':'incluir'})"
-        style="border:1.5px solid ${obraCor(o.id)};border-radius:999px;padding:3px 11px;font-size:12px;font-weight:700;cursor:pointer;
-               background:${on?obraCor(o.id):'#fff'};color:${on?'#fff':obraCor(o.id)};opacity:${on?1:.65}">${on?'✓ ':''}${esc(o.nome)}</button>`; }).join('');
+function obraSelTodas(e){ if(e) e.stopPropagation(); if(!OBRAS.length)return;
+  OBRA_SEL=OBRAS.map(o=>Number(o.id)); localStorage.setItem('sup_obras',JSON.stringify(OBRA_SEL)); load(); }
+// atualiza o rótulo do botão + o menu (se aberto) — chamado no fim do load()
+function obraUpdateUI(){
+  const lbl=document.getElementById('obraPickLbl');
+  if(lbl){ const nomes=OBRA_SEL.map(id=>{ const o=OBRAS.find(x=>Number(x.id)===id); return o?o.nome:('#'+id); });
+    lbl.textContent = nomes.length===1 ? nomes[0] : (nomes.length+' obras selecionadas'); }
+  const m=document.getElementById('obraMenu'); if(m && m.style.display==='block') obraMenuRender();
 }
 async function load(){
   try{
@@ -470,7 +495,7 @@ async function load(){
       ? `<b style="color:var(--verde-d)">${esc(selObras[0].nome)}</b> · ${esc(selObras[0].codinome||'')} — ${esc(selObras[0].local||'')}`
       : selObras.map(o=>`<b style="color:${obraCor(o.id)}">${esc(o.nome)}</b>`).join(' + ')+` · ${selObras.length} obras`;
     document.getElementById('sub').innerHTML=`Mostrando: ${obraTxt} · ligado ao cronograma, orçamento e dicionário · hoje: ${D(today)}`+(cronoErro?` · <span style="color:var(--pend)">cronograma offline</span>`:'');
-    obraChipsRender();
+    obraUpdateUI();
     // KPIs (sobre o conjunto selecionado)
     const comData=itens.filter(i=>i.data_necessaria).length;
     const criticos=itens.filter(i=>alertLevel(i)==='critico').length;

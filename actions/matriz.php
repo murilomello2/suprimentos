@@ -142,6 +142,7 @@ try {
 
     echo json_encode([
         'obra' => $obra,
+        'obras' => $pdo->query("SELECT id, nome, codinome, `local`, metodo_construtivo FROM obra ORDER BY id")->fetchAll(),
         'itens' => $itens,
         'resumo' => [
             'total' => count($itens),

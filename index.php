@@ -247,6 +247,7 @@
 
     <div class="panel" style="margin-top:8px">
       <div class="bar" style="padding:8px 12px;gap:8px">
+        <div id="obraChips" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;padding:4px 8px;border:1.5px solid var(--verde);border-radius:10px;background:#f6faf6"><span style="font-size:11.5px;font-weight:800;color:var(--verde-d)">🏗️ OBRAS</span></div>
         <div class="search" style="min-width:180px"><span class="material-icons" style="color:var(--muted)">search</span>
           <input id="q" placeholder="Buscar item, contratação ou responsável…" oninput="render()"></div>
         <label class="toggle" style="gap:6px">Ver
@@ -256,7 +257,6 @@
         <button class="btn-ghost" id="collapseBtn" onclick="toggleAllGroups()" style="margin-left:auto"></button>
       </div>
       <div class="bar" id="advFilters" style="padding:0 12px 10px;gap:8px;display:none">
-        <select id="fobra" onchange="render()"><option value="">Todas as obras</option></select>
         <select id="fgrupo" onchange="render()"><option value="">Todos os grupos</option></select>
         <select id="fcurva" onchange="render()"><option value="">Todas as curvas</option><option>A</option><option>B</option><option>C</option></select>
         <select id="fstatus" onchange="render()"><option value="">Todos os status</option></select>
@@ -408,7 +408,8 @@ const today=new Date().toISOString().slice(0,10);
 const STK={'Finalizado':'st-Finalizado','Cotação Iniciada':'st-CotacaoIniciada','Com Pendências':'st-ComPendencias','Em Andamento':'st-EmAndamento','Não Iniciado':'st-NaoIniciado'};
 const STATUSES=['Não Iniciado','Cotação Iniciada','Com Pendências','Em Andamento','Finalizado'];
 function toast(m){const t=document.getElementById('toastEl');t.textContent=m;t.style.display='block';clearTimeout(t._);t._=setTimeout(()=>t.style.display='none',2400);}
-const byOrdem=o=>DATA.itens.find(i=>i.ordem==o);
+const byOrdem=(o,ob)=>DATA.itens.find(i=>i.ordem==o && (ob==null || i.obra_id==ob));   // multi-obra: mesma ordem existe em 2 obras
+const OBQ=()=>((CUR&&CUR.obra_id)||OBRA_SEL[0]||1);   // obra do MODAL aberto (ou a primária) — vai em todo fetch do modal
 function daysBetween(a,b){ return Math.round((new Date(b)-new Date(a))/86400000); }
 /* nível de alerta da cotação: 'critico' (fim venceu, não finalizado) > 'atrasado' (início venceu, não iniciou)
    > 'proximo' (faltam ≤7d p/ iniciar) > 'ok'. Item finalizado saiu do radar de Suprimentos = ok. */
@@ -425,33 +426,69 @@ function alertLevel(i){
 }
 const isAlert=i=>['critico','atrasado','proximo'].includes(alertLevel(i)); // 'finalizado'/'ok' não são alerta
 
+/* ===== multi-obra: seleção de obras (chips) — 1 obra por default, persiste no navegador ===== */
+let OBRAS=[];                                    // todas as obras do sistema [{id,nome,codinome,...}]
+let OBRA_SEL=(()=>{ try{ const v=JSON.parse(localStorage.getItem('sup_obras')||'[1]'); return (Array.isArray(v)&&v.length)?v.map(Number):[1]; }catch(e){ return [1]; } })();
+const OBRA_CORES={1:'var(--verde)',2:'#2b5fa8',3:'#7b5ea7',4:'#b5651d'};                 // cor por obra (badge/chip)
+function obraCor(id){ return OBRA_CORES[id]||'#555'; }
+function obraToggle(id){
+  id=Number(id);
+  if(OBRA_SEL.includes(id)){ if(OBRA_SEL.length===1){ toast('Pelo menos uma obra selecionada'); return; } OBRA_SEL=OBRA_SEL.filter(x=>x!==id); }
+  else OBRA_SEL=[...OBRA_SEL,id].sort((a,b)=>a-b);
+  localStorage.setItem('sup_obras',JSON.stringify(OBRA_SEL));
+  load();
+}
+function obraChipsRender(){
+  const box=document.getElementById('obraChips'); if(!box)return;
+  box.innerHTML=`<span style="font-size:11.5px;font-weight:800;color:var(--verde-d)">🏗️ OBRAS</span>`+
+    OBRAS.map(o=>{ const on=OBRA_SEL.includes(Number(o.id));
+      return `<button onclick="obraToggle(${o.id})" title="${esc(o.nome)}${o.codinome?' · '+esc(o.codinome):''}${o.local?' — '+esc(o.local):''} (clique pra ${on?'tirar':'incluir'})"
+        style="border:1.5px solid ${obraCor(o.id)};border-radius:999px;padding:3px 11px;font-size:12px;font-weight:700;cursor:pointer;
+               background:${on?obraCor(o.id):'#fff'};color:${on?'#fff':obraCor(o.id)};opacity:${on?1:.65}">${on?'✓ ':''}${esc(o.nome)}</button>`; }).join('');
+}
 async function load(){
   try{
-    const d=await (await fetch('actions/matriz.php')).json();
-    if(d.error){document.getElementById('tb').innerHTML=`<tr><td colspan="12" class="empty">Erro: ${esc(d.error)}</td></tr>`;return;}
-    DATA=d; const o=d.obra,rs=d.resumo;
-    const obras=[...new Set(d.itens.map(i=>i.obra_nome).filter(Boolean))];
-    const obraTxt=obras.length>1?`${obras.length} obras`:`<b>${esc(o.nome)}</b> · ${esc(o.codinome)} — ${esc(o.local||'')}`;
-    document.getElementById('sub').innerHTML=`Mostrando: ${obraTxt} · ligado ao cronograma, orçamento e dicionário · hoje: ${D(today)}`+(rs.crono_erro?` · <span style="color:var(--pend)">cronograma offline</span>`:'');
-    // KPIs
-    const comData=d.itens.filter(i=>i.data_necessaria).length;
-    const criticos=d.itens.filter(i=>alertLevel(i)==='critico').length;
-    const atrasados=d.itens.filter(i=>alertLevel(i)==='atrasado').length;
-    const cv=k=>d.itens.filter(i=>i.curva===k).length;
+    // busca a matriz de CADA obra selecionada em paralelo e mescla (item ganha obra_id/obra_nome)
+    const rs0=await Promise.all(OBRA_SEL.map(async oid=>{
+      const d=await (await fetch('actions/matriz.php'+(oid!==1?('?obra='+oid):''))).json(); return {oid,d};
+    }));
+    const oks=rs0.filter(x=>x.d && !x.d.error && x.d.itens);
+    if(!oks.length){document.getElementById('tb').innerHTML=`<tr><td colspan="12" class="empty">Erro: ${esc((rs0[0]&&rs0[0].d&&rs0[0].d.error)||'sem dados')}</td></tr>`;return;}
+    DATA=oks[0].d;
+    OBRAS=DATA.obras||OBRAS;
+    const itens=[]; let covVal=0, covLeaf=0, cronoErro=null;
+    for(const {oid,d} of oks){
+      (d.itens||[]).forEach(i=>{ i.obra_id=oid; i.obra_nome=(d.obra&&d.obra.nome)||('obra '+oid); itens.push(i); });
+      covVal+=(d.resumo&&d.resumo.cobertura_valor)||0; covLeaf+=(d.resumo&&d.resumo.cobertura_total_leaf)||0;
+      if(d.resumo&&d.resumo.crono_erro) cronoErro=d.resumo.crono_erro;
+    }
+    DATA.itens=itens;
+    const cobertura=covLeaf?Math.round(covVal/covLeaf*1000)/10:null;
+    // "Mostrando:" reflete a SELEÇÃO de obras (com codinome/local quando 1 só)
+    const selObras=oks.map(x=>x.d.obra).filter(Boolean);
+    const obraTxt=selObras.length===1
+      ? `<b style="color:var(--verde-d)">${esc(selObras[0].nome)}</b> · ${esc(selObras[0].codinome||'')} — ${esc(selObras[0].local||'')}`
+      : selObras.map(o=>`<b style="color:${obraCor(o.id)}">${esc(o.nome)}</b>`).join(' + ')+` · ${selObras.length} obras`;
+    document.getElementById('sub').innerHTML=`Mostrando: ${obraTxt} · ligado ao cronograma, orçamento e dicionário · hoje: ${D(today)}`+(cronoErro?` · <span style="color:var(--pend)">cronograma offline</span>`:'');
+    obraChipsRender();
+    // KPIs (sobre o conjunto selecionado)
+    const comData=itens.filter(i=>i.data_necessaria).length;
+    const criticos=itens.filter(i=>alertLevel(i)==='critico').length;
+    const atrasados=itens.filter(i=>alertLevel(i)==='atrasado').length;
+    const cv=k=>itens.filter(i=>i.curva===k).length;
     document.getElementById('kpis').innerHTML=`
-      <div class="kpi"><div class="v">${rs.total}</div><div class="l">Itens no radar</div></div>
-      <div class="kpi"><div class="v">${comData} / ${rs.total}</div><div class="l">Com data definida</div></div>
+      <div class="kpi"><div class="v">${itens.length}</div><div class="l">Itens no radar${selObras.length>1?' ('+selObras.length+' obras)':''}</div></div>
+      <div class="kpi"><div class="v">${comData} / ${itens.length}</div><div class="l">Com data definida</div></div>
       <div class="kpi"><div class="v ${criticos?'alert':''}">${criticos}</div><div class="l">Críticos (fim da cotação venceu)${atrasados?` · ${atrasados} atrasados`:''}</div></div>
       <div class="kpi"><div class="v">${cv('A')} · ${cv('B')} · ${cv('C')}</div><div class="l">Curva A / B / C</div></div>
-      <div class="kpi" title="${rs.cobertura_real!=null?`Cobertura REAL, sem contar verba em dobro: ${rs.cobertura_analitico}% por vínculo analítico (linhas distintas) + ${rs.cobertura_composicao}% por composição. Coberto ${BRL(rs.cobertura_valor)} de ${BRL(rs.cobertura_total_leaf)} em folhas.`:'sem dados'}"><div class="v gold">${rs.cobertura_real!=null?rs.cobertura_real.toLocaleString('pt-BR')+'%':'—'}</div><div class="l">Cobertura real do orçamento</div></div>`;
+      <div class="kpi" title="Cobertura REAL combinada: coberto ${BRL(covVal)} de ${BRL(covLeaf)} em folhas do(s) orçamento(s)."><div class="v gold">${cobertura!=null?cobertura.toLocaleString('pt-BR')+'%':'—'}</div><div class="l">Cobertura real do orçamento</div></div>`;
     // filtros dinâmicos (grupos em ordem lógica = ordem de aparição; demais ordenados)
-    fillOrdered('fgrupo',[...new Set(d.itens.map(i=>i.grupo).filter(Boolean))]);
-    fill('fobra',obras);
-    fill('fstatus',[...new Set(d.itens.map(i=>i.status||'Não Iniciado'))]);
-    fill('fresp',[...new Set(d.itens.map(i=>i.responsavel).filter(Boolean))]);
+    fillOrdered('fgrupo',[...new Set(itens.map(i=>i.grupo).filter(Boolean))]);
+    fill('fstatus',[...new Set(itens.map(i=>i.status||'Não Iniciado'))]);
+    fill('fresp',[...new Set(itens.map(i=>i.responsavel).filter(Boolean))]);
     // filtros da Matriz
-    fillOrdered('mgrupo',[...new Set(d.itens.map(i=>i.grupo).filter(Boolean))]);
-    fillMulti('mobra',obras);
+    fillOrdered('mgrupo',[...new Set(itens.map(i=>i.grupo).filter(Boolean))]);
+    fillMulti('mobra',[...new Set(itens.map(i=>i.obra_nome).filter(Boolean))]);
     render(); renderMatriz();
   }catch(e){document.getElementById('tb').innerHTML=`<tr><td colspan="12" class="empty">Falha: ${esc(e.message)}</td></tr>`;}
 }
@@ -478,9 +515,10 @@ async function renderAudit(){
   box.innerHTML='<div class="empty">Rodando auditoria na base…</div>';
   let d,u,co;
   try{
-    d=await (await fetch('actions/audit_orcamento.php')).json();
-    u=await (await fetch('actions/verba_usos.php?_='+Date.now())).json();
-    co=await (await fetch('actions/audit_coerencia.php?_='+Date.now())).json();
+    const aob=OBRA_SEL[0]||1;   // auditoria roda na obra PRIMÁRIA selecionada
+    d=await (await fetch('actions/audit_orcamento.php?obra='+aob)).json();
+    u=await (await fetch('actions/verba_usos.php?obra='+aob+'&_='+Date.now())).json();
+    co=await (await fetch('actions/audit_coerencia.php?obra='+aob+'&_='+Date.now())).json();
   }
   catch(e){ box.innerHTML='<div class="empty">Falha: '+esc(e.message)+'</div>'; return; }
   if(d.error){ box.innerHTML='<div class="empty">Erro: '+esc(d.error)+'</div>'; return; }
@@ -551,10 +589,10 @@ async function renderAudit(){
   box.innerHTML=html;
 }
 let AUDIT_CO=null;
-async function postItem(ordem,campos){ return (await (await fetch('actions/item_update.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ordem,campos,me:EU&&EU.bitrix_id})})).json()); }
+async function postItem(ordem,campos){ return (await (await fetch('actions/item_update.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ordem,campos,me:EU&&EU.bitrix_id,obra:OBQ()})})).json()); }
 async function corrigirCoerencia(f){
   if(f.metodo==='analitico'){
-    const d=await (await fetch('actions/separar_mo.php?manter='+f.classe+'&ordem='+f.ordem)).json();
+    const d=await (await fetch('actions/separar_mo.php?obra='+(OBRA_SEL[0]||1)+'&manter='+f.classe+'&ordem='+f.ordem)).json();
     if(d.error) return {err:d.error};
     const sel=(d.composicao_sel||[]).map(s=>({cid:s.cid,idx:s.idx,area:s.area,q:0,locais:s.locais||null}));
     if(!sel.length) return {err:'linhas sem composição — não separei pra não zerar a verba'};   // TRAVA anti-wipe
@@ -589,7 +627,7 @@ async function auditDetalhar(ordem){
   const show=row.style.display==='none'; row.style.display=show?'table-row':'none';
   if(!show || row.dataset.loaded) return;
   const body=row.querySelector('.audet-body'); body.innerHTML='<div class="muted" style="font-size:12px;padding:8px">Detalhando…</div>';
-  let d; try{ d=await (await fetch('actions/audit_detalhe.php?ordem='+ordem)).json(); }
+  let d; try{ d=await (await fetch('actions/audit_detalhe.php?obra='+(OBRA_SEL[0]||1)+'&ordem='+ordem)).json(); }
   catch(e){ body.innerHTML='<div class="muted" style="padding:8px">Falha.</div>'; return; }
   if(d.error){ body.innerHTML='<div class="muted" style="padding:8px">'+esc(d.error)+'</div>'; return; }
   body.innerHTML=auditDetHtml(d); row.dataset.loaded='1';
@@ -694,7 +732,7 @@ async function auditRemover(ordem,lineId){
   if(!confirm(`Remover esta linha do orçamento de "${it.nome}"?\nA verba dele será recalculada sem essa linha.`))return;
   try{
     const d=await (await fetch('actions/item_update.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ordem,campos:{orcamento_refs:novo},me:EU&&EU.bitrix_id})})).json();
+      body:JSON.stringify({ordem,campos:{orcamento_refs:novo},me:EU&&EU.bitrix_id,obra:OBRA_SEL[0]||1})})).json();
     if(d.error){toast('Erro: '+d.error);return;}
   }catch(e){toast('Falha ao salvar');return;}
   VERBA_USOS=null; await load(); renderAudit(); toast('Linha removida de '+it.nome);
@@ -737,7 +775,7 @@ function renderMatriz(){
     for(const o of obras){
       const i=idx[s.ordem+'|'+o]; const cls=cellClass(i);
       const tip=i?`${esc(o)} · ${esc(s.nome)}\n${CELL_TXT[cls]}`+(i.data_necessaria?` · obra ${D(i.data_necessaria)}`:''):'N/A';
-      const click=i?`onclick="openModal(${i.ordem})"`:'';
+      const click=i?`onclick="openModal(${i.ordem},${i.obra_id||1})"`:'';
       html+=`<td><div class="cell ${cls}" title="${tip}" ${click}></div></td>`;
     }
     html+='</tr>';
@@ -873,7 +911,7 @@ function groupHeaderHtml(g,items,idx){
 }
 function render(){
   const q=(document.getElementById('q').value||'').toLowerCase();
-  const fg=document.getElementById('fgrupo').value,fo=document.getElementById('fobra').value;
+  const fg=document.getElementById('fgrupo').value,fo='';   // obra agora é seleção de dados (chips), não filtro de linha
   const fc=document.getElementById('fcurva').value;
   const fs=document.getElementById('fstatus').value,fr=document.getElementById('fresp').value;
   const oa=document.getElementById('onlyalert').checked;
@@ -919,10 +957,11 @@ function rowHtml(i){
   const lvl=alertLevel(i);
   const chipIni=lvl==='atrasado'?`<span class="tag-al atras">atrasado</span>`:lvl==='proximo'?`<span class="tag-al prox">iniciar</span>`:'';
   const chipFim=lvl==='critico'?`<span class="tag-al crit">crítico</span>`:lvl==='finalizado'?`<span class="tag-al fin">✓ concluído</span>`:'';
-  return `<tr class="item" onclick="openModal(${i.ordem})">
-    <td><div class="svc">${esc(i.nome)} ${tipoChip(i.tipo)}</div><div class="svc-sub">${esc(i.forma_contratacao||'')}</div></td>
+  const obTag=(OBRA_SEL.length>1)?`<span style="display:inline-block;font-size:9px;font-weight:800;color:#fff;background:${obraCor(i.obra_id)};border-radius:4px;padding:1px 6px;vertical-align:1px;margin-right:4px">${esc((i.obra_nome||'').slice(0,10))}</span>`:'';
+  return `<tr class="item" onclick="openModal(${i.ordem},${i.obra_id||1})">
+    <td><div class="svc">${obTag}${esc(i.nome)} ${tipoChip(i.tipo)}</div><div class="svc-sub">${esc(i.forma_contratacao||'')}</div></td>
     <td><span class="curva c-${i.curva||'C'}">${esc(i.curva||'—')}</span></td>
-    <td>${i.responsavel?esc(i.responsavel):`<button class="resp-miss" onclick="event.stopPropagation();openModal(${i.ordem})">definir</button>`}</td>
+    <td>${i.responsavel?esc(i.responsavel):`<button class="resp-miss" onclick="event.stopPropagation();openModal(${i.ordem},${i.obra_id||1})">definir</button>`}</td>
     <td class="money">${verbaDefinida(i)?`${BRL(verbaDef(i))}${i.curado_verba?' <span class="material-icons" title="verba curada" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':(i.auto&&i.auto.verba?' <span title="sugerido pelo auto-vínculo (receita) — confira e salve pra confirmar" style="font-size:11px">🤖</span>':'')}`:`<span class="muted" title="sem verba definida — a estimativa preliminar do orçamento não conta como verba">R$ 0 <span style="font-size:10px">· a definir</span></span>`}</td>
     <td>${i.quantitativo!=null?`<div class="qcell" title="${esc(QNUM(i.quantitativo)+' '+(i.quantitativo_unidade||''))}"><b>${QNUM(i.quantitativo)}</b> <span class="muted">${esc(i.quantitativo_unidade||'')}</span>${i.curado_quant?' <span class="material-icons" title="quantitativo curado" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':(i.auto&&i.auto.quant?' <span title="sugerido pelo auto-vínculo (receita)" style="font-size:11px">🤖</span>':'')}</div>`:'<span class="muted">—</span>'}</td>
     <td class="date">${D(i.data_necessaria)}${i.curado_data?' <span class="material-icons" title="data curada" style="font-size:12px;color:var(--ok);vertical-align:-2px">verified</span>':(i.auto&&i.auto.crono?' <span title="sugerido pelo auto-vínculo (receita) — abra o Cronograma e salve pra confirmar" style="font-size:11px">🤖</span>':'')}</td>
@@ -947,7 +986,7 @@ function statusSelect(i){
 async function saveField(ordem,campo,valor){
   try{
     const r=await fetch('actions/item_update.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ordem,campos:{[campo]:valor},me:EU&&EU.bitrix_id})});
+      body:JSON.stringify({ordem,campos:{[campo]:valor},me:EU&&EU.bitrix_id,obra:OBQ()})});
     const d=await r.json();
     if(d.error){toast('Erro: '+d.error);return false;}
     Object.assign(byOrdem(ordem),d.item); // reflete na memória
@@ -964,7 +1003,7 @@ let IS_ADMIN=false;                       // fail-closed; vira true só quando g
 let CAN_EDIT=false;                       // editor geral da obra (status/fornecedor/observação)
 let CAN_CRONO=false, CAN_ORC=false, CAN_QUANT=false, CAN_DIC=false; // permissões específicas (vínculos + dicionário)
 let EU=null;                             // usuário logado + permissões efetivas
-function openModal(o){CUR=byOrdem(o);TAB='Resumo';EDITC=EDITO=EDITQ=EDITD=EDITR=false;drawModal();document.getElementById('ov').classList.add('open');}
+function openModal(o,ob){CUR=byOrdem(o,ob);if(!CUR)return;TAB='Resumo';EDITC=EDITO=EDITQ=EDITD=EDITR=false;drawModal();document.getElementById('ov').classList.add('open');}
 function closeModal(force){ if(!force && anyEditing()){ confirmSaveDialog(async()=>{ await saveCurrentEdit(); _closeModal(); }, ()=>{ _resetEdits(); _closeModal(); }); return; } _resetEdits(); _closeModal(); }
 function _closeModal(){document.getElementById('ov').classList.remove('open');render();renderMatriz();}
 function _resetEdits(){ EDITC=EDITO=EDITQ=EDITD=EDITR=false; }
@@ -1013,7 +1052,7 @@ function drawModal(){
   document.getElementById('modal').innerHTML=`
     <div class="mhead">
       <button class="mclose" onclick="closeModal()">×</button>
-      <div class="crumb">${esc(i.grupo||'')} · Curva ${esc(i.curva||'—')}</div>
+      <div class="crumb"><span style="background:${obraCor(i.obra_id)};border-radius:5px;padding:1px 8px;font-weight:800">${esc(i.obra_nome||'')}</span> · ${esc(i.grupo||'')} · Curva ${esc(i.curva||'—')}</div>
       <div class="mt">${esc(i.nome)}</div>
       <div class="meta">
         <span><span class="material-icons">person</span>${esc(i.responsavel||'sem responsável')}</span>
@@ -1090,7 +1129,7 @@ function cronoEditar(){ EDITC=true; CRONO_PENDING=null; drawModal(); }
 function cronoCancelar(){ EDITC=false; CRONO_PENDING=null; drawModal(); }
 async function cronoInit(){
   const box=document.getElementById('cronoTree'); if(!box)return;
-  const d=await (await fetch('actions/crono_tree.php')).json();
+  const d=await (await fetch('actions/crono_tree.php?obra='+OBQ())).json();
   CRONO_NODES=(d.nos||[]).map(n=>({...n,expanded:false}));
   cronoRenderTree();
 }
@@ -1116,7 +1155,7 @@ async function cronoExpand(ix){
     let j=ix+1; while(j<CRONO_NODES.length && CRONO_NODES[j].nivel>n.nivel) j++;
     CRONO_NODES.splice(ix+1,j-(ix+1)); n.expanded=false; cronoRenderTree(); return;
   }
-  const d=await (await fetch('actions/crono_tree.php?children_of='+encodeURIComponent(n.outline))).json();
+  const d=await (await fetch('actions/crono_tree.php?obra='+OBQ()+'&children_of='+encodeURIComponent(n.outline))).json();
   const filhos=(d.nos||[]).map(x=>({...x,expanded:false}));
   CRONO_NODES.splice(ix+1,0,...filhos); n.expanded=true; cronoRenderTree();
 }
@@ -1144,7 +1183,7 @@ async function cronoBuscarNow(){
   const my=++CRONO_SEQ;
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
   try{
-    const d=await (await fetch('actions/crono_search.php?q='+encodeURIComponent(qt))).json();
+    const d=await (await fetch('actions/crono_search.php?obra='+OBQ()+'&q='+encodeURIComponent(qt))).json();
     if(my!==CRONO_SEQ) return;   // resposta atrasada de uma tecla anterior — descarta (senão sobrescreve os resultados certos com lixo)
     if(d.error){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px;color:var(--pend)">Erro na busca: '+esc(d.error)+'</div>';return;}
     CRONO_SEARCH=(d.tarefas||[]).map(t=>({outline:t.outline_number||t.wbs,nome:t.nome,start:t.start,wbs:t.wbs,path:t.path,summary:t.is_summary}));
@@ -1230,7 +1269,7 @@ async function qcompBuscar(){
   const box=document.getElementById('qcompSearch'); if(!box)return;
   if(q.length<2){box.innerHTML='';return;}
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
-  const d=await (await fetch('actions/composicao.php?q='+encodeURIComponent(q))).json();
+  const d=await (await fetch('actions/composicao.php?obra='+OBQ()+'&q='+encodeURIComponent(q))).json();
   const list=d.composicoes||[];
   if(!list.length){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Nada encontrado.</div>';return;}
   box.innerHTML='<div class="srbox">'+list.map(c=>`<div class="pickrow" onclick="qcompEscolher(${c.id})">
@@ -1315,7 +1354,7 @@ async function quantShowCurrent(i){
 }
 async function qntLoadTree(){
   const box=document.getElementById('qntTree'); if(!box)return;
-  const d=await (await fetch('actions/orcamento.php')).json();
+  const d=await (await fetch('actions/orcamento.php?obra='+OBQ())).json();
   QNT_NODES=(d.linhas||[]).map(n=>({...n,expanded:false}));
   qntRenderTree();
 }
@@ -1339,7 +1378,7 @@ async function qntExpand(ix){
   const n=QNT_NODES[ix]; if(!n)return;
   if(n.expanded){ let j=ix+1; while(j<QNT_NODES.length && QNT_NODES[j].depth>n.depth) j++;
     QNT_NODES.splice(ix+1,j-(ix+1)); n.expanded=false; qntRenderTree(); return; }
-  const d=await (await fetch('actions/orcamento.php?children_of='+encodeURIComponent(n.codigo))).json();
+  const d=await (await fetch('actions/orcamento.php?obra='+OBQ()+'&children_of='+encodeURIComponent(n.codigo))).json();
   QNT_NODES.splice(ix+1,0,...(d.linhas||[]).map(x=>({...x,expanded:false}))); n.expanded=true; qntRenderTree();
 }
 function qntToggleSel(id){
@@ -1353,7 +1392,7 @@ function qntToggleSel(id){
 async function qntRenderSel(){
   const el=document.getElementById('qntSel'); if(!el)return;
   if(!QNT_SEL.size){ const t=document.getElementById('qntTotal'); if(t)t.textContent=''; return; }
-  const d=await (await fetch('actions/orcamento.php?ids='+[...QNT_SEL].join(','))).json();
+  const d=await (await fetch('actions/orcamento.php?obra='+OBQ()+'&ids='+[...QNT_SEL].join(','))).json();
   const byU={}; let html='';
   d.linhas.forEach(l=>{ byU[l.unidade]=(byU[l.unidade]||0)+(l.qtde||0);
     html+=`<div class="pickrow"><span class="material-icons" style="font-size:16px;color:var(--ok)${EDITQ?';cursor:pointer':''}" ${EDITQ?`onclick="qntToggleSel(${l.id})" title="remover"`:''}>${EDITQ?'check_box':'check_circle'}</span>
@@ -1368,7 +1407,7 @@ async function qntBuscar(){
   const box=document.getElementById('qntSearch'); if(!box)return;
   if(q.length<2){QNT_LAST=[];box.innerHTML='';return;}
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
-  const d=await (await fetch('actions/orcamento.php?q='+encodeURIComponent(q))).json();
+  const d=await (await fetch('actions/orcamento.php?obra='+OBQ()+'&q='+encodeURIComponent(q))).json();
   QNT_LAST=d.linhas||[];
   if(!QNT_LAST.length){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Nada encontrado.</div>';return;}
   qntRenderSearch();
@@ -1427,7 +1466,7 @@ function orcCancelar(){ EDITO=false; drawModal(); }
 async function orcLoadLastChange(ordem){
   const box=document.getElementById('orcLastChange'); if(!box)return;
   try{
-    const d=await (await fetch('actions/historico.php?ordem='+ordem)).json();
+    const d=await (await fetch('actions/historico.php?obra='+OBQ()+'&ordem='+ordem)).json();
     const v=(d.historico||[]).find(h=>/^Verba/.test(h.campo||''));  // histórico vem do mais recente p/ o mais antigo
     if(v){
       let q=v.created_at; try{ q=new Date(v.created_at).toLocaleString('pt-BR'); }catch(e){}
@@ -1438,7 +1477,7 @@ async function orcLoadLastChange(ordem){
 async function cronoLoadLastChange(ordem){
   const box=document.getElementById('cronoLastChange'); if(!box)return;
   try{
-    const d=await (await fetch('actions/historico.php?ordem='+ordem)).json();
+    const d=await (await fetch('actions/historico.php?obra='+OBQ()+'&ordem='+ordem)).json();
     const v=(d.historico||[]).find(h=>/^(cronograma|data em obra)/i.test(h.campo||''));  // mais recente primeiro
     if(v){
       let q=v.created_at; try{ q=new Date(v.created_at).toLocaleString('pt-BR'); }catch(e){}
@@ -1625,7 +1664,7 @@ let ORC_BD=null;
 async function orcRenderBreakdown(i){
   const el=document.getElementById('orcSel'), tot=document.getElementById('orcTotal'); if(!el)return;
   el.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Detalhando material × MO × equipamento…</div>';
-  let d; try{ d=await (await fetch('actions/verba_breakdown.php?ordem='+i.ordem)).json(); }catch(e){ await orcRenderSel(); return; }
+  let d; try{ d=await (await fetch('actions/verba_breakdown.php?obra='+OBQ()+'&ordem='+i.ordem)).json(); }catch(e){ await orcRenderSel(); return; }
   if(d.error){ await orcRenderSel(); return; }
   ORC_BD=d; const tp=d.tot_por_tipo;
   const totHtml=['material','mo','mat_mo','equip'].filter(k=>tp[k]>0.5).map(k=>`${tpBadge(k)} <b>${BRL(tp[k])}</b>`).join(' &nbsp; ')+` &nbsp;·&nbsp; <b>Total ${BRL(d.total)}</b>`;
@@ -1728,7 +1767,7 @@ function orcExclToggle(li, ii){
 async function orcLoadTree(){
   const box=document.getElementById('orcTree'); if(!box)return;
   await loadVerbaUsos();   // pra travar as linhas já usadas em outro item
-  const d=await (await fetch('actions/orcamento.php')).json();
+  const d=await (await fetch('actions/orcamento.php?obra='+OBQ())).json();
   ORC_NODES=(d.linhas||[]).map(n=>({...n,expanded:false}));
   orcRenderTree();
 }
@@ -1755,7 +1794,7 @@ async function orcExpand(ix){
     let j=ix+1; while(j<ORC_NODES.length && ORC_NODES[j].depth>n.depth) j++;
     ORC_NODES.splice(ix+1,j-(ix+1)); n.expanded=false; orcRenderTree(); return;
   }
-  const d=await (await fetch('actions/orcamento.php?children_of='+encodeURIComponent(n.codigo))).json();
+  const d=await (await fetch('actions/orcamento.php?obra='+OBQ()+'&children_of='+encodeURIComponent(n.codigo))).json();
   const filhos=(d.linhas||[]).map(x=>({...x,expanded:false}));
   ORC_NODES.splice(ix+1,0,...filhos); n.expanded=true; orcRenderTree();
 }
@@ -1771,7 +1810,7 @@ function orcToggleSel(id){
 async function orcRenderSel(){
   const el=document.getElementById('orcSel'); if(!el)return;
   if(!ORC_SEL.size){el.innerHTML='<span class="muted">Nenhum item selecionado.</span>';document.getElementById('orcTotal').textContent='';return;}
-  const d=await (await fetch('actions/orcamento.php?ids='+[...ORC_SEL].join(','))).json();
+  const d=await (await fetch('actions/orcamento.php?obra='+OBQ()+'&ids='+[...ORC_SEL].join(','))).json();
   let tot=0;
   el.innerHTML=d.linhas.map(l=>{tot+=(l.valor||0);return `<div class="pickrow">
     <span class="material-icons" style="font-size:16px;color:var(--ok)${EDITO?';cursor:pointer':''}" ${EDITO?`onclick="orcToggleSel(${l.id})" title="remover"`:''}>${EDITO?'check_box':'check_circle'}</span>
@@ -1785,7 +1824,7 @@ async function orcBuscar(){
   if(q.length<2){ORC_LAST=[];box.innerHTML='';return;}
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
   await loadVerbaUsos();
-  const d=await (await fetch('actions/orcamento.php?q='+encodeURIComponent(q))).json();
+  const d=await (await fetch('actions/orcamento.php?obra='+OBQ()+'&q='+encodeURIComponent(q))).json();
   ORC_LAST=d.linhas||[];
   if(!ORC_LAST.length){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Nada encontrado.</div>';return;}
   orcRenderSearch();
@@ -1807,7 +1846,7 @@ async function orcLimpar(){ EDITO=false; ORC_SEL.clear(); ORC_EXCL=[]; await sav
 // Separar material × MO: converte verba analítica (linha inteira) em composição SÓ material, liberando a MO
 async function separarMO(){
   if(!CUR) return;
-  let d; try{ d=await (await fetch('actions/separar_mo.php?ordem='+CUR.ordem)).json(); }
+  let d; try{ d=await (await fetch('actions/separar_mo.php?obra='+OBQ()+'&ordem='+CUR.ordem)).json(); }
   catch(e){ toast('Falha ao calcular'); return; }
   if(d.error){ toast(d.error); return; }
   const r=d.resumo;
@@ -1827,10 +1866,10 @@ async function separarMO(){
 }
 
 /* ===== Motor de USO da verba (uma linha do orçamento não pode compor 2 itens) ===== */
-let VERBA_USOS=null;
+let VERBA_USOS=null, VERBA_USOS_OB=null;   // cache POR OBRA — modal de outra obra recarrega
 async function loadVerbaUsos(force){
-  if(VERBA_USOS && !force) return VERBA_USOS;
-  try{ VERBA_USOS=await (await fetch('actions/verba_usos.php?_='+Date.now())).json(); }
+  if(VERBA_USOS && VERBA_USOS_OB===OBQ() && !force) return VERBA_USOS;
+  try{ VERBA_USOS=await (await fetch('actions/verba_usos.php?obra='+OBQ()+'&_='+Date.now())).json(); VERBA_USOS_OB=OBQ(); }
   catch(e){ VERBA_USOS={usos:{},nomes:{}}; }
   return VERBA_USOS;
 }
@@ -1889,7 +1928,7 @@ async function massaBuscar(){
   if(!termos){ box.innerHTML='<div class="muted" style="font-size:12px">Informe os termos.</div>'; return; }
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
   await loadVerbaUsos();   // garante o mapa de uso pra travar duplicadas
-  let d; try{ d=await (await fetch('actions/orcamento_massa.php?escopo='+escopo+'&material='+encodeURIComponent(material)+'&termos='+encodeURIComponent(termos))).json(); }
+  let d; try{ d=await (await fetch('actions/orcamento_massa.php?obra='+OBQ()+'&escopo='+escopo+'&material='+encodeURIComponent(material)+'&termos='+encodeURIComponent(termos))).json(); }
   catch(e){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Falha: '+esc(e.message)+'</div>'; return; }
   if(d.error){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Erro: '+esc(d.error)+'</div>'; return; }
   MASSA=d; MASSA_SEL=new Set(); MASSA_OPEN=new Set();
@@ -2002,7 +2041,7 @@ async function compBuscar(){
   if(q.length<2){box.innerHTML='';return;}
   const my=++COMPB_SEQ;
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
-  const d=await (await fetch('actions/composicao.php?q='+encodeURIComponent(q))).json();
+  const d=await (await fetch('actions/composicao.php?obra='+OBQ()+'&q='+encodeURIComponent(q))).json();
   if(my!==COMPB_SEQ) return;   // resposta atrasada de uma tecla anterior — descarta
   COMP_LAST=d.composicoes||[];
   if(!COMP_LAST.length){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Nada encontrado. É <b>mão de obra ou insumo</b> (ex.: eletricista, encanador)? Eles ficam <b>dentro</b> das composições — use a <b>Busca em massa por insumo</b> logo abaixo.</div>';return;}
@@ -2211,7 +2250,7 @@ async function insMassaBuscar(){
   if(!termos && !sis){ box.innerHTML='<div class="muted" style="font-size:12px">Escolha um <b>sistema</b> (ex.: 🔥 Gás) ou digite um <b>termo</b> (ex.: encanador).</div>'; return; }
   box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Buscando…</div>';
   await loadVerbaUsos();
-  const qs='termos='+encodeURIComponent(termos)+'&sistema='+encodeURIComponent(sis)+'&tipo='+encodeURIComponent(tipo);
+  const qs='obra='+OBQ()+'&termos='+encodeURIComponent(termos)+'&sistema='+encodeURIComponent(sis)+'&tipo='+encodeURIComponent(tipo);
   let d; try{ d=await (await fetch('actions/composicao_insumo_massa.php?'+qs)).json(); }
   catch(e){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Falha: '+esc(e.message)+'</div>'; return; }
   if(d.error){ box.innerHTML='<div class="muted" style="font-size:12px;color:var(--pend)">Erro: '+esc(d.error)+'</div>'; return; }
@@ -2226,7 +2265,7 @@ function insMassaToggleNode(path){ const lvs=insMassaNodeLeaves(path).filter(x=>
   const allOn=lvs.length&&lvs.every(x=>INSMASSA_SEL.has(x.key)); lvs.forEach(x=>{ allOn?INSMASSA_SEL.delete(x.key):INSMASSA_SEL.add(x.key); }); insMassaRender(); }
 function insMassaToggleLeaf(key){ INSMASSA_SEL.has(key)?INSMASSA_SEL.delete(key):INSMASSA_SEL.add(key); insMassaRender(); }
 function insMassaExpandNode(path){ INSMASSA_OPEN.has(path)?INSMASSA_OPEN.delete(path):INSMASSA_OPEN.add(path); insMassaRender(); }
-function insMassaAbrir(ordem){ if(ordem!=null) openModal(Number(ordem)); }
+function insMassaAbrir(ordem){ if(ordem!=null) openModal(Number(ordem), OBQ()); }   // o item bloqueador é da MESMA obra
 function insMassaChk(leaves,path){ const free=leaves.filter(x=>!x.locked); const a=free.length&&free.every(x=>INSMASSA_SEL.has(x.key)), s=free.some(x=>INSMASSA_SEL.has(x.key));
   return `<span class="material-icons chk" onclick="insMassaToggleNode('${path}')" style="color:${a?'var(--ok)':s?'var(--and)':'var(--muted)'}">${a?'check_box':s?'indeterminate_check_box':'check_box_outline_blank'}</span>`; }
 function insMassaRender(){
@@ -2400,7 +2439,7 @@ function histTab(i){ return `<div id="histBox"><div class="empty">Carregando his
 async function loadHist(ordem){
   const box=document.getElementById('histBox'); if(!box)return;
   let d;
-  try{ d=await (await fetch('actions/historico.php?ordem='+ordem)).json(); }
+  try{ d=await (await fetch('actions/historico.php?obra='+OBQ()+'&ordem='+ordem)).json(); }
   catch(e){ box.innerHTML='<div class="empty">Falha ao carregar o histórico.</div>'; return; }
   const hs=(d&&d.historico)||[];
   if(!hs.length){ box.innerHTML='<div class="muted" style="padding:10px 2px">Nenhuma alteração registrada ainda neste item.</div>'; return; }
@@ -2434,11 +2473,11 @@ async function modalGrupo(v){
 async function saveAndReload(campos){
   try{
     const d=await (await fetch('actions/item_update.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ordem:CUR.ordem,campos,me:EU&&EU.bitrix_id})})).json();
+      body:JSON.stringify({ordem:CUR.ordem,campos,me:EU&&EU.bitrix_id,obra:CUR.obra_id||1})})).json();
     if(d.error){toast('Erro: '+d.error);return;}
     VERBA_USOS=null;            // verba mudou → recarrega o mapa de uso na próxima leitura
     await load();
-    CUR=byOrdem(CUR.ordem); drawModal();
+    CUR=byOrdem(CUR.ordem, CUR.obra_id); drawModal();
   }catch(e){toast('Falha ao salvar');}
 }
 /* ----- Criar / desdobrar / excluir itens ----- */
@@ -2469,7 +2508,7 @@ async function novoItemSalvar(){
   let grupo=val('niGrupo');
   if(grupo==='__novo__'){ grupo=(prompt('Nome do novo grupo')||'').trim(); if(!grupo){toast('Informe o grupo');return;} }
   const resp=val('niResp');
-  const body={acao:'novo', nome:val('niNome'), grupo, tipo:val('niTipo'), curva:val('niCurva'), responsavel:resp, copy_from:val('niCopy')||null, me:EU&&EU.bitrix_id};
+  const body={acao:'novo', nome:val('niNome'), grupo, tipo:val('niTipo'), curva:val('niCurva'), responsavel:resp, copy_from:val('niCopy')||null, me:EU&&EU.bitrix_id, obra:OBRA_SEL[0]||1};
   if(!body.nome){toast('Informe o nome');return;}
   // responsável NÃO é obrigatório na criação — pode ser atribuído depois (inclusive em massa por grupo/categoria)
   const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
@@ -2478,14 +2517,14 @@ async function novoItemSalvar(){
 }
 async function desdobrarItem(){
   if(!CUR)return;
-  const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'desdobrar',ordem:CUR.ordem,me:EU&&EU.bitrix_id})})).json();
+  const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'desdobrar',ordem:CUR.ordem,me:EU&&EU.bitrix_id,obra:CUR.obra_id||1})})).json();
   if(d.error){toast('Erro: '+d.error);return;}
   closeModal(true); await load(); toast('Desdobrado em (MAT) e (MO)');
 }
 async function excluirItem(){
   if(!CUR)return;
   if(!confirm('Excluir o item "'+CUR.nome+'" do radar? Esta ação não pode ser desfeita.'))return;
-  const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',ordem:CUR.ordem,me:EU&&EU.bitrix_id})})).json();
+  const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',ordem:CUR.ordem,me:EU&&EU.bitrix_id,obra:CUR.obra_id||1})})).json();
   if(d.error){toast('Erro: '+d.error);return;}
   closeModal(true); await load(); toast('Item excluído');
 }

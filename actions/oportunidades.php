@@ -77,6 +77,7 @@ try {
             $cum += $g['valor'];
             $p = $gapTotal > 0 ? $cum / $gapTotal : 1;
             $g['curva'] = $p <= 0.80 ? 'A' : ($p <= 0.95 ? 'B' : 'C');
+            $g['valor'] = round($g['valor']);
         }
         unset($g);
         echo json_encode(['resumo'=>[

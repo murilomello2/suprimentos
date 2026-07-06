@@ -638,10 +638,11 @@ function opFiltered(){
 }
 function opRender(){
   const r=OPP.resumo, k=document.getElementById('opKpis');
+  const pct=x=>Number(x||0).toFixed(1);
   if(k) k.innerHTML=`
-    <div class="kpi"><div class="v gold">${r.coberto_pct||0}%</div><div class="l">radar cobre · ${BRL(r.coberto)}</div></div>
-    <div class="kpi"><div class="v ${(r.gap_pct||0)>15?'alert':''}">${r.gap_pct||0}%</div><div class="l">gap de suprimentos · ${BRL(r.gap)}</div></div>
-    <div class="kpi"><div class="v">${r.indiretos_pct||0}%</div><div class="l">custos indiretos (fora)</div></div>
+    <div class="kpi"><div class="v gold">${pct(r.coberto_pct)}%</div><div class="l">radar cobre · ${BRL(r.coberto)}</div></div>
+    <div class="kpi"><div class="v ${(r.gap_pct||0)>15?'alert':''}">${pct(r.gap_pct)}%</div><div class="l">gap de suprimentos · ${BRL(r.gap)}</div></div>
+    <div class="kpi"><div class="v">${pct(r.indiretos_pct)}%</div><div class="l">custos indiretos (fora)</div></div>
     <div class="kpi"><div class="v">${r.n_gaps||0}</div><div class="l">itens descobertos</div></div>`;
   const fi=opFiltered(), box=document.getElementById('opwrap');
   let html='<table><thead><tr><th style="width:30px"><input type="checkbox" id="opAll" onclick="opToggleAll(this.checked)"></th><th>Curva</th><th>Descrição (item do orçamento)</th><th>Grupos</th><th style="text-align:right">Valor</th><th style="text-align:right">%</th></tr></thead><tbody>';
@@ -649,7 +650,7 @@ function opRender(){
     html+=`<tr><td><input type="checkbox" ${OPP.sel.has(x.descricao)?'checked':''} onclick="opSel(${x._i},this.checked)"></td>
       <td><span class="tp-chip">${esc(x.curva)}</span></td><td style="font-size:12.5px">${esc(x.descricao)}</td>
       <td class="muted" style="font-size:11px">${esc((x.grupos||[]).join(', '))}</td>
-      <td style="text-align:right;font-weight:600">${BRL(x.valor)}</td><td style="text-align:right" class="muted">${x.valor_pct}%</td></tr>`;
+      <td style="text-align:right;font-weight:600">${BRL(x.valor)}</td><td style="text-align:right" class="muted">${Number(x.valor_pct||0).toFixed(1)}%</td></tr>`;
   }
   if(!fi.length) html+='<tr><td colspan="6" class="empty">Nenhum item descoberto nesse filtro.</td></tr>';
   box.innerHTML=html+'</tbody></table>';

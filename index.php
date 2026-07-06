@@ -301,22 +301,19 @@
       <p class="sub" id="msub">Serviços × obras — status de cada aquisição por obra.</p>
     </div>
     <div class="panel" style="margin-bottom:8px">
-      <div class="bar" style="gap:16px">
-        <span class="lg"><span class="sw c-fin"></span> Finalizado</span>
-        <span class="lg"><span class="sw c-cot"></span> Em cotação (no prazo)</span>
-        <span class="lg"><span class="sw c-andamento"></span> Em andamento</span>
-        <span class="lg"><span class="sw c-prop"></span> Proposta recebida</span>
-        <span class="lg"><span class="sw c-atras"></span> Atrasado (passou do gatilho)</span>
-        <span class="lg"><span class="sw c-pend"></span> Com pendências</span>
-        <span class="lg"><span class="sw c-noprazo"></span> No prazo, não iniciado</span>
-        <span class="lg"><span class="sw c-none"></span> N/A</span>
-      </div>
+      <div class="bar" id="mlegend" style="gap:16px;flex-wrap:wrap"></div>
     </div>
     <div class="panel">
-      <div class="bar">
+      <div class="bar" style="flex-wrap:wrap;gap:8px">
         <select id="mobra" multiple size="1" onchange="renderMatriz()" title="Segure Ctrl para escolher várias obras"></select>
         <select id="mgrupo" onchange="renderMatriz()"><option value="">Todos os grupos</option></select>
         <select id="mcurva" onchange="renderMatriz()"><option value="">Todas as curvas</option><option>A</option><option>B</option><option>C</option></select>
+        <select id="mstatus" onchange="renderMatriz()"><option value="">Todos os status</option></select>
+        <select id="mresp" onchange="renderMatriz()"><option value="">Todos os responsáveis</option><option value="__sem__">— sem responsável —</option></select>
+        <label class="ckl" style="font-size:12px"><input type="checkbox" id="malert" onchange="renderMatriz()"> só em alerta</label>
+        <span style="width:1px;height:22px;background:var(--line);align-self:center"></span>
+        <label class="muted" style="font-size:12px;align-self:center">Colorir <select id="mcolor" onchange="renderMatriz()" style="margin-left:4px"><option value="status">Status</option><option value="prazo">Prazo de cotação</option></select></label>
+        <label class="muted" style="font-size:12px;align-self:center">Organizar <select id="morder" onchange="renderMatriz()" style="margin-left:4px"><option value="grupo">Por grupo</option><option value="prazo">Por prazo (urgente 1º)</option><option value="nome">Por nome</option></select></label>
         <div class="search"><span class="material-icons" style="color:var(--muted)">search</span>
           <input id="mq" placeholder="Filtrar serviço…" oninput="renderMatriz()"></div>
       </div>
@@ -569,6 +566,9 @@ async function loadMatriz(force){
     MAT=items;
     fillOrdered('mgrupo',[...new Set(items.map(i=>i.grupo).filter(Boolean))]);
     fillMulti('mobra',[...new Set(items.map(i=>i.obra_nome).filter(Boolean))]);
+    fill('mstatus',[...new Set(items.map(i=>i.status||'Não Iniciado'))]);
+    const mr=document.getElementById('mresp'); if(mr){ const mk=mr.value;
+      mr.innerHTML='<option value="">Todos os responsáveis</option><option value="__sem__">— sem responsável —</option>'+[...new Set(items.map(i=>i.responsavel).filter(Boolean))].sort().map(v=>`<option>${esc(v)}</option>`).join(''); mr.value=mk; }
     renderMatriz();
   }catch(e){ const w=document.getElementById('mwrap'); if(w) w.innerHTML='<div class="empty">Falha ao carregar a matriz: '+esc(e.message)+'</div>'; }
 }
@@ -828,34 +828,68 @@ function cellClass(i){
   return 'c-noprazo';
 }
 const CELL_TXT={'c-fin':'Finalizado','c-cot':'Em cotação','c-andamento':'Em andamento','c-prop':'Proposta recebida','c-atras':'Atrasado','c-pend':'Com pendências','c-noprazo':'No prazo, não iniciado','c-none':'N/A'};
+// cor por PRAZO DE COTAÇÃO (fim_cotacao) — reaproveita as classes de cor com semântica de prazo
+function prazoClass(i){
+  if(!i) return 'c-none';
+  const lv=alertLevel(i);
+  if(lv==='finalizado') return 'c-fin';
+  if(!i.fim_cotacao) return 'c-none';
+  if(lv==='critico') return 'c-atras';     // fim da cotação venceu
+  if(lv==='atrasado') return 'c-pend';     // devia ter iniciado a cotação
+  if(lv==='proximo')  return 'c-prop';     // vence em ≤7 dias
+  return 'c-noprazo';                       // no prazo
+}
+const PRAZO_TXT={'c-fin':'Cotação finalizada','c-atras':'Prazo de cotação venceu','c-pend':'Devia ter iniciado a cotação','c-prop':'Vence em ≤7 dias','c-noprazo':'No prazo','c-none':'Sem data de cotação'};
+const LEG_STATUS=[['c-fin','Finalizado'],['c-cot','Em cotação (no prazo)'],['c-andamento','Em andamento'],['c-prop','Proposta recebida'],['c-atras','Atrasado (passou do gatilho)'],['c-pend','Com pendências'],['c-noprazo','No prazo, não iniciado'],['c-none','N/A']];
+const LEG_PRAZO=[['c-fin','Cotação finalizada'],['c-atras','Prazo de cotação venceu'],['c-pend','Devia ter iniciado a cotação'],['c-prop','Vence em ≤7 dias'],['c-noprazo','No prazo'],['c-none','Sem data de cotação']];
 function renderMatriz(){
   if(!MAT){ loadMatriz(); return; }        // fonte própria da matriz (todas as obras) ainda não carregada
-  const src=MAT;
+  const src=MAT, gv=id=>{const e=document.getElementById(id);return e?e.value:'';};
   const sel=[...document.getElementById('mobra').selectedOptions].map(o=>o.value);
   const allObras=[...new Set(src.map(i=>i.obra_nome).filter(Boolean))];
   const obras=sel.length?sel:allObras;
-  const fg=document.getElementById('mgrupo').value,fc=document.getElementById('mcurva').value;
-  const q=(document.getElementById('mq').value||'').toLowerCase();
-  // serviços (linhas) distintos por ordem, na ordem lógica de grupo
-  const filt=src.filter(i=>(!fg||i.grupo===fg)&&(!fc||i.curva===fc)&&(!q||i.nome.toLowerCase().includes(q)));
-  const seen=new Map();
-  for(const i of filt){ if(!seen.has(i.ordem)) seen.set(i.ordem,{ordem:i.ordem,nome:i.nome,grupo:i.grupo,curva:i.curva}); }
-  const servicos=[...seen.values()];
-  if(!servicos.length||!obras.length){document.getElementById('mwrap').innerHTML='<div class="empty">Sem dados para os filtros.</div>';return;}
+  const fg=gv('mgrupo'), fc=gv('mcurva'), fst=gv('mstatus'), fr=gv('mresp');
+  const onlyAlert=(document.getElementById('malert')||{}).checked;
+  const colorBy=gv('mcolor')||'status', orderBy=gv('morder')||'grupo';
+  const q=(gv('mq')||'').toLowerCase();
+  const clsFn=colorBy==='prazo'?prazoClass:cellClass, txtMap=colorBy==='prazo'?PRAZO_TXT:CELL_TXT;
+  // legenda + subtítulo dinâmicos
+  const lg=document.getElementById('mlegend'); if(lg) lg.innerHTML=(colorBy==='prazo'?LEG_PRAZO:LEG_STATUS).map(([c,t])=>`<span class="lg"><span class="sw ${c}"></span> ${esc(t)}</span>`).join('');
+  const sub=document.getElementById('msub'); if(sub) sub.textContent=colorBy==='prazo'?'Serviços × obras — cor pelo PRAZO DE COTAÇÃO (data limite p/ fechar a cotação); a data na célula é o fim da cotação.':'Serviços × obras — status de cada aquisição por obra.';
   // índice (ordem|obra) -> item
   const idx={}; src.forEach(i=>idx[i.ordem+'|'+i.obra_nome]=i);
+  // serviços distintos (filtros de serviço: grupo/curva/busca), na ordem natural (= por grupo lógico)
+  const filt=src.filter(i=>obras.includes(i.obra_nome)&&(!fg||i.grupo===fg)&&(!fc||i.curva===fc)&&(!q||i.nome.toLowerCase().includes(q)));
+  const seen=new Map();
+  for(const i of filt){ if(!seen.has(i.ordem)) seen.set(i.ordem,{ordem:i.ordem,nome:i.nome,grupo:i.grupo,curva:i.curva}); }
+  // filtros de ITEM (status/responsável/alerta): mantém o serviço se ALGUM item das obras exibidas casa
+  let servicos=[...seen.values()].filter(s=>{
+    const its=obras.map(o=>idx[s.ordem+'|'+o]).filter(Boolean);
+    if(fst && !its.some(i=>(i.status||'Não Iniciado')===fst)) return false;
+    if(fr){ if(fr==='__sem__'){ if(!its.some(i=>!(i.responsavel||'').trim())) return false; } else if(!its.some(i=>(i.responsavel||'')===fr)) return false; }
+    if(onlyAlert && !its.some(i=>isAlert(i))) return false;
+    return true;
+  });
+  // organização
+  const earliest=s=>{ const ds=obras.map(o=>idx[s.ordem+'|'+o]).filter(Boolean).map(i=>i.fim_cotacao).filter(Boolean).sort(); return ds.length?ds[0]:'9999-99-99'; };
+  let agrupado=true;
+  if(orderBy==='prazo'){ servicos.sort((a,b)=>earliest(a).localeCompare(earliest(b))); agrupado=false; }
+  else if(orderBy==='nome'){ servicos.sort((a,b)=>a.nome.localeCompare(b.nome,'pt')); agrupado=false; }
+  if(!servicos.length||!obras.length){document.getElementById('mwrap').innerHTML='<div class="empty">Sem dados para os filtros.</div>';return;}
   let html='<table class="mtable"><thead><tr><th class="svc-h">Serviço</th>'+
     obras.map(o=>`<th>${esc(o)}</th>`).join('')+'</tr></thead><tbody>';
   let grupo=null;
   for(const s of servicos){
-    if(s.grupo!==grupo){grupo=s.grupo;
+    if(agrupado && s.grupo!==grupo){grupo=s.grupo;
       html+=`<tr class="grp-h"><td colspan="${obras.length+1}">${esc(grupo)}</td></tr>`;}
     html+=`<tr><td class="svc-c">${esc(s.nome)}<small>Curva ${esc(s.curva||'—')}</small></td>`;
     for(const o of obras){
-      const i=idx[s.ordem+'|'+o]; const cls=cellClass(i);
-      const tip=i?`${esc(o)} · ${esc(s.nome)}\n${CELL_TXT[cls]}`+(i.data_necessaria?` · obra ${D(i.data_necessaria)}`:''):'N/A';
+      const i=idx[s.ordem+'|'+o]; const cls=clsFn(i);
+      const dt=i&&i.fim_cotacao?i.fim_cotacao.split('-').slice(1).reverse().join('/'):'';
+      const tip=i?`${esc(o)} · ${esc(s.nome)}\n${txtMap[cls]||''}`+(i.fim_cotacao?` · fim cotação ${D(i.fim_cotacao)}`:'')+(i.responsavel?`\n${esc(i.responsavel)}`:''):'N/A';
       const click=i?`onclick="openModal(${i.ordem},${i.obra_id||1})"`:'';
-      html+=`<td><div class="cell ${cls}" title="${tip}" ${click}></div></td>`;
+      const inner=(colorBy==='prazo'&&dt)?`<span style="background:rgba(0,0,0,.34);color:#fff;padding:1px 5px;border-radius:5px;font-size:10px;font-weight:700">${dt}</span>`:'';
+      html+=`<td><div class="cell ${cls}" title="${tip}" ${click}>${inner}</div></td>`;
     }
     html+='</tr>';
   }

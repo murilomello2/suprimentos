@@ -1,5 +1,5 @@
 <?php /* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php. (republicado) */ ?>
-<?php /* build: opp-busca-digitavel-2026-07-06 */ ?>
+<?php /* build: fix-excluir-por-obra-2026-07-06 */ ?>
 <!doctype html>
 <html lang="pt-br">
 <head>
@@ -2648,7 +2648,8 @@ function resumoTab(i){
       </div>
       ${IS_ADMIN?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;gap:8px">
         <button class="btn-ghost" onclick="desdobrarItem()"><span class="material-icons" style="font-size:15px">call_split</span> Desdobrar em Material + MO</button>
-        <button class="btn-ghost" onclick="excluirItem()" style="color:var(--pend)"><span class="material-icons" style="font-size:15px">delete</span> Excluir item</button>
+        <button class="btn-ghost" onclick="excluirItem()" style="color:var(--pend)"><span class="material-icons" style="font-size:15px">delete</span> Remover desta obra</button>
+        <button class="btn-ghost" onclick="excluirItemCatalogo()" style="color:var(--pend);opacity:.65" title="Remove de TODAS as obras — irreversível"><span class="material-icons" style="font-size:15px">delete_forever</span> Excluir do catálogo</button>
       </div>`:''}`;
   }
   // ---------- MODO EDIÇÃO ---------- (editor geral: status/fornecedor/observações; demais campos = admin)
@@ -2783,10 +2784,20 @@ async function desdobrarItem(){
 }
 async function excluirItem(){
   if(!CUR)return;
-  if(!confirm('Excluir o item "'+CUR.nome+'" do radar? Esta ação não pode ser desfeita.'))return;
+  const ob=CUR.obra_nome||('obra '+(CUR.obra_id||1));
+  if(!confirm('Remover "'+CUR.nome+'" da obra '+ob+'?\n\nO item CONTINUA nas outras obras e no catálogo — some só desta obra.'))return;
   const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',ordem:CUR.ordem,me:EU&&EU.bitrix_id,obra:CUR.obra_id||1})})).json();
   if(d.error){toast('Erro: '+d.error);return;}
-  closeModal(true); await load(); toast('Item excluído');
+  closeModal(true); if(typeof MAT!=='undefined')MAT=null; await load();
+  toast('Removido da obra '+ob+(d.restam_obras!=null?(' · ainda em '+d.restam_obras+' obra(s)'):''));
+}
+async function excluirItemCatalogo(){
+  if(!CUR)return;
+  if(!confirm('⚠️ EXCLUIR "'+CUR.nome+'" do CATÁLOGO INTEIRO?\n\nRemove o item e toda a curadoria dele de TODAS as obras (Trinity, Imperiale, ADARA, ...). Use só para item que é lixo de verdade. NÃO pode ser desfeito.'))return;
+  if(!confirm('Confirma remover "'+CUR.nome+'" de TODAS as obras? Última chance.'))return;
+  const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',catalogo:true,ordem:CUR.ordem,me:EU&&EU.bitrix_id,obra:CUR.obra_id||1})})).json();
+  if(d.error){toast('Erro: '+d.error);return;}
+  closeModal(true); if(typeof MAT!=='undefined')MAT=null; await load(); toast('Excluído do catálogo (todas as obras)');
 }
 /* ===== Configuração / Permissões (Bloco 2) ===== */
 let CFG={usuarios:[],obras:[]}, NUSER=null;

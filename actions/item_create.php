@@ -29,12 +29,26 @@ try {
 
     if ($acao === 'excluir') {
         $ordem = (int)($in['ordem'] ?? 0);
+        // POR PADRÃO remove o item SÓ DESTA OBRA (o radar de cada obra é INNER JOIN em radar_item):
+        // apagar o radar_item da obra atual tira o item do radar dela e MANTÉM nas outras obras.
+        // Só remove do CATÁLOGO (todas as obras + a definição do serviço) com a flag explícita `catalogo` (admin).
+        $doCatalogo = !empty($in['catalogo']);
         $nm = $pdo->prepare("SELECT nome FROM servico WHERE id=?"); $nm->execute([$ordem]); $nome = $nm->fetchColumn() ?: ('#'.$ordem);
-        $pdo->prepare("DELETE FROM radar_item WHERE servico_id=?")->execute([$ordem]);   // catálogo: sai de TODAS as obras
-        $pdo->prepare("DELETE FROM servico WHERE id=?")->execute([$ordem]);
-        log_historico($pdo, $OBRA, $ordem, $nome, $me, $perms['nome'], 'Item excluído', $nome, '');
+        if ($doCatalogo) {
+            if (empty($perms['perm_admin'])) { throw new Exception('Remover do catálogo (todas as obras) é só administrador.'); }
+            $pdo->prepare("DELETE FROM radar_item WHERE servico_id=?")->execute([$ordem]);   // sai de TODAS as obras
+            $pdo->prepare("DELETE FROM servico WHERE id=?")->execute([$ordem]);
+            log_historico($pdo, $OBRA, $ordem, $nome, $me, $perms['nome'], 'Item excluído do catálogo (todas as obras)', $nome, '');
+            $pdo->commit();
+            echo json_encode(['ok'=>true, 'escopo'=>'catalogo']); exit;
+        }
+        // per-obra (padrão seguro)
+        $del = $pdo->prepare("DELETE FROM radar_item WHERE servico_id=? AND obra_id=?"); $del->execute([$ordem, $OBRA]);
+        $restam = $pdo->prepare("SELECT COUNT(*) FROM radar_item WHERE servico_id=?"); $restam->execute([$ordem]);
+        $restam = (int)$restam->fetchColumn();
+        log_historico($pdo, $OBRA, $ordem, $nome, $me, $perms['nome'], 'Item removido da obra', $nome, '');
         $pdo->commit();
-        echo json_encode(['ok'=>true]); exit;
+        echo json_encode(['ok'=>true, 'escopo'=>'obra', 'restam_obras'=>$restam]); exit;
     }
 
     if ($acao === 'desdobrar') {

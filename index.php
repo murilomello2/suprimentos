@@ -224,6 +224,7 @@
     </nav>
     <div class="navlabel">Administração</div>
     <nav class="nav">
+      <a id="nav-oportunidades" data-menu="oportunidades" title="Oportunidades (Curva ABC)" onclick="showView('oportunidades')"><span class="material-icons">insights</span> <span class="navtxt">Oportunidades</span></a>
       <a id="nav-config" data-menu="config" title="Configurações" onclick="showView('config')"><span class="material-icons">settings</span> <span class="navtxt">Configurações</span></a>
       <a id="nav-updates" data-menu="updates" title="Atualizações" onclick="showView('updates')"><span class="material-icons">history</span> <span class="navtxt">Atualizações</span> <span class="navbadge" style="font-size:9px;background:var(--dourado);color:#fff;padding:1px 5px;border-radius:5px;margin-left:auto">temp</span></a>
       <a id="nav-audit" data-menu="audit" title="Auditoria" onclick="showView('audit')"><span class="material-icons">fact_check</span> <span class="navtxt">Auditoria</span> <span class="navbadge" style="font-size:9px;background:var(--dourado);color:#fff;padding:1px 5px;border-radius:5px;margin-left:auto">temp</span></a>
@@ -319,6 +320,31 @@
       </div>
     </div>
     <div class="wrap" id="mwrap"></div>
+   </section>
+
+   <section id="view-oportunidades" style="display:none">
+    <div class="top">
+      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">insights</span> Oportunidades — Curva ABC</h1>
+      <p class="sub">Grandes itens do orçamento que o radar ainda NÃO cobre — agrupe os parecidos e transforme num item de aquisição.</p>
+    </div>
+    <div class="panel" style="margin-bottom:8px">
+      <div class="bar" style="gap:10px;flex-wrap:wrap;align-items:center">
+        <label class="muted" style="font-size:12px">Obra <select id="opObra" onchange="opLoad()" style="margin-left:6px"></select></label>
+        <select id="opCurva" onchange="opRender()"><option value="">Curva A + B + C</option><option value="A">Só curva A</option><option value="AB">Curva A + B</option></select>
+        <select id="opGrupo" onchange="opRender()"><option value="">Todos os grupos</option></select>
+        <div class="search" style="min-width:180px"><span class="material-icons" style="color:var(--muted)">search</span><input id="opQ" placeholder="Buscar descrição…" oninput="opRender()"></div>
+      </div>
+      <div id="opKpis" class="kpis" style="padding:10px 0 0"></div>
+    </div>
+    <div class="panel" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <b id="opSel" style="font-size:13px">0 selecionados · R$ 0</b>
+      <span style="flex:1"></span>
+      <input id="opNome" placeholder="Nome do item (ex.: Esquadrias de Alumínio)" style="min-width:270px">
+      <input id="opGrupoNovo" placeholder="Grupo" style="width:150px">
+      <select id="opCurvaNovo"><option>A</option><option>B</option><option>C</option></select>
+      <button class="btn-prim" style="padding:6px 12px" onclick="opCriar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add_task</span> Criar item de aquisição</button>
+    </div>
+    <div class="wrap" id="opwrap"><div class="empty">Selecione uma obra.</div></div>
    </section>
 
    <section id="view-config" style="display:none">
@@ -575,15 +601,80 @@ async function loadMatriz(force){
 
 /* ---------- view switch ---------- */
 function showView(v){
-  ['radar','matriz','config','audit','updates'].forEach(x=>{
+  ['radar','matriz','oportunidades','config','audit','updates'].forEach(x=>{
     document.getElementById('view-'+x).style.display=v===x?'':'none';
     document.getElementById('nav-'+x).classList.toggle('active',v===x);
   });
   if(v==='matriz') loadMatriz();
+  if(v==='oportunidades') renderOportunidades();
   if(v==='config') renderConfig();
   if(v==='radar') fitRadarHeight();
   if(v==='audit') renderAudit();
   if(v==='updates') renderUpdates();
+}
+
+/* ===== Oportunidades (Curva ABC) — grandes itens do orçamento fora do radar ===== */
+let OPP={obra:null, gaps:[], resumo:{}, sel:new Set()};
+function renderOportunidades(){
+  const os=document.getElementById('opObra'), list=(typeof OBRAS!=='undefined'&&OBRAS)?OBRAS:[];
+  if(os && list.length){ const sig=list.map(o=>o.id).join(','); if(os.dataset.k!==sig || !os.options.length){ const keep=os.value; os.innerHTML=list.map(o=>`<option value="${o.id}">${esc(o.nome)}</option>`).join(''); os.dataset.k=sig; if(keep&&list.some(o=>String(o.id)===keep)) os.value=keep; } }
+  opLoad();
+}
+async function opLoad(){
+  const os=document.getElementById('opObra'); OPP.obra=Number(os?os.value:OPP.obra)||1; OPP.sel=new Set();
+  const box=document.getElementById('opwrap'); box.innerHTML='<div class="empty">Analisando o orçamento…</div>';
+  try{
+    const d=await (await fetch('actions/oportunidades.php?obra='+OPP.obra+'&_='+Date.now())).json();
+    if(d.error){ box.innerHTML='<div class="empty">Erro: '+esc(d.error)+'</div>'; return; }
+    OPP.gaps=(d.gaps||[]).map((g,i)=>(g._i=i,g)); OPP.resumo=d.resumo||{};
+    const g=document.getElementById('opGrupo'), keep=g.value;
+    g.innerHTML='<option value="">Todos os grupos</option>'+[...new Set(OPP.gaps.flatMap(x=>x.grupos||[]))].sort().map(x=>`<option>${esc(x)}</option>`).join(''); if(keep)g.value=keep;
+    opRender();
+  }catch(e){ box.innerHTML='<div class="empty">Falha: '+esc(e.message)+'</div>'; }
+}
+function opFiltered(){
+  const fc=val('opCurva'), fg=val('opGrupo'), q=(document.getElementById('opQ').value||'').toLowerCase();
+  return OPP.gaps.filter(x=>(!fc||(fc==='AB'?(x.curva==='A'||x.curva==='B'):x.curva===fc))&&(!fg||(x.grupos||[]).includes(fg))&&(!q||(x.descricao||'').toLowerCase().includes(q)));
+}
+function opRender(){
+  const r=OPP.resumo, k=document.getElementById('opKpis');
+  if(k) k.innerHTML=`
+    <div class="kpi"><div class="v gold">${r.coberto_pct||0}%</div><div class="l">radar cobre · ${BRL(r.coberto)}</div></div>
+    <div class="kpi"><div class="v ${(r.gap_pct||0)>15?'alert':''}">${r.gap_pct||0}%</div><div class="l">gap de suprimentos · ${BRL(r.gap)}</div></div>
+    <div class="kpi"><div class="v">${r.indiretos_pct||0}%</div><div class="l">custos indiretos (fora)</div></div>
+    <div class="kpi"><div class="v">${r.n_gaps||0}</div><div class="l">itens descobertos</div></div>`;
+  const fi=opFiltered(), box=document.getElementById('opwrap');
+  let html='<table><thead><tr><th style="width:30px"><input type="checkbox" id="opAll" onclick="opToggleAll(this.checked)"></th><th>Curva</th><th>Descrição (item do orçamento)</th><th>Grupos</th><th style="text-align:right">Valor</th><th style="text-align:right">%</th></tr></thead><tbody>';
+  for(const x of fi){
+    html+=`<tr><td><input type="checkbox" ${OPP.sel.has(x.descricao)?'checked':''} onclick="opSel(${x._i},this.checked)"></td>
+      <td><span class="tp-chip">${esc(x.curva)}</span></td><td style="font-size:12.5px">${esc(x.descricao)}</td>
+      <td class="muted" style="font-size:11px">${esc((x.grupos||[]).join(', '))}</td>
+      <td style="text-align:right;font-weight:600">${BRL(x.valor)}</td><td style="text-align:right" class="muted">${x.valor_pct}%</td></tr>`;
+  }
+  if(!fi.length) html+='<tr><td colspan="6" class="empty">Nenhum item descoberto nesse filtro.</td></tr>';
+  box.innerHTML=html+'</tbody></table>';
+  const all=document.getElementById('opAll'); if(all) all.checked=fi.length>0 && fi.every(x=>OPP.sel.has(x.descricao));
+  opCount();
+}
+function opSel(i,on){ const g=OPP.gaps[i]; if(!g)return; on?OPP.sel.add(g.descricao):OPP.sel.delete(g.descricao); opCount();
+  const all=document.getElementById('opAll'); if(all){ const fi=opFiltered(); all.checked=fi.length>0 && fi.every(x=>OPP.sel.has(x.descricao)); } }
+function opToggleAll(on){ opFiltered().forEach(x=>{ on?OPP.sel.add(x.descricao):OPP.sel.delete(x.descricao); }); opRender(); }
+function opCount(){ const v=OPP.gaps.filter(g=>OPP.sel.has(g.descricao)).reduce((s,g)=>s+g.valor,0);
+  const el=document.getElementById('opSel'); if(el) el.textContent=OPP.sel.size+' selecionados · '+BRL(v); }
+async function opCriar(){
+  if(!OPP.sel.size){ toast('Selecione os itens do orçamento a agrupar'); return; }
+  const nome=(document.getElementById('opNome').value||'').trim(); if(!nome){ toast('Dê um nome ao item de aquisição'); return; }
+  const grupo=(document.getElementById('opGrupoNovo').value||'').trim(); if(!grupo){ toast('Informe o grupo'); return; }
+  const curva=val('opCurvaNovo')||'A', descricoes=[...OPP.sel];
+  const v=OPP.gaps.filter(g=>OPP.sel.has(g.descricao)).reduce((s,g)=>s+g.valor,0);
+  if(!confirm('Criar “'+nome+'” agrupando '+descricoes.length+' descrição(ões) · '+BRL(v)+' e vincular a verba na obra? Entra como sugerido (🤖).')) return;
+  try{ const r=await (await fetch('actions/oportunidades.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'criar',me:EU&&EU.bitrix_id,obra:OPP.obra,nome,grupo,curva,descricoes})})).json();
+    if(r.error){ toast(r.error); return; }
+    toast('Criado: '+r.nome+' — '+r.linhas+' linhas · '+BRL(r.valor));
+    document.getElementById('opNome').value=''; document.getElementById('opGrupoNovo').value='';
+    OPP.sel=new Set(); if(typeof MAT!=='undefined')MAT=null; if(typeof RCDATA!=='undefined')RCDATA=null;
+    await opLoad();
+  }catch(e){ toast('Falha: '+e.message); }
 }
 
 /* ===== Auditoria de Orçamento (temporária) — duplicação de vínculo de verba ===== */
@@ -2643,7 +2734,7 @@ async function excluirItem(){
 }
 /* ===== Configuração / Permissões (Bloco 2) ===== */
 let CFG={usuarios:[],obras:[]}, NUSER=null;
-const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Mapa de Cotações'],['updates','Atualizações'],['config','Configurações']];
+const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Mapa de Cotações'],['oportunidades','Oportunidades'],['updates','Atualizações'],['config','Configurações']];
 const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',comprador:'Suprimentos',coordenador:'Coordenador',personalizado:'Personalizado'};
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},

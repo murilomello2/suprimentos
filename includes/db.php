@@ -423,6 +423,16 @@ function sup_sistema($p) { // path normalizado → subsistema. PALAVRA INTEIRA n
     return null;
 }
 
+function sup_mo_guarda($desc) {
+    // true se a descrição é PESSOAL de guarda/portaria (mão de obra, não material).
+    // Só termos de PESSOAL inequívocos — de propósito NÃO usa "portaria"/"vigia"/"segurança"
+    // soltos (portaria/vigia podem ser construção/janela; segurança sozinho pegaria EPI).
+    $d = sup_normt($desc);
+    foreach (['vigilante','porteiro','seguranca patrimonial','guarda patrimonial','vigia noturno'] as $t)
+        if (strpos($d, $t) !== false) return true;
+    return false;
+}
+
 function criar_item($pdo, $nome, $grupo, $tipo = '', $curva = '', $copy_from = null) {
     $nome = trim($nome);
     if ($nome === '') throw new Exception('nome obrigatório');

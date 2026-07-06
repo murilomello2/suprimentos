@@ -40,6 +40,34 @@ try {
     if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
 
     $acao   = $in['acao'] ?? '';
+
+    // Reclassifica insumos de PESSOAL de guarda/portaria material→mo em obras JÁ importadas
+    // (seeds futuros já saem certos pelo classificador). Não mexe no valor da verba, só no rótulo
+    // material/MO do split. {acao:'reclassificar_mo', me, obra?(0=todas), dry?}
+    if ($acao === 'reclassificar_mo') {
+        $alvo = (int)($in['obra'] ?? 0);   // 0 = todas as obras
+        $dry  = !empty($in['dry']);
+        // prefiltro amplo por LIKE (termos ascii presentes no texto); confirmação precisa no PHP via sup_mo_guarda
+        $like = "(ci.descricao LIKE '%vigilante%' OR ci.descricao LIKE '%porteiro%' OR ci.descricao LIKE '%patrimonial%' OR ci.descricao LIKE '%vigia%')";
+        $base = "SELECT ci.composicao_id, ci.descricao, ci.tipo, c.obra_id, c.descricao AS comp
+                 FROM composicao_insumo ci JOIN composicao c ON c.id=ci.composicao_id
+                 WHERE ci.tipo<>'mo' AND $like";
+        if ($alvo > 0) { $st = $pdo->prepare($base . " AND c.obra_id=?"); $st->execute([$alvo]); }
+        else           { $st = $pdo->query($base); }
+        $hit = [];
+        foreach ($st->fetchAll() as $r) if (sup_mo_guarda($r['descricao'])) $hit[] = $r;
+        if (!$dry && $hit) {
+            $pdo->beginTransaction();
+            $up = $pdo->prepare("UPDATE composicao_insumo SET tipo='mo' WHERE composicao_id=? AND descricao=? AND tipo<>'mo'");
+            foreach ($hit as $r) $up->execute([(int)$r['composicao_id'], $r['descricao']]);
+            $pdo->commit();
+        }
+        echo json_encode(['ok'=>true, 'dry'=>$dry, 'obra'=>$alvo ?: 'todas', 'reclassificados'=>count($hit),
+            'itens'=>array_map(function($r){ return ['obra'=>(int)$r['obra_id'], 'composicao'=>$r['comp'],
+                     'insumo'=>$r['descricao'], 'de'=>$r['tipo'], 'para'=>'mo']; }, $hit)],
+            JSON_UNESCAPED_UNICODE); exit;
+    }
+
     $obraId = (int)($in['obra_id'] ?? 0);
     if ($obraId < 2) throw new Exception('obra_id deve ser >= 2 (a 1 é a Trinity, intocável por aqui)');
     $OFF = $obraId * 100000;   // offset de IDs da obra

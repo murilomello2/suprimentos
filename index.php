@@ -2868,36 +2868,58 @@ function rcPillTxt(dim,r){
   if(dim==='quant'){ const q=r.quant||{}; return q.fonte?esc(q.fonte):'—'; }
   return '';
 }
-function rcLearned(v){ if(!v) return '';
-  if(v.metodo==='analitico'){ const n=(v.linhas||[]).length; if(!n) return ''; let t=n+' linha(s) do orçamento casadas por descrição'; if(v.escopo_parcial) t+=' · recorte de local'; if(v.exclusoes&&v.exclusoes.length) t+=' · '+v.exclusoes.length+' exclusão(ões)'; return t; }
-  if(v.metodo==='composicao'){ const n=(v.insumos||[]).length; let t=n?(n+' insumo(s)'):''; if(v.recorte_sugerido) t=(t?t+' · ':'')+'recorte por sistema “'+esc(v.recorte_sugerido.sistema)+'”'+(v.recorte_sugerido.tipo?(' ('+esc(v.recorte_sugerido.tipo)+')'):''); return t; }
-  return '';
-}
+function rcList(arr,fn){ return (arr&&arr.length)?('<ul style="margin:5px 0 0;padding-left:18px">'+arr.map(fn).join('')+'</ul>'):''; }
 function rcEditor(r){
   const sid=r.servico_id, c=r.crono||{}, v=r.verba||{}, qd=r.quant||{};
   const exs=(v.exclusoes||[]).map(e=>e.insumo).join('; ');
-  const learned=rcLearned(v);
   const opt=(cur,val,lab)=>`<option value="${val}" ${cur===val?'selected':''}>${lab}</option>`;
+  const box=inner=>`<div style="background:#f3f8f4;border:1px solid #e2ede5;border-radius:7px;padding:8px 10px;margin-top:8px;font-size:12px;line-height:1.5">
+      <div style="font-size:10px;font-weight:800;letter-spacing:.5px;color:var(--verde);margin-bottom:3px">O QUE FOI APRENDIDO</div>${inner}</div>`;
+  // ---- cronograma: a regra aprendida ----
+  const cronoAp = c.ancora_nome
+    ? `<b>Âncora fixa:</b> procura a tarefa “${esc(c.ancora_nome)}” no cronograma → 1ª data.`
+    : `<b>Automático:</b> usa o marco principal do serviço${c.termos_template?`, procurando por <b>${esc(c.termos_template)}</b>`:''}.`;
+  const cronoMarco = c.marco_template?`<div class="muted" style="margin-top:3px">${esc(c.marco_template)}</div>`:'';
+  // ---- verba: a regra + os insumos/linhas aprendidos ----
+  let verbaAp='';
+  if(v.metodo==='composicao'){
+    verbaAp = `Casa por <b>composição</b> — insumos que geralmente entram:`+
+      rcList(v.insumos,x=>`<li>${esc(x.insumo)} <span class="muted">· ${esc(x.tipo||'')}${x.sistemas?(' · '+esc(Object.keys(x.sistemas).join(', '))):''}${x.escopo==='recorte_de_locais'?' · recorte de locais':' · todos os locais'}</span></li>`);
+    if(v.recorte_sugerido) verbaAp+=`<div class="muted" style="margin-top:3px">Recorte: pega o sistema “${esc(v.recorte_sugerido.sistema)}”${v.recorte_sugerido.tipo?(' ('+esc(v.recorte_sugerido.tipo)+')'):''} inteiro.</div>`;
+  } else if(v.metodo==='analitico'){
+    verbaAp = `Casa por <b>orçamento analítico</b> — linhas que geralmente entram:`+
+      rcList(v.linhas,x=>`<li>${esc(x.descricao)}${x.ocorrencias>1?` <span class="muted">×${x.ocorrencias}</span>`:''}</li>`);
+    if(v.escopo_parcial) verbaAp+=`<div class="muted" style="margin-top:3px">⚠ recorte de locais (não pega todas as ocorrências).</div>`;
+  } else if(v.metodo==='manual'){
+    verbaAp = `Valor <b>manual</b> na origem: ${BRL(v.valor_manual_origem||0)}.`;
+  }
+  if(verbaAp && v.termos_template) verbaAp+=`<div class="muted" style="margin-top:4px">Termos que casam: ${esc(v.termos_template)}</div>`;
+  // ---- quantitativo: o driver aprendido ----
+  let quantAp='';
+  if(qd.driver_na_verba&&qd.driver_na_verba.length) quantAp=`Conta pela quantidade de: <b>${esc(qd.driver_na_verba.join('; '))}</b>.`;
+  else if(qd.linhas&&qd.linhas.length) quantAp=`Soma as linhas: ${esc(qd.linhas.map(l=>l.descricao).join('; '))}.`;
+  else if(qd.insumos&&qd.insumos.length) quantAp=`Insumos: ${esc(qd.insumos.join('; '))}.`;
   return `<div style="padding:12px 14px">
     <div class="rcrule">
       <div class="rchead"><span class="material-icons" style="color:#185fa5">event</span> Cronograma — qual data usar</div>
-      <label class="rclab">tarefa(s) a procurar no cronograma <span class="muted">(separe por “;” pra dar alternativas)</span>
+      ${box(cronoAp+cronoMarco)}
+      <label class="rclab" style="margin-top:8px">âncora fixa <span class="muted">(opcional — vazio mantém automático; separe por “;” pra alternativas)</span>
         <input id="rc_anc_${sid}" value="${esc(c.ancora_nome||'')}" placeholder="ex.: Louças e Metais; Acabamento fino"></label>
-      <div class="muted" style="font-size:11.5px;margin-top:5px">usa a PRIMEIRA data encontrada. Vazio = automático pelos termos do serviço.</div>
     </div>
     <div class="rcrule">
       <div class="rchead"><span class="material-icons" style="color:#b5651d">payments</span> Verba — de onde vem o valor</div>
-      <div style="display:flex;gap:12px;flex-wrap:wrap">
+      ${verbaAp?box(verbaAp):''}
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">
         <label class="rclab" style="flex:0 0 230px">como casar
           <select id="rc_vm_${sid}">${opt(v.metodo||'','','—')}${opt(v.metodo,'composicao','composição (cesta de insumos)')}${opt(v.metodo,'analitico','orçamento analítico (linhas)')}${opt(v.metodo,'manual','manual')}</select></label>
         <label class="rclab" style="flex:1;min-width:220px">não incluir (exclusões, separadas por “;”)
           <input id="rc_ex_${sid}" value="${esc(exs)}" placeholder="ex.: mão de obra empreitada"></label>
       </div>
-      ${learned?`<div class="muted" style="font-size:11.5px;margin-top:7px"><span class="material-icons" style="font-size:14px;vertical-align:-2px">memory</span> aprendido: ${learned} <span class="muted">— a seleção fina vem de curar uma obra real</span></div>`:''}
     </div>
     <div class="rcrule">
       <div class="rchead"><span class="material-icons" style="color:#7b5ea7">straighten</span> Quantitativo — como contar</div>
-      <div style="display:flex;gap:12px;flex-wrap:wrap">
+      ${quantAp?box(quantAp):''}
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">
         <label class="rclab" style="flex:0 0 200px">fonte
           <select id="rc_qf_${sid}">${opt(qd.fonte||'','','—')}${opt(qd.fonte,'composicao','composição')}${opt(qd.fonte,'orcamento','orçamento')}${opt(qd.fonte,'manual','manual')}</select></label>
         <label class="rclab" style="flex:0 0 150px">unidade

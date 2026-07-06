@@ -1735,7 +1735,7 @@ async function orcLoadEditConf(i){
   el.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Conferindo insumos…</div>';
   const refs=[...ORC_SEL].join(',');
   const excl=encodeURIComponent(JSON.stringify((ORC_EXCL||[]).filter(e=>ORC_SEL.has(Number(e.l)))));
-  let d; try{ d=await (await fetch(`actions/verba_breakdown.php?ordem=${i.ordem}&refs=${refs}&excl=${excl}`)).json(); }
+  let d; try{ d=await (await fetch(`actions/verba_breakdown.php?obra=${OBQ()}&ordem=${i.ordem}&refs=${refs}&excl=${excl}`)).json(); }
   catch(e){ el.innerHTML='<span class="muted">Falha ao carregar insumos.</span>'; return; }
   if(d.error){ el.innerHTML='<span class="muted">'+esc(d.error)+'</span>'; return; }
   ORC_BD=d; orcPaintEditConf();

@@ -27,8 +27,9 @@ function opp_cobertas($pdo, $obraId) {
     foreach ($q->fetchAll() as $r) {
         foreach ((json_decode($r['orcamento_refs'] ?? '[]', true) ?: []) as $L) $cov[(int)$L] = 1;   // analítico
         foreach ((json_decode($r['composicao_sel'] ?? '[]', true) ?: []) as $s) {
-            if (!empty($s['cid'])) $cids[(int)$s['cid']] = 1;                                          // composição usada
-            foreach ((is_array($s['locais'] ?? null) ? $s['locais'] : []) as $L) $cov[(int)$L] = 1;    // (se guardou locais, usa também)
+            $loc = is_array($s['locais'] ?? null) ? $s['locais'] : [];
+            if ($loc) { foreach ($loc as $L) $cov[(int)$L] = 1; }        // tem locais → PRECISO (mostra o parcial certo)
+            elseif (!empty($s['cid'])) $cids[(int)$s['cid']] = 1;        // SEM locais (curadoria antiga) → fallback por descrição da composição
         }
     }
     if ($cids) {   // cid → descrição da composição → folhas com essa descrição na obra
@@ -80,12 +81,16 @@ try {
             $g['valor'] = round($g['valor']);
         }
         unset($g);
+        // grupos JÁ EXISTENTES no catálogo (p/ o seletor do "criar item" — não fazer o usuário decorar/digitar)
+        $grupos = [];
+        foreach ($pdo->query("SELECT grupo FROM servico WHERE grupo IS NOT NULL AND grupo<>'' GROUP BY grupo ORDER BY MIN(grupo_ordem)")->fetchAll() as $gr)
+            $grupos[] = $gr['grupo'];
         echo json_encode(['resumo'=>[
             'total'=>round($total), 'coberto'=>round($coberto), 'coberto_pct'=>$total?round(100*$coberto/$total,1):0,
             'gap'=>round($gapTotal), 'gap_pct'=>$total?round(100*$gapTotal/$total,1):0,
             'indiretos'=>round($indiretos), 'indiretos_pct'=>$total?round(100*$indiretos/$total,1):0,
             'n_gaps'=>count($gaps)],
-            'gaps'=>$gaps], JSON_UNESCAPED_UNICODE);
+            'grupos'=>$grupos, 'gaps'=>$gaps], JSON_UNESCAPED_UNICODE);
         exit;
     }
 

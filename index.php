@@ -340,8 +340,8 @@
       <b id="opSel" style="font-size:13px">0 selecionados · R$ 0</b>
       <span style="flex:1"></span>
       <input id="opNome" placeholder="Nome do item (ex.: Esquadrias de Alumínio)" style="min-width:270px">
-      <input id="opGrupoNovo" placeholder="Grupo" style="width:150px">
-      <select id="opCurvaNovo"><option>A</option><option>B</option><option>C</option></select>
+      <input id="opGrupoNovo" list="opGrupos" placeholder="Grupo (escolha da lista ou digite)" style="width:210px" autocomplete="off"><datalist id="opGrupos"></datalist>
+      <label class="muted" style="font-size:11px;align-self:center">curva <select id="opCurvaNovo" style="margin-left:3px"><option>A</option><option>B</option><option>C</option></select></label>
       <button class="btn-prim" style="padding:6px 12px" onclick="opCriar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add_task</span> Criar item de aquisição</button>
     </div>
     <div class="wrap" id="opwrap"><div class="empty">Selecione uma obra.</div></div>
@@ -627,6 +627,7 @@ async function opLoad(){
     const d=await (await fetch('actions/oportunidades.php?obra='+OPP.obra+'&_='+Date.now())).json();
     if(d.error){ box.innerHTML='<div class="empty">Erro: '+esc(d.error)+'</div>'; return; }
     OPP.gaps=(d.gaps||[]).map((g,i)=>(g._i=i,g)); OPP.resumo=d.resumo||{};
+    const dl=document.getElementById('opGrupos'); if(dl) dl.innerHTML=(d.grupos||[]).map(x=>`<option value="${esc(x)}"></option>`).join('');
     const g=document.getElementById('opGrupo'), keep=g.value;
     g.innerHTML='<option value="">Todos os grupos</option>'+[...new Set(OPP.gaps.flatMap(x=>x.grupos||[]))].sort().map(x=>`<option>${esc(x)}</option>`).join(''); if(keep)g.value=keep;
     opRender();

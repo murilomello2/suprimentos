@@ -334,6 +334,7 @@
     </div>
     <div class="bar" style="gap:6px;padding:0 2px 8px">
       <button class="btn-ghost" id="cfgtab-users" onclick="cfgTab('users')" style="padding:6px 14px">👥 Usuários &amp; Permissões</button>
+      <button class="btn-ghost" id="cfgtab-resp" onclick="cfgTab('resp')" style="padding:6px 14px">🛒 Responsáveis</button>
       <button class="btn-ghost" id="cfgtab-receitas" onclick="cfgTab('receitas')" style="padding:6px 14px">📚 Aprendizado (receitas)</button>
     </div>
     <div id="cfg-users">
@@ -374,6 +375,25 @@
         </div>
       </div>
       <div class="wrap" id="rcwrap"><div class="empty">Carregando…</div></div>
+    </div>
+    <div id="cfg-resp" style="display:none">
+      <div class="panel">
+        <div class="bar" style="gap:10px;flex-wrap:wrap;align-items:center">
+          <label class="muted" style="font-size:12px">Obra <select id="rlObra" onchange="rlLoad()" style="margin-left:6px"></select></label>
+          <select id="rlGrupo" onchange="rlRender()"><option value="">Todos os grupos</option></select>
+          <select id="rlStatus" onchange="rlRender()"><option value="">Todos</option><option value="sem">Sem responsável</option><option value="com">Com responsável</option></select>
+          <div class="search" style="min-width:180px"><span class="material-icons" style="color:var(--muted)">search</span><input id="rlQ" placeholder="Buscar item…" oninput="rlRender()"></div>
+        </div>
+        <div id="rlKpi" class="muted" style="font-size:12.5px;margin-top:8px"></div>
+      </div>
+      <div class="panel" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+        <b id="rlSelCount" style="font-size:13px">0 selecionados</b>
+        <span style="flex:1"></span>
+        <select id="rlResp" style="min-width:210px"></select>
+        <button class="btn-prim" style="padding:6px 12px" onclick="rlAtribuir()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">how_to_reg</span> Atribuir aos selecionados</button>
+        <button class="btn-ghost" style="padding:6px 12px" onclick="rlLimpar()">Limpar responsável</button>
+      </div>
+      <div class="wrap" id="rlwrap"><div class="empty">Selecione uma obra.</div></div>
     </div>
    </section>
 
@@ -1058,7 +1078,7 @@ async function saveField(ordem,campo,valor){
 let EDITC=false, EDITO=false, EDITQ=false, EDITD=false, EDITR=false; // modos "Editar" (cronograma/orçamento/quantitativo/dicionário/resumo)
 let IS_ADMIN=false;                       // fail-closed; vira true só quando getCurrentUser confirma perm_admin
 let CAN_EDIT=false;                       // editor geral da obra (status/fornecedor/observação)
-let CAN_CRONO=false, CAN_ORC=false, CAN_QUANT=false, CAN_DIC=false; // permissões específicas (vínculos + dicionário)
+let CAN_CRONO=false, CAN_ORC=false, CAN_QUANT=false, CAN_DIC=false, CAN_RESP=false; // permissões específicas (vínculos + dicionário + responsáveis em lote)
 let EU=null;                             // usuário logado + permissões efetivas
 function openModal(o,ob){CUR=byOrdem(o,ob);if(!CUR)return;TAB='Resumo';EDITC=EDITO=EDITQ=EDITD=EDITR=false;drawModal();document.getElementById('ov').classList.add('open');}
 function closeModal(force){ if(!force && anyEditing()){ confirmSaveDialog(async()=>{ await saveCurrentEdit(); _closeModal(); }, ()=>{ _resetEdits(); _closeModal(); }); return; } _resetEdits(); _closeModal(); }
@@ -2614,6 +2634,7 @@ async function getCurrentUser(){
   CAN_ORC   = IS_ADMIN || (CAN_EDIT && !!(EU && EU.perm_orcamento));
   CAN_QUANT = IS_ADMIN || (CAN_EDIT && !!(EU && EU.perm_quant));
   CAN_DIC   = IS_ADMIN || (CAN_EDIT && !!(EU && EU.perm_dicionario));
+  CAN_RESP  = IS_ADMIN || !!(EU && EU.perm_responsaveis);   // atribuir responsável em lote (independe de editar_escopo)
   applyMenus(); updateWhoami();
 }
 function updateWhoami(){
@@ -2629,7 +2650,8 @@ function applyMenus(){
   const allow = (EU&&EU.autorizado)?(EU.menus||[]):[];
   document.querySelectorAll('.nav a[data-menu]').forEach(a=>{
     const m=a.getAttribute('data-menu');
-    a.style.display=(IS_ADMIN||allow.includes(m))?'':'none';
+    // Configurações também abre p/ quem tem só a permissão de responsáveis em lote (verá apenas essa aba)
+    a.style.display=(IS_ADMIN||allow.includes(m)||(m==='config'&&CAN_RESP))?'':'none';
   });
   const bn=document.getElementById('btnNovo'); if(bn) bn.style.display=CAN_EDIT?'':'none'; // só quem edita cria item
 }
@@ -2642,11 +2664,97 @@ function toggleSide(){
 /* ===== Config » sub-aba Aprendizado (receitas) ===== */
 let RCDATA=null, RC_OPEN=new Set();
 function cfgTab(t){
+  const canR = IS_ADMIN || (typeof CAN_RESP!=='undefined' && CAN_RESP);
+  // só admin vê Usuários & Aprendizado; Responsáveis abre p/ admin OU perm_responsaveis
+  document.getElementById('cfgtab-users').style.display = IS_ADMIN?'':'none';
+  document.getElementById('cfgtab-receitas').style.display = IS_ADMIN?'':'none';
+  document.getElementById('cfgtab-resp').style.display = canR?'':'none';
+  const permitida={users:IS_ADMIN, receitas:IS_ADMIN, resp:canR};
+  if(!permitida[t]) t = IS_ADMIN?'users':(canR?'resp':'users');
   document.getElementById('cfg-users').style.display = t==='users'?'':'none';
   document.getElementById('cfg-receitas').style.display = t==='receitas'?'':'none';
-  const ab=document.getElementById('cfgAddBtn'); if(ab) ab.style.display = t==='users'?'':'none';
-  ['users','receitas'].forEach(x=>{ const b=document.getElementById('cfgtab-'+x); if(b){ b.style.background = x===t?'var(--verde)':''; b.style.color = x===t?'#fff':''; } });
+  document.getElementById('cfg-resp').style.display = t==='resp'?'':'none';
+  const ab=document.getElementById('cfgAddBtn'); if(ab) ab.style.display = (t==='users'&&IS_ADMIN)?'':'none';
+  ['users','resp','receitas'].forEach(x=>{ const b=document.getElementById('cfgtab-'+x); if(b){ b.style.background = x===t?'var(--verde)':''; b.style.color = x===t?'#fff':''; } });
   if(t==='receitas') renderReceitas();
+  if(t==='resp') renderRespLote();
+}
+
+/* ===== Responsáveis EM LOTE (Configurações) — atribui comprador por obra/grupo/seleção ===== */
+let RL={obra:null, itens:[], sel:new Set()};
+function rlObras(){ return (typeof OBRAS!=='undefined'&&OBRAS)?OBRAS.slice():[]; }
+function rlObrasEdit(){   // obras que o usuário PODE editar (o endpoint exige can_edit_obra) — admin/'todas' = todas
+  const all=rlObras();
+  if(IS_ADMIN || (EU&&EU.editar_escopo==='todas')) return all;
+  const ed=((EU&&EU.obras_editar)||[]).map(Number);
+  return all.filter(o=>ed.includes(Number(o.id)));
+}
+function renderRespLote(){
+  const list=rlObrasEdit(), os=document.getElementById('rlObra');
+  if(!list.length){ document.getElementById('rlwrap').innerHTML='<div class="empty">Você não tem obras liberadas para editar responsáveis. Peça ao administrador acesso de edição às obras.</div>';
+    if(os) os.innerHTML=''; const k=document.getElementById('rlKpi'); if(k)k.innerHTML=''; return; }
+  if(os){ const keep=os.value; os.innerHTML=list.map(o=>`<option value="${o.id}">${esc(o.nome)}</option>`).join('');
+    if(keep && list.some(o=>String(o.id)===keep)) os.value=keep; else os.value=list[0].id; }
+  const rs=document.getElementById('rlResp');
+  if(rs) rs.innerHTML='<option value="">— escolher responsável —</option>'+(RESP||[]).map(u=>`<option value="${esc(u.nome)}">${esc(u.nome)}</option>`).join('');
+  rlLoad();
+}
+async function rlLoad(){
+  const os=document.getElementById('rlObra'); RL.obra=Number(os?os.value:RL.obra)||1; RL.sel=new Set();
+  const box=document.getElementById('rlwrap'); box.innerHTML='<div class="empty">Carregando…</div>';
+  try{
+    const d=await (await fetch('actions/matriz.php'+(RL.obra!==1?('?obra='+RL.obra):''))).json();
+    if(d.error){ box.innerHTML='<div class="empty">Erro: '+esc(d.error)+'</div>'; return; }
+    RL.itens=(d.itens||[]).map(i=>({ordem:i.ordem,nome:i.nome,grupo:i.grupo,curva:i.curva,responsavel:(i.responsavel||'').trim()}));
+    const g=document.getElementById('rlGrupo'); const keep=g.value;
+    g.innerHTML='<option value="">Todos os grupos</option>'+[...new Set(RL.itens.map(i=>i.grupo).filter(Boolean))].map(x=>`<option>${esc(x)}</option>`).join('');
+    if(keep) g.value=keep;
+    rlRender();
+  }catch(e){ box.innerHTML='<div class="empty">Falha: '+esc(e.message)+'</div>'; }
+}
+function rlFiltered(){
+  const fg=val('rlGrupo'), fs=val('rlStatus'), q=(document.getElementById('rlQ').value||'').toLowerCase();
+  return RL.itens.filter(i=>(!fg||i.grupo===fg)&&(!fs||(fs==='sem'?!i.responsavel:!!i.responsavel))&&(!q||i.nome.toLowerCase().includes(q)));
+}
+function rlRender(){
+  const box=document.getElementById('rlwrap'), fi=rlFiltered();
+  const com=RL.itens.filter(i=>i.responsavel).length, tot=RL.itens.length;
+  document.getElementById('rlKpi').innerHTML=`<b>${com}</b> de <b>${tot}</b> itens com responsável nesta obra · <b>${tot-com}</b> sem dono`;
+  let html='<table><thead><tr><th style="width:34px"><input type="checkbox" id="rlAll" onclick="rlToggleAll(this.checked)" title="selecionar os filtrados"></th><th>Item</th><th>Grupo</th><th>Curva</th><th>Responsável atual</th></tr></thead><tbody>';
+  let grupo=null;
+  fi.forEach(i=>{
+    if(i.grupo!==grupo){ grupo=i.grupo; html+=`<tr class="grp-h"><td colspan="5">${esc(grupo||'—')}</td></tr>`; }
+    html+=`<tr><td><input type="checkbox" ${RL.sel.has(i.ordem)?'checked':''} onclick="rlSel(${i.ordem},this.checked)"></td>
+      <td>${esc(i.nome)}</td><td class="muted">${esc(i.grupo||'')}</td><td>${esc(i.curva||'')}</td>
+      <td>${i.responsavel?esc(i.responsavel):'<span class="muted">— sem —</span>'}</td></tr>`;
+  });
+  if(!fi.length) html+='<tr><td colspan="5" class="empty">Nenhum item nesse filtro.</td></tr>';
+  box.innerHTML=html+'</tbody></table>';
+  const all=document.getElementById('rlAll'); if(all) all.checked=fi.length>0 && fi.every(i=>RL.sel.has(i.ordem));
+  rlCount();
+}
+function rlSel(ordem,on){ on?RL.sel.add(ordem):RL.sel.delete(ordem);
+  const all=document.getElementById('rlAll'); if(all){ const fi=rlFiltered(); all.checked=fi.length>0 && fi.every(i=>RL.sel.has(i.ordem)); }
+  rlCount(); }
+function rlToggleAll(on){ rlFiltered().forEach(i=>{ on?RL.sel.add(i.ordem):RL.sel.delete(i.ordem); }); rlRender(); }
+function rlCount(){ const el=document.getElementById('rlSelCount'); if(el) el.textContent=RL.sel.size+' selecionado'+(RL.sel.size===1?'':'s'); }
+async function rlAtribuir(){ const nome=val('rlResp'); if(!nome){ toast('Escolha um responsável'); return; }
+  await rlAssign(nome, `Atribuir “${nome}” a ${RL.sel.size} item(ns)?`); }
+async function rlLimpar(){ await rlAssign('', `Limpar o responsável de ${RL.sel.size} item(ns)?`); }
+async function rlAssign(nome, msg){
+  if(!RL.sel.size){ toast('Selecione ao menos um item'); return; }
+  if(!confirm(msg)) return;
+  const ids=[...RL.sel];
+  try{
+    const r=await (await fetch('actions/responsaveis_lote.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'atribuir',me:EU&&EU.bitrix_id,obra:RL.obra,servico_ids:ids,responsavel:nome})})).json();
+    if(r.error){ toast(r.error); return; }
+    toast((r.n||0)+' item(ns) atualizado(s)');
+    RL.itens.forEach(i=>{ if(RL.sel.has(i.ordem)) i.responsavel=nome; }); RL.sel=new Set();
+    if(typeof MAT!=='undefined') MAT=null;                                   // matriz reflete mudança
+    if(typeof OBRA_SEL!=='undefined' && OBRA_SEL.includes(RL.obra)) load();  // refresca o card de cobertura do Radar
+    rlRender();
+  }catch(e){ toast('Falha: '+e.message); }
 }
 function rcMetodoSel(){ const el=document.getElementById('rcmetodo'); return (el&&el.value)||'concreto armado convencional'; }
 function rcMetodoChange(){ renderReceitas(); }
@@ -2795,7 +2903,8 @@ async function renderReceitas(){
 function rcToggle(key){ RC_OPEN.has(key)?RC_OPEN.delete(key):RC_OPEN.add(key); renderReceitas(); }
 
 async function renderConfig(){
-  cfgTab('users');
+  cfgTab(IS_ADMIN?'users':(CAN_RESP?'resp':'users'));
+  if(!IS_ADMIN) return;   // não-admin (só responsáveis em lote) não carrega a lista de usuários
   const box=document.getElementById('cfgwrap'); box.innerHTML='<div class="empty">Carregando…</div>';
   CFG=await (await fetch('actions/usuarios.php')).json();
   if(!CFG.usuarios.length){ box.innerHTML='<div class="empty">Nenhum usuário autorizado ainda. Clique em "Adicionar usuário".</div>'; return; }
@@ -2820,7 +2929,7 @@ function userForm(bid){
   const menus=u?(u.menus||[]):PRESETS.coordenador.menus;
   const obrasVer=u?(u.obras_ver||[]):[], obrasEdit=u?(u.obras_editar||[]):[];
   const adm=u?u.perm_admin:0, ativo=u?u.ativo:1;
-  const pc=u?u.perm_crono:0, po=u?u.perm_orcamento:0, pq=u?u.perm_quant:0, pd=u?u.perm_dicionario:0;
+  const pc=u?u.perm_crono:0, po=u?u.perm_orcamento:0, pq=u?u.perm_quant:0, pd=u?u.perm_dicionario:0, pr=u?u.perm_responsaveis:0;
   const obrasChk=(pref,sel)=>CFG.obras.map(o=>`<label class="ckl"><input type="checkbox" id="${pref}-${o.id}" ${sel.includes(o.id)?'checked':''}> ${esc(o.nome)}</label>`).join('');
   document.getElementById('modal').innerHTML=`
     <div class="mhead"><button class="mclose" onclick="closeModal()">×</button>
@@ -2850,6 +2959,7 @@ function userForm(bid){
           <label class="ckl"><input type="checkbox" id="pOrc" ${po?'checked':''}> Vínculo de orçamento (verba)</label>
           <label class="ckl"><input type="checkbox" id="pQuant" ${pq?'checked':''}> Vínculo de quantitativo</label>
           <label class="ckl"><input type="checkbox" id="pDic" ${pd?'checked':''}> Editar dicionário</label>
+          <label class="ckl"><input type="checkbox" id="pRespLote" ${pr?'checked':''}> Atribuir responsáveis em lote</label>
         </div></div>
       <label class="ckl" style="margin:4px 0 12px"><input type="checkbox" id="uAdmin" ${adm?'checked':''}> É administrador (acessa Configurações e edita tudo)</label>
       <div style="display:flex;gap:8px"><button class="btn-prim" onclick="userSave()">Salvar usuário</button>
@@ -2861,7 +2971,7 @@ function userPreset(){
   const p=PRESETS[val('uPapel')]; if(!p)return; // 'personalizado' (null) mantém o que está marcado
   document.getElementById('uVer').value=p.ver; document.getElementById('uEdit').value=p.edit;
   document.getElementById('uAdmin').checked=!!p.adm;
-  ['pCrono','pOrc','pQuant','pDic'].forEach(id=>{const e=document.getElementById(id); if(e)e.checked=false;}); // presets definidos zeram as específicas
+  ['pCrono','pOrc','pQuant','pDic','pRespLote'].forEach(id=>{const e=document.getElementById(id); if(e)e.checked=false;}); // presets definidos zeram as específicas
   MENUS.forEach(m=>{const e=document.getElementById('mn-'+m[0]); if(e)e.checked=p.menus.includes(m[0]);});
   userToggleObras();
 }
@@ -2897,6 +3007,7 @@ async function userSave(){
     perm_orcamento:document.getElementById('pOrc').checked?1:0,
     perm_quant:document.getElementById('pQuant').checked?1:0,
     perm_dicionario:document.getElementById('pDic').checked?1:0,
+    perm_responsaveis:document.getElementById('pRespLote').checked?1:0,
     ativo:parseInt(val('uAtivo'))};
   const d=await (await fetch('actions/usuarios.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
   if(d.error){

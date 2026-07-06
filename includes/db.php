@@ -91,6 +91,7 @@ function db_schema_mysql($pdo) {
         ver_escopo VARCHAR(16), editar_escopo VARCHAR(16), obras_ver TEXT, obras_editar TEXT, menus TEXT,
         perm_admin INT DEFAULT 0, ativo INT DEFAULT 1, updated_at VARCHAR(40),
         perm_crono INT DEFAULT 0, perm_orcamento INT DEFAULT 0, perm_quant INT DEFAULT 0, perm_dicionario INT DEFAULT 0,
+        perm_responsaveis INT DEFAULT 0,
         PRIMARY KEY (bitrix_id)
     ) $E");
     $pdo->exec("CREATE TABLE IF NOT EXISTS historico (
@@ -120,6 +121,11 @@ function db_schema_mysql($pdo) {
     $oc = [];
     foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='obra'") as $c) $oc[$c['COLUMN_NAME']] = true;
     if (!isset($oc['metodo_construtivo'])) $pdo->exec("ALTER TABLE obra ADD COLUMN metodo_construtivo VARCHAR(64) DEFAULT 'concreto armado convencional'");
+    // permissão granular perm_responsaveis (atribuição de responsável EM LOTE) — self-heal p/ tabela usuario já existente
+    $uc = [];
+    foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='usuario'") as $c) $uc[$c['COLUMN_NAME']] = true;
+    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis'] as $pc)
+        if (!isset($uc[$pc])) $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INT DEFAULT 0");
     // ALARGA as colunas de JSON de seleção: uma busca EM MASSA por insumo (ex.: "encanador" em N composições × M
     // locais) gera composicao_sel > 64KB e o MySQL TRUNCA a coluna TEXT (max 65.535 bytes) SILENCIOSAMENTE →
     // JSON inválido → a seleção "some" (some do read-only) embora a verba/total já tenham sido calculados.
@@ -286,7 +292,7 @@ function db_schema($pdo) {
     // estas liberam capacidades específicas POR USUÁRIO:
     $ucols = [];
     foreach ($pdo->query("PRAGMA table_info(usuario)") as $c) $ucols[$c['name']] = true;
-    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario'] as $pc) {
+    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis'] as $pc) {
         if (!isset($ucols[$pc])) $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INTEGER DEFAULT 0");
     }
 
@@ -378,7 +384,8 @@ function user_perms($pdo, $bid) {
             'perm_crono'=>(int)($u['perm_crono'] ?? 0),
             'perm_orcamento'=>(int)($u['perm_orcamento'] ?? 0),
             'perm_quant'=>(int)($u['perm_quant'] ?? 0),
-            'perm_dicionario'=>(int)($u['perm_dicionario'] ?? 0)];
+            'perm_dicionario'=>(int)($u['perm_dicionario'] ?? 0),
+            'perm_responsaveis'=>(int)($u['perm_responsaveis'] ?? 0)];
 }
 function can_edit_obra($perms, $obra_id) {
     if (!empty($perms['perm_admin'])) return true;

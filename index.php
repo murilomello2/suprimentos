@@ -1,5 +1,5 @@
 <?php /* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php. (republicado) */ ?>
-<?php /* build: matriz-dropdown-data-resp-abc-2026-07-06 */ ?>
+<?php /* build: dashboards-4-2026-07-06 */ ?>
 <!doctype html>
 <html lang="pt-br">
 <head>
@@ -207,6 +207,42 @@
   .cell-off{background:transparent!important;cursor:default}
   .cell-off:hover{outline:none}
   .cell-dt{background:rgba(255,255,255,.72);color:#2f2f2f;font-size:9.5px;font-weight:700;padding:0 5px;border-radius:5px;letter-spacing:.2px;line-height:1.65}
+  /* ===== Dashboards ===== */
+  .dtabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:14px}
+  .dtab{padding:9px 15px;font-size:13px;font-weight:700;color:var(--muted);cursor:pointer;border:none;background:none;border-bottom:2px solid transparent;display:inline-flex;align-items:center;gap:6px}
+  .dtab .material-icons{font-size:16px}
+  .dtab:hover{color:var(--txt)}
+  .dtab.on{color:var(--verde-d);border-bottom-color:var(--dourado)}
+  .dgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px}
+  .dcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .dcard h3{font-size:12px;font-weight:800;color:var(--verde-d);text-transform:uppercase;letter-spacing:.4px;margin:0 0 10px}
+  .dcard.wide{grid-column:1/-1}
+  .dcard.col2{grid-column:span 2}
+  @media(max-width:900px){.dcard.col2{grid-column:1/-1}}
+  .dkpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px}
+  .dkpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .dkpi .v{font-size:24px;font-weight:800;color:var(--verde-d);line-height:1.1}
+  .dkpi .v.red{color:var(--pend)} .dkpi .v.gold{color:var(--dourado)} .dkpi .v.blue{color:#2b5fa8}
+  .dkpi .l{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.3}
+  .dtable{width:100%;border-collapse:collapse;font-size:12px}
+  .dtable th{text-align:left;color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;padding:5px 8px;border-bottom:1px solid var(--line)}
+  .dtable td{padding:6px 8px;border-bottom:1px solid #f3f5f4;vertical-align:middle}
+  .dtable tr:last-child td{border-bottom:none}
+  .dtable td.r,.dtable th.r{text-align:right}
+  .drow{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:5px 0}
+  .dbar-bg{flex:1;height:8px;background:#eef1f0;border-radius:5px;overflow:hidden}
+  .dbar-fi{height:100%;border-radius:5px}
+  .dchip{display:inline-block;font-size:10px;font-weight:800;padding:1px 7px;border-radius:20px;color:#fff}
+  .dchip.a{background:var(--pend)} .dchip.b{background:var(--dourado)} .dchip.c{background:#8a9299}
+  .dleg{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--txt);margin-top:8px}
+  .dleg span{display:inline-flex;align-items:center;gap:5px}
+  .dleg i{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .dgm{display:inline-block;width:9px;height:9px;border-radius:50%}
+  .dmini{font-size:10.5px;color:var(--muted)}
+  .dempty{padding:26px;text-align:center;color:var(--muted);font-size:13px}
+  .gantt-row{display:grid;grid-template-columns:130px 1fr;gap:8px;align-items:center;margin-bottom:7px;font-size:11.5px}
+  .gantt-track{position:relative;height:16px;background:#f1f4f3;border-radius:8px}
+  .gantt-bar{position:absolute;top:0;height:16px;border-radius:8px;opacity:.9}
   .mtable .svc-c small{color:var(--muted);display:block;font-size:11px}
 </style>
 </head>
@@ -221,7 +257,7 @@
     </div>
     <div class="navlabel">Aquisições</div>
     <nav class="nav">
-      <a id="nav-dashboard" data-menu="dashboard" title="Dashboard" onclick="toast('Dashboard — próxima etapa')"><span class="material-icons">dashboard</span> <span class="navtxt">Dashboard</span></a>
+      <a id="nav-dashboards" data-menu="dashboard" title="Dashboards" onclick="showView('dashboards')"><span class="material-icons">dashboard</span> <span class="navtxt">Dashboards</span></a>
       <a id="nav-radar" data-menu="radar" class="active" title="Radar de Aquisições" onclick="showView('radar')"><span class="material-icons">radar</span> <span class="navtxt">Radar de Aquisições</span></a>
       <a id="nav-matriz" data-menu="matriz" title="Matriz" onclick="showView('matriz')"><span class="material-icons">grid_on</span> <span class="navtxt">Matriz</span></a>
       <a id="nav-cotacoes" data-menu="cotacoes" title="Mapa de Cotações" onclick="toast('Mapa de Cotações — Fase 3')"><span class="material-icons">request_quote</span> <span class="navtxt">Mapa de Cotações</span></a>
@@ -375,6 +411,20 @@
       </div>
     </div>
     <div class="wrap" id="opwrap"><div class="empty">Selecione uma obra.</div></div>
+   </section>
+
+   <section id="view-dashboards" style="display:none">
+    <div class="top">
+      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">dashboard</span> Dashboards</h1>
+      <p class="sub" id="dsub">Visão consolidada das obras — cotações, riscos, exposição e oportunidades.</p>
+    </div>
+    <div class="panel" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div class="dtabs" id="dtabs" style="border:none;margin:0"></div>
+        <div class="dmini" id="dmeta">—</div>
+      </div>
+    </div>
+    <div id="dwrap"><div class="dempty">Carregando…</div></div>
    </section>
 
    <section id="view-config" style="display:none">
@@ -663,10 +713,11 @@ async function loadMatriz(force){
 
 /* ---------- view switch ---------- */
 function showView(v){
-  ['radar','matriz','oportunidades','config','audit','updates'].forEach(x=>{
+  ['radar','matriz','oportunidades','dashboards','config','audit','updates'].forEach(x=>{
     document.getElementById('view-'+x).style.display=v===x?'':'none';
-    document.getElementById('nav-'+x).classList.toggle('active',v===x);
+    const nav=document.getElementById('nav-'+x); if(nav) nav.classList.toggle('active',v===x);
   });
+  if(v==='dashboards') dashInit();
   if(v==='matriz') loadMatriz();
   if(v==='oportunidades') renderOportunidades();
   if(v==='config') renderConfig();
@@ -2843,6 +2894,247 @@ async function excluirItemCatalogo(){
   if(d.error){toast('Erro: '+d.error);return;}
   closeModal(true); if(typeof MAT!=='undefined')MAT=null; await load(); toast('Excluído do catálogo (todas as obras)');
 }
+/* ===================== DASHBOARDS ===================== */
+let DASH={tab:null, D:null, oppByObra:{}};
+const DASH_TABS=[['comprador','Comprador','person'],['gerente','Gerente de Compras','groups'],['diretor','Diretor','insights'],['oportunidades','Oportunidades','savings']];
+function dashAllowed(){ const papel=(EU&&EU.papel)||''; if(IS_ADMIN||papel==='diretor') return DASH_TABS.map(t=>t[0]);
+  if(papel==='comprador') return ['comprador','oportunidades']; return ['comprador','oportunidades']; }
+function dashInit(){
+  const allowed=dashAllowed(), tb=document.getElementById('dtabs');
+  if(tb) tb.innerHTML=DASH_TABS.filter(t=>allowed.includes(t[0])).map(t=>`<button class="dtab" id="dtab-${t[0]}" onclick="dashTab('${t[0]}')"><span class="material-icons">${t[2]}</span> ${t[1]}</button>`).join('');
+  if(!DASH.tab||!allowed.includes(DASH.tab)) DASH.tab=allowed[0]||'comprador';
+  dashActive(); dashLoad();
+}
+function dashActive(){ DASH_TABS.forEach(t=>{ const b=document.getElementById('dtab-'+t[0]); if(b) b.classList.toggle('on',t[0]===DASH.tab); }); }
+function dashTab(t){ DASH.tab=t; dashActive(); renderDash(); }
+async function dashLoad(){
+  const w=document.getElementById('dwrap');
+  w.innerHTML='<div class="dempty">Carregando dados das obras…</div>';
+  // FONTE PRÓPRIA (não depende do MAT global, que o load() do Radar zera de forma assíncrona)
+  if(!DASH.items || !DASH.items.length){
+    try{
+      let obras=(OBRAS&&OBRAS.length)?OBRAS.map(o=>Number(o.id)):null;
+      if(!obras){ const d0=await (await fetch('actions/matriz.php')).json(); OBRAS=d0.obras||[]; obras=OBRAS.map(o=>Number(o.id)); }
+      const rs=await Promise.all(obras.map(async oid=>{ const u='actions/matriz.php'+(oid!==1?('?obra='+oid+'&'):'?')+'_='+Date.now(); const d=await (await fetch(u)).json().catch(()=>null); return {oid,d}; }));
+      const items=[];
+      for(const {oid,d} of rs){ if(!d||d.error||!d.itens) continue; if(d.obras) OBRAS=d.obras;
+        d.itens.forEach(i=>{ i.obra_id=oid; i.obra_nome=(d.obra&&d.obra.nome)||('obra '+oid); items.push(i); }); }
+      DASH.items=items;
+    }catch(e){ DASH.items=DASH.items||[]; }
+  }
+  const obras=[...new Set(DASH.items.map(i=>i.obra_id))];
+  const need=obras.filter(id=>!DASH.oppByObra[id]);
+  if(need.length){ w.innerHTML='<div class="dempty">Analisando cobertura e oportunidades…</div>';
+    await Promise.all(need.map(async id=>{ try{ DASH.oppByObra[id]=await (await fetch('actions/oportunidades.php?obra='+id+'&_='+Date.now())).json(); }catch(e){ DASH.oppByObra[id]={gaps:[],resumo:{}}; } })); }
+  DASH.D=dashCompute(); renderDash();
+}
+function dashRefresh(){ DASH.items=null; DASH.oppByObra={}; dashLoad(); }
+function renderDash(){
+  const w=document.getElementById('dwrap'), D=DASH.D; if(!w)return;
+  if(!D){ w.innerHTML='<div class="dempty">Sem dados.</div>'; return; }
+  const meta=document.getElementById('dmeta'); if(meta) meta.textContent=`${D.obras.length} obra(s) · ${D.totalItens} itens · hoje ${D.hojeBR}`;
+  const f={comprador:renderDashComprador,gerente:renderDashGerente,diretor:renderDashDiretor,oportunidades:renderDashOpp}[DASH.tab];
+  w.innerHTML=f?f(D):'<div class="dempty">—</div>';
+}
+/* ---------- cálculo das métricas (client-side, a partir do MAT + oportunidades) ---------- */
+function dashCompute(){
+  const items=(DASH.items&&DASH.items.length)?DASH.items:(MAT||[]), hoje=today, _now=new Date(hoje+'T00:00:00');
+  const val=i=>Number(i.verba||0), lvl=i=>alertLevel(i);
+  const dDiff=f=>f?Math.round((new Date(f+'T00:00:00')-_now)/864e5):null;
+  const obrasMap={}; (OBRAS||[]).forEach(o=>obrasMap[o.id]=o.nome);
+  const D={hoje, hojeBR:hoje.split('-').reverse().join('/'),
+    obras:[...new Set(items.map(i=>i.obra_id))].map(id=>({id,nome:obrasMap[id]||('Obra '+id),cor:obraCor(id)}))};
+  D.totalItens=items.length; D.verbaTotal=items.reduce((a,i)=>a+val(i),0);
+  D.porStatus={}; items.forEach(i=>{const s=i.status||'Não Iniciado'; D.porStatus[s]=(D.porStatus[s]||0)+1;});
+  D.finalizados=items.filter(i=>i.status==='Finalizado').length;
+  D.emCotacao=items.filter(i=>/cota/i.test(i.status||'')).length;
+  D.propostas=items.filter(i=>/proposta|negocia/i.test(i.status||'')).length;
+  D.comData=items.filter(i=>i.fim_cotacao).length; D.pctComData=D.totalItens?Math.round(100*D.comData/D.totalItens):0;
+  const isAtras=i=>['critico','atrasado'].includes(lvl(i));
+  D.criticos=items.filter(i=>lvl(i)==='critico').length;
+  D.expostoAtraso=items.filter(isAtras).reduce((a,i)=>a+val(i),0);
+  D.emergencial=items.filter(i=>lvl(i)==='critico').reduce((a,i)=>a+val(i),0);
+  // gatilhos (não finalizados, com fim de cotação)
+  const g={atras:{n:0,v:0},d7:{n:0,v:0},d15:{n:0,v:0},d30:{n:0,v:0}};
+  items.forEach(i=>{ if(i.status==='Finalizado'||!i.fim_cotacao)return; const d=dDiff(i.fim_cotacao), v=val(i);
+    if(d<0){g.atras.n++;g.atras.v+=v;} else if(d<=7){g.d7.n++;g.d7.v+=v;} else if(d<=15){g.d15.n++;g.d15.v+=v;} else {g.d30.n++;g.d30.v+=v;} });
+  D.gatilhos=g;
+  // por comprador
+  const cm={}; items.forEach(i=>{ const r=(i.responsavel||'').trim(); if(!r)return; (cm[r]=cm[r]||{nome:r,itens:0,criticos:0,exposta:0}); cm[r].itens++;
+    if(lvl(i)==='critico')cm[r].criticos++; if(isAtras(i))cm[r].exposta+=val(i); });
+  D.compradores=Object.values(cm).sort((a,b)=>b.exposta-a.exposta);
+  const maxExp=Math.max(1,...D.compradores.map(c=>c.exposta)); D.compradores.forEach(c=>c.risco=Math.round(100*c.exposta/maxExp));
+  // por obra
+  const ob={}; items.forEach(i=>{ const id=i.obra_id; (ob[id]=ob[id]||{id,nome:obrasMap[id]||('Obra '+id),cor:obraCor(id),itens:0,criticos:0,verba:0,contratado:0}); const o=ob[id];
+    o.itens++; o.verba+=val(i); if(lvl(i)==='critico')o.criticos++; if(i.status==='Finalizado')o.contratado+=val(i); });
+  Object.values(ob).forEach(o=>{ const opp=DASH.oppByObra[o.id]||{}; o.coberturaPct=(opp.resumo&&opp.resumo.coberto_pct)||null; o.orcado=(opp.resumo&&opp.resumo.total)||null;
+    o.exposta=items.filter(i=>i.obra_id===o.id&&isAtras(i)).reduce((a,i)=>a+val(i),0); });
+  const maxR=Math.max(1,...Object.values(ob).map(o=>o.exposta)); Object.values(ob).forEach(o=>o.risco=Math.round(100*o.exposta/maxR));
+  D.porObra=Object.values(ob).sort((a,b)=>b.exposta-a.exposta);
+  // curva ABC em risco (itens em alerta) — curva por VALOR (mesma régua do radar)
+  const curva=i=>{const v=val(i);return v>=2e5?'A':(v>=1e5?'B':'C');};
+  const cr={A:{n:0,v:0},B:{n:0,v:0},C:{n:0,v:0}}; items.filter(isAtras).forEach(i=>{const c=curva(i);cr[c].n++;cr[c].v+=val(i);}); D.curvaRisco=cr;
+  // listas
+  const nivelOrd={critico:0,atrasado:1,proximo:2}; const alertItems=items.filter(i=>['critico','atrasado','proximo'].includes(lvl(i)));
+  const sortAlert=(a,b)=>(nivelOrd[lvl(a)]-nivelOrd[lvl(b)])||((a.fim_cotacao||'9999').localeCompare(b.fim_cotacao||'9999'))||(val(b)-val(a));
+  D.itensCriticos=alertItems.slice().sort(sortAlert).map(i=>({obra:i.obra_nome,nome:i.nome,resp:i.responsavel||'',fim:i.fim_cotacao,verba:val(i),nivel:lvl(i)}));
+  D.proximos=items.filter(i=>i.fim_cotacao&&dDiff(i.fim_cotacao)>=0&&i.status!=='Finalizado').sort((a,b)=>a.fim_cotacao.localeCompare(b.fim_cotacao))
+    .map(i=>({obra:i.obra_nome,nome:i.nome,fim:i.fim_cotacao,verba:val(i),dias:dDiff(i.fim_cotacao)}));
+  const acaoDe=i=>{const s=i.status||'Não Iniciado'; if(/cota/i.test(s))return'Cobrar propostas'; if(/proposta/i.test(s))return'Aprovar fornecedor'; if(/negocia/i.test(s))return'Fechar negociação'; return'Iniciar cotação';};
+  D.atuacao=alertItems.slice().sort(sortAlert).map(i=>({obra:i.obra_nome,nome:i.nome,resp:i.responsavel||'—',acao:acaoDe(i),nivel:lvl(i)}));
+  // OPORTUNIDADES: lote por categoria (grupo) presente em 2+ obras + gaps de curva A/B
+  const grp={}; items.forEach(i=>{ const c=i.grupo||'Outros'; (grp[c]=grp[c]||{cat:c,obras:new Set(),valor:0,itens:0,ini:null,fim:null});
+    const G=grp[c]; G.obras.add(i.obra_id); G.valor+=val(i); G.itens++;
+    if(i.inicio_cotacao){ if(!G.ini||i.inicio_cotacao<G.ini)G.ini=i.inicio_cotacao; } if(i.fim_cotacao){ if(!G.fim||i.fim_cotacao>G.fim)G.fim=i.fim_cotacao; } });
+  let cats=Object.values(grp).map(G=>({cat:G.cat,obras:G.obras.size,valor:G.valor,itens:G.itens,ini:G.ini,fim:G.fim})).sort((a,b)=>b.valor-a.valor);
+  D.opp={ categorias:cats, lotes:cats.filter(c=>c.obras>=2),
+    valorPotencial:cats.reduce((a,c)=>a+c.valor,0),
+    obrasEnvolvidas:D.obras.length };
+  // janela 60 dias: categorias cujo início de cotação cai nos próximos 60 dias
+  D.opp.janela60=cats.filter(c=>c.ini&&dDiff(c.ini)!==null&&dDiff(c.ini)<=60&&dDiff(c.ini)>=-30).length;
+  D.opp.valorLote=D.opp.lotes.reduce((a,c)=>a+c.valor,0);
+  // gaps de curva A/B do orçamento (todas as obras) p/ a matriz de oportunidades
+  const gapCat={}; Object.entries(DASH.oppByObra).forEach(([id,d])=>{ (d.gaps||[]).forEach(gp=>{ if(gp.curva==='C')return; (gp.grupos||['—']).forEach(cat=>{ (gapCat[cat]=gapCat[cat]||{cat,valor:0,n:0,obras:new Set()}); gapCat[cat].valor+=Number(gp.valor||0)/(gp.grupos||['—']).length; gapCat[cat].n++; gapCat[cat].obras.add(id); }); }); });
+  D.opp.gapCategorias=Object.values(gapCat).map(g=>({cat:g.cat,valor:Math.round(g.valor),n:g.n,obras:g.obras.size})).sort((a,b)=>b.valor-a.valor).slice(0,10);
+  D.opp.gapTotal=Object.values(DASH.oppByObra).reduce((a,d)=>a+((d.resumo&&d.resumo.gap)||0),0);
+  return D;
+}
+/* ---------- helpers de gráfico ---------- */
+function dashDonut(segs,size){ size=size||120; const tot=segs.reduce((a,s)=>a+s.v,0)||1, r=size/2-6, c=size/2, cir=2*Math.PI*r; let off=0;
+  const arcs=segs.filter(s=>s.v>0).map(s=>{ const len=cir*s.v/tot, el=`<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${s.color}" stroke-width="12" stroke-dasharray="${len} ${cir-len}" stroke-dashoffset="${-off}" transform="rotate(-90 ${c} ${c})"/>`; off+=len; return el; }).join('');
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${arcs}<text x="${c}" y="${c-2}" text-anchor="middle" font-size="20" font-weight="800" fill="#1e3a2e">${tot}</text><text x="${c}" y="${c+14}" text-anchor="middle" font-size="9" fill="#889">itens</text></svg>`; }
+function dashBars(rows,fmt){ const max=Math.max(1,...rows.map(r=>r.v)); return rows.map(r=>`<div class="drow"><span style="width:auto;min-width:96px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.label)}</span><div class="dbar-bg"><div class="dbar-fi" style="width:${Math.round(100*r.v/max)}%;background:${r.color||'var(--verde)'}"></div></div><b style="min-width:64px;text-align:right;font-size:11.5px">${fmt?fmt(r.v):r.v}${r.sub?` <span class="dmini">${esc(r.sub)}</span>`:''}</b></div>`).join(''); }
+function dashGantt(rows){ const ds=rows.flatMap(r=>[r.ini,r.fim]).filter(Boolean).sort(); if(!ds.length)return'<div class="dmini">sem datas de cotação</div>';
+  const min=new Date(ds[0]+'T00:00:00'), max=new Date(ds[ds.length-1]+'T00:00:00'), span=Math.max(1,(max-min)/864e5);
+  return rows.map(r=>{ if(!r.ini||!r.fim)return`<div class="gantt-row"><span>${esc(r.cat)}</span><div class="gantt-track"></div></div>`;
+    const a=Math.max(0,(new Date(r.ini+'T00:00:00')-min)/864e5), b=(new Date(r.fim+'T00:00:00')-min)/864e5;
+    const l=100*a/span, wd=Math.max(2,100*(b-a)/span);
+    return `<div class="gantt-row"><span title="${esc(r.cat)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.cat)}</span><div class="gantt-track"><div class="gantt-bar" style="left:${l}%;width:${wd}%;background:${r.color||'var(--verde)'}" title="${D(r.ini)}–${D(r.fim)}"></div></div></div>`; }).join(''); }
+function nivelChip(n){ const m={critico:['var(--pend)','Crítico'],atrasado:['#c77f1a','Atrasado'],proximo:['var(--dourado)','Em breve']}; const x=m[n]||['#8a9299','—']; return `<span class="dchip" style="background:${x[0]}">${x[1]}</span>`; }
+const ST_COR={'Finalizado':'var(--ok)','Contratado':'var(--ok)','Em cotação':'#2b5fa8','Em andamento':'var(--and)','Proposta recebida':'var(--dourado)','Em negociação':'var(--dourado)','Não Iniciado':'#cfd6da'};
+function stCor(s){ return ST_COR[s]||'#8a9299'; }
+
+/* ---------- 1) COMPRADOR ---------- */
+function renderDashComprador(D){
+  const base=(DASH.items&&DASH.items.length)?DASH.items:(MAT||[]);
+  const eu=(EU&&EU.nome)||''; const meus=base.filter(i=>(i.responsavel||'').trim() && (!eu||(i.responsavel||'')===eu));
+  const escopo = eu && meus.length ? eu : 'toda a equipe';
+  const src = (eu && meus.length) ? meus : base;
+  const val=i=>Number(i.verba||0), lvl=i=>alertLevel(i);
+  const emCot=src.filter(i=>/cota/i.test(i.status||'')).length;
+  const crit=src.filter(i=>lvl(i)==='critico');
+  const prazo7=src.filter(i=>{const d=i.fim_cotacao?Math.round((new Date(i.fim_cotacao+'T00:00:00')-new Date(D.hoje+'T00:00:00'))/864e5):null; return d!==null&&d>=0&&d<=7&&i.status!=='Finalizado';});
+  const props=src.filter(i=>/proposta|negocia/i.test(i.status||'')).length;
+  const stc={}; src.forEach(i=>{const s=i.status||'Não Iniciado'; stc[s]=(stc[s]||0)+1;});
+  const donutSegs=Object.entries(stc).map(([s,n])=>({v:n,color:stCor(s),label:s}));
+  const crList=crit.slice().sort((a,b)=>(a.fim_cotacao||'9999').localeCompare(b.fim_cotacao||'9999')).slice(0,6);
+  const prox=src.filter(i=>i.fim_cotacao&&i.status!=='Finalizado').sort((a,b)=>a.fim_cotacao.localeCompare(b.fim_cotacao)).slice(0,6);
+  const tab=src.slice().sort((a,b)=>(a.fim_cotacao||'9999').localeCompare(b.fim_cotacao||'9999')).slice(0,8);
+  return `
+  <div class="dkpis">
+    <div class="dkpi"><div class="v">${src.length}</div><div class="l">itens sob responsabilidade<br><span class="dmini">${esc(escopo)}</span></div></div>
+    <div class="dkpi"><div class="v blue">${emCot}</div><div class="l">em cotação</div></div>
+    <div class="dkpi"><div class="v red">${crit.length}</div><div class="l">críticos (fim venceu)</div></div>
+    <div class="dkpi"><div class="v gold">${prazo7.length}</div><div class="l">prazo ≤ 7 dias</div></div>
+    <div class="dkpi"><div class="v">${props}</div><div class="l">propostas / negociação</div></div>
+  </div>
+  <div class="dgrid">
+    <div class="dcard"><h3>Status das minhas cotações</h3>
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">${dashDonut(donutSegs)}
+        <div style="flex:1;min-width:120px">${Object.entries(stc).sort((a,b)=>b[1]-a[1]).map(([s,n])=>`<div class="drow" style="padding:3px 0"><span class="dgm" style="background:${stCor(s)}"></span><span style="flex:1">${esc(s)}</span><b>${n}</b> <span class="dmini">${Math.round(100*n/(src.length||1))}%</span></div>`).join('')}</div>
+      </div></div>
+    <div class="dcard"><h3>Meus itens críticos</h3>${crList.length?crList.map(i=>`<div class="drow"><span class="material-icons" style="font-size:16px;color:var(--pend)">warning</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(i.nome)} <span class="dmini">· ${esc(i.obra_nome||'')}</span></span><span class="dmini">${D2(i.fim_cotacao)}</span> <b style="min-width:66px;text-align:right">${BRL(val(i))}</b></div>`).join(''):'<div class="dmini">Nenhum item crítico. 👏</div>'}</div>
+    <div class="dcard"><h3>Próximos vencimentos de cotação</h3>${prox.length?prox.map(i=>`<div class="drow"><span class="dgm" style="background:${obraCor(i.obra_id)}"></span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(i.nome)}</span><span class="dmini">${D2(i.fim_cotacao)}</span> <b style="min-width:66px;text-align:right">${BRL(val(i))}</b></div>`).join(''):'<div class="dmini">—</div>'}</div>
+    <div class="dcard wide"><h3>Minhas aquisições</h3>
+      <div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Item</th><th>Obra</th><th>Fim cotação</th><th>Status</th><th class="r">Verba</th></tr></thead><tbody>
+      ${tab.map(i=>`<tr><td>${esc(i.nome)}</td><td>${esc(i.obra_nome||'')}</td><td>${D2(i.fim_cotacao)} ${lvl(i)==='critico'?'<span class="dchip" style="background:var(--pend)">vencido</span>':''}</td><td><span class="dchip" style="background:${stCor(i.status||'Não Iniciado')}">${esc(i.status||'Não Iniciado')}</span></td><td class="r">${BRL(val(i))}</td></tr>`).join('')}
+      </tbody></table></div></div>
+  </div>`;
+}
+function D2(s){ if(!s)return'—'; const p=String(s).split('-'); return p.length===3?p[2]+'/'+p[1]:s; }
+
+/* ---------- 2) GERENTE DE COMPRAS ---------- */
+function renderDashGerente(D){
+  const cobPct=(()=>{ let cov=0,tot=0; Object.values(DASH.oppByObra).forEach(d=>{ if(d.resumo){cov+=d.resumo.coberto||0;tot+=d.resumo.total||0;} }); return tot?Math.round(100*cov/tot):null; })();
+  const g=D.gatilhos;
+  return `
+  <div class="dkpis">
+    <div class="dkpi"><div class="v">${D.totalItens}</div><div class="l">itens no radar</div></div>
+    <div class="dkpi"><div class="v ${D.pctComData>=80?'':'gold'}">${D.pctComData}%</div><div class="l">com data definida</div></div>
+    <div class="dkpi"><div class="v red">${D.criticos}</div><div class="l">críticos</div></div>
+    <div class="dkpi"><div class="v gold">${BRL(D.expostoAtraso)}</div><div class="l">valor exposto (atraso)</div></div>
+    <div class="dkpi"><div class="v blue">${cobPct!=null?cobPct+'%':'—'}</div><div class="l">cobertura da verba</div></div>
+  </div>
+  <div class="dgrid">
+    <div class="dcard"><h3>Ranking de compradores (por exposição)</h3>${D.compradores.length?dashBars(D.compradores.slice(0,6).map(c=>({label:c.nome,v:c.exposta,color:c.risco>66?'var(--pend)':(c.risco>33?'var(--dourado)':'var(--verde)'),sub:c.criticos?c.criticos+' crít.':''})),BRL):'<div class="dmini">sem responsáveis atribuídos</div>'}</div>
+    <div class="dcard"><h3>Semáforo por obra</h3><table class="dtable"><thead><tr><th>Obra</th><th class="r">Itens</th><th class="r">Críticos</th><th class="r">Risco</th></tr></thead><tbody>
+      ${D.porObra.map(o=>`<tr><td><span class="dgm" style="background:${o.cor}"></span> ${esc(o.nome)}</td><td class="r">${o.itens}</td><td class="r">${o.criticos}</td><td class="r"><span class="dgm" style="background:${o.risco>66?'var(--pend)':(o.risco>33?'var(--dourado)':'var(--ok)')}"></span></td></tr>`).join('')}</tbody></table></div>
+    <div class="dcard"><h3>Linha do tempo de gatilhos</h3>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center">
+        <div><div style="font-size:20px;font-weight:800;color:var(--pend)">${g.atras.n}</div><div class="dmini">Atrasados</div><div class="dmini">${BRL(g.atras.v)}</div></div>
+        <div><div style="font-size:20px;font-weight:800;color:#c77f1a">${g.d7.n}</div><div class="dmini">≤ 7 dias</div><div class="dmini">${BRL(g.d7.v)}</div></div>
+        <div><div style="font-size:20px;font-weight:800;color:var(--dourado)">${g.d15.n}</div><div class="dmini">8–15 dias</div><div class="dmini">${BRL(g.d15.v)}</div></div>
+        <div><div style="font-size:20px;font-weight:800;color:var(--verde)">${g.d30.n}</div><div class="dmini">15+ dias</div><div class="dmini">${BRL(g.d30.v)}</div></div>
+      </div></div>
+    <div class="dcard wide"><h3>O que precisa de atuação hoje</h3><div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Item</th><th>Obra</th><th>Responsável</th><th>Nível</th><th>Próxima ação</th></tr></thead><tbody>
+      ${D.atuacao.slice(0,10).map(a=>`<tr><td>${esc(a.nome)}</td><td>${esc(a.obra)}</td><td>${esc(a.resp)}</td><td>${nivelChip(a.nivel)}</td><td>${esc(a.acao)}</td></tr>`).join('')||'<tr><td colspan="5" class="dmini">Nada urgente. 👍</td></tr>'}
+      </tbody></table></div></div>
+  </div>`;
+}
+
+/* ---------- 3) DIRETOR ---------- */
+function renderDashDiretor(D){
+  const contratado=D.porObra.reduce((a,o)=>a+o.contratado,0);
+  const cr=D.curvaRisco, totRiscoV=cr.A.v+cr.B.v+cr.C.v;
+  const donut=[{v:cr.A.v,color:'var(--pend)'},{v:cr.B.v,color:'var(--dourado)'},{v:cr.C.v,color:'#8a9299'}];
+  const dpct=v=>totRiscoV?Math.round(100*v/totRiscoV):0;
+  return `
+  <div class="dkpis">
+    <div class="dkpi"><div class="v">${BRL(D.verbaTotal)}</div><div class="l">verba total no radar</div></div>
+    <div class="dkpi"><div class="v red">${BRL(D.expostoAtraso)}</div><div class="l">exposição em atraso</div></div>
+    <div class="dkpi"><div class="v">${D.porObra.filter(o=>o.risco>50).length}</div><div class="l">obras em risco</div></div>
+    <div class="dkpi"><div class="v blue">${BRL(contratado)}</div><div class="l">já contratado (finalizado)</div></div>
+    <div class="dkpi"><div class="v gold">${BRL(D.emergencial)}</div><div class="l">compras emergenciais</div></div>
+  </div>
+  <div class="dgrid">
+    <div class="dcard"><h3>Ranking de obras por risco</h3>${dashBars(D.porObra.slice(0,8).map(o=>({label:o.nome,v:o.exposta,color:o.cor,sub:o.criticos?o.criticos+' crít.':''})),BRL)}</div>
+    <div class="dcard"><h3>Curva ABC em risco</h3><div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <svg viewBox="0 0 120 120" width="120" height="120">${(function(){const cir=2*Math.PI*54;let off=0;return donut.filter(s=>s.v>0).map(s=>{const len=cir*s.v/(totRiscoV||1);const el=`<circle cx="60" cy="60" r="54" fill="none" stroke="${s.color}" stroke-width="12" stroke-dasharray="${len} ${cir-len}" stroke-dashoffset="${-off}" transform="rotate(-90 60 60)"/>`;off+=len;return el;}).join('');})()}<text x="60" y="64" text-anchor="middle" font-size="13" font-weight="800" fill="#1e3a2e">${BRL(totRiscoV).replace('R$','')}</text></svg>
+      <div style="flex:1;min-width:130px">
+        <div class="drow"><span class="dchip a">A</span><span style="flex:1">≥ R$200 mil</span><b>${cr.A.n}</b> <span class="dmini">${dpct(cr.A.v)}%</span></div>
+        <div class="drow"><span class="dchip b">B</span><span style="flex:1">R$100–200 mil</span><b>${cr.B.n}</b> <span class="dmini">${dpct(cr.B.v)}%</span></div>
+        <div class="drow"><span class="dchip c">C</span><span style="flex:1">&lt; R$100 mil</span><b>${cr.C.n}</b> <span class="dmini">${dpct(cr.C.v)}%</span></div>
+      </div></div></div>
+    <div class="dcard"><h3>Verba × contratado × exposto</h3>
+      ${dashBars([{label:'Verba total',v:D.verbaTotal,color:'#8a9299'},{label:'Contratado',v:contratado,color:'var(--ok)'},{label:'Em cotação/aberto',v:D.verbaTotal-contratado,color:'#2b5fa8'},{label:'Exposto (atraso)',v:D.expostoAtraso,color:'var(--pend)'}],BRL)}
+      <div class="dmini" style="margin-top:8px">Exposto = verba de itens que passaram do gatilho de cotação e ainda não fecharam.</div></div>
+    <div class="dcard wide"><h3>Top exposições financeiras</h3><div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Item</th><th>Obra</th><th>Nível</th><th class="r">Valor exposto</th></tr></thead><tbody>
+      ${D.itensCriticos.slice(0,8).map(i=>`<tr><td>${esc(i.nome)}</td><td>${esc(i.obra)}</td><td>${nivelChip(i.nivel)}</td><td class="r">${BRL(i.verba)}</td></tr>`).join('')||'<tr><td colspan="4" class="dmini">Sem exposição. 👍</td></tr>'}
+      </tbody></table></div></div>
+  </div>`;
+}
+
+/* ---------- 4) OPORTUNIDADES ---------- */
+function renderDashOpp(D){
+  const o=D.opp;
+  const janelas=o.categorias.filter(c=>c.ini&&c.fim).slice(0,10).map(c=>({cat:c.cat+(c.obras>=2?' ('+c.obras+' obras)':''),ini:c.ini,fim:c.fim,color:c.obras>=2?'var(--dourado)':'var(--verde)'}));
+  return `
+  <div class="dkpis">
+    <div class="dkpi"><div class="v gold">${o.lotes.length}</div><div class="l">categorias em ≥2 obras (lote)</div></div>
+    <div class="dkpi"><div class="v">${BRL(o.valorLote)}</div><div class="l">valor agrupável (lote)</div></div>
+    <div class="dkpi"><div class="v blue">${o.obrasEnvolvidas}</div><div class="l">obras no radar</div></div>
+    <div class="dkpi"><div class="v">${o.janela60}</div><div class="l">categorias c/ janela ≤60d</div></div>
+    <div class="dkpi"><div class="v red">${BRL(o.gapTotal)}</div><div class="l">gap de suprimentos (curva A/B)</div></div>
+  </div>
+  <div class="dgrid">
+    <div class="dcard col2"><h3>Negociações em lote — mesma categoria em várias obras</h3><div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Categoria</th><th class="r">Obras</th><th class="r">Itens</th><th>Janela de cotação</th><th class="r">Valor agrupável</th></tr></thead><tbody>
+      ${o.lotes.slice(0,10).map(c=>`<tr><td><b>${esc(c.cat)}</b></td><td class="r">${c.obras}</td><td class="r">${c.itens}</td><td class="dmini">${c.ini?D2(c.ini):'—'} → ${c.fim?D2(c.fim):'—'}</td><td class="r">${BRL(c.valor)}</td></tr>`).join('')||'<tr><td colspan="5" class="dmini">Nenhuma categoria repetida em 2+ obras ainda.</td></tr>'}
+      </tbody></table></div><div class="dmini" style="margin-top:8px">Categorias que aparecem em 2+ obras com janelas próximas = poder de negociação em volume.</div></div>
+    <div class="dcard"><h3>Próximas janelas de contratação</h3>${dashGantt(janelas)}<div class="dleg"><span><i style="background:var(--dourado)"></i> lote (2+ obras)</span><span><i style="background:var(--verde)"></i> obra única</span></div></div>
+    <div class="dcard col2"><h3>Maiores gaps do orçamento por categoria (curva A/B)</h3>${o.gapCategorias.length?dashBars(o.gapCategorias.map(g=>({label:g.cat,v:g.valor,color:'var(--pend)',sub:g.obras+' obra(s)'})),BRL):'<div class="dmini">Sem gaps de curva A/B.</div>'}<div class="dmini" style="margin-top:8px">Grandes itens do orçamento que o radar ainda não cobre — candidatos a novo item/negociação (ver aba Oportunidades).</div></div>
+  </div>`;
+}
+
 /* ===== Configuração / Permissões (Bloco 2) ===== */
 let CFG={usuarios:[],obras:[]}, NUSER=null;
 const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Mapa de Cotações'],['oportunidades','Oportunidades'],['updates','Atualizações'],['config','Configurações']];

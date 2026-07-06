@@ -143,9 +143,11 @@ try {
 
     // ---- células do radar: 1 por serviço do catálogo (curadoria/auto-vínculo vêm depois) ----
     $nR = 0;
-    $insR = $pdo->prepare("INSERT INTO radar_item (obra_id, servico_id, status, updated_at) VALUES (?,?,?,?)");
-    foreach ($pdo->query("SELECT id FROM servico ORDER BY id")->fetchAll() as $s) {
-        $insR->execute([$obraId, (int)$s['id'], 'Não Iniciado', date('c')]);
+    // a obra nova HERDA o responsável padrão de cada serviço (regra padrão)
+    $insR = $pdo->prepare("INSERT INTO radar_item (obra_id, servico_id, status, responsavel, updated_at) VALUES (?,?,?,?,?)");
+    foreach ($pdo->query("SELECT id, responsavel_padrao FROM servico ORDER BY id")->fetchAll() as $s) {
+        $rp = trim((string)($s['responsavel_padrao'] ?? ''));
+        $insR->execute([$obraId, (int)$s['id'], 'Não Iniciado', $rp !== '' ? $rp : null, date('c')]);
         $nR++;
     }
 

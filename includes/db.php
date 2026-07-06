@@ -468,10 +468,12 @@ function criar_item($pdo, $nome, $grupo, $tipo = '', $curva = '', $copy_from = n
             $curva ?: $g('curva','C'),$g('forma_contratacao'),$g('unidade'),$g('quantitativo'),$g('lead_dias'),
             $g('marco_cronograma'),$g('termos_orcamento'),$g('termos_cronograma'),$g('responsavel_padrao'),
             $g('escopo'),$g('variaveis_cotar'),$g('licoes'),$g('documentos'),$g('verba_linhas')]);
-    // serviço é CATÁLOGO (global) → cria a célula do radar em TODAS as obras existentes
-    $ins = $pdo->prepare("INSERT INTO radar_item (obra_id,servico_id,status,tipo,updated_at) VALUES (?,?,?,?,?)");
+    // serviço é CATÁLOGO (global) → cria a célula do radar em TODAS as obras existentes;
+    // já nasce com o RESPONSÁVEL PADRÃO do serviço (regra padrão — a célula herda)
+    $rpad = trim((string)$g('responsavel_padrao'));
+    $ins = $pdo->prepare("INSERT INTO radar_item (obra_id,servico_id,status,responsavel,tipo,updated_at) VALUES (?,?,?,?,?,?)");
     foreach ($pdo->query("SELECT id FROM obra ORDER BY id")->fetchAll() as $ob)
-        $ins->execute([(int)$ob['id'],$nid,'Não Iniciado',$tipo,date('c')]);
+        $ins->execute([(int)$ob['id'],$nid,'Não Iniciado',$rpad!==''?$rpad:null,$tipo,date('c')]);
     return $nid;
 }
 

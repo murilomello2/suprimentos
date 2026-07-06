@@ -388,7 +388,9 @@
       </div>
       <div class="panel" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
         <b id="rlSelCount" style="font-size:13px">0 selecionados</b>
+        <label id="rlPadraoWrap" class="ckl" style="display:none;font-size:12px" title="Também grava como padrão do serviço — obras novas já nascem com esse responsável"><input type="checkbox" id="rlPadrao"> tornar padrão (novas obras herdam)</label>
         <span style="flex:1"></span>
+        <button class="btn-ghost" style="padding:6px 12px" onclick="rlPreencherPadrao()" title="Preenche os itens SEM responsável com o padrão do serviço"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_fix_high</span> Preencher vazios c/ padrão</button>
         <select id="rlResp" style="min-width:210px"></select>
         <button class="btn-prim" style="padding:6px 12px" onclick="rlAtribuir()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">how_to_reg</span> Atribuir aos selecionados</button>
         <button class="btn-ghost" style="padding:6px 12px" onclick="rlLimpar()">Limpar responsável</button>
@@ -2697,6 +2699,8 @@ function renderRespLote(){
     if(keep && list.some(o=>String(o.id)===keep)) os.value=keep; else os.value=list[0].id; }
   const rs=document.getElementById('rlResp');
   if(rs) rs.innerHTML='<option value="">— escolher responsável —</option>'+(RESP||[]).map(u=>`<option value="${esc(u.nome)}">${esc(u.nome)}</option>`).join('');
+  // "tornar padrão" é mudança GLOBAL (template) → só p/ admin ou quem edita TODAS as obras
+  const pw=document.getElementById('rlPadraoWrap'); if(pw) pw.style.display=(IS_ADMIN||(CAN_RESP&&EU&&EU.editar_escopo==='todas'))?'':'none';
   rlLoad();
 }
 async function rlLoad(){
@@ -2705,7 +2709,7 @@ async function rlLoad(){
   try{
     const d=await (await fetch('actions/matriz.php'+(RL.obra!==1?('?obra='+RL.obra):''))).json();
     if(d.error){ box.innerHTML='<div class="empty">Erro: '+esc(d.error)+'</div>'; return; }
-    RL.itens=(d.itens||[]).map(i=>({ordem:i.ordem,nome:i.nome,grupo:i.grupo,curva:i.curva,responsavel:(i.responsavel||'').trim()}));
+    RL.itens=(d.itens||[]).map(i=>({ordem:i.ordem,nome:i.nome,grupo:i.grupo,curva:i.curva,responsavel:(i.responsavel||'').trim(),padrao:(i.responsavel_padrao||'').trim()}));
     const g=document.getElementById('rlGrupo'); const keep=g.value;
     g.innerHTML='<option value="">Todos os grupos</option>'+[...new Set(RL.itens.map(i=>i.grupo).filter(Boolean))].map(x=>`<option>${esc(x)}</option>`).join('');
     if(keep) g.value=keep;
@@ -2720,15 +2724,16 @@ function rlRender(){
   const box=document.getElementById('rlwrap'), fi=rlFiltered();
   const com=RL.itens.filter(i=>i.responsavel).length, tot=RL.itens.length;
   document.getElementById('rlKpi').innerHTML=`<b>${com}</b> de <b>${tot}</b> itens com responsável nesta obra · <b>${tot-com}</b> sem dono`;
-  let html='<table><thead><tr><th style="width:34px"><input type="checkbox" id="rlAll" onclick="rlToggleAll(this.checked)" title="selecionar os filtrados"></th><th>Item</th><th>Grupo</th><th>Curva</th><th>Responsável atual</th></tr></thead><tbody>';
+  let html='<table><thead><tr><th style="width:34px"><input type="checkbox" id="rlAll" onclick="rlToggleAll(this.checked)" title="selecionar os filtrados"></th><th>Item</th><th>Grupo</th><th>Curva</th><th>Responsável atual</th><th>Padrão</th></tr></thead><tbody>';
   let grupo=null;
   fi.forEach(i=>{
-    if(i.grupo!==grupo){ grupo=i.grupo; html+=`<tr class="grp-h"><td colspan="5">${esc(grupo||'—')}</td></tr>`; }
+    if(i.grupo!==grupo){ grupo=i.grupo; html+=`<tr class="grp-h"><td colspan="6">${esc(grupo||'—')}</td></tr>`; }
     html+=`<tr><td><input type="checkbox" ${RL.sel.has(i.ordem)?'checked':''} onclick="rlSel(${i.ordem},this.checked)"></td>
       <td>${esc(i.nome)}</td><td class="muted">${esc(i.grupo||'')}</td><td>${esc(i.curva||'')}</td>
-      <td>${i.responsavel?esc(i.responsavel):'<span class="muted">— sem —</span>'}</td></tr>`;
+      <td>${i.responsavel?esc(i.responsavel):'<span class="muted">— sem —</span>'}</td>
+      <td class="muted" title="padrão do serviço (novas obras herdam)">${i.padrao?esc(i.padrao):'—'}</td></tr>`;
   });
-  if(!fi.length) html+='<tr><td colspan="5" class="empty">Nenhum item nesse filtro.</td></tr>';
+  if(!fi.length) html+='<tr><td colspan="6" class="empty">Nenhum item nesse filtro.</td></tr>';
   box.innerHTML=html+'</tbody></table>';
   const all=document.getElementById('rlAll'); if(all) all.checked=fi.length>0 && fi.every(i=>RL.sel.has(i.ordem));
   rlCount();
@@ -2745,15 +2750,31 @@ async function rlAssign(nome, msg){
   if(!RL.sel.size){ toast('Selecione ao menos um item'); return; }
   if(!confirm(msg)) return;
   const ids=[...RL.sel];
+  const pchk=document.getElementById('rlPadrao');
+  const tornarPadrao = !!(nome && pchk && pchk.checked && pchk.offsetParent!==null);  // só ao ATRIBUIR (não ao limpar) e se visível+marcado
   try{
     const r=await (await fetch('actions/responsaveis_lote.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({acao:'atribuir',me:EU&&EU.bitrix_id,obra:RL.obra,servico_ids:ids,responsavel:nome})})).json();
+      body:JSON.stringify({acao:'atribuir',me:EU&&EU.bitrix_id,obra:RL.obra,servico_ids:ids,responsavel:nome,tornar_padrao:tornarPadrao?1:0})})).json();
     if(r.error){ toast(r.error); return; }
-    toast((r.n||0)+' item(ns) atualizado(s)');
-    RL.itens.forEach(i=>{ if(RL.sel.has(i.ordem)) i.responsavel=nome; }); RL.sel=new Set();
+    toast((r.n||0)+' item(ns) atualizado(s)'+(r.padrao?(' · '+r.padrao+' viraram padrão'):''));
+    RL.itens.forEach(i=>{ if(RL.sel.has(i.ordem)){ i.responsavel=nome; if(tornarPadrao) i.padrao=nome; } }); if(pchk) pchk.checked=false; RL.sel=new Set();
     if(typeof MAT!=='undefined') MAT=null;                                   // matriz reflete mudança
     if(typeof OBRA_SEL!=='undefined' && OBRA_SEL.includes(RL.obra)) load();  // refresca o card de cobertura do Radar
     rlRender();
+  }catch(e){ toast('Falha: '+e.message); }
+}
+async function rlPreencherPadrao(){
+  const alvo=RL.itens.filter(i=>!i.responsavel && i.padrao).length;
+  if(!alvo){ toast('Nenhum item vazio COM padrão definido nesta obra'); return; }
+  if(!confirm('Preencher '+alvo+' item(ns) sem responsável com o padrão do serviço, nesta obra?')) return;
+  try{
+    const r=await (await fetch('actions/responsaveis_lote.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'preencher_padrao',me:EU&&EU.bitrix_id,obra:RL.obra})})).json();
+    if(r.error){ toast(r.error); return; }
+    toast((r.n||0)+' item(ns) preenchido(s) com o padrão');
+    if(typeof MAT!=='undefined') MAT=null;
+    if(typeof OBRA_SEL!=='undefined' && OBRA_SEL.includes(RL.obra)) load();
+    await rlLoad();
   }catch(e){ toast('Falha: '+e.message); }
 }
 function rcMetodoSel(){ const el=document.getElementById('rcmetodo'); return (el&&el.value)||'concreto armado convencional'; }

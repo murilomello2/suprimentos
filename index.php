@@ -350,12 +350,27 @@
       <div class="wrap" id="cfgwrap"></div>
     </div>
     <div id="cfg-receitas" style="display:none">
+      <style>
+        #cfg-receitas .rcrule{border:1px solid var(--line,#e6ebe6);border-radius:8px;padding:10px 12px;margin-bottom:8px;background:#fff}
+        #cfg-receitas .rchead{display:flex;align-items:center;gap:7px;font-weight:700;font-size:12.5px;margin-bottom:8px}
+        #cfg-receitas .rchead .material-icons{font-size:18px}
+        #cfg-receitas .rclab{display:block;font-size:11.5px;color:var(--muted,#6b7280)}
+        #cfg-receitas .rclab input,#cfg-receitas .rclab select,#cfg-receitas .rclab textarea{display:block;width:100%;margin-top:3px;font-size:13px}
+        #cfg-receitas .rcpick{position:relative;display:inline-block}
+        #cfg-receitas .rcmenu{position:absolute;top:100%;right:0;margin-top:4px;background:#fff;border:1px solid var(--line,#e6ebe6);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);min-width:190px;z-index:50;padding:4px;max-height:340px;overflow:auto}
+        #cfg-receitas .rcmi{padding:7px 10px;border-radius:6px;cursor:pointer;font-size:12.5px}
+        #cfg-receitas .rcmi:hover{background:#eff7f1}
+      </style>
       <div class="panel">
-        <h3>📚 Dicionário de aprendizado — como cada item foi decidido (por nome, replicável em obra nova)</h3>
-        <div class="bar" style="flex-wrap:wrap;gap:10px;font-size:12.5px;align-items:center">
-          <span class="muted">A receita guarda a REGRA de cronograma (âncora → primeira data), a RECEITA de verba (linhas/insumos/recortes/exclusões) e a fonte do quantitativo. Pra corrigir uma receita: re-cure o item no radar e clique em re-derivar.</span>
-          <button class="btn-prim" style="padding:6px 12px" onclick="receitasDerivar(1)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Re-derivar da Trinity</button>
-          <button class="btn-ghost" style="padding:6px 12px" onclick="receitasAplicar(2)" title="preenche cronograma/verba/quantitativo da obra 2 com as receitas — tudo entra como sugerido 🤖 (não curado)"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--dourado)">smart_toy</span> Aplicar na Imperiale (auto-vínculo)</button>
+        <div class="bar" style="justify-content:space-between;flex-wrap:wrap;gap:10px;align-items:center">
+          <div class="search" style="flex:1;min-width:200px"><span class="material-icons" style="color:var(--muted)">search</span>
+            <input id="rcq" placeholder="Buscar item…" oninput="renderReceitas()"></div>
+          <div class="bar" style="gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="rcmetodo" onchange="rcMetodoChange()" title="Variante de método construtivo" style="max-width:230px"></select>
+            <button class="btn-ghost" style="padding:6px 12px" onclick="rcNovoItem()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">add</span> Novo item</button>
+            <div class="rcpick"><button class="btn-ghost" style="padding:6px 12px" onclick="rcMenu('aprender',event)"><span class="material-icons" style="font-size:16px;vertical-align:-3px">school</span> Aprender de uma obra <span class="material-icons" style="font-size:15px;vertical-align:-3px">expand_more</span></button><div id="rcmenu-aprender" class="rcmenu" style="display:none"></div></div>
+            <div class="rcpick"><button class="btn-prim" style="padding:6px 12px" onclick="rcMenu('aplicar',event)"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--dourado)">smart_toy</span> Aplicar em uma obra <span class="material-icons" style="font-size:15px;vertical-align:-3px">expand_more</span></button><div id="rcmenu-aplicar" class="rcmenu" style="display:none"></div></div>
+          </div>
         </div>
       </div>
       <div class="wrap" id="rcwrap"><div class="empty">Carregando…</div></div>
@@ -2633,51 +2648,151 @@ function cfgTab(t){
   ['users','receitas'].forEach(x=>{ const b=document.getElementById('cfgtab-'+x); if(b){ b.style.background = x===t?'var(--verde)':''; b.style.color = x===t?'#fff':''; } });
   if(t==='receitas') renderReceitas();
 }
-async function receitasDerivar(obraId){
-  if(!confirm('Re-derivar as receitas a partir da curadoria atual da obra? (as notas manuais são preservadas)')) return;
-  const r=await (await fetch('actions/receitas.php',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({acao:'derivar',obra_id:obraId,me:EU&&EU.bitrix_id})})).json();
-  if(r.error){ toast(r.error); return; }
-  toast(r.derivadas+' receitas derivadas de '+r.obra); RCDATA=null; renderReceitas();
+function rcMetodoSel(){ const el=document.getElementById('rcmetodo'); return (el&&el.value)||'concreto armado convencional'; }
+function rcMetodoChange(){ renderReceitas(); }
+function rcObras(){ return (typeof OBRAS!=='undefined'&&OBRAS)?OBRAS.slice():[]; }
+// dropdowns "Aprender de uma obra" / "Aplicar em uma obra"
+function rcMenu(kind,e){ if(e)e.stopPropagation();
+  document.querySelectorAll('#cfg-receitas .rcmenu').forEach(x=>{ if(x.id!=='rcmenu-'+kind) x.style.display='none'; });
+  const m=document.getElementById('rcmenu-'+kind); if(!m)return;
+  if(m.style.display==='block'){ m.style.display='none'; return; }
+  const obras=rcObras().filter(o=> kind==='aplicar' ? Number(o.id)>=2 : true);
+  m.innerHTML = obras.length ? obras.map(o=>`<div class="rcmi" onclick="rc${kind==='aprender'?'Aprender':'Aplicar'}(${Number(o.id)})">${esc(o.nome)}</div>`).join('')
+    : `<div class="rcmi muted">${rcObras().length?'nenhuma obra elegível':'carregando…'}</div>`;
+  m.style.display='block';
 }
-async function receitasAplicar(obraId){
-  if(!confirm('Aplicar as receitas na obra '+obraId+'? Só preenche o que está VAZIO, tudo entra como sugerido 🤖 (não curado).')) return;
-  toast('Aplicando receitas… (pode levar ~1 min)');
-  const r=await (await fetch('actions/aplicar_receitas.php',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({acao:'aplicar',obra_id:obraId,me:EU&&EU.bitrix_id})})).json();
-  if(r.error){ toast(r.error); return; }
-  toast(`Auto-vínculo em ${r.obra}: ${r.sugeridos.crono} cronogramas · ${r.sugeridos.verba} verbas · ${r.sugeridos.quant} quantitativos sugeridos`);
+document.addEventListener('click',e=>{ if(!(e.target.closest&&e.target.closest('#cfg-receitas .rcpick'))) document.querySelectorAll('#cfg-receitas .rcmenu').forEach(x=>x.style.display='none'); });
+async function rcAprender(obraId){
+  document.querySelectorAll('#cfg-receitas .rcmenu').forEach(x=>x.style.display='none');
+  const nome=(rcObras().find(o=>Number(o.id)===Number(obraId))||{}).nome||('obra '+obraId);
+  if(!confirm('Aprender as receitas a partir da curadoria atual de “'+nome+'”?\n\nRE-DERIVA a regra de cada item dessa obra. As anotações/cuidados são preservados; ajustes manuais de âncora/método podem ser sobrescritos.')) return;
+  toast('Aprendendo de '+nome+'…');
+  try{ const r=await (await fetch('actions/receitas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'derivar',obra_id:Number(obraId),me:EU&&EU.bitrix_id})})).json();
+    if(r.error){ toast(r.error); return; }
+    toast((r.derivadas||0)+' receitas aprendidas de '+r.obra); RCDATA=null; renderReceitas();
+  }catch(e){ toast('Falha: '+e.message); }
 }
-function rcCronoTxt(c){ if(!c) return '—';
-  return c.ancora_nome ? `Buscar “${esc(c.ancora_nome)}” → 1ª data` : ('automático'+(c.termos_template?` (${esc(c.termos_template)})`:'')); }
-function rcVerbaTxt(v){ if(!v||!v.metodo) return '(sem verba)';
-  if(v.metodo==='analitico'){ const ls=v.linhas||[]; let t=`ANALÍTICO · ${v.n_linhas||0} linhas`;
-    if(v.escopo_parcial) t+=' · ⚠ recorte de local'; if(v.exclusoes) t+=` · exclui ${v.exclusoes.length} insumo(s)`; return t; }
-  if(v.metodo==='composicao'){ const xs=v.insumos||[]; let t=`COMPOSIÇÃO · ${xs.length} insumo(s)`;
-    if(v.recorte_sugerido) t+=` · 🔎 sistema=${esc(v.recorte_sugerido.sistema)}${v.recorte_sugerido.tipo?(' tipo='+esc(v.recorte_sugerido.tipo)):''}`; return t; }
-  if(v.metodo==='manual') return 'MANUAL: '+BRL(v.valor_manual_origem||0);
-  return v.metodo;
+async function rcAplicar(obraId){
+  document.querySelectorAll('#cfg-receitas .rcmenu').forEach(x=>x.style.display='none');
+  if(Number(obraId)<2){ toast('A obra de origem do aprendizado não recebe auto-vínculo.'); return; }
+  const nome=(rcObras().find(o=>Number(o.id)===Number(obraId))||{}).nome||('obra '+obraId);
+  if(!confirm('Aplicar o dicionário em “'+nome+'”?\n\nPreenche só o que está VAZIO; tudo entra como sugerido 🤖 (não curado).')) return;
+  toast('Aplicando o dicionário em '+nome+'… (pode levar ~1 min)');
+  try{ const r=await (await fetch('actions/aplicar_receitas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'aplicar',obra_id:Number(obraId),me:EU&&EU.bitrix_id})})).json();
+    if(r.error){ toast(r.error); return; }
+    MAT=null;   // a matriz muda → invalida o cache
+    toast(`Auto-vínculo em ${r.obra}: ${r.sugeridos.crono} cronogramas · ${r.sugeridos.verba} verbas · ${r.sugeridos.quant} quantitativos`);
+  }catch(e){ toast('Falha: '+e.message); }
+}
+function rcNovoItem(){
+  const nome=(prompt('Nome do novo item (aquisição):')||'').trim(); if(!nome)return;
+  const grupos=[...new Set((RCDATA&&RCDATA.receitas||[]).map(r=>r.grupo).filter(Boolean))];
+  const grupo=(prompt('Grupo do item:'+(grupos.length?('\n\nexistentes: '+grupos.join(' · ')):''))||'').trim(); if(!grupo)return;
+  const curva=((prompt('Curva (A / B / C):','C')||'C').trim().toUpperCase())||'C';
+  (async()=>{
+    try{ const r=await (await fetch('actions/receitas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'criar_item',nome,grupo,curva,metodo_construtivo:rcMetodoSel(),me:EU&&EU.bitrix_id})})).json();
+      if(r.error){ toast(r.error); return; }
+      toast('Item criado: '+r.nome); RC_OPEN.add('sid:'+r.servico_id); RCDATA=null; renderReceitas();
+    }catch(e){ toast('Falha: '+e.message); }
+  })();
+}
+function rcPillTxt(dim,r){
+  if(dim==='crono'){ const c=r.crono||{}; if(!c.ancora_nome) return 'automático'; const p=c.ancora_nome.split(';').map(s=>s.trim()).filter(Boolean); return '“'+esc(p[0]||'')+'”'+(p.length>1?(' +'+(p.length-1)):''); }
+  if(dim==='verba'){ const v=r.verba||{}; if(!v.metodo) return '—';
+    if(v.metodo==='composicao') return 'composição · '+((v.insumos||[]).length)+' insumo(s)';
+    if(v.metodo==='analitico') return 'analítico · '+((v.linhas||[]).length)+' linha(s)';
+    return 'manual'; }
+  if(dim==='quant'){ const q=r.quant||{}; return q.fonte?esc(q.fonte):'—'; }
+  return '';
+}
+function rcLearned(v){ if(!v) return '';
+  if(v.metodo==='analitico'){ const n=(v.linhas||[]).length; if(!n) return ''; let t=n+' linha(s) do orçamento casadas por descrição'; if(v.escopo_parcial) t+=' · recorte de local'; if(v.exclusoes&&v.exclusoes.length) t+=' · '+v.exclusoes.length+' exclusão(ões)'; return t; }
+  if(v.metodo==='composicao'){ const n=(v.insumos||[]).length; let t=n?(n+' insumo(s)'):''; if(v.recorte_sugerido) t=(t?t+' · ':'')+'recorte por sistema “'+esc(v.recorte_sugerido.sistema)+'”'+(v.recorte_sugerido.tipo?(' ('+esc(v.recorte_sugerido.tipo)+')'):''); return t; }
+  return '';
+}
+function rcEditor(r){
+  const sid=r.servico_id, c=r.crono||{}, v=r.verba||{}, qd=r.quant||{};
+  const exs=(v.exclusoes||[]).map(e=>e.insumo).join('; ');
+  const learned=rcLearned(v);
+  const opt=(cur,val,lab)=>`<option value="${val}" ${cur===val?'selected':''}>${lab}</option>`;
+  return `<div style="padding:12px 14px">
+    <div class="rcrule">
+      <div class="rchead"><span class="material-icons" style="color:#185fa5">event</span> Cronograma — qual data usar</div>
+      <label class="rclab">tarefa(s) a procurar no cronograma <span class="muted">(separe por “;” pra dar alternativas)</span>
+        <input id="rc_anc_${sid}" value="${esc(c.ancora_nome||'')}" placeholder="ex.: Louças e Metais; Acabamento fino"></label>
+      <div class="muted" style="font-size:11.5px;margin-top:5px">usa a PRIMEIRA data encontrada. Vazio = automático pelos termos do serviço.</div>
+    </div>
+    <div class="rcrule">
+      <div class="rchead"><span class="material-icons" style="color:#b5651d">payments</span> Verba — de onde vem o valor</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <label class="rclab" style="flex:0 0 230px">como casar
+          <select id="rc_vm_${sid}">${opt(v.metodo||'','','—')}${opt(v.metodo,'composicao','composição (cesta de insumos)')}${opt(v.metodo,'analitico','orçamento analítico (linhas)')}${opt(v.metodo,'manual','manual')}</select></label>
+        <label class="rclab" style="flex:1;min-width:220px">não incluir (exclusões, separadas por “;”)
+          <input id="rc_ex_${sid}" value="${esc(exs)}" placeholder="ex.: mão de obra empreitada"></label>
+      </div>
+      ${learned?`<div class="muted" style="font-size:11.5px;margin-top:7px"><span class="material-icons" style="font-size:14px;vertical-align:-2px">memory</span> aprendido: ${learned} <span class="muted">— a seleção fina vem de curar uma obra real</span></div>`:''}
+    </div>
+    <div class="rcrule">
+      <div class="rchead"><span class="material-icons" style="color:#7b5ea7">straighten</span> Quantitativo — como contar</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <label class="rclab" style="flex:0 0 200px">fonte
+          <select id="rc_qf_${sid}">${opt(qd.fonte||'','','—')}${opt(qd.fonte,'composicao','composição')}${opt(qd.fonte,'orcamento','orçamento')}${opt(qd.fonte,'manual','manual')}</select></label>
+        <label class="rclab" style="flex:0 0 150px">unidade
+          <input id="rc_qu_${sid}" value="${esc(qd.unidade||'')}" placeholder="un, m², vb…"></label>
+      </div>
+    </div>
+    <div class="rcrule">
+      <div class="rchead"><span class="material-icons" style="color:var(--muted)">sticky_note_2</span> Cuidados, sinônimos, o que não fazer na próxima obra</div>
+      <textarea id="rc_nt_${sid}" style="width:100%;min-height:56px;font-size:13px" placeholder="ex.: em alvenaria estrutural, conferir se a bacia é suspensa — muda o kit.">${esc(r.nota||'')}</textarea>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+      <span class="muted" style="font-size:11px">${r.obra_origem?('última origem: '+esc(r.obra_origem)):'sem origem ainda'} · ${esc(r.metodo_construtivo||'')}</span>
+      <button class="btn-prim" style="padding:6px 14px" onclick="rcSalvar(${sid})"><span class="material-icons" style="font-size:15px;vertical-align:-3px">check</span> Salvar aprendizado</button>
+    </div>
+  </div>`;
+}
+async function rcSalvar(sid){
+  const g=id=>{ const el=document.getElementById(id); return el?el.value:''; };
+  const body={ acao:'salvar', me:EU&&EU.bitrix_id, servico_id:sid, metodo_construtivo:rcMetodoSel(),
+    crono:{ ancora_nome:g('rc_anc_'+sid) },
+    verba:{ metodo:g('rc_vm_'+sid), exclusoes:g('rc_ex_'+sid).split(';').map(s=>s.trim()).filter(Boolean) },
+    quant:{ fonte:g('rc_qf_'+sid), unidade:g('rc_qu_'+sid) },
+    nota:g('rc_nt_'+sid) };
+  try{ const r=await (await fetch('actions/receitas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.error){ toast(r.error); return; }
+    toast('Aprendizado salvo'); RCDATA=null; renderReceitas();
+  }catch(e){ toast('Falha: '+e.message); }
 }
 async function renderReceitas(){
   const box=document.getElementById('rcwrap'); if(!box) return;
   if(!RCDATA){ box.innerHTML='<div class="empty">Carregando…</div>';
     try{ RCDATA=await (await fetch('actions/receitas.php?_='+Date.now())).json(); }catch(e){ box.innerHTML='<div class="empty">Falha ao carregar.</div>'; return; } }
-  const rs=RCDATA.receitas||[];
-  if(!rs.length){ box.innerHTML='<div class="empty">Nenhuma receita ainda — clique em “Re-derivar da Trinity”.</div>'; return; }
-  box.innerHTML=`<table><thead><tr><th style="width:26px"></th><th>Item</th><th>Grupo</th><th>Cronograma (regra)</th><th>Verba (receita)</th><th>Quant.</th><th>Origem</th></tr></thead><tbody>`+
-    rs.map((r,ix)=>{
-      const open=RC_OPEN.has(ix);
-      const det=open?`<tr><td></td><td colspan="6" style="background:#fbfdf9"><pre style="white-space:pre-wrap;font-size:11px;margin:6px 0;max-height:300px;overflow:auto">${esc(JSON.stringify({crono:r.crono,verba:r.verba,quant:r.quant},null,1))}</pre>${r.nota?`<div class="note" style="margin:4px 0">📝 ${esc(r.nota)}</div>`:''}</td></tr>`:'';
-      return `<tr class="item" onclick="rcToggle(${ix})" style="cursor:pointer">
-        <td><span class="material-icons" style="font-size:16px;color:var(--muted)">${open?'expand_more':'chevron_right'}</span></td>
-        <td><b>${esc(r.nome)}</b></td><td class="muted">${esc(r.grupo||'')}</td>
-        <td style="font-size:12px">${rcCronoTxt(r.crono)}</td>
-        <td style="font-size:12px">${rcVerbaTxt(r.verba)}</td>
-        <td style="font-size:12px">${esc((r.quant&&r.quant.fonte)||'—')}</td>
-        <td class="muted" style="font-size:11.5px">${esc(r.obra_origem||'')}<br>${esc(r.metodo_construtivo||'')}</td></tr>`+det;
-    }).join('')+'</tbody></table>';
+  const all=RCDATA.receitas||[];
+  // seletor de método construtivo (variantes do dicionário)
+  const metsel=document.getElementById('rcmetodo');
+  let metodos=[...new Set(all.map(r=>r.metodo_construtivo).filter(Boolean))]; if(!metodos.length) metodos=['concreto armado convencional'];
+  if(metsel && metsel.dataset.k!==metodos.join('|')){ const keep=metsel.value; metsel.innerHTML=metodos.map(m=>`<option>${esc(m)}</option>`).join(''); metsel.dataset.k=metodos.join('|'); if(keep&&metodos.includes(keep)) metsel.value=keep; }
+  const met=rcMetodoSel();
+  const q=(document.getElementById('rcq')?document.getElementById('rcq').value:'').toLowerCase();
+  let rs=all.filter(r=>(r.metodo_construtivo||'concreto armado convencional')===met);
+  if(q) rs=rs.filter(r=>((r.nome||'')+' '+(r.grupo||'')).toLowerCase().includes(q));
+  if(!rs.length){ box.innerHTML='<div class="empty">Nenhum item nesse filtro. Use “Aprender de uma obra” pra puxar de uma curadoria, ou “Novo item”.</div>'; return; }
+  let html='<table><thead><tr><th style="width:26px"></th><th>Item</th><th>Grupo</th><th>Cronograma</th><th>Verba</th><th>Quant.</th></tr></thead><tbody>';
+  let grupo=null;
+  rs.forEach(r=>{
+    const key='sid:'+r.servico_id, open=RC_OPEN.has(key);
+    if(r.grupo!==grupo){ grupo=r.grupo; html+=`<tr class="grp-h"><td colspan="6">${esc(grupo||'—')}</td></tr>`; }
+    html+=`<tr class="item" onclick="rcToggle('${key}')" style="cursor:pointer">
+      <td><span class="material-icons" style="font-size:16px;color:var(--muted)">${open?'expand_more':'chevron_right'}</span></td>
+      <td><b>${esc(r.nome)}</b></td><td class="muted">${esc(r.grupo||'')}</td>
+      <td style="font-size:12px">${rcPillTxt('crono',r)}</td>
+      <td style="font-size:12px">${rcPillTxt('verba',r)}</td>
+      <td style="font-size:12px">${rcPillTxt('quant',r)}</td></tr>`;
+    if(open) html+=`<tr><td></td><td colspan="5" style="background:#fbfdf9;padding:0">${rcEditor(r)}</td></tr>`;
+  });
+  box.innerHTML=html+'</tbody></table>';
 }
-function rcToggle(ix){ RC_OPEN.has(ix)?RC_OPEN.delete(ix):RC_OPEN.add(ix); renderReceitas(); }
+function rcToggle(key){ RC_OPEN.has(key)?RC_OPEN.delete(key):RC_OPEN.add(key); renderReceitas(); }
 
 async function renderConfig(){
   cfgTab('users');

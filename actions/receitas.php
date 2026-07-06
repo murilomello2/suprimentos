@@ -67,6 +67,73 @@ try {
         echo json_encode(['ok'=>true]); exit;
     }
 
+    // ---- EDIÇÃO MANUAL da receita (didática): mescla os campos editáveis SEM perder a seleção
+    //      fina derivada (linhas/insumos/recorte vêm de curar uma obra real). ----
+    if ($acao === 'salvar') {
+        $sid = (int)($in['servico_id'] ?? 0);
+        $mc  = trim((string)($in['metodo_construtivo'] ?? '')) ?: 'concreto armado convencional';
+        if (!$sid) throw new Exception('servico_id obrigatório');
+        $ex = $pdo->prepare("SELECT crono, verba, quant, nota, obra_origem FROM receita WHERE servico_id=? AND metodo_construtivo=?");
+        $ex->execute([$sid, $mc]); $ex = $ex->fetch() ?: null;
+        $crono = ($ex && $ex['crono']) ? (json_decode($ex['crono'], true) ?: []) : [];
+        $verba = ($ex && $ex['verba']) ? (json_decode($ex['verba'], true) ?: []) : [];
+        $quant = ($ex && $ex['quant']) ? (json_decode($ex['quant'], true) ?: []) : [];
+        $origem = $ex ? $ex['obra_origem'] : null;
+
+        $ic = is_array($in['crono'] ?? null) ? $in['crono'] : [];
+        $iv = is_array($in['verba'] ?? null) ? $in['verba'] : [];
+        $iq = is_array($in['quant'] ?? null) ? $in['quant'] : [];
+
+        if (array_key_exists('ancora_nome', $ic)) {
+            $an = trim((string)$ic['ancora_nome']);
+            $crono['ancora_nome'] = ($an !== '') ? $an : null;
+            $crono['regra'] = ($an !== '') ? 'buscar_nome_pegar_primeira_data' : 'auto_por_termos';
+        }
+        if (array_key_exists('metodo', $iv)) {
+            $m = trim((string)$iv['metodo']);
+            if ($m === '') $verba['metodo'] = null;
+            elseif (in_array($m, ['analitico','composicao','manual'], true)) $verba['metodo'] = $m;
+        }
+        if (array_key_exists('exclusoes', $iv)) {
+            $exs = [];
+            foreach ((array)$iv['exclusoes'] as $e) { $e = trim((string)$e); if ($e !== '') $exs[] = ['insumo'=>$e]; }
+            if ($exs) $verba['exclusoes'] = $exs; else unset($verba['exclusoes']);
+        }
+        if (array_key_exists('fonte', $iq)) {
+            $f = trim((string)$iq['fonte']);
+            if ($f === '') $quant['fonte'] = null;
+            elseif (in_array($f, ['orcamento','composicao','manual'], true)) $quant['fonte'] = $f;
+        }
+        if (array_key_exists('unidade', $iq)) { $u = trim((string)$iq['unidade']); $quant['unidade'] = $u !== '' ? $u : null; }
+        $nota = array_key_exists('nota', $in) ? (string)$in['nota'] : ($ex['nota'] ?? null);
+
+        $pdo->prepare("REPLACE INTO receita (servico_id, metodo_construtivo, obra_origem, crono, verba, quant, nota, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?)")
+            ->execute([$sid, $mc, $origem,
+                       json_encode($crono, JSON_UNESCAPED_UNICODE), json_encode($verba, JSON_UNESCAPED_UNICODE),
+                       json_encode($quant, JSON_UNESCAPED_UNICODE), $nota, date('c')]);
+        echo json_encode(['ok'=>true, 'servico_id'=>$sid, 'metodo_construtivo'=>$mc]); exit;
+    }
+
+    // ---- NOVO ITEM no catálogo (aparece em TODAS as obras) + receita vazia editável ----
+    if ($acao === 'criar_item') {
+        $nome  = trim((string)($in['nome'] ?? ''));
+        $grupo = trim((string)($in['grupo'] ?? ''));
+        $curva = strtoupper(trim((string)($in['curva'] ?? ''))) ?: 'C';
+        $mc    = trim((string)($in['metodo_construtivo'] ?? '')) ?: 'concreto armado convencional';
+        if ($nome === '')  throw new Exception('nome obrigatório');
+        if ($grupo === '') throw new Exception('grupo obrigatório');
+        $sid = criar_item($pdo, $nome, $grupo, '', $curva);
+        $pdo->prepare("REPLACE INTO receita (servico_id, metodo_construtivo, obra_origem, crono, verba, quant, nota, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?)")
+            ->execute([$sid, $mc, null,
+                       json_encode(['regra'=>'auto_por_termos','ancora_nome'=>null], JSON_UNESCAPED_UNICODE),
+                       json_encode(['metodo'=>null], JSON_UNESCAPED_UNICODE),
+                       json_encode(['fonte'=>null], JSON_UNESCAPED_UNICODE),
+                       '', date('c')]);
+        echo json_encode(['ok'=>true, 'servico_id'=>$sid, 'nome'=>$nome, 'grupo'=>$grupo]); exit;
+    }
+
     if ($acao !== 'derivar') throw new Exception('acao inválida');
     $obraId = (int)($in['obra_id'] ?? 1);
     $obra = $pdo->prepare("SELECT * FROM obra WHERE id=?"); $obra->execute([$obraId]);

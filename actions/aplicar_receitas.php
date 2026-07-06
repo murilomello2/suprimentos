@@ -130,22 +130,30 @@ try {
         $anc = $rc['crono']['ancora_nome'] ?? null;
         if ($it['data_necessaria_override']) { $R['crono'] = 'já definido'; continue; }
         if (!$anc) { $R['crono'] = 'sem âncora (auto por termos segue valendo)'; continue; }
-        $toks = av_tokens($anc);
+        // a âncora pode trazer ALTERNATIVAS separadas por ";" (sinônimos de tarefa) — tenta cada uma
+        $cands = array_values(array_filter(array_map('trim', explode(';', $anc)), fn($x)=>$x!==''));
+        if (!$cands) $cands = [$anc];
         $best = null; $bestNome = null; $aprox = false;
-        foreach ($TASKS as $t) {   // 1º: match EXATO (todas as palavras) → primeira data
-            $ok = true;
-            foreach ($toks as $tk) if (strpos($t['n'], $tk) === false) { $ok = false; break; }
-            if ($ok && ($best === null || $t['start'] < $best)) { $best = $t['start']; $bestNome = $t['nome']; }
-        }
-        if (!$best && count($toks) >= 2) {   // 2º: APROXIMADO — melhor pontuação de palavras (regra do usuário:
-            $minHit = max(2, (int)ceil(count($toks) * 0.5));   // se a tarefa exata não existe, algo de prazo similar)
-            $bestScore = 0;
+        foreach ($cands as $cand) {   // 1º: match EXATO (todas as palavras do candidato) → 1ª data; melhor entre candidatos
+            $toks = av_tokens($cand); if (!$toks) continue;
             foreach ($TASKS as $t) {
-                $hit = 0;
-                foreach ($toks as $tk) if (strpos($t['n'], $tk) !== false) $hit++;
-                if ($hit < $minHit) continue;
-                if ($hit > $bestScore || ($hit === $bestScore && $best !== null && $t['start'] < $best)) {
-                    $bestScore = $hit; $best = $t['start']; $bestNome = $t['nome'];
+                $ok = true;
+                foreach ($toks as $tk) if (strpos($t['n'], $tk) === false) { $ok = false; break; }
+                if ($ok && ($best === null || $t['start'] < $best)) { $best = $t['start']; $bestNome = $t['nome']; }
+            }
+        }
+        if (!$best) {   // 2º: APROXIMADO — melhor pontuação de palavras entre TODOS os candidatos (regra do usuário:
+            $bestScore = 0;                                    // se a tarefa exata não existe, algo de prazo similar)
+            foreach ($cands as $cand) {
+                $toks = av_tokens($cand); if (count($toks) < 2) continue;
+                $minHit = max(2, (int)ceil(count($toks) * 0.5));
+                foreach ($TASKS as $t) {
+                    $hit = 0;
+                    foreach ($toks as $tk) if (strpos($t['n'], $tk) !== false) $hit++;
+                    if ($hit < $minHit) continue;
+                    if ($hit > $bestScore || ($hit === $bestScore && $best !== null && $t['start'] < $best)) {
+                        $bestScore = $hit; $best = $t['start']; $bestNome = $t['nome'];
+                    }
                 }
             }
             if ($best) $aprox = true;

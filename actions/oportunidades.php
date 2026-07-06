@@ -16,15 +16,31 @@ header('Content-Type: application/json; charset=utf-8');
 set_time_limit(180);
 require_once __DIR__ . '/../includes/db.php';
 
-/** conjunto de ids de folha COBERTOS por qualquer item do radar da obra (analítico + composição). */
+/** conjunto de ids de folha COBERTOS por qualquer item do radar da obra (analítico + composição).
+ *  Composição: itens curados à mão guardam só o `cid` (locais=None), então a cobertura é resolvida
+ *  por cid → DESCRIÇÃO da composição → todas as folhas com essa descrição (mesmo critério da
+ *  "cobertura real" do radar). Sem isso, alvenaria/gesso/etc. (composição) apareciam como falso-gap. */
 function opp_cobertas($pdo, $obraId) {
-    $cov = [];
+    $cov = []; $cids = [];
     $q = $pdo->prepare("SELECT orcamento_refs, composicao_sel FROM radar_item WHERE obra_id=?");
     $q->execute([$obraId]);
     foreach ($q->fetchAll() as $r) {
-        foreach ((json_decode($r['orcamento_refs'] ?? '[]', true) ?: []) as $L) $cov[(int)$L] = 1;
-        foreach ((json_decode($r['composicao_sel'] ?? '[]', true) ?: []) as $s)
-            foreach ((is_array($s['locais'] ?? null) ? $s['locais'] : []) as $L) $cov[(int)$L] = 1;
+        foreach ((json_decode($r['orcamento_refs'] ?? '[]', true) ?: []) as $L) $cov[(int)$L] = 1;   // analítico
+        foreach ((json_decode($r['composicao_sel'] ?? '[]', true) ?: []) as $s) {
+            if (!empty($s['cid'])) $cids[(int)$s['cid']] = 1;                                          // composição usada
+            foreach ((is_array($s['locais'] ?? null) ? $s['locais'] : []) as $L) $cov[(int)$L] = 1;    // (se guardou locais, usa também)
+        }
+    }
+    if ($cids) {   // cid → descrição da composição → folhas com essa descrição na obra
+        $descs = [];
+        foreach ($pdo->query("SELECT descricao FROM composicao WHERE id IN (" . implode(',', array_map('intval', array_keys($cids))) . ")")->fetchAll() as $c)
+            if ($c['descricao'] !== null && $c['descricao'] !== '') $descs[$c['descricao']] = 1;
+        if ($descs) {
+            $ph = implode(',', array_fill(0, count($descs), '?'));
+            $q2 = $pdo->prepare("SELECT id FROM orcamento_linha WHERE obra_id=? AND folha=1 AND descricao IN ($ph)");
+            $q2->execute(array_merge([$obraId], array_keys($descs)));
+            foreach ($q2->fetchAll() as $l) $cov[(int)$l['id']] = 1;
+        }
     }
     return $cov;
 }

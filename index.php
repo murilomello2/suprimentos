@@ -2873,57 +2873,49 @@ function rcEditor(r){
   const sid=r.servico_id, c=r.crono||{}, v=r.verba||{}, qd=r.quant||{};
   const exs=(v.exclusoes||[]).map(e=>e.insumo).join('; ');
   const opt=(cur,val,lab)=>`<option value="${val}" ${cur===val?'selected':''}>${lab}</option>`;
-  const box=inner=>`<div style="background:#f3f8f4;border:1px solid #e2ede5;border-radius:7px;padding:8px 10px;margin-top:8px;font-size:12px;line-height:1.5">
-      <div style="font-size:10px;font-weight:800;letter-spacing:.5px;color:var(--verde);margin-bottom:3px">O QUE FOI APRENDIDO</div>${inner}</div>`;
-  // ---- cronograma: a regra aprendida ----
-  const cronoAp = c.ancora_nome
-    ? `<b>Âncora fixa:</b> procura a tarefa “${esc(c.ancora_nome)}” no cronograma → 1ª data.`
-    : `<b>Automático:</b> usa o marco principal do serviço${c.termos_template?`, procurando por <b>${esc(c.termos_template)}</b>`:''}.`;
-  const cronoMarco = c.marco_template?`<div class="muted" style="margin-top:3px">${esc(c.marco_template)}</div>`:'';
-  // ---- verba: a regra + os insumos/linhas aprendidos ----
-  let verbaAp='';
-  if(v.metodo==='composicao'){
-    verbaAp = `Casa por <b>composição</b> — insumos que geralmente entram:`+
-      rcList(v.insumos,x=>`<li>${esc(x.insumo)} <span class="muted">· ${esc(x.tipo||'')}${x.sistemas?(' · '+esc(Object.keys(x.sistemas).join(', '))):''}${x.escopo==='recorte_de_locais'?' · recorte de locais':' · todos os locais'}</span></li>`);
-    if(v.recorte_sugerido) verbaAp+=`<div class="muted" style="margin-top:3px">Recorte: pega o sistema “${esc(v.recorte_sugerido.sistema)}”${v.recorte_sugerido.tipo?(' ('+esc(v.recorte_sugerido.tipo)+')'):''} inteiro.</div>`;
-  } else if(v.metodo==='analitico'){
-    verbaAp = `Casa por <b>orçamento analítico</b> — linhas que geralmente entram:`+
-      rcList(v.linhas,x=>`<li>${esc(x.descricao)}${x.ocorrencias>1?` <span class="muted">×${x.ocorrencias}</span>`:''}</li>`);
-    if(v.escopo_parcial) verbaAp+=`<div class="muted" style="margin-top:3px">⚠ recorte de locais (não pega todas as ocorrências).</div>`;
-  } else if(v.metodo==='manual'){
-    verbaAp = `Valor <b>manual</b> na origem: ${BRL(v.valor_manual_origem||0)}.`;
-  }
-  if(verbaAp && v.termos_template) verbaAp+=`<div class="muted" style="margin-top:4px">Termos que casam: ${esc(v.termos_template)}</div>`;
-  // ---- quantitativo: o driver aprendido ----
-  let quantAp='';
-  if(qd.driver_na_verba&&qd.driver_na_verba.length) quantAp=`Conta pela quantidade de: <b>${esc(qd.driver_na_verba.join('; '))}</b>.`;
-  else if(qd.linhas&&qd.linhas.length) quantAp=`Soma as linhas: ${esc(qd.linhas.map(l=>l.descricao).join('; '))}.`;
-  else if(qd.insumos&&qd.insumos.length) quantAp=`Insumos: ${esc(qd.insumos.join('; '))}.`;
+  const met=v.metodo||'';
+  const itens = met==='composicao' ? (v.insumos||[]).map(x=>x.insumo).join('\n')
+              : met==='analitico'  ? (v.linhas||[]).map(x=>x.descricao).join('\n') : '';
+  const itensLbl = met==='composicao' ? 'insumos que entram — um por linha (adicione / remova / edite)'
+                 : 'linhas do orçamento — uma por linha (adicione / remova / edite)';
+  const driver = (qd.driver_na_verba&&qd.driver_na_verba.length)?qd.driver_na_verba.join('; ')
+               : (qd.insumos&&qd.insumos.length)?qd.insumos.join('; ') : '';
+  const cronoResumo = c.ancora_nome?`âncora fixa “${esc(c.ancora_nome)}”`:'automático (marco principal do serviço)';
+  const recNote = v.recorte_sugerido?`<div class="muted" style="font-size:11px;margin-top:5px"><span class="material-icons" style="font-size:13px;vertical-align:-2px">bolt</span> recorte aprendido: pega o sistema “${esc(v.recorte_sugerido.sistema)}”${v.recorte_sugerido.tipo?(' ('+esc(v.recorte_sugerido.tipo)+')'):''} inteiro — se você listar insumos acima, eles valem no lugar do recorte.</div>`:'';
   return `<div style="padding:12px 14px">
     <div class="rcrule">
       <div class="rchead"><span class="material-icons" style="color:#185fa5">event</span> Cronograma — qual data usar</div>
-      ${box(cronoAp+cronoMarco)}
-      <label class="rclab" style="margin-top:8px">âncora fixa <span class="muted">(opcional — vazio mantém automático; separe por “;” pra alternativas)</span>
-        <input id="rc_anc_${sid}" value="${esc(c.ancora_nome||'')}" placeholder="ex.: Louças e Metais; Acabamento fino"></label>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <label class="rclab" style="flex:1;min-width:220px">tarefa-âncora <span class="muted">(vazio = automático; “;” p/ alternativas)</span>
+          <input id="rc_anc_${sid}" value="${esc(c.ancora_nome||'')}" placeholder="ex.: Louças e Metais; Acabamento fino"></label>
+        <label class="rclab" style="flex:1;min-width:220px">termos que o cronograma procura
+          <input id="rc_ct_${sid}" value="${esc(c.termos_template||'')}" placeholder="ex.: louças; sanitário"></label>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:5px">${c.marco_template?esc(c.marco_template)+' · ':''}atual: ${cronoResumo}</div>
     </div>
     <div class="rcrule">
       <div class="rchead"><span class="material-icons" style="color:#b5651d">payments</span> Verba — de onde vem o valor</div>
-      ${verbaAp?box(verbaAp):''}
-      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
         <label class="rclab" style="flex:0 0 230px">como casar
-          <select id="rc_vm_${sid}">${opt(v.metodo||'','','—')}${opt(v.metodo,'composicao','composição (cesta de insumos)')}${opt(v.metodo,'analitico','orçamento analítico (linhas)')}${opt(v.metodo,'manual','manual')}</select></label>
+          <select id="rc_vm_${sid}">${opt(met,'','—')}${opt(met,'composicao','composição (cesta de insumos)')}${opt(met,'analitico','orçamento analítico (linhas)')}${opt(met,'manual','manual')}</select></label>
         <label class="rclab" style="flex:1;min-width:220px">não incluir (exclusões, separadas por “;”)
           <input id="rc_ex_${sid}" value="${esc(exs)}" placeholder="ex.: mão de obra empreitada"></label>
       </div>
+      ${(met==='composicao'||met==='analitico')?`<label class="rclab" style="margin-top:8px">${itensLbl}
+        <textarea id="rc_it_${sid}" style="width:100%;min-height:74px;font-size:12.5px">${esc(itens)}</textarea></label>
+      <label class="rclab" style="margin-top:6px">termos que casam (sinônimos)
+        <input id="rc_vt_${sid}" value="${esc(v.termos_template||'')}" placeholder="ex.: louça; bacia; caixa acoplada"></label>${recNote}`
+      :(met==='manual'?`<div class="muted" style="font-size:11.5px;margin-top:6px">Valor manual — definido item a item na obra.</div>`:'<div class="muted" style="font-size:11.5px;margin-top:6px">Escolha o método acima pra listar os insumos/linhas.</div>')}
     </div>
     <div class="rcrule">
       <div class="rchead"><span class="material-icons" style="color:#7b5ea7">straighten</span> Quantitativo — como contar</div>
-      ${quantAp?box(quantAp):''}
-      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">
-        <label class="rclab" style="flex:0 0 200px">fonte
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <label class="rclab" style="flex:0 0 190px">fonte
           <select id="rc_qf_${sid}">${opt(qd.fonte||'','','—')}${opt(qd.fonte,'composicao','composição')}${opt(qd.fonte,'orcamento','orçamento')}${opt(qd.fonte,'manual','manual')}</select></label>
-        <label class="rclab" style="flex:0 0 150px">unidade
-          <input id="rc_qu_${sid}" value="${esc(qd.unidade||'')}" placeholder="un, m², vb…"></label>
+        <label class="rclab" style="flex:0 0 130px">unidade
+          <input id="rc_qu_${sid}" value="${esc(qd.unidade||'')}" placeholder="un, m²…"></label>
+        <label class="rclab" style="flex:1;min-width:200px">conta pela quantidade de (separe por “;”)
+          <input id="rc_qd_${sid}" value="${esc(driver)}" placeholder="ex.: Caixa acoplada de louça"></label>
       </div>
     </div>
     <div class="rcrule">
@@ -2938,10 +2930,13 @@ function rcEditor(r){
 }
 async function rcSalvar(sid){
   const g=id=>{ const el=document.getElementById(id); return el?el.value:''; };
+  const verba={ metodo:g('rc_vm_'+sid), exclusoes:g('rc_ex_'+sid).split(';').map(s=>s.trim()).filter(Boolean) };
+  const itEl=document.getElementById('rc_it_'+sid); if(itEl) verba.itens=itEl.value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const vtEl=document.getElementById('rc_vt_'+sid); if(vtEl) verba.termos_template=vtEl.value;
   const body={ acao:'salvar', me:EU&&EU.bitrix_id, servico_id:sid, metodo_construtivo:rcMetodoSel(),
-    crono:{ ancora_nome:g('rc_anc_'+sid) },
-    verba:{ metodo:g('rc_vm_'+sid), exclusoes:g('rc_ex_'+sid).split(';').map(s=>s.trim()).filter(Boolean) },
-    quant:{ fonte:g('rc_qf_'+sid), unidade:g('rc_qu_'+sid) },
+    crono:{ ancora_nome:g('rc_anc_'+sid), termos_template:g('rc_ct_'+sid) },
+    verba,
+    quant:{ fonte:g('rc_qf_'+sid), unidade:g('rc_qu_'+sid), driver:g('rc_qd_'+sid).split(';').map(s=>s.trim()).filter(Boolean) },
     nota:g('rc_nt_'+sid) };
   try{ const r=await (await fetch('actions/receitas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){ toast(r.error); return; }

@@ -89,6 +89,14 @@ try {
             $crono['ancora_nome'] = ($an !== '') ? $an : null;
             $crono['regra'] = ($an !== '') ? 'buscar_nome_pegar_primeira_data' : 'auto_por_termos';
         }
+        if (array_key_exists('termos_template', $ic)) {   // termos do cronograma → também no serviço (marco automático usa)
+            $t = trim((string)$ic['termos_template']);
+            if ($t !== '') $crono['termos_template'] = $t; else unset($crono['termos_template']);
+            // servico.termos_cronograma é POR SERVIÇO (não por método) e o marco automático o consome p/ TODAS
+            // as obras → só o método BASE propaga, e só quando não-vazio (não sobrescreve variantes nem apaga global)
+            if ($mc === 'concreto armado convencional' && $t !== '')
+                $pdo->prepare("UPDATE servico SET termos_cronograma=? WHERE id=?")->execute([$t, $sid]);
+        }
         if (array_key_exists('metodo', $iv)) {
             $m = trim((string)$iv['metodo']);
             if ($m === '') $verba['metodo'] = null;
@@ -99,12 +107,44 @@ try {
             foreach ((array)$iv['exclusoes'] as $e) { $e = trim((string)$e); if ($e !== '') $exs[] = ['insumo'=>$e]; }
             if ($exs) $verba['exclusoes'] = $exs; else unset($verba['exclusoes']);
         }
+        // ITENS editados à mão (insumos p/ composição, descrições de linha p/ analítico). O motor casa por
+        // NOME, então adicionar/remover aqui muda o auto-vínculo. Preserva tipo/sistemas dos que continuam.
+        if (array_key_exists('itens', $iv)) {
+            $met = $verba['metodo'] ?? null;
+            $nomes = [];
+            foreach ((array)$iv['itens'] as $x) { $x = trim((string)$x); if ($x !== '') $nomes[] = $x; }
+            if ($met === 'composicao') {
+                $antNomes = []; foreach (($verba['insumos'] ?? []) as $ins) if (isset($ins['insumo'])) $antNomes[] = $ins['insumo'];
+                $ant = []; foreach (($verba['insumos'] ?? []) as $ins) if (isset($ins['insumo'])) $ant[$ins['insumo']] = $ins;
+                $novos = []; foreach ($nomes as $nm) $novos[] = $ant[$nm] ?? ['insumo'=>$nm, 'tipo'=>null];
+                $verba['insumos'] = $novos;
+                // só descarta o recorte aprendido se a lista REALMENTE mudou. O editor pré-preenche o
+                // textarea com os insumos derivados; um "salvar" sem tocar na lista não pode apagar o
+                // recorte (senão degrada "pega o sistema inteiro" → "só estes N insumos" num no-op).
+                if ($antNomes !== $nomes) unset($verba['recorte_sugerido']);
+            } elseif ($met === 'analitico') {
+                $ant = []; foreach (($verba['linhas'] ?? []) as $ln) if (isset($ln['descricao'])) $ant[$ln['descricao']] = $ln;
+                $novas = []; foreach ($nomes as $nm) $novas[] = $ant[$nm] ?? ['descricao'=>$nm, 'ocorrencias'=>1];
+                $verba['linhas'] = $novas; $verba['n_linhas'] = count($novas);
+            }
+        }
+        if (array_key_exists('termos_template', $iv)) {   // termos da verba → também no serviço (busca em massa usa)
+            $t = trim((string)$iv['termos_template']);
+            if ($t !== '') $verba['termos_template'] = $t; else unset($verba['termos_template']);
+            if ($mc === 'concreto armado convencional' && $t !== '')   // só o método base propaga p/ a coluna global do serviço
+                $pdo->prepare("UPDATE servico SET termos_orcamento=? WHERE id=?")->execute([$t, $sid]);
+        }
         if (array_key_exists('fonte', $iq)) {
             $f = trim((string)$iq['fonte']);
             if ($f === '') $quant['fonte'] = null;
             elseif (in_array($f, ['orcamento','composicao','manual'], true)) $quant['fonte'] = $f;
         }
         if (array_key_exists('unidade', $iq)) { $u = trim((string)$iq['unidade']); $quant['unidade'] = $u !== '' ? $u : null; }
+        if (array_key_exists('driver', $iq)) {   // insumo(s) que dirigem o quantitativo (o motor conta por eles)
+            $drv = [];
+            foreach ((array)$iq['driver'] as $d) { $d = trim((string)$d); if ($d !== '') $drv[] = $d; }
+            if ($drv) $quant['driver_na_verba'] = $drv; else unset($quant['driver_na_verba']);
+        }
         $nota = array_key_exists('nota', $in) ? (string)$in['nota'] : ($ex['nota'] ?? null);
 
         $pdo->prepare("REPLACE INTO receita (servico_id, metodo_construtivo, obra_origem, crono, verba, quant, nota, updated_at)

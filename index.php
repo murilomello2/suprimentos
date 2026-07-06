@@ -1127,7 +1127,7 @@ function renderMatriz(){
       if(fr){ const off = fr==='__sem__' ? (!i||(i.responsavel||'').trim()!=='') : (!i||(i.responsavel||'')!==fr);
         if(off){ html+='<td><div class="cell cell-off"></div></td>'; continue; } }
       const cls=clsFn(i);
-      const dt=i&&i.fim_cotacao?i.fim_cotacao.split('-').slice(1).reverse().join('/'):'';
+      const dt=i&&i.fim_cotacao?(p=>p[2]+'/'+p[1]+'/'+p[0].slice(2))(i.fim_cotacao.split('-')):'';
       const tip=i?`${esc(o)} · ${esc(s.nome)}\n${txtMap[cls]||''}`+(i.fim_cotacao?` · fim cotação ${D(i.fim_cotacao)}`:'')+(i.responsavel?`\n${esc(i.responsavel)}`:''):'N/A';
       const click=i?`onclick="openModal(${i.ordem},${i.obra_id||1})"`:'';
       const inner=dt?`<span class="cell-dt">${dt}</span>`:'';   // data (fim da cotação) SEMPRE visível, suave

@@ -70,14 +70,13 @@ try {
         $gaps = array_values($agg);
         usort($gaps, function($a, $b){ return $b['valor'] <=> $a['valor']; });
         $gapTotal = array_sum(array_map(function($g){ return $g['valor']; }, $gaps));
-        // curva A/B/C por % ACUMULADO do gap (A até 80%, B até 95%, C o resto)
-        $cum = 0.0;
+        // Curva ABC de SUPRIMENTOS por VALOR do item (regra do usuário — não é % acumulado):
+        //   A >= R$ 200 mil · B R$ 100-200 mil · C < R$ 100 mil. Foco do radar = A e B.
+        $CURVA_A = 200000; $CURVA_B = 100000;
         foreach ($gaps as &$g) {
             $g['grupos'] = array_keys($g['grupos']);
             $g['valor_pct'] = $total > 0 ? round(100 * $g['valor'] / $total, 2) : 0;
-            $cum += $g['valor'];
-            $p = $gapTotal > 0 ? $cum / $gapTotal : 1;
-            $g['curva'] = $p <= 0.80 ? 'A' : ($p <= 0.95 ? 'B' : 'C');
+            $g['curva'] = $g['valor'] >= $CURVA_A ? 'A' : ($g['valor'] >= $CURVA_B ? 'B' : 'C');
             $g['valor'] = round($g['valor']);
         }
         unset($g);

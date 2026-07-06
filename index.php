@@ -1,5 +1,5 @@
 <?php /* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php. (republicado) */ ?>
-<?php /* build: fix-excluir-por-obra-2026-07-06 */ ?>
+<?php /* build: matriz-dropdown-data-resp-abc-2026-07-06 */ ?>
 <!doctype html>
 <html lang="pt-br">
 <head>
@@ -204,6 +204,9 @@
   .cell{width:100%;height:34px;cursor:pointer;display:flex;align-items:center;justify-content:center;border-left:1px solid #f1f3f2}
   .cell:hover{outline:2px solid var(--verde);outline-offset:-2px}
   .cell .material-icons{font-size:15px;color:#fff;opacity:.9}
+  .cell-off{background:transparent!important;cursor:default}
+  .cell-off:hover{outline:none}
+  .cell-dt{background:rgba(255,255,255,.72);color:#2f2f2f;font-size:9.5px;font-weight:700;padding:0 5px;border-radius:5px;letter-spacing:.2px;line-height:1.65}
   .mtable .svc-c small{color:var(--muted);display:block;font-size:11px}
 </style>
 </head>
@@ -307,7 +310,13 @@
     </div>
     <div class="panel">
       <div class="bar" style="flex-wrap:wrap;gap:8px">
-        <select id="mobra" multiple size="1" onchange="renderMatriz()" title="Segure Ctrl para escolher várias obras"></select>
+        <div id="matObraPick" style="position:relative">
+          <button type="button" class="btn-ghost" onclick="matObraToggle(event)" style="min-width:150px;display:inline-flex;align-items:center;gap:8px;justify-content:space-between;padding:7px 11px">
+            <span style="display:inline-flex;align-items:center;gap:5px"><span class="material-icons" style="font-size:15px;color:var(--dourado)">apartment</span> <span id="matObraLbl">Todas as obras</span></span>
+            <span style="font-size:10px;color:var(--muted)">▾</span>
+          </button>
+          <div id="matObraMenu" style="display:none;position:absolute;top:100%;left:0;z-index:60;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.14);min-width:210px;padding:6px;margin-top:3px"></div>
+        </div>
         <select id="mgrupo" onchange="renderMatriz()"><option value="">Todos os grupos</option></select>
         <select id="mcurva" onchange="renderMatriz()"><option value="">Todas as curvas</option><option>A</option><option>B</option><option>C</option></select>
         <select id="mstatus" onchange="renderMatriz()"><option value="">Todos os status</option></select>
@@ -517,7 +526,7 @@ const isAlert=i=>['critico','atrasado','proximo'].includes(alertLevel(i)); // 'f
 let OBRAS=[];                                    // todas as obras do sistema [{id,nome,codinome,...}]
 let OBRA_SEL=(()=>{ try{ const v=JSON.parse(localStorage.getItem('sup_obras')||'[1]'); return (Array.isArray(v)&&v.length)?v.map(Number):[1]; }catch(e){ return [1]; } })();
 let MAT=null;   // dataset da MATRIZ = TODAS as obras (independente do OBRA_SEL do Radar) — carregado sob demanda
-const OBRA_CORES={1:'var(--verde)',2:'#2b5fa8',3:'#7b5ea7',4:'#b5651d'};                 // cor por obra (badge/chip)
+const OBRA_CORES={1:'var(--verde)',2:'#2b5fa8',3:'#7b5ea7',4:'#b5651d',5:'#3a3a3a'};      // cor por obra (badge/chip)
 function obraCor(id){ return OBRA_CORES[id]||'#555'; }
 // dropdown de obras: abre/fecha o menu de checkboxes
 function obraMenuToggle(e){ if(e) e.stopPropagation(); const m=document.getElementById('obraMenu'); if(!m)return;
@@ -552,6 +561,38 @@ function obraUpdateUI(){
     lbl.textContent = nomes.length===1 ? nomes[0] : (nomes.length+' obras selecionadas'); }
   const m=document.getElementById('obraMenu'); if(m && m.style.display==='block') obraMenuRender();
 }
+
+/* ===== Matriz: dropdown de obras (próprio, independente do Radar) — null = todas ===== */
+let MAT_SEL=(()=>{ try{ const v=JSON.parse(localStorage.getItem('sup_mat_obras')||'null'); return Array.isArray(v)?v:null; }catch(e){ return null; } })();
+function matObraMeta(){ const seen=new Map(); (MAT||[]).forEach(i=>{ if(i.obra_nome && !seen.has(i.obra_nome)) seen.set(i.obra_nome,i.obra_id); }); return [...seen].map(([nome,id])=>({nome,id})); }
+function matObraToggle(e){ if(e) e.stopPropagation(); const m=document.getElementById('matObraMenu'); if(!m)return;
+  const abrir=m.style.display==='none'||!m.style.display; m.style.display=abrir?'block':'none'; if(abrir) matObraRender(); }
+document.addEventListener('click',e=>{ const p=document.getElementById('matObraPick'), m=document.getElementById('matObraMenu');
+  if(m && m.style.display==='block' && p && !p.contains(e.target)) m.style.display='none'; });
+function matObraRender(){
+  const m=document.getElementById('matObraMenu'); if(!m)return; const metas=matObraMeta();
+  const selAll=!MAT_SEL||!MAT_SEL.length;
+  m.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 6px 6px;border-bottom:1px solid var(--line);margin-bottom:4px">
+      <span style="font-size:10px;font-weight:800;letter-spacing:.6px;color:var(--muted)">SELECIONE 1 OU MAIS OBRAS</span>
+      <button class="btn-ghost" style="padding:2px 8px;font-size:11px" onclick="matObraTodas(event)">Todas</button></div>`+
+    (metas.length?metas.map(o=>{ const on=selAll||MAT_SEL.includes(o.nome);
+      return `<label style="display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;cursor:pointer;font-size:12.5px" onmouseover="this.style.background='#eff7f1'" onmouseout="this.style.background=''">
+        <input type="checkbox" ${on?'checked':''} onchange="matObraSet('${encodeURIComponent(o.nome)}',this.checked)">
+        <span style="width:9px;height:9px;border-radius:50%;background:${obraCor(o.id)};flex:0 0 auto"></span>
+        <span style="flex:1"><b>${esc(o.nome)}</b></span></label>`; }).join(''):'<div class="muted" style="padding:8px;font-size:12px">—</div>');
+}
+function matObraSet(nomeEnc,checked){ const nome=decodeURIComponent(nomeEnc), all=matObraMeta().map(o=>o.nome);
+  let cur=(!MAT_SEL||!MAT_SEL.length)?all.slice():MAT_SEL.slice();
+  if(checked){ if(!cur.includes(nome)) cur.push(nome); }
+  else { cur=cur.filter(x=>x!==nome); if(!cur.length){ toast('Pelo menos uma obra selecionada'); matObraRender(); return; } }
+  MAT_SEL=(cur.length>=all.length)?null:cur;
+  localStorage.setItem('sup_mat_obras',JSON.stringify(MAT_SEL));
+  matObraLbl(); matObraRender(); renderMatriz();
+}
+function matObraTodas(e){ if(e) e.stopPropagation(); MAT_SEL=null; localStorage.setItem('sup_mat_obras','null'); matObraLbl(); matObraRender(); renderMatriz(); }
+function matObraLbl(){ const l=document.getElementById('matObraLbl'); if(!l)return; const all=matObraMeta();
+  if(!MAT_SEL||!MAT_SEL.length||MAT_SEL.length>=all.length) l.textContent='Todas as obras';
+  else l.textContent=MAT_SEL.length===1?MAT_SEL[0]:(MAT_SEL.length+' obras'); }
 async function load(){
   try{
     // busca a matriz de CADA obra selecionada em paralelo e mescla (item ganha obra_id/obra_nome)
@@ -612,7 +653,7 @@ async function loadMatriz(force){
     }
     MAT=items;
     fillOrdered('mgrupo',[...new Set(items.map(i=>i.grupo).filter(Boolean))]);
-    fillMulti('mobra',[...new Set(items.map(i=>i.obra_nome).filter(Boolean))]);
+    matObraLbl();
     fill('mstatus',[...new Set(items.map(i=>i.status||'Não Iniciado'))]);
     const mr=document.getElementById('mresp'); if(mr){ const mk=mr.value;
       mr.innerHTML='<option value="">Todos os responsáveis</option><option value="__sem__">— sem responsável —</option>'+[...new Set(items.map(i=>i.responsavel).filter(Boolean))].sort().map(v=>`<option>${esc(v)}</option>`).join(''); mr.value=mk; }
@@ -992,9 +1033,8 @@ const LEG_PRAZO=[['c-fin','Cotação finalizada'],['c-atras','Prazo de cotação
 function renderMatriz(){
   if(!MAT){ loadMatriz(); return; }        // fonte própria da matriz (todas as obras) ainda não carregada
   const src=MAT, gv=id=>{const e=document.getElementById(id);return e?e.value:'';};
-  const sel=[...document.getElementById('mobra').selectedOptions].map(o=>o.value);
   const allObras=[...new Set(src.map(i=>i.obra_nome).filter(Boolean))];
-  const obras=sel.length?sel:allObras;
+  const obras=(MAT_SEL&&MAT_SEL.length)?allObras.filter(o=>MAT_SEL.includes(o)):allObras;
   const fg=gv('mgrupo'), fc=gv('mcurva'), fst=gv('mstatus'), fr=gv('mresp');
   const onlyAlert=(document.getElementById('malert')||{}).checked;
   const colorBy=gv('mcolor')||'status', orderBy=gv('morder')||'grupo';
@@ -1002,7 +1042,7 @@ function renderMatriz(){
   const clsFn=colorBy==='prazo'?prazoClass:cellClass, txtMap=colorBy==='prazo'?PRAZO_TXT:CELL_TXT;
   // legenda + subtítulo dinâmicos
   const lg=document.getElementById('mlegend'); if(lg) lg.innerHTML=(colorBy==='prazo'?LEG_PRAZO:LEG_STATUS).map(([c,t])=>`<span class="lg"><span class="sw ${c}"></span> ${esc(t)}</span>`).join('');
-  const sub=document.getElementById('msub'); if(sub) sub.textContent=colorBy==='prazo'?'Serviços × obras — cor pelo PRAZO DE COTAÇÃO (data limite p/ fechar a cotação); a data na célula é o fim da cotação.':'Serviços × obras — status de cada aquisição por obra.';
+  const sub=document.getElementById('msub'); if(sub) sub.textContent=(colorBy==='prazo'?'Cor pelo PRAZO DE COTAÇÃO (data limite p/ fechar a cotação).':'Cor pelo STATUS de cada aquisição.')+' A data no centro de cada célula é o FIM DA COTAÇÃO.';
   // índice (ordem|obra) -> item
   const idx={}; src.forEach(i=>idx[i.ordem+'|'+i.obra_nome]=i);
   // serviços distintos (filtros de serviço: grupo/curva/busca), na ordem natural (= por grupo lógico)
@@ -1031,11 +1071,15 @@ function renderMatriz(){
       html+=`<tr class="grp-h"><td colspan="${obras.length+1}">${esc(grupo)}</td></tr>`;}
     html+=`<tr><td class="svc-c">${esc(s.nome)}<small>Curva ${esc(s.curva||'—')}</small></td>`;
     for(const o of obras){
-      const i=idx[s.ordem+'|'+o]; const cls=clsFn(i);
+      const i=idx[s.ordem+'|'+o];
+      // filtro por responsável: célula que NÃO é desse responsável fica transparente (a coluna da obra permanece)
+      if(fr){ const off = fr==='__sem__' ? (!i||(i.responsavel||'').trim()!=='') : (!i||(i.responsavel||'')!==fr);
+        if(off){ html+='<td><div class="cell cell-off"></div></td>'; continue; } }
+      const cls=clsFn(i);
       const dt=i&&i.fim_cotacao?i.fim_cotacao.split('-').slice(1).reverse().join('/'):'';
       const tip=i?`${esc(o)} · ${esc(s.nome)}\n${txtMap[cls]||''}`+(i.fim_cotacao?` · fim cotação ${D(i.fim_cotacao)}`:'')+(i.responsavel?`\n${esc(i.responsavel)}`:''):'N/A';
       const click=i?`onclick="openModal(${i.ordem},${i.obra_id||1})"`:'';
-      const inner=(colorBy==='prazo'&&dt)?`<span style="background:rgba(0,0,0,.34);color:#fff;padding:1px 5px;border-radius:5px;font-size:10px;font-weight:700">${dt}</span>`:'';
+      const inner=dt?`<span class="cell-dt">${dt}</span>`:'';   // data (fim da cotação) SEMPRE visível, suave
       html+=`<td><div class="cell ${cls}" title="${tip}" ${click}>${inner}</div></td>`;
     }
     html+='</tr>';

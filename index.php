@@ -435,6 +435,7 @@ const isAlert=i=>['critico','atrasado','proximo'].includes(alertLevel(i)); // 'f
 /* ===== multi-obra: seleção de obras (chips) — 1 obra por default, persiste no navegador ===== */
 let OBRAS=[];                                    // todas as obras do sistema [{id,nome,codinome,...}]
 let OBRA_SEL=(()=>{ try{ const v=JSON.parse(localStorage.getItem('sup_obras')||'[1]'); return (Array.isArray(v)&&v.length)?v.map(Number):[1]; }catch(e){ return [1]; } })();
+let MAT=null;   // dataset da MATRIZ = TODAS as obras (independente do OBRA_SEL do Radar) — carregado sob demanda
 const OBRA_CORES={1:'var(--verde)',2:'#2b5fa8',3:'#7b5ea7',4:'#b5651d'};                 // cor por obra (badge/chip)
 function obraCor(id){ return OBRA_CORES[id]||'#555'; }
 // dropdown de obras: abre/fecha o menu de checkboxes
@@ -505,15 +506,35 @@ async function load(){
     fillOrdered('fgrupo',[...new Set(itens.map(i=>i.grupo).filter(Boolean))]);
     fill('fstatus',[...new Set(itens.map(i=>i.status||'Não Iniciado'))]);
     fill('fresp',[...new Set(itens.map(i=>i.responsavel).filter(Boolean))]);
-    // filtros da Matriz
-    fillOrdered('mgrupo',[...new Set(itens.map(i=>i.grupo).filter(Boolean))]);
-    fillMulti('mobra',[...new Set(itens.map(i=>i.obra_nome).filter(Boolean))]);
-    render(); renderMatriz();
+    render();
+    // a MATRIZ tem fonte PRÓPRIA (todas as obras, independente do Radar) — invalida o cache e refresca se estiver aberta
+    MAT=null;
+    if(document.getElementById('view-matriz').style.display!=='none') loadMatriz(true);
   }catch(e){document.getElementById('tb').innerHTML=`<tr><td colspan="12" class="empty">Falha: ${esc(e.message)}</td></tr>`;}
 }
 function fill(id,arr){const el=document.getElementById(id);const keep=el.value;el.innerHTML=el.children[0].outerHTML+arr.slice().sort().map(v=>`<option>${esc(v)}</option>`).join('');el.value=keep;}
 function fillOrdered(id,arr){const el=document.getElementById(id);const keep=el.value;el.innerHTML=el.children[0].outerHTML+arr.map(v=>`<option>${esc(v)}</option>`).join('');el.value=keep;}
 function fillMulti(id,arr){const el=document.getElementById(id);el.innerHTML=arr.map(v=>`<option selected>${esc(v)}</option>`).join('');el.size=Math.min(Math.max(arr.length,1),4);}
+// Carrega a MATRIZ com TODAS as obras do sistema — independente do filtro de obra do Radar (OBRA_SEL).
+async function loadMatriz(force){
+  try{
+    if(MAT && !force){ renderMatriz(); return; }
+    let obras=(OBRAS&&OBRAS.length)?OBRAS.map(o=>Number(o.id)):null;
+    if(!obras){ const d0=await (await fetch('actions/matriz.php')).json(); OBRAS=d0.obras||[]; obras=OBRAS.map(o=>Number(o.id)); }
+    const rs=await Promise.all(obras.map(async oid=>{
+      const d=await (await fetch('actions/matriz.php'+(oid!==1?('?obra='+oid):''))).json(); return {oid,d};
+    }));
+    const items=[];
+    for(const {oid,d} of rs){ if(!d||d.error||!d.itens) continue;
+      if(d.obras) OBRAS=d.obras;
+      (d.itens||[]).forEach(i=>{ i.obra_id=oid; i.obra_nome=(d.obra&&d.obra.nome)||('obra '+oid); items.push(i); });
+    }
+    MAT=items;
+    fillOrdered('mgrupo',[...new Set(items.map(i=>i.grupo).filter(Boolean))]);
+    fillMulti('mobra',[...new Set(items.map(i=>i.obra_nome).filter(Boolean))]);
+    renderMatriz();
+  }catch(e){ const w=document.getElementById('mwrap'); if(w) w.innerHTML='<div class="empty">Falha ao carregar a matriz: '+esc(e.message)+'</div>'; }
+}
 
 /* ---------- view switch ---------- */
 function showView(v){
@@ -521,7 +542,7 @@ function showView(v){
     document.getElementById('view-'+x).style.display=v===x?'':'none';
     document.getElementById('nav-'+x).classList.toggle('active',v===x);
   });
-  if(v==='matriz') renderMatriz();
+  if(v==='matriz') loadMatriz();
   if(v==='config') renderConfig();
   if(v==='radar') fitRadarHeight();
   if(v==='audit') renderAudit();
@@ -771,19 +792,21 @@ function cellClass(i){
 }
 const CELL_TXT={'c-fin':'Finalizado','c-cot':'Em cotação','c-andamento':'Em andamento','c-prop':'Proposta recebida','c-atras':'Atrasado','c-pend':'Com pendências','c-noprazo':'No prazo, não iniciado','c-none':'N/A'};
 function renderMatriz(){
+  if(!MAT){ loadMatriz(); return; }        // fonte própria da matriz (todas as obras) ainda não carregada
+  const src=MAT;
   const sel=[...document.getElementById('mobra').selectedOptions].map(o=>o.value);
-  const allObras=[...new Set(DATA.itens.map(i=>i.obra_nome).filter(Boolean))];
+  const allObras=[...new Set(src.map(i=>i.obra_nome).filter(Boolean))];
   const obras=sel.length?sel:allObras;
   const fg=document.getElementById('mgrupo').value,fc=document.getElementById('mcurva').value;
   const q=(document.getElementById('mq').value||'').toLowerCase();
   // serviços (linhas) distintos por ordem, na ordem lógica de grupo
-  const filt=DATA.itens.filter(i=>(!fg||i.grupo===fg)&&(!fc||i.curva===fc)&&(!q||i.nome.toLowerCase().includes(q)));
+  const filt=src.filter(i=>(!fg||i.grupo===fg)&&(!fc||i.curva===fc)&&(!q||i.nome.toLowerCase().includes(q)));
   const seen=new Map();
   for(const i of filt){ if(!seen.has(i.ordem)) seen.set(i.ordem,{ordem:i.ordem,nome:i.nome,grupo:i.grupo,curva:i.curva}); }
   const servicos=[...seen.values()];
   if(!servicos.length||!obras.length){document.getElementById('mwrap').innerHTML='<div class="empty">Sem dados para os filtros.</div>';return;}
   // índice (ordem|obra) -> item
-  const idx={}; DATA.itens.forEach(i=>idx[i.ordem+'|'+i.obra_nome]=i);
+  const idx={}; src.forEach(i=>idx[i.ordem+'|'+i.obra_nome]=i);
   let html='<table class="mtable"><thead><tr><th class="svc-h">Serviço</th>'+
     obras.map(o=>`<th>${esc(o)}</th>`).join('')+'</tr></thead><tbody>';
   let grupo=null;

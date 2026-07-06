@@ -1,4 +1,5 @@
 <?php /* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php. (republicado) */ ?>
+<?php /* build: opp-busca-digitavel-2026-07-06 */ ?>
 <!doctype html>
 <html lang="pt-br">
 <head>
@@ -336,13 +337,33 @@
       </div>
       <div id="opKpis" class="kpis" style="padding:10px 0 0"></div>
     </div>
-    <div class="panel" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-      <b id="opSel" style="font-size:13px">0 selecionados · R$ 0</b>
-      <span style="flex:1"></span>
-      <input id="opNome" placeholder="Nome do item (ex.: Esquadrias de Alumínio)" style="min-width:270px">
-      <input id="opGrupoNovo" list="opGrupos" placeholder="Grupo (escolha da lista ou digite)" style="width:210px" autocomplete="off"><datalist id="opGrupos"></datalist>
-      <label class="muted" style="font-size:11px;align-self:center">curva <select id="opCurvaNovo" style="margin-left:3px"><option>A</option><option>B</option><option>C</option></select></label>
-      <button class="btn-prim" style="padding:6px 12px" onclick="opCriar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add_task</span> Criar item de aquisição</button>
+    <div class="panel" style="margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <b id="opSel" style="font-size:13px">0 selecionados · R$ 0</b>
+        <span class="muted" style="font-size:11.5px">— marque os itens do orçamento abaixo e escolha:</span>
+      </div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:10px;align-items:flex-end">
+        <div>
+          <div style="font-size:10px;font-weight:800;letter-spacing:.5px;color:var(--muted);margin-bottom:4px">VINCULAR A UM ITEM QUE JÁ EXISTE</div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <div style="position:relative">
+              <input id="opItemBusca" oninput="opItemBuscaInput()" placeholder="Buscar item do radar (ex.: forma pronta)…" style="width:280px" autocomplete="off">
+              <div id="opItemSug" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:60;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.14);max-height:280px;overflow:auto;margin-top:2px"></div>
+            </div>
+            <button class="btn-prim" style="padding:6px 12px" onclick="opVincular()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">link</span> Vincular</button>
+          </div>
+        </div>
+        <div style="width:1px;align-self:stretch;background:var(--line)"></div>
+        <div>
+          <div style="font-size:10px;font-weight:800;letter-spacing:.5px;color:var(--muted);margin-bottom:4px">OU CRIAR UM ITEM NOVO</div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input id="opNome" placeholder="Nome (ex.: Esquadrias de Alumínio)" style="width:225px">
+            <input id="opGrupoNovo" list="opGrupos" placeholder="Grupo" style="width:150px" autocomplete="off"><datalist id="opGrupos"></datalist>
+            <select id="opCurvaNovo" title="curva ABC"><option>A</option><option>B</option><option>C</option></select>
+            <button class="btn-ghost" style="padding:6px 12px" onclick="opCriar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add_task</span> Criar</button>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="wrap" id="opwrap"><div class="empty">Selecione uma obra.</div></div>
    </section>
@@ -628,6 +649,7 @@ async function opLoad(){
     if(d.error){ box.innerHTML='<div class="empty">Erro: '+esc(d.error)+'</div>'; return; }
     OPP.gaps=(d.gaps||[]).map((g,i)=>(g._i=i,g)); OPP.resumo=d.resumo||{};
     const dl=document.getElementById('opGrupos'); if(dl) dl.innerHTML=(d.grupos||[]).map(x=>`<option value="${esc(x)}"></option>`).join('');
+    OPP.itens=d.itens||[]; OPP.selItem=null;
     const g=document.getElementById('opGrupo'), keep=g.value;
     g.innerHTML='<option value="">Todos os grupos</option>'+[...new Set(OPP.gaps.flatMap(x=>x.grupos||[]))].sort().map(x=>`<option>${esc(x)}</option>`).join(''); if(keep)g.value=keep;
     opRender();
@@ -674,6 +696,38 @@ async function opCriar(){
     if(r.error){ toast(r.error); return; }
     toast('Criado: '+r.nome+' — '+r.linhas+' linhas · '+BRL(r.valor));
     document.getElementById('opNome').value=''; document.getElementById('opGrupoNovo').value='';
+    OPP.sel=new Set(); if(typeof MAT!=='undefined')MAT=null; if(typeof RCDATA!=='undefined')RCDATA=null;
+    await opLoad();
+  }catch(e){ toast('Falha: '+e.message); }
+}
+function opNorm(s){ return (s||'').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''); }
+function opItemMatch(q){   // busca por PALAVRAS: cada token precisa aparecer no nome (tolera plural, ordem, acento)
+  const toks=opNorm(q).split(/\s+/).map(t=>t.replace(/[^a-z0-9]/g,'')).filter(t=>t.length>=2).map(t=>(t.length>=4&&t.endsWith('s'))?t.slice(0,-1):t);
+  if(!toks.length) return [];
+  return (OPP.itens||[]).filter(it=>{ const n=opNorm(it.nome); return toks.every(t=>n.includes(t)); }).slice(0,12);
+}
+function opItemBuscaInput(){
+  OPP.selItem=null;
+  const q=document.getElementById('opItemBusca').value, box=document.getElementById('opItemSug'); if(!box)return;
+  const ms=q.trim()?opItemMatch(q):[];
+  if(!ms.length){ box.style.display='none'; box.innerHTML=''; return; }
+  box.innerHTML=ms.map(it=>`<div onclick="opPickItem(${it.id})" style="padding:7px 10px;cursor:pointer;font-size:12.5px;border-bottom:1px solid #f1f3f2" onmouseover="this.style.background='#eff7f1'" onmouseout="this.style.background=''">${esc(it.nome)} <span class="muted" style="font-size:10.5px">· ${esc(it.grupo||'')}</span></div>`).join('');
+  box.style.display='block';
+}
+function opPickItem(id){ const it=(OPP.itens||[]).find(x=>x.id===id); if(!it)return; OPP.selItem=it;
+  const inp=document.getElementById('opItemBusca'); if(inp)inp.value=it.nome; const box=document.getElementById('opItemSug'); if(box){box.style.display='none';box.innerHTML='';} }
+document.addEventListener('click',e=>{ if(!(e.target.closest&&e.target.closest('#opItemBusca,#opItemSug'))){ const b=document.getElementById('opItemSug'); if(b) b.style.display='none'; } });
+async function opVincular(){
+  if(!OPP.sel.size){ toast('Marque os itens do orçamento a vincular'); return; }
+  const q=(document.getElementById('opItemBusca').value||'').trim();
+  const it=OPP.selItem || (OPP.itens||[]).find(x=>(x.nome||'').toLowerCase()===q.toLowerCase()) || opItemMatch(q)[0];
+  if(!it){ toast('Digite e escolha um item existente do radar'); return; }
+  const descricoes=[...OPP.sel], v=OPP.gaps.filter(g=>OPP.sel.has(g.descricao)).reduce((s,g)=>s+g.valor,0);
+  if(!confirm('Vincular '+descricoes.length+' descrição(ões) · '+BRL(v)+' ao item “'+it.nome+'”?\n\nEntra como sugerido (🤖); depois você entra no item e refina os insumos se precisar.')) return;
+  try{ const r=await (await fetch('actions/oportunidades.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'vincular',me:EU&&EU.bitrix_id,obra:OPP.obra,servico_id:it.id,descricoes})})).json();
+    if(r.error){ toast(r.error); return; }
+    toast('Vinculado a “'+r.nome+'” — +'+r.linhas+' linhas · '+BRL(r.valor));
+    document.getElementById('opItemBusca').value='';
     OPP.sel=new Set(); if(typeof MAT!=='undefined')MAT=null; if(typeof RCDATA!=='undefined')RCDATA=null;
     await opLoad();
   }catch(e){ toast('Falha: '+e.message); }

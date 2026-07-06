@@ -81,33 +81,29 @@ try {
             $g['valor'] = round($g['valor']);
         }
         unset($g);
-        // grupos JÁ EXISTENTES no catálogo (p/ o seletor do "criar item" — não fazer o usuário decorar/digitar)
+        // grupos JÁ EXISTENTES + lista de ITENS do catálogo (p/ os pickers do "criar novo" / "vincular a existente")
         $grupos = [];
         foreach ($pdo->query("SELECT grupo FROM servico WHERE grupo IS NOT NULL AND grupo<>'' GROUP BY grupo ORDER BY MIN(grupo_ordem)")->fetchAll() as $gr)
             $grupos[] = $gr['grupo'];
+        $itens = $pdo->query("SELECT id, nome, grupo FROM servico ORDER BY nome")->fetchAll();
         echo json_encode(['resumo'=>[
             'total'=>round($total), 'coberto'=>round($coberto), 'coberto_pct'=>$total?round(100*$coberto/$total,1):0,
             'gap'=>round($gapTotal), 'gap_pct'=>$total?round(100*$gapTotal/$total,1):0,
             'indiretos'=>round($indiretos), 'indiretos_pct'=>$total?round(100*$indiretos/$total,1):0,
             'n_gaps'=>count($gaps)],
-            'grupos'=>$grupos, 'gaps'=>$gaps], JSON_UNESCAPED_UNICODE);
+            'grupos'=>$grupos, 'itens'=>$itens, 'gaps'=>$gaps], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     // ---- POST: criar item de aquisição (bundle) a partir de descrições descobertas ----
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
     $perms = user_perms($pdo, $in['me'] ?? null);
-    if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores criam itens de aquisição.']); exit; }
-    if (($in['acao'] ?? '') !== 'criar') throw new Exception('acao inválida');
+    if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores mexem no catálogo.']); exit; }
+    $acao = $in['acao'] ?? '';
     $obraId = max(1, (int)($in['obra'] ?? 0));
-    $nome  = trim((string)($in['nome'] ?? ''));
-    $grupo = trim((string)($in['grupo'] ?? ''));
-    $curva = strtoupper(trim((string)($in['curva'] ?? ''))) ?: 'A';
-    $descs = array_values(array_filter(array_map(function($x){ return trim((string)$x); }, (array)($in['descricoes'] ?? []))));
     if (!$obraId) throw new Exception('obra obrigatória');
-    if ($nome === '')  throw new Exception('nome obrigatório');
-    if ($grupo === '') throw new Exception('grupo obrigatório');
-    if (!$descs)       throw new Exception('selecione ao menos uma descrição');
+    $descs = array_values(array_filter(array_map(function($x){ return trim((string)$x); }, (array)($in['descricoes'] ?? []))));
+    if (!$descs) throw new Exception('selecione ao menos uma descrição do orçamento');
 
     // folhas DESCOBERTAS dessas descrições, na obra (não reivindica linha que outro item já pegou)
     $cov = opp_cobertas($pdo, $obraId);
@@ -118,21 +114,54 @@ try {
     foreach ($q->fetchAll() as $l) { if (isset($cov[(int)$l['id']])) continue; $refs[] = (int)$l['id']; $valor += (float)$l['valor']; }
     if (!$refs) throw new Exception('nenhuma folha descoberta para essas descrições (já foram cobertas?)');
 
-    $pdo->beginTransaction();
-    // termos do cronograma a partir do nome → dá chance do marco automático achar a data (prioridade: cronograma)
-    $termos = implode('; ', array_values(array_filter(array_map('trim', preg_split('/[\/,;+()]| e | de | para | com /i', $nome)),
-                      function($t){ return mb_strlen($t) >= 4; })));
-    $sid = criar_item($pdo, $nome, $grupo, '', $curva);
-    if ($termos !== '') $pdo->prepare("UPDATE servico SET termos_orcamento=?, termos_cronograma=? WHERE id=?")->execute([$termos, $termos, $sid]);
-    // vincula a verba analítica na obra + marca como SUGERIDO
-    $af = json_encode(['verba'=>1]);
-    $pdo->prepare("UPDATE radar_item SET orcamento_refs=?, verba_metodo='analitico', verba_override=?, verba_curada=0,
-                   auto_flags=?, updated_at=? WHERE obra_id=? AND servico_id=?")
-        ->execute([json_encode(array_values($refs)), $valor, $af, date('c'), $obraId, $sid]);
-    log_historico($pdo, $obraId, $sid, $nome, $in['me'] ?? null, $perms['nome'] ?? null,
-                  'Item criado (Curva ABC)', '', count($refs) . ' linhas · R$ ' . number_format($valor, 0, ',', '.'));
-    $pdo->commit();
-    echo json_encode(['ok'=>true, 'servico_id'=>$sid, 'nome'=>$nome, 'linhas'=>count($refs), 'valor'=>round($valor)], JSON_UNESCAPED_UNICODE);
+    if ($acao === 'criar') {
+        $nome  = trim((string)($in['nome'] ?? ''));
+        $grupo = trim((string)($in['grupo'] ?? ''));
+        $curva = strtoupper(trim((string)($in['curva'] ?? ''))) ?: 'A';
+        if ($nome === '')  throw new Exception('nome obrigatório');
+        if ($grupo === '') throw new Exception('grupo obrigatório');
+        $pdo->beginTransaction();
+        // termos do cronograma a partir do nome → dá chance do marco automático achar a data (prioridade: cronograma)
+        $termos = implode('; ', array_values(array_filter(array_map('trim', preg_split('/[\/,;+()]| e | de | para | com /i', $nome)),
+                          function($t){ return mb_strlen($t) >= 4; })));
+        $sid = criar_item($pdo, $nome, $grupo, '', $curva);
+        if ($termos !== '') $pdo->prepare("UPDATE servico SET termos_orcamento=?, termos_cronograma=? WHERE id=?")->execute([$termos, $termos, $sid]);
+        $pdo->prepare("UPDATE radar_item SET orcamento_refs=?, verba_metodo='analitico', verba_override=?, verba_curada=0,
+                       auto_flags=?, updated_at=? WHERE obra_id=? AND servico_id=?")
+            ->execute([json_encode(array_values($refs)), $valor, json_encode(['verba'=>1]), date('c'), $obraId, $sid]);
+        log_historico($pdo, $obraId, $sid, $nome, $in['me'] ?? null, $perms['nome'] ?? null,
+                      'Item criado (Curva ABC)', '', count($refs) . ' linhas · R$ ' . number_format($valor, 0, ',', '.'));
+        $pdo->commit();
+        echo json_encode(['ok'=>true, 'servico_id'=>$sid, 'nome'=>$nome, 'linhas'=>count($refs), 'valor'=>round($valor)], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'vincular') {   // vincula as folhas descobertas a um item que JÁ EXISTE (verba analítica)
+        $sid = (int)($in['servico_id'] ?? 0);
+        if (!$sid) throw new Exception('escolha o item existente');
+        $ri = $pdo->prepare("SELECT r.verba_metodo, r.orcamento_refs, r.verba_curada, r.auto_flags, s.nome
+                             FROM radar_item r JOIN servico s ON s.id = r.servico_id WHERE r.obra_id=? AND r.servico_id=?");
+        $ri->execute([$obraId, $sid]); $ri = $ri->fetch();
+        if (!$ri) throw new Exception('esse item não existe nesta obra');
+        $met = $ri['verba_metodo'];
+        if ($met === 'composicao' || $met === 'manual')
+            throw new Exception('o item “' . $ri['nome'] . '” já usa verba por ' . $met . ' — nesse caso vincule pela curadoria do item (aba Orçamento do modal).');
+        // acrescenta as folhas descobertas aos refs que o item já tem (analítico ou vazio)
+        $existing = array_map('intval', json_decode($ri['orcamento_refs'] ?? '[]', true) ?: []);
+        $allRefs = array_values(array_unique(array_merge($existing, $refs)));
+        $inR = implode(',', array_map('intval', $allRefs));
+        $vtot = (float)$pdo->query("SELECT COALESCE(SUM(valor),0) FROM orcamento_linha WHERE id IN ($inR)")->fetchColumn();
+        $af = json_decode($ri['auto_flags'] ?? '{}', true) ?: [];
+        if (empty($ri['verba_curada'])) $af['verba'] = 1;   // sugerido (só se ainda não estava curado)
+        $pdo->beginTransaction();
+        $pdo->prepare("UPDATE radar_item SET orcamento_refs=?, verba_metodo='analitico', verba_override=?, auto_flags=?, updated_at=? WHERE obra_id=? AND servico_id=?")
+            ->execute([json_encode($allRefs), $vtot, ($af ? json_encode($af) : null), date('c'), $obraId, $sid]);
+        log_historico($pdo, $obraId, $sid, $ri['nome'], $in['me'] ?? null, $perms['nome'] ?? null,
+                      'Vínculo de verba (Curva ABC)', '', '+' . count($refs) . ' linhas · R$ ' . number_format($valor, 0, ',', '.'));
+        $pdo->commit();
+        echo json_encode(['ok'=>true, 'servico_id'=>$sid, 'nome'=>$ri['nome'], 'linhas'=>count($refs), 'valor'=>round($valor), 'vinculado'=>true], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    throw new Exception('acao inválida');
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
     http_response_code(500);

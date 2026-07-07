@@ -1,5 +1,5 @@
 <?php /* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php. (republicado) */ ?>
-<?php /* build: dashboards-4-2026-07-06 */ ?>
+<?php /* build: cotacoes-mapa-v1-2026-07-06 */ ?>
 <!doctype html>
 <html lang="pt-br">
 <head>
@@ -260,7 +260,7 @@
       <a id="nav-dashboards" data-menu="dashboard" title="Dashboards" onclick="showView('dashboards')"><span class="material-icons">dashboard</span> <span class="navtxt">Dashboards</span></a>
       <a id="nav-radar" data-menu="radar" class="active" title="Radar de Aquisições" onclick="showView('radar')"><span class="material-icons">radar</span> <span class="navtxt">Radar de Aquisições</span></a>
       <a id="nav-matriz" data-menu="matriz" title="Matriz" onclick="showView('matriz')"><span class="material-icons">grid_on</span> <span class="navtxt">Matriz</span></a>
-      <a id="nav-cotacoes" data-menu="cotacoes" title="Mapa de Cotações" onclick="toast('Mapa de Cotações — Fase 3')"><span class="material-icons">request_quote</span> <span class="navtxt">Mapa de Cotações</span></a>
+      <a id="nav-cotacoes" data-menu="cotacoes" title="Mapa de Cotações" onclick="showView('cotacoes')"><span class="material-icons">request_quote</span> <span class="navtxt">Mapa de Cotações</span></a>
     </nav>
     <div class="navlabel">Administração</div>
     <nav class="nav">
@@ -425,6 +425,14 @@
       </div>
     </div>
     <div id="dwrap"><div class="dempty">Carregando…</div></div>
+   </section>
+
+   <section id="view-cotacoes" style="display:none">
+    <div class="top">
+      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">request_quote</span> Mapa de Cotações</h1>
+      <p class="sub">Monte a concorrência: itens a cotar → propostas dos fornecedores → mapa comparativo (melhor preço por item).</p>
+    </div>
+    <div id="cotwrap"><div class="dempty">Carregando…</div></div>
    </section>
 
    <section id="view-config" style="display:none">
@@ -713,10 +721,11 @@ async function loadMatriz(force){
 
 /* ---------- view switch ---------- */
 function showView(v){
-  ['radar','matriz','oportunidades','dashboards','config','audit','updates'].forEach(x=>{
+  ['radar','matriz','oportunidades','dashboards','cotacoes','config','audit','updates'].forEach(x=>{
     document.getElementById('view-'+x).style.display=v===x?'':'none';
     const nav=document.getElementById('nav-'+x); if(nav) nav.classList.toggle('active',v===x);
   });
+  if(v==='cotacoes') cotInit();
   if(v==='dashboards') dashInit();
   if(v==='matriz') loadMatriz();
   if(v==='oportunidades') renderOportunidades();
@@ -3134,6 +3143,164 @@ function renderDashOpp(D){
     <div class="dcard col2"><h3>Maiores gaps do orçamento por categoria (curva A/B)</h3>${o.gapCategorias.length?dashBars(o.gapCategorias.map(g=>({label:g.cat,v:g.valor,color:'var(--pend)',sub:g.obras+' obra(s)'})),BRL):'<div class="dmini">Sem gaps de curva A/B.</div>'}<div class="dmini" style="margin-top:8px">Grandes itens do orçamento que o radar ainda não cobre — candidatos a novo item/negociação (ver aba Oportunidades).</div></div>
   </div>`;
 }
+
+/* ===================== MAPA DE COTAÇÕES ===================== */
+let COT={mode:'list', list:[], obra:'', cur:null, novoItens:[], prop:null};
+function cotInit(){ cotLoad(); }
+function cotStChip(s){ const m={aberta:['#8a9299','Aberta'],aguardando:['var(--dourado)','Aguardando'],finalizada:['var(--ok)','Finalizada']}; const x=m[s]||['#8a9299',s]; return `<span class="dchip" style="background:${x[0]}">${x[1]}</span>`; }
+function cotObraOpts(sel){ return '<option value="">— obra —</option>'+((typeof OBRAS!=='undefined'&&OBRAS)||[]).map(o=>`<option value="${o.id}" ${String(sel)===String(o.id)?'selected':''}>${esc(o.nome)}</option>`).join(''); }
+async function cotLoad(){
+  const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Carregando cotações…</div>';
+  try{ const d=await (await fetch('actions/cotacoes.php'+(COT.obra?('?obra='+COT.obra+'&'):'?')+'_='+Date.now())).json();
+    COT.list=d.cotacoes||[]; COT.mode='list'; cotRender();
+  }catch(e){ w.innerHTML='<div class="dempty">Falha: '+esc(e.message)+'</div>'; }
+}
+function cotRender(){
+  if(COT.mode==='novo') return cotRenderNovo();
+  if(COT.mode==='detalhe') return cotRenderDetalhe();
+  if(COT.mode==='proposta') return cotRenderProposta();
+  const w=document.getElementById('cotwrap');
+  let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:10px;flex-wrap:wrap;align-items:center">
+     <label class="muted" style="font-size:12px">Obra <select onchange="COT.obra=this.value;cotLoad()" style="margin-left:6px">${cotObraOpts(COT.obra)}</select></label>
+     ${CAN_EDIT?'<button class="btn-prim" style="margin-left:auto;padding:7px 14px" onclick="cotNovo()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">add</span> Nova cotação</button>':''}
+   </div></div><div class="wrap"><table><thead><tr><th>Cotação</th><th>Obra</th><th>Categoria</th><th>Tipo</th><th style="text-align:center">Itens</th><th style="text-align:center">Propostas</th><th style="text-align:right">Melhor oferta</th><th>Status</th><th></th></tr></thead><tbody>`;
+  for(const c of COT.list){
+    html+=`<tr style="cursor:pointer" onclick="cotOpen(${c.id})"><td><b>${esc(c.titulo)}</b></td><td>${esc(c.obra_nome||'—')}</td><td class="muted">${esc(c.categoria||'')}</td><td class="muted">${esc(c.tipo_servico||'')}</td>
+      <td style="text-align:center">${c.n_itens}</td><td style="text-align:center">${c.n_propostas}</td><td style="text-align:right">${c.melhor_oferta?BRL(c.melhor_oferta):'—'}</td><td>${cotStChip(c.status)}</td>
+      <td><span class="material-icons" style="color:var(--muted)">chevron_right</span></td></tr>`;
+  }
+  if(!COT.list.length) html+='<tr><td colspan="9" class="empty">Nenhuma cotação ainda. Crie a primeira.</td></tr>';
+  w.innerHTML=html+'</tbody></table></div>';
+}
+function cotNovo(){ COT.mode='novo'; COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; cotRender(); }
+function cotRenderNovo(){
+  document.getElementById('cotwrap').innerHTML=`<div class="panel">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="cotLoad()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button><b style="font-size:15px">Nova cotação</b></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+      ${cotFld('Título *','<input id="cotT" placeholder="Ex.: MO Forro de Gesso">')}
+      ${cotFld('Obra','<select id="cotO">'+cotObraOpts('')+'</select>')}
+      ${cotFld('Categoria','<input id="cotC" placeholder="Ex.: M.O. Gesso">')}
+      ${cotFld('Tipo','<select id="cotTipo"><option>Material</option><option>M.O.</option><option>Material + MO</option><option>Locação</option><option>Serviço</option></select>')}
+      ${cotFld('Verba (R$)','<input id="cotV" type="number" placeholder="0">')}
+    </div>
+    ${cotFld('Descrição','<textarea id="cotD" rows="2" placeholder="Escopo / informações gerais da cotação"></textarea>','margin-top:8px')}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px"><b style="font-size:13px">Itens a cotar *</b>
+      <button class="btn-ghost" style="padding:4px 10px" onclick="cotImportarTexto()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">content_paste</span> Importar via texto</button></div>
+    <div id="cotItens" style="margin-top:8px"></div>
+    <button class="btn-ghost" style="margin-top:6px" onclick="cotAddItem()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar item</button>
+    <div style="margin-top:14px"><button class="btn-prim" onclick="cotCriar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Criar cotação</button></div>
+  </div>`;
+  cotRenderItens();
+}
+function cotFld(label,inner,extra){ return `<div style="${extra||''}"><div class="muted" style="font-size:11px;margin-bottom:2px">${label}</div>${inner}</div>`; }
+function cotRenderItens(){
+  const box=document.getElementById('cotItens'); if(!box)return;
+  box.innerHTML=COT.novoItens.map((it,i)=>`<div style="display:grid;grid-template-columns:1fr 80px 80px 1fr 30px;gap:6px;margin-bottom:6px;align-items:center">
+    <input placeholder="Descrição do item" value="${esc(it.descricao)}" oninput="COT.novoItens[${i}].descricao=this.value">
+    <input placeholder="Unid." value="${esc(it.unidade)}" oninput="COT.novoItens[${i}].unidade=this.value">
+    <input placeholder="Qtde" type="number" value="${esc(it.quantidade)}" oninput="COT.novoItens[${i}].quantidade=this.value">
+    <input placeholder="Observação" value="${esc(it.observacao)}" oninput="COT.novoItens[${i}].observacao=this.value">
+    <button class="btn-ghost" style="padding:2px" onclick="COT.novoItens.splice(${i},1);cotRenderItens()" title="Remover"><span class="material-icons" style="font-size:16px;color:var(--pend)">close</span></button></div>`).join('');
+}
+function cotAddItem(){ COT.novoItens.push({descricao:'',unidade:'',quantidade:'',observacao:''}); cotRenderItens(); }
+function cotImportarTexto(){
+  const t=prompt('Cole os itens, um por linha.\nFormato: descrição ; unidade ; quantidade'); if(!t)return;
+  t.split('\n').map(l=>l.trim()).filter(Boolean).forEach(l=>{ const p=l.split(/[;\t]/).map(x=>x.trim()); COT.novoItens.push({descricao:p[0]||'',unidade:p[1]||'',quantidade:p[2]||'',observacao:''}); });
+  COT.novoItens=COT.novoItens.filter(it=>(it.descricao||'').trim()); if(!COT.novoItens.length)COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; cotRenderItens();
+}
+async function cotCriar(){
+  const titulo=val('cotT').trim(); if(!titulo){toast('Dê um título à cotação');return;}
+  const itens=COT.novoItens.filter(it=>(it.descricao||'').trim()); if(!itens.length){toast('Inclua ao menos um item');return;}
+  const body={acao:'criar',me:EU&&EU.bitrix_id,obra_id:Number(val('cotO'))||null,titulo,categoria:val('cotC'),tipo_servico:val('cotTipo'),verba:Number(val('cotV'))||0,descricao:val('cotD'),itens};
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.error){toast(r.error);return;} toast('Cotação criada'); cotOpen(r.id);
+  }catch(e){toast('Falha: '+e.message);}
+}
+async function cotOpen(id){
+  const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Abrindo mapa…</div>';
+  try{ const d=await (await fetch('actions/cotacoes.php?id='+id+'&_='+Date.now())).json();
+    if(d.error){w.innerHTML='<div class="dempty">'+esc(d.error)+'</div>';return;}
+    COT.cur=d; COT.mode='detalhe'; cotRenderDetalhe();
+  }catch(e){w.innerHTML='<div class="dempty">Falha: '+esc(e.message)+'</div>';}
+}
+function cotNum(x){ return x!=null&&x!==''?Number(x).toLocaleString('pt-BR'):''; }
+function cotRenderDetalhe(){
+  const d=COT.cur,c=d.cotacao,itens=d.itens||[],props=d.propostas||[],m=d.mapa||{},best=m.melhor_por_item||{},w=document.getElementById('cotwrap');
+  let html=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <button class="btn-ghost" onclick="cotLoad()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button>
+      <b style="font-size:16px">${esc(c.titulo)}</b> ${cotStChip(c.status)}
+      <span class="muted" style="font-size:12px">${esc(c.obra_nome||'sem obra')}${c.categoria?' · '+esc(c.categoria):''}${c.tipo_servico?' · '+esc(c.tipo_servico):''}</span>
+      <span style="margin-left:auto;display:flex;gap:6px">
+        ${CAN_EDIT?`<button class="btn-prim" style="padding:6px 12px" onclick="cotProposta()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Cadastrar proposta</button>`:''}
+        ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotFinalizar()">${c.status==='finalizada'?'Reabrir':'Finalizar'}</button>`:''}
+      </span></div>
+    <div class="kpis" style="padding:10px 0 0">
+      <div class="kpi"><div class="v">${props.length}</div><div class="l">propostas recebidas</div></div>
+      <div class="kpi"><div class="v gold">${m.melhor_oferta?BRL(m.melhor_oferta):'—'}</div><div class="l">melhor fornecedor único${m.fornecedor_destaque?' · '+esc(m.fornecedor_destaque):''}</div></div>
+      <div class="kpi"><div class="v" style="color:var(--ok)">${m.melhor_total?BRL(m.melhor_total):'—'}</div><div class="l">melhor compra (menor por item)</div></div>
+      <div class="kpi"><div class="v">${c.verba?BRL(c.verba):'—'}</div><div class="l">verba prevista</div></div>
+    </div></div>`;
+  if(!props.length){ html+='<div class="panel"><div class="empty">Nenhuma proposta ainda. Clique em "Cadastrar proposta" para montar o mapa comparativo.</div></div>'; }
+  else{
+    html+='<div class="panel" style="overflow-x:auto;padding:0"><table class="mtable" style="border:none"><thead><tr><th class="svc-h" style="text-align:left">Item</th>';
+    props.forEach(p=>{ html+=`<th style="min-width:120px">${esc(p.fornecedor_nome)}${p.prazo?`<div class="muted" style="font-size:9.5px;font-weight:400">${esc(p.prazo)}</div>`:''}</th>`; });
+    html+='<th style="min-width:140px;color:var(--verde-d)">🏆 Melhor Compra</th></tr></thead><tbody>';
+    itens.forEach(it=>{ const b=best[it.id];
+      html+=`<tr><td class="svc-c" style="text-align:left">${esc(it.descricao)}<small>${cotNum(it.quantidade)} ${esc(it.unidade||'')}</small></td>`;
+      props.forEach(p=>{ const pi=(p.itens||{})[it.id]; const isB=b&&b.proposta_id===p.id;
+        html+=`<td style="text-align:center;padding:6px 8px;${isB?'background:#e7f6ee':''}">${pi&&pi.preco_total!=null?`<b>${BRL(pi.preco_unit)}</b>${isB?' 🏆':''}<div class="muted" style="font-size:10px">${BRL(pi.preco_total)}</div>`:'<span class="muted">—</span>'}</td>`; });
+      html+=`<td style="text-align:center;padding:6px 8px;background:#eafaf0">${b?`<b>${BRL(b.preco_total)}</b><div class="muted" style="font-size:10px">${esc(b.fornecedor)}</div>`:'—'}</td></tr>`;
+    });
+    html+='<tr style="background:#f7faf8"><td class="svc-c" style="text-align:left;font-weight:800">TOTAL</td>';
+    props.forEach(p=>{ const isBS=m.fornecedor_destaque===p.fornecedor_nome; html+=`<td style="text-align:center;font-weight:800;${isBS?'color:var(--verde-d)':''}">${p.total!=null?BRL(p.total):'—'}</td>`; });
+    html+=`<td style="text-align:center;font-weight:800;background:#eafaf0;color:var(--verde-d)">${m.melhor_total?BRL(m.melhor_total):'—'}</td></tr></tbody></table></div>`;
+    html+='<div class="panel" style="margin-top:10px"><b style="font-size:13px">Propostas</b><div style="margin-top:8px">';
+    props.forEach(p=>{ html+=`<div class="drow"><span class="dgm" style="background:${m.fornecedor_destaque===p.fornecedor_nome?'var(--ok)':'#8a9299'}"></span><span style="flex:1">${esc(p.fornecedor_nome)}${p.prazo?` <span class="muted">· ${esc(p.prazo)}</span>`:''}</span><b style="min-width:90px;text-align:right">${p.total!=null?BRL(p.total):'—'}</b>
+       ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 8px" onclick="cotProposta(${p.id})">Editar</button><button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="cotExcluirProposta(${p.id})">Excluir</button>`:''}</div>`; });
+    html+='</div></div>';
+  }
+  w.innerHTML=html;
+}
+function cotProposta(pid){
+  const d=COT.cur; let ex=null; if(pid) ex=(d.propostas||[]).find(p=>p.id===pid);
+  COT.prop={id:pid||0, precos:{}};
+  (d.itens||[]).forEach(it=>{ const pi=ex?(ex.itens||{})[it.id]:null; COT.prop.precos[it.id]={preco_unit:pi&&pi.preco_unit!=null?pi.preco_unit:'',preco_total:pi&&pi.preco_total!=null?pi.preco_total:''}; });
+  COT.prop.fornecedor_nome=ex?ex.fornecedor_nome:''; COT.prop.prazo=ex?ex.prazo:''; COT.prop.observacoes=ex?ex.observacoes:'';
+  COT.mode='proposta'; cotRenderProposta();
+}
+function cotRenderProposta(){
+  const d=COT.cur,c=d.cotacao,itens=d.itens||[],pr=COT.prop;
+  document.getElementById('cotwrap').innerHTML=`<div class="panel">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="cotRenderDetalhe()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar ao mapa</button><b style="font-size:15px">${pr.id?'Editar':'Cadastrar'} proposta · ${esc(c.titulo)}</b></div>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+      ${cotFld('Fornecedor *','<input id="prF" value="'+esc(pr.fornecedor_nome||'')+'" placeholder="Nome do fornecedor">')}
+      ${cotFld('Prazo de entrega','<input id="prP" value="'+esc(pr.prazo||'')+'" placeholder="Ex.: 15 dias">')}
+    </div>
+    ${cotFld('Observações','<textarea id="prO" rows="2">'+esc(pr.observacoes||'')+'</textarea>','margin-top:8px')}
+    <div style="margin-top:12px"><b style="font-size:13px">Preços por item</b> <span class="muted" style="font-size:11px">(preencha unitário — o total calcula pela quantidade)</span></div>
+    <div style="margin-top:6px">${itens.map(it=>`<div style="display:grid;grid-template-columns:1fr 120px 130px;gap:8px;align-items:center;margin-bottom:6px">
+      <div><b style="font-size:12.5px">${esc(it.descricao)}</b> <span class="muted" style="font-size:11px">${cotNum(it.quantidade)} ${esc(it.unidade||'')}</span></div>
+      <div><div class="muted" style="font-size:10px">Preço unit.</div><input type="number" step="0.0001" id="prU${it.id}" value="${pr.precos[it.id].preco_unit}" oninput="cotPrecoIn(${it.id},'u',this.value)"></div>
+      <div><div class="muted" style="font-size:10px">Preço total</div><input type="number" step="0.01" id="prT${it.id}" value="${pr.precos[it.id].preco_total}" oninput="cotPrecoIn(${it.id},'t',this.value)"></div></div>`).join('')}</div>
+    <div style="margin-top:14px"><button class="btn-prim" onclick="cotSalvarProposta()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar proposta</button></div></div>`;
+}
+function cotPrecoIn(iid,which,v){
+  const p=COT.prop.precos[iid], it=(COT.cur.itens||[]).find(x=>x.id===iid), q=it&&it.quantidade?Number(it.quantidade):null;
+  if(which==='u'){ p.preco_unit=v; if(q&&v!==''){ p.preco_total=(Number(v)*q).toFixed(2); const el=document.getElementById('prT'+iid); if(el)el.value=p.preco_total; } }
+  else p.preco_total=v;
+}
+async function cotSalvarProposta(){
+  const forn=val('prF').trim(); if(!forn){toast('Informe o fornecedor');return;}
+  const itens=Object.entries(COT.prop.precos).map(([iid,p])=>({cotacao_item_id:Number(iid),preco_unit:p.preco_unit!==''?Number(p.preco_unit):'',preco_total:p.preco_total!==''?Number(p.preco_total):''}));
+  const body={acao:'proposta',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:COT.prop.id||undefined,fornecedor_nome:forn,prazo:val('prP'),observacoes:val('prO'),itens};
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.error){toast(r.error);return;} toast('Proposta salva'); cotOpen(COT.cur.cotacao.id);
+  }catch(e){toast('Falha: '+e.message);}
+}
+async function cotFinalizar(){ const c=COT.cur.cotacao, novo=c.status==='finalizada'?'aguardando':'finalizada';
+  try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'status',me:EU&&EU.bitrix_id,cotacao_id:c.id,status:novo})}); cotOpen(c.id); }catch(e){toast('Falha');} }
+async function cotExcluirProposta(pid){ if(!confirm('Excluir esta proposta?'))return;
+  try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir_proposta',me:EU&&EU.bitrix_id,proposta_id:pid})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
 
 /* ===== Configuração / Permissões (Bloco 2) ===== */
 let CFG={usuarios:[],obras:[]}, NUSER=null;

@@ -108,6 +108,38 @@ function db_schema_mysql($pdo) {
         nota TEXT, updated_at VARCHAR(40),
         PRIMARY KEY (servico_id, metodo_construtivo)
     ) $E");
+    // ---- MAPA DE COTAÇÕES (reconstruído no cockpit; Supabase antigo só p/ import em lote futuro) ----
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cot_categoria (
+        id INT NOT NULL AUTO_INCREMENT, nome VARCHAR(191) NOT NULL, ext_id VARCHAR(64), created_at VARCHAR(40),
+        PRIMARY KEY (id), UNIQUE KEY uq_cot_cat (nome)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cot_fornecedor (
+        id INT NOT NULL AUTO_INCREMENT, nome VARCHAR(255) NOT NULL, categoria VARCHAR(191), cidade VARCHAR(120),
+        contato VARCHAR(191), telefone VARCHAR(60), whatsapp VARCHAR(60), email VARCHAR(191),
+        itens TEXT, tipo VARCHAR(60), cnpj VARCHAR(40), ativo INT DEFAULT 1, ext_id VARCHAR(64), created_at VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_forn_cat (categoria)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao (
+        id INT NOT NULL AUTO_INCREMENT, obra_id INT, servico_id INT, titulo VARCHAR(255) NOT NULL,
+        categoria VARCHAR(191), tipo_servico VARCHAR(60), verba DOUBLE, descricao TEXT,
+        status VARCHAR(40) DEFAULT 'rascunho', aprovacao VARCHAR(40) DEFAULT 'aguardando',
+        criado_por VARCHAR(64), criado_nome VARCHAR(191), created_at VARCHAR(40), updated_at VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_cot_obra (obra_id), KEY idx_cot_serv (servico_id)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_item (
+        id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, descricao TEXT, unidade VARCHAR(40),
+        quantidade DOUBLE, observacao TEXT, ordem INT, PRIMARY KEY (id), KEY idx_coti_cot (cotacao_id)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta (
+        id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, fornecedor_id INT, fornecedor_nome VARCHAR(255),
+        prazo VARCHAR(120), observacoes TEXT, data_resposta VARCHAR(40), total DOUBLE, created_at VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_prop_cot (cotacao_id)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta_item (
+        id INT NOT NULL AUTO_INCREMENT, proposta_id INT NOT NULL, cotacao_item_id INT NOT NULL,
+        preco_unit DOUBLE, preco_total DOUBLE, observacao TEXT,
+        PRIMARY KEY (id), KEY idx_propi_prop (proposta_id)
+    ) $E");
     // colunas ADITIVAS na produção (radar_item já existe da migração; CREATE IF NOT EXISTS não adiciona coluna).
     // Usa ALTER (privilégio concedido) só se faltar. Espelha o self-heal do caminho SQLite.
     $rc = [];
@@ -286,6 +318,17 @@ function db_schema($pdo) {
         campo TEXT, valor_antes TEXT, valor_depois TEXT, created_at TEXT
     )");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_hist_serv ON historico(servico_id)");
+
+    // ---- MAPA DE COTAÇÕES (reconstruído no cockpit) ----
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cot_categoria (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL UNIQUE, ext_id TEXT, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cot_fornecedor (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, categoria TEXT, cidade TEXT, contato TEXT, telefone TEXT, whatsapp TEXT, email TEXT, itens TEXT, tipo TEXT, cnpj TEXT, ativo INTEGER DEFAULT 1, ext_id TEXT, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao (id INTEGER PRIMARY KEY AUTOINCREMENT, obra_id INTEGER, servico_id INTEGER, titulo TEXT NOT NULL, categoria TEXT, tipo_servico TEXT, verba REAL, descricao TEXT, status TEXT DEFAULT 'rascunho', aprovacao TEXT DEFAULT 'aguardando', criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_item (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, quantidade REAL, observacao TEXT, ordem INTEGER)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, prazo TEXT, observacoes TEXT, data_resposta TEXT, total REAL, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta_item (id INTEGER PRIMARY KEY AUTOINCREMENT, proposta_id INTEGER NOT NULL, cotacao_item_id INTEGER NOT NULL, preco_unit REAL, preco_total REAL, observacao TEXT)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_coti_cot ON cotacao_item(cotacao_id)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_prop_cot ON cotacao_proposta(cotacao_id)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_propi_prop ON cotacao_proposta_item(proposta_id)");
 
     // permissões GRANULARES de edição (além do editar_escopo geral) — aditivas, fora do drop de migração.
     // perm_admin = tudo. editar_escopo (todas/sel) = editor geral (status/fornecedor/observação).

@@ -3447,6 +3447,25 @@ function cotEqTexto(it){ let raw=(it&&it.variaveis_cotar||'').trim(); if(!raw)re
 function cotVerbaOrigem(it){ if(!it)return ''; if(it.curado_verba)return 'curada'; if(it.auto&&it.auto.verba)return 'auto'; if(it.verba)return 'definida'; return ''; }
 function cotVerbaChip(origem){ const m={curada:['var(--ok)','verified','curada (confirmada)'],auto:['var(--dourado)','smart_toy','sugerida pelo auto-vínculo'],definida:['var(--muted)','check','definida no item']}; const x=m[origem]; return x?`<span class="dchip" title="Verba ${esc(x[2])}" style="background:${x[0]};font-size:10px"><span class="material-icons" style="font-size:11px;vertical-align:-2px">${x[1]}</span> ${esc(x[2])}</span>`:''; }
 function cotVerbaInfoBtn(c){ const o=c&&c.verba_origem; if(!o)return ''; const m={curada:['var(--ok)','verified','Verba CURADA — confirmada manualmente no item do radar.'],auto:['var(--dourado)','smart_toy','Verba SUGERIDA pelo auto-vínculo (receita) — confira e cure no item.'],definida:['var(--muted)','info','Verba definida no item do radar (vínculo do orçamento).']}; const x=m[o]||m.definida; return `<span class="material-icons" title="${esc(x[2])}" style="font-size:14px;vertical-align:-2px;color:${x[0]};cursor:help">${x[1]}</span>`; }
+// aceita "463664", "463.664", "463.664,00" (formato BR) → número
+function cotParseNum(v){ v=String(v==null?'':v).replace(/\s/g,'').replace(/R\$/gi,''); v=v.replace(/\.(?=\d{3}(\D|$))/g,''); v=v.replace(',', '.'); v=v.replace(/[^0-9.]/g,''); return Number(v)||0; }
+async function cotBuscaItem(obra,sid){ try{ const url='actions/matriz.php'+(String(obra||1)!=='1'?('?obra='+obra+'&'):'?')+'_='+Date.now(); const d=await (await fetch(url)).json(); return (d.itens||[]).find(x=>Number(x.ordem)===Number(sid))||null; }catch(e){ return null; } }
+async function cotVerbaEditar(){
+  const c=COT.cur.cotacao, podePux=!!c.servico_id;
+  const v=prompt('Verba prevista (R$):'+(podePux?'\n\n(deixe VAZIO e clique OK para PUXAR a verba do item do radar vinculado)':''), c.verba!=null?c.verba:'');
+  if(v===null) return;
+  let verba, origem;
+  if(String(v).trim()==='' && podePux){
+    const it=await cotBuscaItem(c.obra_id||1, c.servico_id);
+    if(!it || !(it.verba>0)){ toast('O item vinculado não tem verba definida'); return; }
+    verba=it.verba; origem=cotVerbaOrigem(it)||'definida';
+  } else {
+    verba=cotParseNum(v); origem='manual';
+  }
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'verba_salvar',me:EU&&EU.bitrix_id,cotacao_id:c.id,verba:verba,verba_origem:origem})})).json();
+    if(r.error){toast(r.error);return;} c.verba=verba; c.verba_origem=origem; cotRenderDetalhe(); toast('Verba atualizada: '+BRL(verba));
+  }catch(e){ toast('Falha: '+e.message); }
+}
 // preenche os "itens a cotar" — PREFERE o quantitativo real da obra; senão o dicionário do serviço
 async function cotVincApply(it){
   const vazio=!COT.novoItens||COT.novoItens.every(x=>!(x.descricao||'').trim()); if(!vazio)return;
@@ -3517,16 +3536,16 @@ function cotRenderDetalhe(){
       <div class="kpi"><div class="v">${props.length}</div><div class="l">propostas recebidas</div></div>
       <div class="kpi"><div class="v gold">${m.melhor_oferta?BRL(m.melhor_oferta):'—'}</div><div class="l">melhor fornecedor único${m.fornecedor_destaque?' · '+esc(m.fornecedor_destaque):''}</div></div>
       <div class="kpi"><div class="v" style="color:var(--ok)">${m.melhor_total?BRL(m.melhor_total):'—'}</div><div class="l">melhor compra (menor por item)</div></div>
-      <div class="kpi"><div class="v">${c.verba?BRL(c.verba):'—'} ${cotVerbaInfoBtn(c)}</div><div class="l">verba prevista${c.verba_origem?' · '+esc({curada:'curada ✓',auto:'auto 🤖',definida:'definida'}[c.verba_origem]||c.verba_origem):''}</div></div>
+      <div class="kpi"><div class="v">${c.verba?BRL(c.verba):'—'} ${cotVerbaInfoBtn(c)} ${CAN_EDIT?`<span class="material-icons" onclick="cotVerbaEditar()" title="editar / puxar a verba" style="font-size:14px;cursor:pointer;color:var(--muted);vertical-align:-2px">edit</span>`:''}</div><div class="l">verba prevista${c.verba_origem?' · '+esc({curada:'curada ✓',auto:'auto 🤖',definida:'definida'}[c.verba_origem]||c.verba_origem):''}</div></div>
     </div></div>`;
   // ---- Concorrência (fornecedores convidados) ----
   const conv=d.convidados||[];
   html+=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <b style="font-size:13px">Concorrência — fornecedores convidados</b>
       <span class="dchip" style="background:${conv.length&&conv.every(x=>x.respondeu)?'var(--ok)':'var(--dourado)'}">${conv.filter(x=>x.respondeu).length} de ${conv.length} responderam</span></div>`;
-  if(conv.length) html+='<div style="margin-top:8px">'+conv.map(cf=>`<div class="drow"><span class="dgm" style="background:${cf.respondeu?'var(--ok)':'#cfd6da'}"></span><span style="flex:1">${esc(cf.fornecedor_nome)}${cf.categoria?` <span class="muted" style="font-size:11px">· ${esc(cf.categoria)}</span>`:''}</span>
+  if(conv.length) html+='<div style="margin-top:8px">'+conv.map((cf,ci)=>`<div class="drow"><span class="dgm" style="background:${cf.respondeu?'var(--ok)':'#cfd6da'}"></span><span style="flex:1">${esc(cf.fornecedor_nome)}${cf.categoria?` <span class="muted" style="font-size:11px">· ${esc(cf.categoria)}</span>`:''}</span>
       <span class="dchip" style="background:${cf.respondeu?'var(--ok)':'#8a9299'}">${cf.respondeu?('respondeu · '+BRL(cf.proposta_total)):'aguardando'}</span>
-      ${CAN_EDIT&&!cf.respondeu?`<button class="btn-ghost" style="padding:2px 8px" onclick="cotPropostaDe(${JSON.stringify(cf.fornecedor_nome)})">Lançar proposta</button>`:''}
+      ${CAN_EDIT&&!cf.respondeu?`<button class="btn-ghost" style="padding:2px 8px" onclick="cotPropostaDe(${ci})">Lançar proposta</button>`:''}
       ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="cotDesconvidar(${cf.id})" title="tirar da concorrência">×</button>`:''}</div>`).join('')+'</div>';
   else html+='<div class="dmini" style="margin-top:6px">Nenhum fornecedor convidado ainda — convide abaixo.</div>';
   if(CAN_EDIT) html+=`<div style="margin-top:8px"><button class="btn-ghost" style="padding:5px 12px" onclick="cotFornPickerOpen('convite')"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">group_add</span> Convidar fornecedores</button></div>`;
@@ -3666,7 +3685,7 @@ async function cotUploadAnexo(propostaId, input){
 async function cotDelAnexo(id){ if(!confirm('Excluir este anexo?'))return;
   try{ await fetch('actions/cotacao_anexo.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
 /* --- Concorrência: convidar / desconvidar / lançar proposta de um convidado --- */
-function cotPropostaDe(nome){ cotProposta(0); COT.prop.fornecedor_nome=nome; cotRenderProposta(); cotFornDatalist(((COT.cur||{}).cotacao||{}).categoria); }
+function cotPropostaDe(ci){ const cf=((COT.cur||{}).convidados||[])[ci]; if(!cf)return; cotProposta(0); COT.prop.fornecedor_nome=cf.fornecedor_nome; cotRenderProposta(); cotFornDatalist(((COT.cur||{}).cotacao||{}).categoria); }
 async function cotDesconvidar(id){ if(!confirm('Tirar este fornecedor da concorrência?'))return;
   try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'desconvidar',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
 let _cotCB;

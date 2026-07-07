@@ -3212,7 +3212,7 @@ async function cotIniciar(sid, obra, nome, grupo){
   COT.novoServico=sid; COT.novoServicoNome=svNome; COT.novoConvidados=[]; COT.novoVincItem=it; COT.novoVincObra=obra?String(obra):'';
   COT.novoPre={obra:obra?String(obra):'', titulo:svNome, categoria:svGrupo, descricao:(it&&it.escopo)||'', equalizacao:it?cotEqTexto(it):''};
   // itens a cotar: quantitativo REAL da obra → dicionário do serviço → 1 item vazio
-  let itens=it?await cotItensFromQuant(it):[]; let src=itens.length?'quantitativo da obra':'';
+  let itens=it?await cotItensFromQuant(it, obra):[]; let src=itens.length?'quantitativo da obra':'';
   if(!itens.length&&dic.itens&&dic.itens.length){ itens=dic.itens.map(i=>({descricao:i.descricao,unidade:i.unidade||'',quantidade:'',observacao:i.nota||''})); src='dicionário do serviço'; }
   if(!itens.length) itens=[{descricao:svNome,unidade:'',quantidade:'',observacao:''}];
   COT.novoItens=itens;
@@ -3348,7 +3348,7 @@ function cotEqTexto(it){ return (it&&it.variaveis_cotar||'').split('|').map(s=>s
 // preenche os "itens a cotar" — PREFERE o quantitativo real da obra; senão o dicionário do serviço
 async function cotVincApply(it){
   const vazio=!COT.novoItens||COT.novoItens.every(x=>!(x.descricao||'').trim()); if(!vazio)return;
-  const q=await cotItensFromQuant(it);
+  const q=await cotItensFromQuant(it, COT.novoVincObra);
   if(q.length){ COT.novoItens=q; cotRenderItens(); toast(q.length+' item(ns) do quantitativo da obra'); return; }
   try{ const dic=await (await fetch('actions/cotacoes.php?dicionario='+it.ordem+'&_='+Date.now())).json();
     if(dic&&dic.itens&&dic.itens.length){ COT.novoItens=dic.itens.map(i=>({descricao:i.descricao,unidade:i.unidade||'',quantidade:'',observacao:i.nota||''})); cotRenderItens(); toast(dic.itens.length+' item(ns) do dicionário do serviço'); }
@@ -3356,7 +3356,7 @@ async function cotVincApply(it){
 }
 // Deriva os itens a cotar do QUANTITATIVO do item (mesma precedência da aba Quantitativo):
 // quant_comp_sel → composicao_sel(q) → quantitativo_refs(orçamento) → manual.
-async function cotItensFromQuant(it){
+async function cotItensFromQuant(it, obra){
   if(!it) return [];
   const N=x=>{ const n=Number(x); return isFinite(n)?n:0; };
   const Q=x=>{ const n=N(x); return n?Math.round(n*100)/100:''; };
@@ -3366,7 +3366,8 @@ async function cotItensFromQuant(it){
   if(cs.length) return cs.map(s=>({descricao:s.desc||'',unidade:s.unidade||'',quantidade:Q(N(s.area)*N(s.coef)),observacao:(s.compdesc&&s.compdesc!==s.desc)?s.compdesc:''})).filter(x=>x.descricao);
   const refs=it.quantitativo_refs||[];
   if(refs.length){
-    try{ const d=await (await fetch('actions/orcamento.php?obra='+(it.obra_id||1)+'&ids='+refs.join(',')+'&_='+Date.now())).json();
+    const ob=obra||it.obra_id||1;   // obra CERTA p/ resolver os ids do orçamento (ids são PK global; orcamento.php filtra por obra)
+    try{ const d=await (await fetch('actions/orcamento.php?obra='+ob+'&ids='+refs.join(',')+'&_='+Date.now())).json();
       const L=d.linhas||[];
       if(L.length) return L.map(l=>({descricao:l.descricao||'',unidade:l.unidade||'',quantidade:(l.qtde!=null&&l.qtde!=='')?Number(l.qtde):'',observacao:l.path_str||''})).filter(x=>x.descricao);
     }catch(e){}
@@ -3481,8 +3482,22 @@ function cotEqualizaPanel(d){
 function cotEqualizaEdit(){ const e=document.getElementById('cotEqEdit'); if(e) e.style.display=(e.style.display==='none'?'block':'none'); }
 async function cotEqualizaPontosSave(){
   const txt=(document.getElementById('cotEqPontos')||{}).value||'';
+  const oldP=cotEqPontos(COT.cur.cotacao);                                    // pontos ANTES (valores por proposta são chaveados pelo texto)
+  const newP=txt.split(/\r?\n|\|/).map(s=>s.trim()).filter(Boolean);
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'equaliza_salvar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,equalizacao:txt})})).json();
-    if(r.error){toast(r.error);return;} COT.cur.cotacao.equalizacao=txt; cotRenderDetalhe(); toast('Pontos de equalização salvos');
+    if(r.error){toast(r.error);return;}
+    COT.cur.cotacao.equalizacao=txt;
+    // Renomeou/reordenou mantendo a mesma quantidade de pontos? Remapeia POSICIONALMENTE os valores já preenchidos
+    // por proposta, senão eles ficariam órfãos (chaveados pelo texto antigo) e apareceriam como "—".
+    if(oldP.length===newP.length && oldP.some((k,i)=>k!==newP[i])){
+      for(const p of (COT.cur.propostas||[])){
+        const old=p.equaliza||{}, nm={}; let mudou=false;
+        newP.forEach((k,i)=>{ const v=old[oldP[i]]; if(v!=null&&v!=='') { nm[k]=v; mudou=true; } });
+        p.equaliza=nm;
+        if(mudou){ try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'equaliza_salvar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:p.id,equaliza:nm})}); }catch(e){} }
+      }
+    }
+    cotRenderDetalhe(); toast('Pontos de equalização salvos');
   }catch(e){ toast('Falha ao salvar'); }
 }
 function cotEqualizaCell(pid){

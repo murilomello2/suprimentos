@@ -102,6 +102,7 @@ try {
         // AUTO-VÍNCULO: dimensões preenchidas por receita e ainda não confirmadas — não contam como curadas
         $aflags = !empty($r['auto_flags']) ? (json_decode($r['auto_flags'], true) ?: []) : [];
         $d = [
+            'obra_id'         => $OBRA,     // p/ o cliente resolver refs do orçamento na obra CERTA (cotItensFromQuant)
             'data_necessaria' => $data_nec,
             'inicio_cotacao'  => $inicio,
             'fim_cotacao'     => $fim,

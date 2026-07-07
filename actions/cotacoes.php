@@ -79,7 +79,8 @@ function cot_get_full($pdo, $id) {
         $byp = [];
         foreach ($piq->fetchAll() as $r) $byp[(int)$r['proposta_id']][(int)$r['cotacao_item_id']] =
             ['preco_unit'=>$r['preco_unit']!==null?(float)$r['preco_unit']:null, 'preco_total'=>$r['preco_total']!==null?(float)$r['preco_total']:null, 'observacao'=>$r['observacao']];
-        foreach ($propostas as &$p) { $p['total'] = $p['total']!==null?(float)$p['total']:null; $p['itens'] = $byp[(int)$p['id']] ?? []; }
+        foreach ($propostas as &$p) { $p['total'] = $p['total']!==null?(float)$p['total']:null; $p['itens'] = $byp[(int)$p['id']] ?? [];
+            $p['equaliza'] = !empty($p['equaliza'] ?? '') ? (json_decode($p['equaliza'], true) ?: []) : []; }
         unset($p);
     }
     $anx = $pdo->prepare("SELECT id, proposta_id, nome, tamanho FROM cotacao_anexo WHERE cotacao_id=? ORDER BY id"); $anx->execute([$id]);
@@ -143,11 +144,11 @@ try {
         if (!$itens) throw new Exception('inclua ao menos um item a cotar');
         $now = date('c');
         $pdo->beginTransaction();
-        $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, descricao, status, aprovacao, criado_por, criado_nome, created_at, updated_at)
-                       VALUES (?,?,?,?,?,?,?, 'aberta', 'aguardando', ?,?,?,?)")
+        $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, descricao, equalizacao, status, aprovacao, criado_por, criado_nome, created_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?, 'aberta', 'aguardando', ?,?,?,?)")
             ->execute([$obra ?: null, ($in['servico_id'] ?? null) ?: null, $titulo, trim((string)($in['categoria'] ?? '')),
                        trim((string)($in['tipo_servico'] ?? '')), (float)($in['verba'] ?? 0) ?: null, trim((string)($in['descricao'] ?? '')),
-                       $me, $perms['nome'] ?? null, $now, $now]);
+                       trim((string)($in['equalizacao'] ?? '')), $me, $perms['nome'] ?? null, $now, $now]);
         $cid = (int)$pdo->lastInsertId();
         $insI = $pdo->prepare("INSERT INTO cotacao_item (cotacao_id, descricao, unidade, quantidade, observacao, ordem) VALUES (?,?,?,?,?,?)");
         $o = 0;
@@ -174,6 +175,25 @@ try {
         $obra = (int)($row->fetchColumn() ?: 1);
         if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão.']); exit; }
         $pdo->prepare("DELETE FROM cotacao_fornecedor WHERE id=?")->execute([$id]);
+        echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'equaliza_salvar') {   // pontos de equalização da cotação e/ou os valores por proposta
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
+        $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
+        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+        // 1) lista de pontos a conferir (texto livre, 1 por linha) — no header da cotação
+        if (array_key_exists('equalizacao', $in)) {
+            $pdo->prepare("UPDATE cotacao SET equalizacao=?, updated_at=? WHERE id=?")->execute([trim((string)$in['equalizacao']), date('c'), $cid]);
+        }
+        // 2) valores da equalização de UMA proposta (JSON ponto->valor) — valida que a proposta é desta cotação
+        if (!empty($in['proposta_id'])) {
+            $pid = (int)$in['proposta_id'];
+            $ok = $pdo->prepare("SELECT 1 FROM cotacao_proposta WHERE id=? AND cotacao_id=?"); $ok->execute([$pid, $cid]);
+            if (!$ok->fetch()) throw new Exception('proposta não pertence a esta cotação');
+            $val = isset($in['equaliza']) ? json_encode((object)$in['equaliza'], JSON_UNESCAPED_UNICODE) : null;
+            $pdo->prepare("UPDATE cotacao_proposta SET equaliza=? WHERE id=?")->execute([$val, $pid]);
+        }
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 

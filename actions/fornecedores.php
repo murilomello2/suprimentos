@@ -36,6 +36,14 @@ try {
         if (isset($_GET['categorias'])) { echo json_encode(['categorias'=>$cats], JSON_UNESCAPED_UNICODE); exit; }
         // lista de fornecedores com filtros
         $w = []; $a = [];
+        // busca AMPLA (usada pelas sugestões de convite/proposta): casa nome OU itens OU categoria OU cidade.
+        // Evita o bug do filtro categoria=AND rígido — a categoria do fornecedor (livre/importada) raramente bate
+        // a categoria da cotação, então categoria NUNCA deve zerar uma busca por nome.
+        if (trim((string)($_GET['q'] ?? '')) !== '') {
+            $t = '%'.trim($_GET['q']).'%';
+            $w[] = '(nome LIKE ? OR itens LIKE ? OR categoria LIKE ? OR cidade LIKE ?)';
+            array_push($a, $t, $t, $t, $t);
+        }
         if (($_GET['nome'] ?? '') !== '')      { $w[] = 'nome LIKE ?';      $a[] = '%'.$_GET['nome'].'%'; }
         if (($_GET['categoria'] ?? '') !== '') { $w[] = 'categoria = ?';    $a[] = $_GET['categoria']; }
         if (($_GET['tipo'] ?? '') !== '')      { $w[] = 'tipo = ?';         $a[] = $_GET['tipo']; }

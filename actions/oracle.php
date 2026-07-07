@@ -11,6 +11,7 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/supabase.php';
 require_once __DIR__ . '/../includes/cronograma.php';
+require_once __DIR__ . '/../includes/verba.php';
 
 define('ORACLE_CFG_FILE', __DIR__ . '/../data/.oracle.json');
 function oracle_cfg() { $j = @json_decode(@file_get_contents(ORACLE_CFG_FILE), true); return is_array($j) ? $j : []; }
@@ -148,6 +149,7 @@ No MODAL do item (clique no item do Radar ou numa célula da Matriz) as abas sã
 CURADORIA (importante): cada dado pode estar CURADO (✓ verde = confirmado manualmente por uma pessoa) ou SUGERIDO PELO AUTO-VÍNCULO (🤖 = a receita preencheu automaticamente e AINDA precisa ser conferido e salvo). Aparece nos selos ao lado da VERBA, do QUANTITATIVO e da DATA (na Matriz há legenda). Se algo estiver 🤖, oriente a pessoa a abrir o item e confirmar. (Pergunta "como confiro a verba?" → responda: abra o item, veja o selo ✓/🤖 ao lado da verba; na aba Orçamento vê a origem; clicando no 🤖 abre pra confirmar.)
 
 VERBA: o valor "definitivo" do item é a verba curada (override) ou a soma material+MO ou a estimativa. "Verba a definir / R\$ 0" = ainda não definida (sinalize isso).
+FERRAMENTA `detalhar_verba(item, obra)`: quando perguntarem o VALOR ou o DETALHE da verba de um item específico (ex.: "qual a verba dos elevadores definitivos da Trinity?"), CHAME esta ferramenta — ela devolve método (composição/analítico), verba total, material, mão de obra e as composições/insumos que geraram o valor. Traga a resposta DETALHADA: total, split material×MO, método, e a lista de composições/insumos com seus valores (tabela ajuda). NUNCA responda "verba não definida" sem antes chamar a ferramenta; só diga que não há verba se ela retornar metodo "não definida". Se retornar encontrado=false, aí sim diga que não achou o item e confirme o nome/obra.
 
 === ATRASOS E PRAZOS (o CORAÇÃO do radar — o principal problema a evitar) ===
 Cada item do radar tem INÍCIO e FIM da cotação (datas calculadas do cronograma). Um item está ATRASADO quando:
@@ -181,6 +183,67 @@ TXT;
 function oracle_persona($cfg) {
     $p = trim((string)($cfg['prompt'] ?? ''));
     return $p !== '' ? $p : oracle_default_prompt();
+}
+
+// ================= FERRAMENTA: detalhar verba (function-calling da IA) =================
+// Resolve nome do item + nome da obra -> [servico_id, obra_id, nome_real].
+function oracle_resolve_item($pdo, $item, $obra) {
+    $item = trim((string)$item); $obra = trim((string)$obra);
+    $obra_id = null;
+    if ($obra !== '') {
+        $q = $pdo->prepare("SELECT id FROM obra WHERE nome = ? LIMIT 1"); $q->execute([$obra]); $obra_id = $q->fetchColumn();
+        if ($obra_id === false) { $q = $pdo->prepare("SELECT id FROM obra WHERE nome LIKE ? ORDER BY id LIMIT 1"); $q->execute(['%'.$obra.'%']); $obra_id = $q->fetchColumn(); }
+    }
+    if (!$obra_id) { $obra_id = $pdo->query("SELECT id FROM obra ORDER BY id LIMIT 1")->fetchColumn(); }
+    $obra_id = (int)$obra_id;
+    $q = $pdo->prepare("SELECT s.id, s.nome FROM servico s JOIN radar_item r ON r.servico_id=s.id AND r.obra_id=? WHERE s.nome = ? LIMIT 1");
+    $q->execute([$obra_id, $item]); $row = $q->fetch();
+    if (!$row) { $q = $pdo->prepare("SELECT s.id, s.nome FROM servico s JOIN radar_item r ON r.servico_id=s.id AND r.obra_id=? WHERE s.nome LIKE ? ORDER BY s.id LIMIT 1"); $q->execute([$obra_id, '%'.$item.'%']); $row = $q->fetch(); }
+    return [$row ? (int)$row['id'] : null, $obra_id, $row ? $row['nome'] : null];
+}
+
+function oracle_tool_detalhar_verba($pdo, $item, $obra) {
+    [$sid, $obra_id, $snome] = oracle_resolve_item($pdo, $item, $obra);
+    $onome = ''; if ($obra_id) { $q = $pdo->prepare("SELECT nome FROM obra WHERE id=?"); $q->execute([$obra_id]); $onome = (string)$q->fetchColumn(); }
+    if (!$sid) return ['encontrado'=>false, 'motivo'=>'Item "'.$item.'" não encontrado no radar da obra '.($onome ?: $obra).'.'];
+    $bd = verba_breakdown_data($pdo, $sid, $obra_id);
+    if (isset($bd['error'])) return ['encontrado'=>false, 'motivo'=>$bd['error']];
+    // Sem composição/analítico vinculado: cai no valor denormalizado (override/material+mo/estim).
+    if ($bd['metodo'] === 'nenhum') {
+        $q = $pdo->prepare("SELECT verba_override, verba_material, verba_mo, verba_estim FROM radar_item WHERE servico_id=? AND obra_id=?");
+        $q->execute([$sid, $obra_id]); $rr = $q->fetch(); $v = $rr ? o_verba($rr) : null;
+        return ['encontrado'=>true, 'item'=>$snome, 'obra'=>$onome,
+                'metodo'=> $v !== null ? 'valor definido diretamente (sem quebra por insumo)' : 'não definida',
+                'verba_total'=> $v !== null ? round($v) : 0,
+                'material'=> $rr && o_num($rr['verba_material']) !== null ? round(o_num($rr['verba_material'])) : null,
+                'mao_de_obra'=> $rr && o_num($rr['verba_mo']) !== null ? round(o_num($rr['verba_mo'])) : null,
+                'composicoes'=>[], 'insumos'=>[]];
+    }
+    $metNome = ['analitico'=>'orçamento analítico', 'composicao'=>'composição de insumos'][$bd['metodo']] ?? $bd['metodo'];
+    $comps = array_map(function($l){ return ['descricao'=>$l['descricao'], 'valor'=>round($l['valor'])]; }, $bd['linhas']);
+    $ins = [];
+    foreach (['material','mo','mat_mo','equip'] as $t) foreach (($bd['por_tipo'][$t] ?? []) as $x)
+        $ins[] = ['desc'=>$x['desc'], 'tipo'=>$t, 'qtde'=>round($x['qtde'],2), 'unidade'=>$x['unidade'], 'valor'=>round($x['valor'])];
+    usort($ins, function($a,$b){ return $b['valor'] <=> $a['valor']; });
+    $tp = $bd['tot_por_tipo'];
+    return ['encontrado'=>true, 'item'=>$snome, 'obra'=>$onome, 'metodo'=>$metNome,
+            'verba_total'=>round($bd['total']), 'material'=>round($tp['material']), 'mao_de_obra'=>round($tp['mo']),
+            'mat_mo'=>round($tp['mat_mo']), 'equipamento'=>round($tp['equip']),
+            'composicoes'=>$comps, 'insumos'=>array_slice($ins, 0, 20)];
+}
+
+function oracle_tools() {
+    return [[
+        'type'=>'function',
+        'function'=>[
+            'name'=>'detalhar_verba',
+            'description'=>'Retorna a QUEBRA da verba de um item do radar: método (composição de insumos / orçamento analítico), verba total, material, mão de obra, e as composições e insumos que geraram o valor. Chame SEMPRE que perguntarem o VALOR ou o DETALHE/COMPOSIÇÃO da verba de um item específico — não responda "não definida" sem antes tentar esta ferramenta.',
+            'parameters'=>['type'=>'object', 'properties'=>[
+                'item'=>['type'=>'string', 'description'=>'Nome do item/serviço do radar. Ex.: "Elevadores Definitivos".'],
+                'obra'=>['type'=>'string', 'description'=>'Nome da obra. Ex.: "Trinity".'],
+            ], 'required'=>['item','obra']],
+        ],
+    ]];
 }
 
 // Permite carregar só as funções (testes/CLI) sem executar o endpoint.
@@ -242,17 +305,33 @@ try {
     }
     $messages[] = ['role'=>'user', 'content'=>$pergunta];
 
-    [$code, $res, $err] = oracle_post('https://api.openai.com/v1/chat/completions', $key,
-        ['model'=>$model, 'messages'=>$messages, 'temperature'=>0.3, 'max_tokens'=>1400]);
-    if ($code !== 200) {
-        $msg = 'Falha ao consultar a IA (HTTP ' . $code . ')';
-        $ej = json_decode((string)$res, true);
-        if (!empty($ej['error']['message'])) $msg .= ': ' . $ej['error']['message'];
-        elseif ($err) $msg .= ': ' . $err;
-        echo json_encode(['error'=>$msg]); exit;
+    // Loop de function-calling: a IA pode chamar detalhar_verba (quebra da verba) antes de responder.
+    $base = ['model'=>$model, 'temperature'=>0.3, 'max_tokens'=>1500, 'tools'=>oracle_tools()];
+    $resposta = null;
+    for ($round = 0; $round < 3; $round++) {
+        [$code, $res, $err] = oracle_post('https://api.openai.com/v1/chat/completions', $key, array_merge($base, ['messages'=>$messages]));
+        if ($code !== 200) {
+            $msg = 'Falha ao consultar a IA (HTTP ' . $code . ')';
+            $ej = json_decode((string)$res, true);
+            if (!empty($ej['error']['message'])) $msg .= ': ' . $ej['error']['message'];
+            elseif ($err) $msg .= ': ' . $err;
+            echo json_encode(['error'=>$msg]); exit;
+        }
+        $j = json_decode($res, true);
+        $m = $j['choices'][0]['message'] ?? [];
+        $calls = $m['tool_calls'] ?? null;
+        if (empty($calls)) { $resposta = $m['content'] ?? '(a IA não retornou resposta)'; break; }
+        $messages[] = $m;   // mensagem do assistant COM os tool_calls (obrigatória antes das respostas tool)
+        foreach ($calls as $tc) {
+            $fn = $tc['function']['name'] ?? '';
+            $args = json_decode($tc['function']['arguments'] ?? '{}', true) ?: [];
+            $out = ($fn === 'detalhar_verba')
+                 ? oracle_tool_detalhar_verba($pdo, $args['item'] ?? '', $args['obra'] ?? '')
+                 : ['error'=>'ferramenta desconhecida: ' . $fn];
+            $messages[] = ['role'=>'tool', 'tool_call_id'=>$tc['id'] ?? '', 'content'=>json_encode($out, JSON_UNESCAPED_UNICODE)];
+        }
     }
-    $j = json_decode($res, true);
-    $resposta = $j['choices'][0]['message']['content'] ?? '(a IA não retornou resposta)';
+    if ($resposta === null) $resposta = '(não consegui concluir a resposta — tente reformular a pergunta)';
     // conta 1 uso do dia (admin não conta) — só depois da resposta OK
     if (!$isAdmin && $limite > 0) {
         $up = $pdo->prepare("UPDATE oracle_uso SET n=n+1 WHERE bitrix_id=? AND dia=?"); $up->execute([$bid, $hoje]);

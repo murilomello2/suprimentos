@@ -841,6 +841,12 @@ function oracMd(t){
   if(inList) out.push('</ul>');
   return out.join('');
 }
+function oracModelSelect(cur){
+  cur=(cur||'gpt-4o-mini');
+  const opts=[['gpt-4o-mini','gpt-4o-mini — rápido e barato (recomendado)'],['gpt-4o','gpt-4o — mais capaz'],['gpt-4.1-mini','gpt-4.1-mini'],['gpt-4.1','gpt-4.1 — o mais capaz']];
+  if(!opts.some(o=>o[0]===cur)) opts.unshift([cur, cur+' (atual)']);
+  return '<select id="oracModel" style="width:100%">'+opts.map(o=>'<option value="'+esc(o[0])+'"'+(o[0]===cur?' selected':'')+'>'+esc(o[1])+'</option>').join('')+'</select>';
+}
 function oracRender(){
   const w=document.getElementById('oracwrap'); if(!w)return; const cfg=ORAC.cfg||{}; const admin=!!(EU&&EU.perm_admin);
   let admincfg='';
@@ -849,7 +855,7 @@ function oracRender(){
       <div class="dmini" style="margin-bottom:8px">A chave fica só no servidor (nunca no navegador). Status: <b style="color:${cfg.configurado?'var(--ok)':'var(--pend)'}">${cfg.configurado?'configurada ✓':'não configurada'}</b> · ${cfg.prompt_custom?'usando <b>prompt personalizado</b>':'usando o <b>prompt padrão</b>'}</div>
       <div style="display:grid;grid-template-columns:1fr 150px 130px;gap:8px;max-width:720px">
         ${cotFld('Chave da OpenAI (sk-…)','<input id="oracKey" type="password" autocomplete="off" style="width:100%" placeholder="vazio mantém a atual">')}
-        ${cotFld('Modelo','<input id="oracModel" style="width:100%" value="'+esc(cfg.modelo||'gpt-4o')+'">')}
+        ${cotFld('Modelo', oracModelSelect(cfg.modelo))}
         ${cotFld('Perguntas/dia','<input id="oracLimite" type="number" min="0" style="width:100%" title="0 = ilimitado; admins não contam" value="'+((cfg.limite_dia!=null)?cfg.limite_dia:2)+'">')}
       </div>
       ${cotFld('Prompt-base do oráculo — ensina o sistema à IA (vazio volta ao padrão)','<textarea id="oracPrompt" rows="10" style="width:100%;font-size:12px;font-family:ui-monospace,Consolas,monospace">'+esc(cfg.prompt_custom?(cfg.prompt||''):'')+'</textarea>','margin-top:8px')}

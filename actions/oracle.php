@@ -78,23 +78,21 @@ function oracle_contexto($pdo, $perms) {
             $atras = $fimAtras || $iniAtras;
             $motivo = $fimAtras ? ('o FIM da cotação venceu em ' . $fim . ' e o item não está Finalizado')
                     : ($iniAtras ? ('passou o INÍCIO da cotação em ' . $ini . ' e a cotação ainda não foi disparada (status "' . $st . '")') : null);
-            $rec = ['item'=>$r['nome'], 'obra'=>$onome, 'grupo'=>($r['grupo'] ?? null) ?: null, 'curva'=>($r['curva'] ?? null) ?: null,
-                    'status'=>$st, 'responsavel'=>$resp ?: null, 'fornecedor'=>($r['fornecedor'] ?? null) ?: null,
-                    'verba'=>$v !== null ? round($v) : null, 'data_em_obra'=>$data_nec ?: null,
-                    'inicio_cotacao'=>$ini ?: null, 'fim_cotacao'=>$fim ?: null,
-                    'atrasado'=>$atras, 'motivo_atraso'=>$motivo];
-            // CATÁLOGO COMPLETO (compacto) — TODOS os itens de TODAS as obras, inclusive finalizados/sem responsável.
-            // É a fonte de verdade para consultas factuais ("qual fornecedor/status/responsável/verba de X na obra Y").
-            $catalogo[] = ['item'=>$r['nome'], 'obra'=>$onome, 'curva'=>($r['curva'] ?? null) ?: null, 'status'=>$st,
-                           'responsavel'=>$resp ?: null, 'fornecedor'=>($r['fornecedor'] ?? null) ?: null,
-                           'verba'=>$v !== null ? round($v) : null, 'atrasado'=>$atras];
-            if ($nome !== '' && strcasecmp($resp, $nome) === 0) $meus[] = $rec;
-            if ($atras) { $atrasadas[] = $rec; if ($resp !== '') $atrResp[$resp] = ($atrResp[$resp] ?? 0) + 1; }
-            if ($fim !== '' && $fim <= $fim_mes && $st !== 'Finalizado') $fecharMes[] = $rec;
+            // CATÁLOGO COMPLETO (linha compacta; colunar no return) — TODOS os itens de TODAS as obras,
+            // inclusive finalizados/sem responsável. Fonte de verdade p/ consultas factuais
+            // ("qual fornecedor/status/responsável/verba de X na obra Y"). Ordem = colunas do return.
+            $catalogo[] = [$r['nome'], $onome, ($r['curva'] ?? '') ?: '', $st, $resp ?: '',
+                           ($r['fornecedor'] ?? '') ?: '', $v !== null ? round($v) : '', $atras ? 1 : 0];
+            // Agenda (compacta): só o que precisa de DATA — o resto (fornecedor, verba, curva…) vem do catálogo.
+            $recA = ['item'=>$r['nome'], 'obra'=>$onome, 'responsavel'=>$resp ?: null,
+                     'inicio'=>$ini ?: null, 'fim'=>$fim ?: null, 'atrasado'=>$atras, 'motivo'=>$motivo];
+            if ($nome !== '' && strcasecmp($resp, $nome) === 0) $meus[] = $recA;
+            if ($atras) { $atrasadas[] = $recA; if ($resp !== '') $atrResp[$resp] = ($atrResp[$resp] ?? 0) + 1; }
+            if ($fim !== '' && $fim <= $fim_mes && $st !== 'Finalizado') $fecharMes[] = $recA;
         }
     }
-    usort($atrasadas, function($a,$b){ return strcmp((string)$a['fim_cotacao'], (string)$b['fim_cotacao']); });
-    usort($fecharMes, function($a,$b){ return strcmp((string)$a['fim_cotacao'], (string)$b['fim_cotacao']); });
+    usort($atrasadas, function($a,$b){ return strcmp((string)$a['fim'], (string)$b['fim']); });
+    usort($fecharMes, function($a,$b){ return strcmp((string)$a['fim'], (string)$b['fim']); });
     $cots = $pdo->query("SELECT c.id, c.titulo, c.categoria, c.tipo_servico, c.status, c.verba, c.created_at, o.nome AS obra,
                 (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id) AS propostas,
                 (SELECT COUNT(*) FROM cotacao_fornecedor cf WHERE cf.cotacao_id=c.id) AS convidados,
@@ -115,11 +113,12 @@ function oracle_contexto($pdo, $perms) {
         'resumo' => ['itens_por_obra'=>$porObra, 'itens_por_status'=>$porStatus, 'itens_por_responsavel'=>$porResp,
                      'total_atrasadas'=>count($atrasadas), 'atrasadas_por_responsavel'=>$atrResp,
                      'itens_a_fechar_este_mes'=>count($fecharMes), 'verba_total_em_aberto'=>round($verbaAberta)],
-        'catalogo' => array_slice($catalogo, 0, 2000),
+        'catalogo' => ['colunas'=>['item','obra','curva','status','responsavel','fornecedor','verba','atrasado'],
+                       'itens'=>array_slice($catalogo, 0, 2000)],
         'catalogo_truncado' => count($catalogo) > 2000,
         'minhas_aquisicoes' => array_slice($meus, 0, 60),
-        'aquisicoes_atrasadas' => array_slice($atrasadas, 0, 80),
-        'a_fechar_este_mes' => array_slice($fecharMes, 0, 80),
+        'aquisicoes_atrasadas' => array_slice($atrasadas, 0, 60),
+        'a_fechar_este_mes' => array_slice($fecharMes, 0, 60),
         'cotacoes' => $cotacoes,
     ];
 }
@@ -154,7 +153,7 @@ VERBA: o valor "definitivo" do item é a verba curada (override) ou a soma mater
 Cada item do radar tem INÍCIO e FIM da cotação (datas calculadas do cronograma). Um item está ATRASADO quando:
 1) o FIM da cotação já passou (fim_cotacao < hoje) E o item NÃO está "Finalizado"; OU
 2) o INÍCIO da cotação já passou E a cotação nem foi disparada (status ainda "Não Iniciado").
-No JSON, cada item já vem com "atrasado" (true/false) e "motivo_atraso" — CONFIE nesses campos (não recalcule datas na mão). Use as listas prontas:
+As listas de agenda (aquisicoes_atrasadas / a_fechar_este_mes / minhas_aquisicoes) trazem cada item com: item, obra, responsavel, inicio e fim (datas de cotação), atrasado (true/false) e motivo (texto pronto explicando o atraso). CONFIE nesses campos (não recalcule datas na mão). Use as listas prontas:
 • "aquisicoes_atrasadas" = TODOS os itens atrasados (ordenados do mais antigo). Para "o que está atrasado com o Fulano", filtre por responsavel = Fulano.
 • "a_fechar_este_mes" = itens cujo FIM da cotação cai até o fim deste mês e não estão Finalizados (inclui os já vencidos). É o que a pessoa "precisa fechar este mês" — são ITENS DO RADAR, não só as cotações do Mapa de Cotações.
 • "minhas_aquisicoes" = os itens do usuário logado (cada um com "atrasado"). "resumo.total_atrasadas" e "resumo.atrasadas_por_responsavel" dão os números.
@@ -162,7 +161,11 @@ Quando perguntarem "o que tenho que fechar este mês / o que está atrasado", re
 Se "fonte_das_datas" for INDISPONÍVEL, avise que não conseguiu ler o cronograma agora e peça pra tentar de novo.
 
 === CONSULTAS FACTUAIS (qual fornecedor/status/responsável/verba de um item) ===
-Para responder sobre QUALQUER item específico — ex.: "qual fornecedor fechamos para Sondagem na Trinity?", "qual o status de X?", "quem é o responsável por Y?", "quanto de verba tem Z?" — consulte SEMPRE a lista "catalogo". Ela traz TODOS os itens do radar de TODAS as obras (inclusive os FINALIZADOS e os sem responsável), cada um com: item, obra, curva, status, responsavel, fornecedor, verba, atrasado. Ache a linha pelo nome do item + obra e responda direto (ex.: fornecedor). Só diga "não tenho esse dado" se realmente não houver a linha no "catalogo". As listas minhas_aquisicoes/aquisicoes_atrasadas/a_fechar_este_mes são recortes de agenda; o "catalogo" é a fonte de verdade completa.
+Para responder sobre QUALQUER item específico — ex.: "qual fornecedor fechamos para Sondagem na Trinity?", "qual o status de X?", "quem é o responsável por Y?", "quanto de verba tem Z?" — consulte SEMPRE o "catalogo". Ele traz TODOS os itens do radar de TODAS as obras (inclusive FINALIZADOS e sem responsável), em formato COLUNAR para economizar espaço:
+• catalogo.colunas = ["item","obra","curva","status","responsavel","fornecedor","verba","atrasado"]
+• catalogo.itens = lista de LINHAS; cada linha é um array na MESMA ordem das colunas.
+Ex.: a linha ["Sondagem","Trinity","C","Finalizado","","Marcel moretti",160,0] quer dizer que o fornecedor de Sondagem na Trinity é "Marcel moretti". Convenções: verba "" ou 0 = não definida; atrasado 1 = sim, 0 = não; responsavel "" = sem responsável.
+Ache a linha pelo item + obra e leia a coluna pedida. Só diga "não tenho esse dado" se realmente não houver a linha no catalogo. As listas de agenda (minhas_aquisicoes/aquisicoes_atrasadas/a_fechar_este_mes) são recortes; o "catalogo" é a fonte de verdade completa.
 
 === COMO RESPONDER ===
 - Use SOMENTE os dados do JSON do cockpit fornecido abaixo. Se a info não estiver lá (nem no "catalogo"), diga que não tem esse dado no seu contexto e ORIENTE onde a pessoa acha no sistema (menu/aba).

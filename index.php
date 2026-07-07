@@ -3434,7 +3434,10 @@ function cotPickKey(f){ return f.id?('id:'+f.id):('n:'+(''+(f.nome||'')).toLower
 function cotPickRenderList(){
   const box=document.getElementById('cotPickList'); if(!box)return; const L=COT_PICK.list;
   if(!L.length){ box.innerHTML='<div class="dmini" style="padding:16px 0">Nenhum fornecedor encontrado.</div>'; cotPickCount(); return; }
-  box.innerHTML=`<div class="dmini" style="padding:4px 0">${L.length} fornecedor(es)${L.length>=300?'+ (refine a busca)':''} — marque os que vão participar</div>`+L.map((f,i)=>{ const on=!!COT_PICK.sel[cotPickKey(f)];
+  const allSel=L.every(f=>!!COT_PICK.sel[cotPickKey(f)]);
+  box.innerHTML=`<div class="dmini" style="padding:4px 0;display:flex;align-items:center;gap:10px;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1">
+      <span>${L.length} fornecedor(es)${L.length>=300?'+ (refine a busca)':''} — marque os que vão participar</span>
+      <button class="btn-ghost" style="padding:2px 10px;font-size:11px" onclick="cotPickAll(${!allSel})"><span class="material-icons" style="font-size:13px;vertical-align:-2px">${allSel?'remove_done':'done_all'}</span> ${allSel?'Limpar seleção':'Selecionar todos ('+L.length+')'}</button></div>`+L.map((f,i)=>{ const on=!!COT_PICK.sel[cotPickKey(f)];
     return `<label style="display:flex;align-items:center;gap:9px;padding:7px 4px;border-bottom:1px solid #f2f4f3;cursor:pointer">
       <input type="checkbox" ${on?'checked':''} onchange="cotPickToggle(${i})" style="width:16px;height:16px">
       <span style="flex:1;font-size:12.5px"><b>${esc(f.nome)}</b> <span class="muted" style="font-size:10.5px">· ${esc(f.categoria||'sem categoria')}${f.cidade?' · '+esc(f.cidade):''}${f.tipo?' · '+esc(f.tipo):''}${f.itens?' · '+esc((''+f.itens).slice(0,40)):''}</span></span></label>`;
@@ -3442,6 +3445,8 @@ function cotPickRenderList(){
   cotPickCount();
 }
 function cotPickToggle(i){ const f=COT_PICK.list[i]; if(!f)return; const k=cotPickKey(f); if(COT_PICK.sel[k])delete COT_PICK.sel[k]; else COT_PICK.sel[k]=f; cotPickCount(); }
+// marca/desmarca TODOS os fornecedores do filtro atual de uma vez
+function cotPickAll(on){ (COT_PICK.list||[]).forEach(f=>{ const k=cotPickKey(f); if(on)COT_PICK.sel[k]=f; else delete COT_PICK.sel[k]; }); cotPickRenderList(); }
 function cotPickCount(){ const n=Object.keys(COT_PICK.sel).length, el=document.getElementById('cotPickCount'); if(el)el.textContent=n+' selecionado'+(n===1?'':'s'); }
 async function cotPickAdd(){
   const chosen=Object.values(COT_PICK.sel); if(!chosen.length){ toast('Marque ao menos um fornecedor'); return; }

@@ -1164,7 +1164,10 @@ function renderMatriz(){
   const q=(gv('mq')||'').toLowerCase();
   const clsFn=colorBy==='prazo'?prazoClass:cellClass, txtMap=colorBy==='prazo'?PRAZO_TXT:CELL_TXT;
   // legenda + subtítulo dinâmicos
-  const lg=document.getElementById('mlegend'); if(lg) lg.innerHTML=(colorBy==='prazo'?LEG_PRAZO:LEG_STATUS).map(([c,t])=>`<span class="lg"><span class="sw ${c}"></span> ${esc(t)}</span>`).join('');
+  const lg=document.getElementById('mlegend'); if(lg) lg.innerHTML=(colorBy==='prazo'?LEG_PRAZO:LEG_STATUS).map(([c,t])=>`<span class="lg"><span class="sw ${c}"></span> ${esc(t)}</span>`).join('')
+    +`<span style="width:1px;height:16px;background:var(--line);align-self:center;margin:0 2px"></span>`
+    +`<span class="lg" title="dado confirmado manualmente (curadoria)"><span class="material-icons" style="font-size:14px;color:var(--ok)">verified</span> curado</span>`
+    +`<span class="lg" title="dado sugerido pelo auto-vínculo (receita) — ainda não confirmado">🤖 auto-vínculo</span>`;
   const sub=document.getElementById('msub'); if(sub) sub.textContent=(colorBy==='prazo'?'Cor pelo PRAZO DE COTAÇÃO (data limite p/ fechar a cotação).':'Cor pelo STATUS de cada aquisição.')+' A data no centro de cada célula é o FIM DA COTAÇÃO.';
   // índice (ordem|obra) -> item
   const idx={}; src.forEach(i=>idx[i.ordem+'|'+i.obra_nome]=i);

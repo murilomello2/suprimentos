@@ -1,5 +1,5 @@
 <?php /* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php. (republicado) */ ?>
-<?php /* build: cotacoes-fornecedores-2026-07-06 */ ?>
+<?php /* build: responsaveis-multiobra-cards-2026-07-06 */ ?>
 <!doctype html>
 <html lang="pt-br">
 <head>
@@ -494,12 +494,18 @@
     <div id="cfg-resp" style="display:none">
       <div class="panel">
         <div class="bar" style="gap:10px;flex-wrap:wrap;align-items:center">
-          <label class="muted" style="font-size:12px">Obra <select id="rlObra" onchange="rlLoad()" style="margin-left:6px"></select></label>
+          <div id="rlObraPick" style="position:relative">
+            <button type="button" class="btn-ghost" onclick="rlObraToggle(event)" style="min-width:150px;display:inline-flex;align-items:center;gap:8px;justify-content:space-between;padding:7px 11px">
+              <span style="display:inline-flex;align-items:center;gap:5px"><span class="material-icons" style="font-size:15px;color:var(--dourado)">apartment</span> <span id="rlObraLbl">Obras</span></span>
+              <span style="font-size:10px;color:var(--muted)">▾</span>
+            </button>
+            <div id="rlObraMenu" style="display:none;position:absolute;top:100%;left:0;z-index:60;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.14);min-width:220px;padding:6px;margin-top:3px"></div>
+          </div>
           <select id="rlGrupo" onchange="rlRender()"><option value="">Todos os grupos</option></select>
           <select id="rlStatus" onchange="rlRender()"><option value="">Todos</option><option value="sem">Sem responsável</option><option value="com">Com responsável</option></select>
           <div class="search" style="min-width:180px"><span class="material-icons" style="color:var(--muted)">search</span><input id="rlQ" placeholder="Buscar item…" oninput="rlRender()"></div>
         </div>
-        <div id="rlKpi" class="muted" style="font-size:12.5px;margin-top:8px"></div>
+        <div id="rlKpi" class="kpis" style="margin-top:10px"></div>
       </div>
       <div class="panel" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
         <b id="rlSelCount" style="font-size:13px">0 selecionados</b>
@@ -3443,7 +3449,7 @@ function cfgTab(t){
 }
 
 /* ===== Responsáveis EM LOTE (Configurações) — atribui comprador por obra/grupo/seleção ===== */
-let RL={obra:null, itens:[], sel:new Set()};
+let RL={obras:[], itens:[], sel:new Set()};
 function rlObras(){ return (typeof OBRAS!=='undefined'&&OBRAS)?OBRAS.slice():[]; }
 function rlObrasEdit(){   // obras que o usuário PODE editar (o endpoint exige can_edit_obra) — admin/'todas' = todas
   const all=rlObras();
@@ -3452,56 +3458,90 @@ function rlObrasEdit(){   // obras que o usuário PODE editar (o endpoint exige 
   return all.filter(o=>ed.includes(Number(o.id)));
 }
 function renderRespLote(){
-  const list=rlObrasEdit(), os=document.getElementById('rlObra');
+  const list=rlObrasEdit();
   if(!list.length){ document.getElementById('rlwrap').innerHTML='<div class="empty">Você não tem obras liberadas para editar responsáveis. Peça ao administrador acesso de edição às obras.</div>';
-    if(os) os.innerHTML=''; const k=document.getElementById('rlKpi'); if(k)k.innerHTML=''; return; }
-  if(os){ const keep=os.value; os.innerHTML=list.map(o=>`<option value="${o.id}">${esc(o.nome)}</option>`).join('');
-    if(keep && list.some(o=>String(o.id)===keep)) os.value=keep; else os.value=list[0].id; }
+    const k=document.getElementById('rlKpi'); if(k)k.innerHTML=''; const l=document.getElementById('rlObraLbl'); if(l)l.textContent='—'; return; }
+  // default: TODAS as obras editáveis (o caso do usuário: atribuir um grupo em lote em todas)
+  if(!RL.obras.length) RL.obras=list.map(o=>Number(o.id));
+  else { RL.obras=RL.obras.filter(id=>list.some(o=>Number(o.id)===id)); if(!RL.obras.length) RL.obras=[Number(list[0].id)]; }
   const rs=document.getElementById('rlResp');
   if(rs) rs.innerHTML='<option value="">— escolher responsável —</option>'+(RESP||[]).map(u=>`<option value="${esc(u.nome)}">${esc(u.nome)}</option>`).join('');
   // "tornar padrão" é mudança GLOBAL (template) → só p/ admin ou quem edita TODAS as obras
   const pw=document.getElementById('rlPadraoWrap'); if(pw) pw.style.display=(IS_ADMIN||(CAN_RESP&&EU&&EU.editar_escopo==='todas'))?'':'none';
-  rlLoad();
+  rlObraLbl(); rlLoad();
 }
+// ---- dropdown MULTI-OBRA ----
+function rlObraToggle(e){ if(e)e.stopPropagation(); const m=document.getElementById('rlObraMenu'); if(!m)return; const ab=m.style.display==='none'||!m.style.display; m.style.display=ab?'block':'none'; if(ab) rlObraMenu(); }
+document.addEventListener('click',e=>{ const p=document.getElementById('rlObraPick'),m=document.getElementById('rlObraMenu'); if(m&&m.style.display==='block'&&p&&!p.contains(e.target)) m.style.display='none'; });
+function rlObraMenu(){ const m=document.getElementById('rlObraMenu'); if(!m)return; const list=rlObrasEdit();
+  m.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 6px 6px;border-bottom:1px solid var(--line);margin-bottom:4px"><span style="font-size:10px;font-weight:800;letter-spacing:.6px;color:var(--muted)">SELECIONE AS OBRAS</span><button class="btn-ghost" style="padding:2px 8px;font-size:11px" onclick="rlObraTodas(event)">Todas</button></div>`+
+    list.map(o=>{ const on=RL.obras.includes(Number(o.id));
+      return `<label style="display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;cursor:pointer;font-size:12.5px" onmouseover="this.style.background='#eff7f1'" onmouseout="this.style.background=''"><input type="checkbox" ${on?'checked':''} onchange="rlObraSet(${o.id},this.checked)"><span style="width:9px;height:9px;border-radius:50%;background:${obraCor(o.id)};flex:0 0 auto"></span><span style="flex:1"><b>${esc(o.nome)}</b></span></label>`; }).join('');
+}
+function rlObraSet(id,on){ id=Number(id);
+  if(on){ if(!RL.obras.includes(id)) RL.obras.push(id); }
+  else { RL.obras=RL.obras.filter(x=>x!==id); if(!RL.obras.length){ toast('Ao menos uma obra'); RL.obras=[id]; rlObraMenu(); return; } }
+  rlObraLbl(); rlObraMenu(); rlLoad();
+}
+function rlObraTodas(e){ if(e)e.stopPropagation(); RL.obras=rlObrasEdit().map(o=>Number(o.id)); rlObraLbl(); rlObraMenu(); rlLoad(); }
+function rlObraLbl(){ const l=document.getElementById('rlObraLbl'); if(!l)return; const list=rlObrasEdit();
+  if(RL.obras.length>=list.length) l.textContent='Todas as obras';
+  else if(RL.obras.length===1){ const o=list.find(x=>Number(x.id)===RL.obras[0]); l.textContent=o?o.nome:'1 obra'; }
+  else l.textContent=RL.obras.length+' obras'; }
 async function rlLoad(){
-  const os=document.getElementById('rlObra'); RL.obra=Number(os?os.value:RL.obra)||1; RL.sel=new Set();
-  const box=document.getElementById('rlwrap'); box.innerHTML='<div class="empty">Carregando…</div>';
+  RL.sel=new Set(); const box=document.getElementById('rlwrap'); box.innerHTML='<div class="empty">Carregando…</div>';
   try{
-    const d=await (await fetch('actions/matriz.php'+(RL.obra!==1?('?obra='+RL.obra):''))).json();
-    if(d.error){ box.innerHTML='<div class="empty">Erro: '+esc(d.error)+'</div>'; return; }
-    RL.itens=(d.itens||[]).map(i=>({ordem:i.ordem,nome:i.nome,grupo:i.grupo,curva:i.curva,responsavel:(i.responsavel||'').trim(),padrao:(i.responsavel_padrao||'').trim()}));
-    const g=document.getElementById('rlGrupo'); const keep=g.value;
-    g.innerHTML='<option value="">Todos os grupos</option>'+[...new Set(RL.itens.map(i=>i.grupo).filter(Boolean))].map(x=>`<option>${esc(x)}</option>`).join('');
-    if(keep) g.value=keep;
+    const onome={}; rlObrasEdit().forEach(o=>onome[Number(o.id)]=o.nome);
+    const rs=await Promise.all(RL.obras.map(async oid=>{ const u='actions/matriz.php'+(oid!==1?('?obra='+oid+'&'):'?')+'_='+Date.now(); const d=await (await fetch(u)).json().catch(()=>null); return {oid,d}; }));
+    const itens=[];
+    for(const {oid,d} of rs){ if(!d||d.error||!d.itens) continue;
+      d.itens.forEach(i=>itens.push({obra_id:oid, obra_nome:(d.obra&&d.obra.nome)||onome[oid]||('obra '+oid), ordem:i.ordem, nome:i.nome, grupo:i.grupo, curva:i.curva, responsavel:(i.responsavel||'').trim(), padrao:(i.responsavel_padrao||'').trim(), temData:!!(i.data_necessaria||i.fim_cotacao)})); }
+    RL.itens=itens;
+    const g=document.getElementById('rlGrupo'), keep=g.value;
+    g.innerHTML='<option value="">Todos os grupos</option>'+[...new Set(itens.map(i=>i.grupo).filter(Boolean))].sort().map(x=>`<option>${esc(x)}</option>`).join(''); if(keep) g.value=keep;
     rlRender();
   }catch(e){ box.innerHTML='<div class="empty">Falha: '+esc(e.message)+'</div>'; }
 }
+function rlKey(i){ return i.obra_id+':'+i.ordem; }
 function rlFiltered(){
   const fg=val('rlGrupo'), fs=val('rlStatus'), q=(document.getElementById('rlQ').value||'').toLowerCase();
   return RL.itens.filter(i=>(!fg||i.grupo===fg)&&(!fs||(fs==='sem'?!i.responsavel:!!i.responsavel))&&(!q||i.nome.toLowerCase().includes(q)));
 }
 function rlRender(){
   const box=document.getElementById('rlwrap'), fi=rlFiltered();
-  const com=RL.itens.filter(i=>i.responsavel).length, tot=RL.itens.length;
-  document.getElementById('rlKpi').innerHTML=`<b>${com}</b> de <b>${tot}</b> itens com responsável nesta obra · <b>${tot-com}</b> sem dono`;
-  let html='<table><thead><tr><th style="width:34px"><input type="checkbox" id="rlAll" onclick="rlToggleAll(this.checked)" title="selecionar os filtrados"></th><th>Item</th><th>Grupo</th><th>Curva</th><th>Responsável atual</th><th>Padrão</th></tr></thead><tbody>';
-  let grupo=null;
-  fi.forEach(i=>{
-    if(i.grupo!==grupo){ grupo=i.grupo; html+=`<tr class="grp-h"><td colspan="6">${esc(grupo||'—')}</td></tr>`; }
-    html+=`<tr><td><input type="checkbox" ${RL.sel.has(i.ordem)?'checked':''} onclick="rlSel(${i.ordem},this.checked)"></td>
-      <td>${esc(i.nome)}</td><td class="muted">${esc(i.grupo||'')}</td><td>${esc(i.curva||'')}</td>
-      <td>${i.responsavel?esc(i.responsavel):'<span class="muted">— sem —</span>'}</td>
-      <td class="muted" title="padrão do serviço (novas obras herdam)">${i.padrao?esc(i.padrao):'—'}</td></tr>`;
+  // ---- CARDS (todas as obras selecionadas) ----
+  const tot=RL.itens.length, com=RL.itens.filter(i=>i.responsavel).length, semd=tot-com, pct=tot?Math.round(100*com/tot):0;
+  const comData=RL.itens.filter(i=>i.temData).length;
+  const compradores={}; RL.itens.forEach(i=>{ if(i.responsavel) compradores[i.responsavel]=(compradores[i.responsavel]||0)+1; });
+  const nComp=Object.keys(compradores).length, media=nComp?Math.round(com/nComp):0;
+  const k=document.getElementById('rlKpi');
+  if(k) k.innerHTML=`
+    <div class="kpi"><div class="v">${tot}</div><div class="l">itens · ${RL.obras.length} obra${RL.obras.length>1?'s':''}</div></div>
+    <div class="kpi"><div class="v gold">${pct}%</div><div class="l">atribuídos · ${com} de ${tot}</div></div>
+    <div class="kpi"><div class="v ${semd?'alert':''}">${semd}</div><div class="l">sem dono (faltam)</div></div>
+    <div class="kpi"><div class="v">${nComp}</div><div class="l">compradores · ~${media}/pessoa</div></div>
+    <div class="kpi"><div class="v">${comData}</div><div class="l">com data de cronograma</div></div>`;
+  // ---- tabela (agrupada por grupo; coluna Obra quando multi) ----
+  const multi=RL.obras.length>1, cols=multi?7:6;
+  let html='<table><thead><tr><th style="width:34px"><input type="checkbox" id="rlAll" onclick="rlToggleAll(this.checked)" title="selecionar os filtrados"></th><th>Item</th>'+(multi?'<th>Obra</th>':'')+'<th>Grupo</th><th>Curva</th><th>Responsável atual</th><th>Padrão</th></tr></thead><tbody>';
+  const byG={}; fi.forEach(i=>{ (byG[i.grupo||'—']=byG[i.grupo||'—']||[]).push(i); });
+  Object.keys(byG).forEach(gr=>{
+    html+=`<tr class="grp-h"><td colspan="${cols}">${esc(gr)}</td></tr>`;
+    byG[gr].forEach(i=>{ const key=rlKey(i);
+      html+=`<tr><td><input type="checkbox" ${RL.sel.has(key)?'checked':''} onclick="rlSel('${key}',this.checked)"></td>
+        <td>${esc(i.nome)}</td>${multi?`<td><span class="dgm" style="background:${obraCor(i.obra_id)};margin-right:5px"></span><span class="muted" style="font-size:11.5px">${esc(i.obra_nome)}</span></td>`:''}<td class="muted">${esc(i.grupo||'')}</td><td>${esc(i.curva||'')}</td>
+        <td>${i.responsavel?esc(i.responsavel):'<span class="muted">— sem —</span>'}</td>
+        <td class="muted" title="padrão do serviço (novas obras herdam)">${i.padrao?esc(i.padrao):'—'}</td></tr>`; });
   });
-  if(!fi.length) html+='<tr><td colspan="6" class="empty">Nenhum item nesse filtro.</td></tr>';
+  if(!fi.length) html+=`<tr><td colspan="${cols}" class="empty">Nenhum item nesse filtro.</td></tr>`;
   box.innerHTML=html+'</tbody></table>';
-  const all=document.getElementById('rlAll'); if(all) all.checked=fi.length>0 && fi.every(i=>RL.sel.has(i.ordem));
+  const all=document.getElementById('rlAll'); if(all) all.checked=fi.length>0 && fi.every(i=>RL.sel.has(rlKey(i)));
   rlCount();
 }
-function rlSel(ordem,on){ on?RL.sel.add(ordem):RL.sel.delete(ordem);
-  const all=document.getElementById('rlAll'); if(all){ const fi=rlFiltered(); all.checked=fi.length>0 && fi.every(i=>RL.sel.has(i.ordem)); }
+function rlSel(key,on){ on?RL.sel.add(key):RL.sel.delete(key);
+  const all=document.getElementById('rlAll'); if(all){ const fi=rlFiltered(); all.checked=fi.length>0 && fi.every(i=>RL.sel.has(rlKey(i))); }
   rlCount(); }
-function rlToggleAll(on){ rlFiltered().forEach(i=>{ on?RL.sel.add(i.ordem):RL.sel.delete(i.ordem); }); rlRender(); }
+function rlToggleAll(on){ rlFiltered().forEach(i=>{ on?RL.sel.add(rlKey(i)):RL.sel.delete(rlKey(i)); }); rlRender(); }
 function rlCount(){ const el=document.getElementById('rlSelCount'); if(el) el.textContent=RL.sel.size+' selecionado'+(RL.sel.size===1?'':'s'); }
 async function rlAtribuir(){ const nome=val('rlResp'); if(!nome){ toast('Escolha um responsável'); return; }
   await rlAssign(nome, `Atribuir “${nome}” a ${RL.sel.size} item(ns)?`); }
@@ -3509,32 +3549,35 @@ async function rlLimpar(){ await rlAssign('', `Limpar o responsável de ${RL.sel
 async function rlAssign(nome, msg){
   if(!RL.sel.size){ toast('Selecione ao menos um item'); return; }
   if(!confirm(msg)) return;
-  const ids=[...RL.sel];
   const pchk=document.getElementById('rlPadrao');
-  const tornarPadrao = !!(nome && pchk && pchk.checked && pchk.offsetParent!==null);  // só ao ATRIBUIR (não ao limpar) e se visível+marcado
+  const tornarPadrao = !!(nome && pchk && pchk.checked && pchk.offsetParent!==null);  // só ao ATRIBUIR e se visível+marcado
+  // agrupa a seleção por OBRA (o endpoint é por obra)
+  const porObra={}; [...RL.sel].forEach(key=>{ const p=key.split(':'); const ob=Number(p[0]), ordem=Number(p[1]); (porObra[ob]=porObra[ob]||[]).push(ordem); });
   try{
-    const r=await (await fetch('actions/responsaveis_lote.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({acao:'atribuir',me:EU&&EU.bitrix_id,obra:RL.obra,servico_ids:ids,responsavel:nome,tornar_padrao:tornarPadrao?1:0})})).json();
-    if(r.error){ toast(r.error); return; }
-    toast((r.n||0)+' item(ns) atualizado(s)'+(r.padrao?(' · '+r.padrao+' viraram padrão'):''));
-    RL.itens.forEach(i=>{ if(RL.sel.has(i.ordem)){ i.responsavel=nome; if(tornarPadrao) i.padrao=nome; } }); if(pchk) pchk.checked=false; RL.sel=new Set();
-    if(typeof MAT!=='undefined') MAT=null;                                   // matriz reflete mudança
-    if(typeof OBRA_SEL!=='undefined' && OBRA_SEL.includes(RL.obra)) load();  // refresca o card de cobertura do Radar
+    let n=0, padr=0;
+    for(const ob of Object.keys(porObra)){
+      const r=await (await fetch('actions/responsaveis_lote.php',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({acao:'atribuir',me:EU&&EU.bitrix_id,obra:Number(ob),servico_ids:porObra[ob],responsavel:nome,tornar_padrao:tornarPadrao?1:0})})).json();
+      if(r.error){ toast(r.error); return; } n+=(r.n||0); padr+=(r.padrao||0);
+    }
+    toast(n+' item(ns) atualizado(s)'+(padr?(' · '+padr+' viraram padrão'):''));
+    RL.itens.forEach(i=>{ if(RL.sel.has(rlKey(i))){ i.responsavel=nome; if(tornarPadrao) i.padrao=nome; } }); if(pchk) pchk.checked=false; RL.sel=new Set();
+    if(typeof MAT!=='undefined') MAT=null; if(typeof load==='function') load();
     rlRender();
   }catch(e){ toast('Falha: '+e.message); }
 }
 async function rlPreencherPadrao(){
   const alvo=RL.itens.filter(i=>!i.responsavel && i.padrao).length;
-  if(!alvo){ toast('Nenhum item vazio COM padrão definido nesta obra'); return; }
-  if(!confirm('Preencher '+alvo+' item(ns) sem responsável com o padrão do serviço, nesta obra?')) return;
-  try{
-    const r=await (await fetch('actions/responsaveis_lote.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({acao:'preencher_padrao',me:EU&&EU.bitrix_id,obra:RL.obra})})).json();
-    if(r.error){ toast(r.error); return; }
-    toast((r.n||0)+' item(ns) preenchido(s) com o padrão');
-    if(typeof MAT!=='undefined') MAT=null;
-    if(typeof OBRA_SEL!=='undefined' && OBRA_SEL.includes(RL.obra)) load();
-    await rlLoad();
+  if(!alvo){ toast('Nenhum item vazio COM padrão nas obras selecionadas'); return; }
+  if(!confirm('Preencher '+alvo+' item(ns) sem responsável com o padrão do serviço, nas '+RL.obras.length+' obra(s) selecionada(s)?')) return;
+  try{ let n=0;
+    for(const ob of RL.obras){
+      const r=await (await fetch('actions/responsaveis_lote.php',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({acao:'preencher_padrao',me:EU&&EU.bitrix_id,obra:ob})})).json();
+      if(!r.error) n+=(r.n||0);
+    }
+    toast(n+' item(ns) preenchido(s) com o padrão');
+    if(typeof MAT!=='undefined') MAT=null; if(typeof load==='function') load(); await rlLoad();
   }catch(e){ toast('Falha: '+e.message); }
 }
 function rcMetodoSel(){ const el=document.getElementById('rcmetodo'); return (el&&el.value)||'concreto armado convencional'; }

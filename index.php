@@ -658,7 +658,8 @@ function matExpBlock(i){
   const qt=i.quantitativo!=null?`${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}`:'—';
   const vb=verbaDefinida(i)?BRL(verbaDef(i)):'<span style="color:var(--pend)">a definir</span>';
   const rs=i.responsavel?esc(i.responsavel):'<span style="color:var(--pend)">sem resp.</span>';
-  return `<div class="mexpb"><div><b>Qtd</b>${qt}</div><div><b>Verba</b>${vb}</div><div><b>Resp</b>${rs}</div><div><b>Status</b>${esc(i.status||'Não Iniciado')}</div></div>`;
+  const forn=(i.fornecedor&&(''+i.fornecedor).trim())?`<div><b>Fornec.</b>${esc(i.fornecedor)}</div>`:'';   // só quando houver
+  return `<div class="mexpb"><div><b>Qtd</b>${qt}</div><div><b>Verba</b>${vb}</div><div><b>Resp</b>${rs}</div><div><b>Status</b>${esc(i.status||'Não Iniciado')}</div>${forn}</div>`;
 }
 function matGrpToggle(g){ if(MAT_COLLAPSED.has(g))MAT_COLLAPSED.delete(g); else MAT_COLLAPSED.add(g); renderMatriz(); }
 function matSvcToggle(ordem){ ordem=Number(ordem); if(MAT_EXP.has(ordem))MAT_EXP.delete(ordem); else MAT_EXP.add(ordem); renderMatriz(); }

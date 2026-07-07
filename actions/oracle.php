@@ -9,6 +9,8 @@
  */
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/supabase.php';
+require_once __DIR__ . '/../includes/cronograma.php';
 
 define('ORACLE_CFG_FILE', __DIR__ . '/../data/.oracle.json');
 function oracle_cfg() { $j = @json_decode(@file_get_contents(ORACLE_CFG_FILE), true); return is_array($j) ? $j : []; }
@@ -38,32 +40,56 @@ function o_verba($r) { // verba "definitiva" do item (override > material+mo > e
     return o_num($r['verba_estim']);
 }
 
-// Monta o CONTEXTO (dados do cockpit) que a IA vai enxergar — filtra/destaca pelo usuário logado.
+// Monta o CONTEXTO que a IA enxerga. Datas de cotação calculadas do cronograma vivo — MESMA lógica da matriz.php
+// (crono_resolver → data necessária; FIM = data − lead; INÍCIO = fim − 30d). A coluna crua fim_cotacao é obsoleta.
+// ATRASADO = (FIM já passou e o item não está Finalizado) OU (INÍCIO já passou e a cotação nem foi disparada — "Não Iniciado").
 function oracle_contexto($pdo, $perms) {
     $nome = trim((string)($perms['nome'] ?? ''));
-    $obras = []; foreach ($pdo->query("SELECT id, nome FROM obra ORDER BY id")->fetchAll() as $o) $obras[(int)$o['id']] = $o['nome'];
-    $rows = $pdo->query("SELECT r.obra_id, r.status, r.responsavel, r.fornecedor, r.inicio_cotacao, r.fim_cotacao,
-                r.verba_override, r.verba_material, r.verba_mo, r.verba_estim,
-                r.quantitativo_valor, r.quantitativo_unidade, s.nome AS item, s.grupo, s.curva
-              FROM radar_item r JOIN servico s ON s.id = r.servico_id")->fetchAll();
-    $hoje = date('Y-m-d'); $lim = date('Y-m-d', strtotime('+90 days'));
-    $meus = []; $prazos = []; $porObra = []; $porStatus = []; $porResp = []; $verbaAberta = 0.0;
-    foreach ($rows as $r) {
-        $on = $obras[(int)$r['obra_id']] ?? ('obra ' . $r['obra_id']);
-        $v = o_verba($r); $st = $r['status'] ?: 'Não Iniciado'; $resp = trim((string)$r['responsavel']);
-        $fim = $r['fim_cotacao'] ?: '';
-        $porObra[$on] = ($porObra[$on] ?? 0) + 1;
-        $porStatus[$st] = ($porStatus[$st] ?? 0) + 1;
-        if ($resp !== '') $porResp[$resp] = ($porResp[$resp] ?? 0) + 1;
-        if ($st !== 'Finalizado' && $v !== null) $verbaAberta += (float)$v;
-        $rec = ['item'=>$r['item'], 'obra'=>$on, 'grupo'=>$r['grupo'], 'curva'=>$r['curva'], 'status'=>$st,
-                'responsavel'=>$resp ?: null, 'fornecedor'=>$r['fornecedor'] ?: null,
-                'verba'=>$v !== null ? round($v) : null,
-                'inicio_cotacao'=>$r['inicio_cotacao'] ?: null, 'fim_cotacao'=>$fim ?: null];
-        if ($nome !== '' && strcasecmp($resp, $nome) === 0) $meus[] = $rec;
-        if ($fim && $fim >= $hoje && $fim <= $lim && $st !== 'Finalizado') $prazos[] = $rec;
+    $obras = $pdo->query("SELECT id, nome, cronograma_id FROM obra ORDER BY id")->fetchAll();
+    $obrasNome = []; foreach ($obras as $o) $obrasNome[(int)$o['id']] = $o['nome'];
+    $hoje = date('Y-m-d'); $fim_mes = date('Y-m-t');
+    $meus=[]; $atrasadas=[]; $fecharMes=[]; $porObra=[]; $porStatus=[]; $porResp=[]; $atrResp=[]; $verbaAberta=0.0; $ok=false;
+    $q = $pdo->prepare("SELECT s.nome, s.grupo, s.curva, s.lead_dias, s.termos_cronograma,
+                r.status, r.responsavel, r.fornecedor, r.verba_estim, r.verba_override, r.verba_material, r.verba_mo,
+                r.lead_override, r.data_necessaria_override
+              FROM servico s JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = ?
+              ORDER BY s.grupo_ordem, s.ordem");
+    foreach ($obras as $o) {
+        $onome = $o['nome'];
+        $tasks = [];
+        if (!empty($o['cronograma_id'])) { try { $tasks = crono_tasks($o['cronograma_id']); if ($tasks) $ok = true; } catch (Throwable $e) {} }
+        $q->execute([(int)$o['id']]);
+        foreach ($q->fetchAll() as $r) {
+            // MESMA conta da matriz.php: data necessária (override ou cronograma) − lead = FIM; − 30d = INÍCIO
+            $auto = $tasks ? crono_resolver($r, $tasks) : ['data_necessaria'=>null];
+            $lead = ($r['lead_override'] !== null && $r['lead_override'] !== '') ? (int)$r['lead_override'] : 60;
+            $data_nec = $r['data_necessaria_override'] ?: ($auto['data_necessaria'] ?? null);
+            $fim = $data_nec ? date('Y-m-d', strtotime($data_nec . ' -' . $lead . ' days')) : '';
+            $ini = $fim ? date('Y-m-d', strtotime($fim . ' -30 days')) : '';
+            $v = o_verba($r);
+            $st = (($r['status'] ?? '') !== '') ? $r['status'] : 'Não Iniciado';
+            $resp = trim((string)$r['responsavel']);
+            $porObra[$onome] = ($porObra[$onome] ?? 0) + 1;
+            $porStatus[$st] = ($porStatus[$st] ?? 0) + 1;
+            if ($resp !== '') $porResp[$resp] = ($porResp[$resp] ?? 0) + 1;
+            if ($st !== 'Finalizado' && $v) $verbaAberta += (float)$v;
+            $fimAtras = ($fim !== '' && $fim < $hoje && $st !== 'Finalizado');
+            $iniAtras = ($ini !== '' && $ini < $hoje && ($st === 'Não Iniciado' || $st === ''));
+            $atras = $fimAtras || $iniAtras;
+            $motivo = $fimAtras ? ('o FIM da cotação venceu em ' . $fim . ' e o item não está Finalizado')
+                    : ($iniAtras ? ('passou o INÍCIO da cotação em ' . $ini . ' e a cotação ainda não foi disparada (status "' . $st . '")') : null);
+            $rec = ['item'=>$r['nome'], 'obra'=>$onome, 'grupo'=>($r['grupo'] ?? null) ?: null, 'curva'=>($r['curva'] ?? null) ?: null,
+                    'status'=>$st, 'responsavel'=>$resp ?: null, 'fornecedor'=>($r['fornecedor'] ?? null) ?: null,
+                    'verba'=>$v !== null ? round($v) : null, 'data_em_obra'=>$data_nec ?: null,
+                    'inicio_cotacao'=>$ini ?: null, 'fim_cotacao'=>$fim ?: null,
+                    'atrasado'=>$atras, 'motivo_atraso'=>$motivo];
+            if ($nome !== '' && strcasecmp($resp, $nome) === 0) $meus[] = $rec;
+            if ($atras) { $atrasadas[] = $rec; if ($resp !== '') $atrResp[$resp] = ($atrResp[$resp] ?? 0) + 1; }
+            if ($fim !== '' && $fim <= $fim_mes && $st !== 'Finalizado') $fecharMes[] = $rec;
+        }
     }
-    usort($prazos, function($a, $b) { return strcmp((string)$a['fim_cotacao'], (string)$b['fim_cotacao']); });
+    usort($atrasadas, function($a,$b){ return strcmp((string)$a['fim_cotacao'], (string)$b['fim_cotacao']); });
+    usort($fecharMes, function($a,$b){ return strcmp((string)$a['fim_cotacao'], (string)$b['fim_cotacao']); });
     $cots = $pdo->query("SELECT c.id, c.titulo, c.categoria, c.tipo_servico, c.status, c.verba, c.created_at, o.nome AS obra,
                 (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id) AS propostas,
                 (SELECT COUNT(*) FROM cotacao_fornecedor cf WHERE cf.cotacao_id=c.id) AS convidados,
@@ -78,12 +104,15 @@ function oracle_contexto($pdo, $perms) {
     return [
         'usuario_logado' => $nome ?: '(desconhecido)',
         'is_admin' => !empty($perms['perm_admin']),
-        'hoje' => $hoje,
+        'hoje' => $hoje, 'fim_do_mes' => $fim_mes,
         'obras' => array_values($obras),
+        'fonte_das_datas' => $ok ? 'cronograma ao vivo (via matriz)' : 'INDISPONÍVEL — não consegui ler o cronograma agora',
         'resumo' => ['itens_por_obra'=>$porObra, 'itens_por_status'=>$porStatus, 'itens_por_responsavel'=>$porResp,
-                     'verba_total_em_aberto'=>round($verbaAberta)],
+                     'total_atrasadas'=>count($atrasadas), 'atrasadas_por_responsavel'=>$atrResp,
+                     'itens_a_fechar_este_mes'=>count($fecharMes), 'verba_total_em_aberto'=>round($verbaAberta)],
         'minhas_aquisicoes' => array_slice($meus, 0, 60),
-        'prazos_de_cotacao_proximos_90d' => array_slice($prazos, 0, 50),
+        'aquisicoes_atrasadas' => array_slice($atrasadas, 0, 80),
+        'a_fechar_este_mes' => array_slice($fecharMes, 0, 80),
         'cotacoes' => $cotacoes,
     ];
 }
@@ -113,6 +142,17 @@ No MODAL do item (clique no item do Radar ou numa célula da Matriz) as abas sã
 CURADORIA (importante): cada dado pode estar CURADO (✓ verde = confirmado manualmente por uma pessoa) ou SUGERIDO PELO AUTO-VÍNCULO (🤖 = a receita preencheu automaticamente e AINDA precisa ser conferido e salvo). Aparece nos selos ao lado da VERBA, do QUANTITATIVO e da DATA (na Matriz há legenda). Se algo estiver 🤖, oriente a pessoa a abrir o item e confirmar. (Pergunta "como confiro a verba?" → responda: abra o item, veja o selo ✓/🤖 ao lado da verba; na aba Orçamento vê a origem; clicando no 🤖 abre pra confirmar.)
 
 VERBA: o valor "definitivo" do item é a verba curada (override) ou a soma material+MO ou a estimativa. "Verba a definir / R\$ 0" = ainda não definida (sinalize isso).
+
+=== ATRASOS E PRAZOS (o CORAÇÃO do radar — o principal problema a evitar) ===
+Cada item do radar tem INÍCIO e FIM da cotação (datas calculadas do cronograma). Um item está ATRASADO quando:
+1) o FIM da cotação já passou (fim_cotacao < hoje) E o item NÃO está "Finalizado"; OU
+2) o INÍCIO da cotação já passou E a cotação nem foi disparada (status ainda "Não Iniciado").
+No JSON, cada item já vem com "atrasado" (true/false) e "motivo_atraso" — CONFIE nesses campos (não recalcule datas na mão). Use as listas prontas:
+• "aquisicoes_atrasadas" = TODOS os itens atrasados (ordenados do mais antigo). Para "o que está atrasado com o Fulano", filtre por responsavel = Fulano.
+• "a_fechar_este_mes" = itens cujo FIM da cotação cai até o fim deste mês e não estão Finalizados (inclui os já vencidos). É o que a pessoa "precisa fechar este mês" — são ITENS DO RADAR, não só as cotações do Mapa de Cotações.
+• "minhas_aquisicoes" = os itens do usuário logado (cada um com "atrasado"). "resumo.total_atrasadas" e "resumo.atrasadas_por_responsavel" dão os números.
+Quando perguntarem "o que tenho que fechar este mês / o que está atrasado", responda pelos ITENS DO RADAR (aquisicoes_atrasadas / a_fechar_este_mes), destacando os ATRASADOS primeiro e o motivo de cada um. O objetivo do time é ZERO atrasos.
+Se "fonte_das_datas" for INDISPONÍVEL, avise que não conseguiu ler o cronograma agora e peça pra tentar de novo.
 
 === COMO RESPONDER ===
 - Use SOMENTE os dados do JSON do cockpit fornecido abaixo. Se a info não estiver lá, diga que não tem esse dado no seu contexto e ORIENTE onde a pessoa acha no sistema (menu/aba).

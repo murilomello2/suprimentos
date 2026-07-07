@@ -3939,7 +3939,7 @@ async function fornExcluir(id){ if(!confirm('Excluir este fornecedor?'))return;
 
 /* ===== Configuração / Permissões (Bloco 2) ===== */
 let CFG={usuarios:[],obras:[]}, NUSER=null;
-const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Mapa de Cotações'],['oportunidades','Oportunidades'],['updates','Atualizações'],['config','Configurações']];
+const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Mapa de Cotações'],['oportunidades','Oportunidades'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações']];
 const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',comprador:'Suprimentos',coordenador:'Coordenador',personalizado:'Personalizado'};
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},
@@ -3979,12 +3979,19 @@ function updateWhoami(){
     <div class="wsrc${ok?'':' bad'}">${ok?'identificado via Bitrix':'fallback — não identificado'}</div>`;
 }
 function applyMenus(){
-  const allow = (EU&&EU.autorizado)?(EU.menus||[]):[];
+  const auth = !!(EU&&EU.autorizado);
+  const allow = auth?(EU.menus||[]):[];
+  // Admin com uma SELEÇÃO de menus definida → respeita a seleção dele (pode esconder itens de si mesmo p/ "pintar a tela").
+  // Config e Radar IA ficam sempre visíveis p/ admin (evita se trancar / oráculo é leitura).
+  const adminSel = IS_ADMIN && Array.isArray(EU&&EU.menus);
   document.querySelectorAll('.nav a[data-menu]').forEach(a=>{
     const m=a.getAttribute('data-menu');
-    // Configurações também abre p/ quem tem só a permissão de responsáveis em lote (verá apenas essa aba).
-    // Radar IA (oráculo) é liberado p/ todo usuário autorizado (leitura; a chave fica no servidor).
-    a.style.display=(IS_ADMIN||m==='oraculo'||allow.includes(m)||(m==='config'&&CAN_RESP))?'':'none';
+    let show;
+    if(m==='oraculo') show = auth;                                         // Radar IA p/ todo autorizado
+    else if(m==='config') show = IS_ADMIN||allow.includes('config')||CAN_RESP;  // Config nunca some p/ admin
+    else if(adminSel) show = allow.includes(m);                            // admin escolheu → mostra só o marcado
+    else show = IS_ADMIN||allow.includes(m);
+    a.style.display = show?'':'none';
   });
   const bn=document.getElementById('btnNovo'); if(bn) bn.style.display=CAN_EDIT?'':'none'; // só quem edita cria item
 }

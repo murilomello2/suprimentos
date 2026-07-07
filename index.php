@@ -1,5 +1,5 @@
 <?php /* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php. (republicado) */ ?>
-<?php /* build: cotacoes-mapa-v1-2026-07-06 */ ?>
+<?php /* build: cotacoes-fornecedores-2026-07-06 */ ?>
 <!doctype html>
 <html lang="pt-br">
 <head>
@@ -431,6 +431,10 @@
     <div class="top">
       <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">request_quote</span> Mapa de Cotações</h1>
       <p class="sub">Monte a concorrência: itens a cotar → propostas dos fornecedores → mapa comparativo (melhor preço por item).</p>
+    </div>
+    <div class="dtabs" id="cottabs" style="margin-bottom:12px">
+      <button class="dtab on" id="ctab-cotacoes" onclick="cotTab('cotacoes')"><span class="material-icons">request_quote</span> Cotações</button>
+      <button class="dtab" id="ctab-fornecedores" onclick="cotTab('fornecedores')"><span class="material-icons">groups</span> Fornecedores</button>
     </div>
     <div id="cotwrap"><div class="dempty">Carregando…</div></div>
    </section>
@@ -3145,8 +3149,10 @@ function renderDashOpp(D){
 }
 
 /* ===================== MAPA DE COTAÇÕES ===================== */
-let COT={mode:'list', list:[], obra:'', cur:null, novoItens:[], prop:null};
-function cotInit(){ cotLoad(); }
+let COT={mode:'list', tab:'cotacoes', list:[], obra:'', cur:null, novoItens:[], prop:null};
+function cotInit(){ cotTab(COT.tab||'cotacoes'); }
+function cotTab(t){ COT.tab=t; ['cotacoes','fornecedores'].forEach(x=>{const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x===t);});
+  if(t==='fornecedores') fornLoad(); else cotLoad(); }
 function cotStChip(s){ const m={aberta:['#8a9299','Aberta'],aguardando:['var(--dourado)','Aguardando'],finalizada:['var(--ok)','Finalizada']}; const x=m[s]||['#8a9299',s]; return `<span class="dchip" style="background:${x[0]}">${x[1]}</span>`; }
 function cotObraOpts(sel){ return '<option value="">— obra —</option>'+((typeof OBRAS!=='undefined'&&OBRAS)||[]).map(o=>`<option value="${o.id}" ${String(sel)===String(o.id)?'selected':''}>${esc(o.nome)}</option>`).join(''); }
 async function cotLoad(){
@@ -3266,14 +3272,20 @@ function cotProposta(pid){
   COT.prop={id:pid||0, precos:{}};
   (d.itens||[]).forEach(it=>{ const pi=ex?(ex.itens||{})[it.id]:null; COT.prop.precos[it.id]={preco_unit:pi&&pi.preco_unit!=null?pi.preco_unit:'',preco_total:pi&&pi.preco_total!=null?pi.preco_total:''}; });
   COT.prop.fornecedor_nome=ex?ex.fornecedor_nome:''; COT.prop.prazo=ex?ex.prazo:''; COT.prop.observacoes=ex?ex.observacoes:'';
-  COT.mode='proposta'; cotRenderProposta();
+  COT.mode='proposta'; cotRenderProposta(); cotFornDatalist(((COT.cur||{}).cotacao||{}).categoria);
+}
+async function cotFornDatalist(categoria){
+  try{ const q=categoria?('?categoria='+encodeURIComponent(categoria)+'&limit=400'):'?limit=400';
+    const d=await (await fetch('actions/fornecedores.php'+q)).json();
+    const dl=document.getElementById('prFForn'); if(dl) dl.innerHTML=(d.fornecedores||[]).map(f=>`<option value="${esc(f.nome)}">${esc(f.categoria||'')}</option>`).join('');
+  }catch(e){}
 }
 function cotRenderProposta(){
   const d=COT.cur,c=d.cotacao,itens=d.itens||[],pr=COT.prop;
   document.getElementById('cotwrap').innerHTML=`<div class="panel">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="cotRenderDetalhe()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar ao mapa</button><b style="font-size:15px">${pr.id?'Editar':'Cadastrar'} proposta · ${esc(c.titulo)}</b></div>
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
-      ${cotFld('Fornecedor *','<input id="prF" value="'+esc(pr.fornecedor_nome||'')+'" placeholder="Nome do fornecedor">')}
+      ${cotFld('Fornecedor *','<input id="prF" list="prFForn" autocomplete="off" value="'+esc(pr.fornecedor_nome||'')+'" placeholder="Fornecedor (sugestões por categoria)"><datalist id="prFForn"></datalist>')}
       ${cotFld('Prazo de entrega','<input id="prP" value="'+esc(pr.prazo||'')+'" placeholder="Ex.: 15 dias">')}
     </div>
     ${cotFld('Observações','<textarea id="prO" rows="2">'+esc(pr.observacoes||'')+'</textarea>','margin-top:8px')}
@@ -3301,6 +3313,59 @@ async function cotFinalizar(){ const c=COT.cur.cotacao, novo=c.status==='finaliz
   try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'status',me:EU&&EU.bitrix_id,cotacao_id:c.id,status:novo})}); cotOpen(c.id); }catch(e){toast('Falha');} }
 async function cotExcluirProposta(pid){ if(!confirm('Excluir esta proposta?'))return;
   try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir_proposta',me:EU&&EU.bitrix_id,proposta_id:pid})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
+
+/* ---------- Fornecedores (sub-aba do Mapa de Cotações) ---------- */
+let FORN={list:[],cats:[],tipos:[],total:0,f:{nome:'',categoria:'',tipo:'',itens:''},edit:null};
+async function fornLoad(){
+  const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Carregando fornecedores…</div>';
+  const q=new URLSearchParams(); Object.entries(FORN.f).forEach(([k,v])=>{ if(v) q.set(k,v); }); q.set('limit','80');
+  try{ const d=await (await fetch('actions/fornecedores.php?'+q.toString())).json();
+    FORN.list=d.fornecedores||[]; FORN.cats=d.categorias||[]; FORN.tipos=d.tipos||[]; FORN.total=d.total||0; fornRender();
+  }catch(e){ w.innerHTML='<div class="dempty">Falha: '+esc(e.message)+'</div>'; }
+}
+let _fornT; function fornDeb(){ clearTimeout(_fornT); _fornT=setTimeout(fornLoad,350); }
+function fornCatOpts(sel){ return '<option value="">Todas as categorias</option>'+FORN.cats.map(c=>`<option ${c.nome===sel?'selected':''}>${esc(c.nome)}</option>`).join(''); }
+function fornRender(){
+  if(FORN.edit) return fornRenderEdit();
+  const w=document.getElementById('cotwrap');
+  let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
+    <div class="search" style="min-width:150px"><span class="material-icons" style="color:var(--muted)">search</span><input placeholder="Buscar nome…" value="${esc(FORN.f.nome)}" oninput="FORN.f.nome=this.value;fornDeb()"></div>
+    <select onchange="FORN.f.categoria=this.value;fornLoad()">${fornCatOpts(FORN.f.categoria)}</select>
+    <select onchange="FORN.f.tipo=this.value;fornLoad()"><option value="">Todos os tipos</option>${FORN.tipos.map(t=>`<option ${t===FORN.f.tipo?'selected':''}>${esc(t)}</option>`).join('')}</select>
+    <input placeholder="Filtrar por itens…" value="${esc(FORN.f.itens)}" oninput="FORN.f.itens=this.value;fornDeb()" style="min-width:130px">
+    <span class="muted" style="font-size:12px">${FORN.total} fornecedor(es)</span>
+    ${CAN_EDIT?'<button class="btn-prim" style="margin-left:auto;padding:7px 12px" onclick="fornNovo()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Novo</button>':''}
+  </div></div><div class="wrap"><table><thead><tr><th>Nome</th><th>Categoria</th><th>Cidade</th><th>Contato</th><th>Telefone</th><th>Itens</th><th>Tipo</th><th></th></tr></thead><tbody>`;
+  for(const f of FORN.list){
+    html+=`<tr><td><b>${esc(f.nome)}</b>${f.email?`<div class="muted" style="font-size:11px">${esc(f.email)}</div>`:''}</td><td class="muted">${esc(f.categoria||'')}</td><td class="muted">${esc(f.cidade||'')}</td><td>${esc(f.contato||'')}</td><td>${esc(f.telefone||'')}</td><td class="muted" style="font-size:11px">${esc((f.itens||'').slice(0,42))}</td><td>${esc(f.tipo||'')}</td>
+      <td>${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 8px" onclick="fornNovo(${f.id})"><span class="material-icons" style="font-size:15px">edit</span></button>`:''}</td></tr>`;
+  }
+  if(!FORN.list.length) html+='<tr><td colspan="8" class="empty">Nenhum fornecedor. Importe do sistema antigo (Excel) ou cadastre um novo.</td></tr>';
+  w.innerHTML=html+'</tbody></table></div>';
+}
+function fornNovo(id){ FORN.edit = id ? Object.assign({}, (FORN.list.find(f=>f.id===id)||{id})) : {}; fornRender(); }
+function fornRenderEdit(){
+  const f=FORN.edit, w=document.getElementById('cotwrap');
+  const F=(label,key,ph)=>cotFld(label,`<input id="fe_${key}" value="${esc(f[key]||'')}" placeholder="${ph||''}">`);
+  w.innerHTML=`<div class="panel"><div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="FORN.edit=null;fornRender()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button><b style="font-size:15px">${f.id?'Editar':'Novo'} fornecedor</b></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+      ${F('Nome *','nome','Razão social / nome')}
+      ${cotFld('Categoria',`<input id="fe_categoria" list="feCats" value="${esc(f.categoria||'')}" placeholder="Categoria"><datalist id="feCats">${FORN.cats.map(c=>`<option value="${esc(c.nome)}">`).join('')}</datalist>`)}
+      ${cotFld('Tipo',`<select id="fe_tipo">${['','Fabricante','M.O.','Atacadista','Varejista','Locadora','Distribuidor','Prestador'].map(t=>`<option ${t===(f.tipo||'')?'selected':''}>${t}</option>`).join('')}</select>`)}
+      ${F('Cidade','cidade')} ${F('Contato','contato')} ${F('Telefone','telefone')} ${F('WhatsApp','whatsapp')} ${F('E-mail','email')} ${F('CNPJ','cnpj')}
+    </div>
+    ${cotFld('Itens que fornece','<input id="fe_itens" value="'+esc(f.itens||'')+'" placeholder="Ex.: forro, gesso, revestimentos">','margin-top:8px')}
+    <div style="margin-top:14px;display:flex;gap:8px"><button class="btn-prim" onclick="fornSalvar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar</button>${f.id?`<button class="btn-ghost" style="color:var(--pend)" onclick="fornExcluir(${f.id})">Excluir</button>`:''}</div></div>`;
+}
+async function fornSalvar(){
+  const g=id=>val('fe_'+id); const nome=g('nome').trim(); if(!nome){toast('Nome obrigatório');return;}
+  const body={acao:'fornecedor_salvar',me:EU&&EU.bitrix_id,id:FORN.edit.id||undefined,nome,categoria:g('categoria'),cidade:g('cidade'),contato:g('contato'),telefone:g('telefone'),whatsapp:g('whatsapp'),email:g('email'),cnpj:g('cnpj'),itens:g('itens'),tipo:g('tipo')};
+  try{ const r=await (await fetch('actions/fornecedores.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.error){toast(r.error);return;} toast('Fornecedor salvo'); FORN.edit=null; fornLoad();
+  }catch(e){toast('Falha: '+e.message);}
+}
+async function fornExcluir(id){ if(!confirm('Excluir este fornecedor?'))return;
+  try{ await fetch('actions/fornecedores.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'fornecedor_excluir',me:EU&&EU.bitrix_id,id})}); FORN.edit=null; fornLoad(); }catch(e){toast('Falha');} }
 
 /* ===== Configuração / Permissões (Bloco 2) ===== */
 let CFG={usuarios:[],obras:[]}, NUSER=null;

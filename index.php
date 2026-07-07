@@ -195,13 +195,18 @@
   .c-andamento{background:#0d9488}
   .c-empty{background:#fff;cursor:default} .c-empty:hover{outline:none} .cell-x{color:#d3d9d6;font-size:12px;font-weight:700}
   #mobra{min-width:170px;height:auto}
-  .mtable{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-  .mtable th{background:#fafbfb;padding:9px 10px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line);text-align:center;white-space:nowrap}
-  .mtable th.svc-h{text-align:left;min-width:240px;position:sticky;left:0;background:#fafbfb;z-index:2}
+  #mwrap{max-height:calc(100vh - 220px);overflow:auto;border:1px solid var(--line);border-radius:12px}
+  .mtable{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:0;border-radius:0;table-layout:fixed}
+  .mtable th{background:#fafbfb;padding:9px 8px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:sticky;top:0;z-index:3}
+  .mtable th:not(.svc-h),.mtable td:not(.svc-c){width:118px}   /* TODAS as colunas de obra do MESMO tamanho */
+  .mtable th.svc-h{text-align:left;width:250px;position:sticky;left:0;top:0;background:#fafbfb;z-index:5}
   .mtable td{border-bottom:1px solid #f1f3f2;padding:0}
-  .mtable td.svc-c{padding:8px 10px;font-size:13px;position:sticky;left:0;background:#fff;border-right:1px solid var(--line)}
+  .mtable td.svc-c{padding:8px 10px;font-size:13px;position:sticky;left:0;background:#fff;border-right:1px solid var(--line);z-index:1}
   .mtable tr:hover td.svc-c{background:#f7fbf8}
   .mtable .grp-h td{background:#eef4f0;font-weight:800;color:var(--verde-d);font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;padding:7px 10px;position:sticky;left:0}
+  .mo-th{cursor:grab} .mo-th.mo-drag{outline:2px dashed var(--dourado);outline-offset:-2px;background:#fff7e6}
+  .mexp-c{padding:6px 8px;vertical-align:top;background:#f7faf8;border-left:1px solid #eef1ef}
+  .mexpb{font-size:10px;line-height:1.55;color:var(--txt)} .mexpb b{color:var(--muted);font-weight:600;font-size:8.5px;letter-spacing:.2px;display:block;text-transform:uppercase} .mexpb div{margin-bottom:3px}
   .cell{width:100%;height:34px;cursor:pointer;display:flex;align-items:center;justify-content:center;border-left:1px solid #f1f3f2}
   .cell:hover{outline:2px solid var(--verde);outline-offset:-2px}
   .cell .material-icons{font-size:15px;color:#fff;opacity:.9}
@@ -366,6 +371,7 @@
           <input id="mq" placeholder="Filtrar serviço…" oninput="renderMatriz()"></div>
       </div>
     </div>
+    <div id="mctrl" style="margin:0 26px 8px"></div>
     <div class="wrap" id="mwrap"></div>
    </section>
 
@@ -637,6 +643,31 @@ function obraUpdateUI(){
 
 /* ===== Matriz: dropdown de obras (próprio, independente do Radar) — null = todas ===== */
 let MAT_SEL=(()=>{ try{ const v=JSON.parse(localStorage.getItem('sup_mat_obras')||'null'); return Array.isArray(v)?v:null; }catch(e){ return null; } })();
+// matriz: grupos recolhidos, serviços expandidos (detalhe), ordem custom das colunas de obra, item arrastado
+let MAT_COLLAPSED=new Set(), MAT_EXP=new Set(), _matDrag=null, MAT_OBRAS_CUR=[], MAT_SVCS_CUR=[];
+let MAT_OBRA_ORDER=(()=>{ try{ const v=JSON.parse(localStorage.getItem('sup_matobra_ord')||'null'); return Array.isArray(v)?v:null; }catch(e){ return null; } })();
+// arg seguro p/ string em atributo HTML de evento (aspas simples no JS + &quot; no atributo)
+function jsArg(s){ return "'"+String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/\n/g,' ')+"'"; }
+// bloco de detalhe (quantitativo/verba/responsável/status) mostrado quando o serviço é expandido na matriz
+function matExpBlock(i){
+  const qt=i.quantitativo!=null?`${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}`:'—';
+  const vb=verbaDefinida(i)?BRL(verbaDef(i)):'<span style="color:var(--pend)">a definir</span>';
+  const rs=i.responsavel?esc(i.responsavel):'<span style="color:var(--pend)">sem resp.</span>';
+  return `<div class="mexpb"><div><b>Qtd</b>${qt}</div><div><b>Verba</b>${vb}</div><div><b>Resp</b>${rs}</div><div><b>Status</b>${esc(i.status||'Não Iniciado')}</div></div>`;
+}
+function matGrpToggle(g){ if(MAT_COLLAPSED.has(g))MAT_COLLAPSED.delete(g); else MAT_COLLAPSED.add(g); renderMatriz(); }
+function matSvcToggle(ordem){ ordem=Number(ordem); if(MAT_EXP.has(ordem))MAT_EXP.delete(ordem); else MAT_EXP.add(ordem); renderMatriz(); }
+function matExpandAll(on){ if(on)(MAT_SVCS_CUR||[]).forEach(s=>MAT_EXP.add(s.ordem)); else MAT_EXP.clear(); renderMatriz(); }
+function matGrpAll(on){ if(on) MAT_COLLAPSED.clear(); else [...new Set((MAT_SVCS_CUR||[]).map(s=>s.grupo))].forEach(g=>MAT_COLLAPSED.add(g)); renderMatriz(); }
+function matDragStart(e,i){ _matDrag=(MAT_OBRAS_CUR||[])[i]; try{ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', _matDrag||''); }catch(_){} }
+function matDrop(e,i){ e.preventDefault(); const cur=MAT_OBRAS_CUR||[], target=cur[i];
+  if(!_matDrag||!target||_matDrag===target){ _matDrag=null; renderMatriz(); return; }
+  let order=(MAT_OBRA_ORDER&&MAT_OBRA_ORDER.length)?MAT_OBRA_ORDER.slice():cur.slice();
+  cur.forEach(o=>{ if(!order.includes(o)) order.push(o); });      // inclui obras novas ainda sem posição
+  order=order.filter(o=>o!==_matDrag); order.splice(order.indexOf(target),0,_matDrag);
+  MAT_OBRA_ORDER=order; _matDrag=null; try{ localStorage.setItem('sup_matobra_ord',JSON.stringify(order)); }catch(_){}
+  renderMatriz();
+}
 function matObraMeta(){ const seen=new Map(); (MAT||[]).forEach(i=>{ if(i.obra_nome && !seen.has(i.obra_nome)) seen.set(i.obra_nome,i.obra_id); }); return [...seen].map(([nome,id])=>({nome,id})); }
 function matObraToggle(e){ if(e) e.stopPropagation(); const m=document.getElementById('matObraMenu'); if(!m)return;
   const abrir=m.style.display==='none'||!m.style.display; m.style.display=abrir?'block':'none'; if(abrir) matObraRender(); }
@@ -1109,7 +1140,9 @@ function renderMatriz(){
   if(!MAT){ loadMatriz(); return; }        // fonte própria da matriz (todas as obras) ainda não carregada
   const src=MAT, gv=id=>{const e=document.getElementById(id);return e?e.value:'';};
   const allObras=[...new Set(src.map(i=>i.obra_nome).filter(Boolean))];
-  const obras=(MAT_SEL&&MAT_SEL.length)?allObras.filter(o=>MAT_SEL.includes(o)):allObras;
+  let obras=(MAT_SEL&&MAT_SEL.length)?allObras.filter(o=>MAT_SEL.includes(o)):allObras;
+  if(MAT_OBRA_ORDER){ obras=obras.slice().sort((a,b)=>{ const ia=MAT_OBRA_ORDER.indexOf(a), ib=MAT_OBRA_ORDER.indexOf(b); return (ia<0?999:ia)-(ib<0?999:ib); }); }
+  MAT_OBRAS_CUR=obras;   // p/ os handlers de arrastar mapearem índice→nome de obra
   const fg=gv('mgrupo'), fc=gv('mcurva'), fst=gv('mstatus'), fr=gv('mresp');
   const onlyAlert=(document.getElementById('malert')||{}).checked;
   const colorBy=gv('mcolor')||'status', orderBy=gv('morder')||'grupo';
@@ -1137,29 +1170,46 @@ function renderMatriz(){
   let agrupado=true;
   if(orderBy==='prazo'){ servicos.sort((a,b)=>earliest(a).localeCompare(earliest(b))); agrupado=false; }
   else if(orderBy==='nome'){ servicos.sort((a,b)=>a.nome.localeCompare(b.nome,'pt')); agrupado=false; }
+  MAT_SVCS_CUR=servicos;   // p/ expandir/recolher todos
+  const mc=document.getElementById('mctrl');
+  if(mc) mc.innerHTML=(servicos.length&&obras.length)?`<div class="bar" style="gap:6px;flex-wrap:wrap;align-items:center;padding:0">
+    <button class="btn-ghost" style="padding:4px 10px" onclick="matExpandAll(true)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">unfold_more</span> Expandir serviços</button>
+    <button class="btn-ghost" style="padding:4px 10px" onclick="matExpandAll(false)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">unfold_less</span> Recolher serviços</button>
+    <button class="btn-ghost" style="padding:4px 10px" onclick="matGrpAll(false)">Recolher grupos</button>
+    <button class="btn-ghost" style="padding:4px 10px" onclick="matGrpAll(true)">Expandir grupos</button>
+    <span class="muted" style="font-size:11px">— arraste os nomes das obras p/ reordenar · clique no ▸ de um serviço p/ ver quantitativo / verba / responsável / status</span></div>`:'';
   if(!servicos.length||!obras.length){document.getElementById('mwrap').innerHTML='<div class="empty">Sem dados para os filtros.</div>';return;}
   let html='<table class="mtable"><thead><tr><th class="svc-h">Serviço</th>'+
-    obras.map(o=>`<th>${esc(o)}</th>`).join('')+'</tr></thead><tbody>';
-  let grupo=null;
+    obras.map((o,oi)=>`<th class="mo-th" draggable="true" ondragstart="matDragStart(event,${oi})" ondragover="event.preventDefault();this.classList.add('mo-drag')" ondragleave="this.classList.remove('mo-drag')" ondrop="matDrop(event,${oi})" title="arraste p/ reordenar">${esc(o)}</th>`).join('')+'</tr></thead><tbody>';
+  let grupo=null, grpCol=false;
   for(const s of servicos){
-    if(agrupado && s.grupo!==grupo){grupo=s.grupo;
-      html+=`<tr class="grp-h"><td colspan="${obras.length+1}">${esc(grupo)}</td></tr>`;}
-    html+=`<tr><td class="svc-c">${esc(s.nome)}<small>Curva ${esc(s.curva||'—')}</small></td>`;
+    if(agrupado && s.grupo!==grupo){ grupo=s.grupo; grpCol=MAT_COLLAPSED.has(grupo);
+      const n=servicos.filter(x=>x.grupo===grupo).length;
+      html+=`<tr class="grp-h"><td colspan="${obras.length+1}" onclick="matGrpToggle(${jsArg(grupo)})" style="cursor:pointer"><span class="material-icons" style="font-size:15px;vertical-align:-3px">${grpCol?'chevron_right':'expand_more'}</span> ${esc(grupo)} <span class="muted" style="font-weight:400;font-size:10px">(${n})</span></td></tr>`;
+    }
+    if(agrupado && grpCol) continue;   // grupo recolhido: pula os serviços
+    const isExp=MAT_EXP.has(s.ordem);
+    html+=`<tr><td class="svc-c"><span class="material-icons" onclick="event.stopPropagation();matSvcToggle(${s.ordem})" title="ver detalhes" style="font-size:15px;vertical-align:-3px;cursor:pointer;color:var(--muted)">${isExp?'expand_more':'chevron_right'}</span>${esc(s.nome)}<small>Curva ${esc(s.curva||'—')}</small></td>`;
     for(const o of obras){
       const i=idx[s.ordem+'|'+o];
-      // filtro por responsável: célula que NÃO é desse responsável fica transparente (a coluna da obra permanece)
       if(fr){ const off = fr==='__sem__' ? (!i||(i.responsavel||'').trim()!=='') : (!i||(i.responsavel||'')!==fr);
         if(off){ html+='<td><div class="cell cell-off"></div></td>'; continue; } }
-      // serviço NÃO existe (ou foi excluído) para esta obra → célula branca com ✕ (distinta do cinza "N/A")
       if(!i){ html+=`<td><div class="cell c-empty" title="${esc(o)} · ${esc(s.nome)}\nsem este serviço nesta obra"><span class="cell-x">✕</span></div></td>`; continue; }
       const cls=clsFn(i);
       const dt=i&&i.fim_cotacao?(p=>p[2]+'/'+p[1]+'/'+p[0].slice(2))(i.fim_cotacao.split('-')):'';
       const tip=i?`${esc(o)} · ${esc(s.nome)}\n${txtMap[cls]||''}`+(i.fim_cotacao?` · fim cotação ${D(i.fim_cotacao)}`:'')+(i.responsavel?`\n${esc(i.responsavel)}`:''):'N/A';
       const click=i?`onclick="openModal(${i.ordem},${i.obra_id||1})"`:'';
-      const inner=dt?`<span class="cell-dt">${dt}</span>`:'';   // data (fim da cotação) SEMPRE visível, suave
+      const inner=dt?`<span class="cell-dt">${dt}</span>`:'';
       html+=`<td><div class="cell ${cls}" title="${tip}" ${click}>${inner}</div></td>`;
     }
     html+='</tr>';
+    // linha de DETALHE (quantitativo/verba/responsável/status por obra) quando o serviço está expandido
+    if(isExp){
+      html+=`<tr class="mexp"><td class="svc-c" style="background:#f7faf8;font-size:10px;color:var(--muted)">detalhe</td>`;
+      for(const o of obras){ const i=idx[s.ordem+'|'+o];
+        html+=`<td class="mexp-c">${i?matExpBlock(i):'<span class="muted" style="font-size:10px">—</span>'}</td>`; }
+      html+='</tr>';
+    }
   }
   html+='</tbody></table>';
   document.getElementById('mwrap').innerHTML=html;

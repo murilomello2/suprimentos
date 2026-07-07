@@ -152,6 +152,13 @@ function db_schema_mysql($pdo) {
         id INT NOT NULL AUTO_INCREMENT, servico_id INT NOT NULL, descricao TEXT, unidade VARCHAR(40),
         ordem INT, nota TEXT, created_at VARCHAR(40), PRIMARY KEY (id), KEY idx_cotdic_sv (servico_id)
     ) $E");
+    // FORNECEDORES CONVIDADOS p/ a concorrência de uma cotação. Rastreia quem foi convidado e (via proposta)
+    // quem respondeu. status derivado: respondeu se houver proposta com o mesmo fornecedor.
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_fornecedor (
+        id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, fornecedor_id INT, fornecedor_nome VARCHAR(255),
+        categoria VARCHAR(191), contato VARCHAR(191), email VARCHAR(191), telefone VARCHAR(60),
+        created_at VARCHAR(40), PRIMARY KEY (id), KEY idx_cotf_cot (cotacao_id)
+    ) $E");
     // colunas ADITIVAS na produção (radar_item já existe da migração; CREATE IF NOT EXISTS não adiciona coluna).
     // Usa ALTER (privilégio concedido) só se faltar. Espelha o self-heal do caminho SQLite.
     $rc = [];
@@ -340,6 +347,7 @@ function db_schema($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta_item (id INTEGER PRIMARY KEY AUTOINCREMENT, proposta_id INTEGER NOT NULL, cotacao_item_id INTEGER NOT NULL, preco_unit REAL, preco_total REAL, observacao TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, proposta_id INTEGER, nome TEXT, arquivo TEXT, tamanho INTEGER, mime TEXT, criado_por TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cot_dicionario (id INTEGER PRIMARY KEY AUTOINCREMENT, servico_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, ordem INTEGER, nota TEXT, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_fornecedor (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, categoria TEXT, contato TEXT, email TEXT, telefone TEXT, created_at TEXT)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_coti_cot ON cotacao_item(cotacao_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_prop_cot ON cotacao_proposta(cotacao_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_propi_prop ON cotacao_proposta_item(proposta_id)");

@@ -21,6 +21,22 @@ function cot_can_edit($pdo, $me, $obra) {
     if (can_edit_obra($perms, max(1, (int)$obra))) return $perms;
     return null;
 }
+// insere fornecedores CONVIDADOS na concorrência (dedup por fornecedor_id/nome)
+function cot_insert_convidados($pdo, $cid, $lista) {
+    $ins = $pdo->prepare("INSERT INTO cotacao_fornecedor (cotacao_id, fornecedor_id, fornecedor_nome, categoria, contato, email, telefone, created_at) VALUES (?,?,?,?,?,?,?,?)");
+    $ex = $pdo->prepare("SELECT fornecedor_id, fornecedor_nome FROM cotacao_fornecedor WHERE cotacao_id=?"); $ex->execute([$cid]);
+    $seen = [];
+    foreach ($ex->fetchAll() as $r) { $seen['n:'.strtolower(trim((string)$r['fornecedor_nome']))] = 1; if ($r['fornecedor_id']) $seen['i:'.(int)$r['fornecedor_id']] = 1; }
+    $now = date('c'); $n = 0;
+    foreach ((array)$lista as $f) {
+        $nome = trim((string)($f['nome'] ?? $f['fornecedor_nome'] ?? '')); if ($nome === '') continue;
+        $fid = (int)($f['id'] ?? $f['fornecedor_id'] ?? 0) ?: null;
+        if (($fid && isset($seen['i:'.$fid])) || isset($seen['n:'.strtolower($nome)])) continue;
+        $ins->execute([$cid, $fid, $nome, trim((string)($f['categoria'] ?? '')), trim((string)($f['contato'] ?? '')), trim((string)($f['email'] ?? '')), trim((string)($f['telefone'] ?? '')), $now]);
+        $seen['n:'.strtolower($nome)] = 1; if ($fid) $seen['i:'.$fid] = 1; $n++;
+    }
+    return $n;
+}
 // mapa comparativo a partir das propostas: melhor (menor) preço por item + total ótimo + melhor fornecedor único
 function cot_mapa($itens, $propostas) {
     $melhor = [];        // item_id => ['proposta_id','fornecedor','preco_unit','preco_total']
@@ -67,7 +83,20 @@ function cot_get_full($pdo, $id) {
         unset($p);
     }
     $anx = $pdo->prepare("SELECT id, proposta_id, nome, tamanho FROM cotacao_anexo WHERE cotacao_id=? ORDER BY id"); $anx->execute([$id]);
-    return ['cotacao'=>$cot, 'itens'=>$itens, 'propostas'=>$propostas, 'anexos'=>$anx->fetchAll(), 'mapa'=>cot_mapa($itens, $propostas)];
+    // fornecedores CONVIDADOS (concorrência) + status respondeu (deriva de proposta com mesmo fornecedor)
+    $cf = $pdo->prepare("SELECT * FROM cotacao_fornecedor WHERE cotacao_id=? ORDER BY fornecedor_nome"); $cf->execute([$id]);
+    $convidados = $cf->fetchAll();
+    foreach ($convidados as &$c) {
+        $resp = null; $cn = strtolower(trim((string)$c['fornecedor_nome']));
+        foreach ($propostas as $p) {
+            if (($c['fornecedor_id'] && (int)$p['fornecedor_id'] === (int)$c['fornecedor_id'])
+                || ($cn !== '' && strtolower(trim((string)$p['fornecedor_nome'])) === $cn)) { $resp = $p; break; }
+        }
+        $c['respondeu'] = $resp ? 1 : 0; $c['proposta_id'] = $resp['id'] ?? null; $c['proposta_total'] = $resp['total'] ?? null;
+    }
+    unset($c);
+    return ['cotacao'=>$cot, 'itens'=>$itens, 'propostas'=>$propostas, 'anexos'=>$anx->fetchAll(),
+            'convidados'=>$convidados, 'mapa'=>cot_mapa($itens, $propostas)];
 }
 
 try {
@@ -125,8 +154,27 @@ try {
         foreach ($itens as $it) $insI->execute([$cid, trim((string)$it['descricao']), trim((string)($it['unidade'] ?? '')),
                         ($it['quantidade'] ?? null) !== null && $it['quantidade'] !== '' ? (float)$it['quantidade'] : null,
                         trim((string)($it['observacao'] ?? '')), $o++]);
+        cot_insert_convidados($pdo, $cid, $in['convidados'] ?? []);   // fornecedores convidados p/ a concorrência
         $pdo->commit();
         echo json_encode(['ok'=>true, 'id'=>$cid], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'convidar') {   // adiciona fornecedores convidados a uma cotação existente
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
+        $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
+        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+        $pdo->beginTransaction();
+        $n = cot_insert_convidados($pdo, $cid, $in['convidados'] ?? $in['fornecedores'] ?? []);
+        $pdo->commit();
+        echo json_encode(['ok'=>true, 'n'=>$n], JSON_UNESCAPED_UNICODE); exit;
+    }
+    if ($acao === 'desconvidar') {
+        $id = (int)($in['id'] ?? 0); if (!$id) throw new Exception('id obrigatório');
+        $row = $pdo->prepare("SELECT c.obra_id FROM cotacao_fornecedor cf JOIN cotacao c ON c.id=cf.cotacao_id WHERE cf.id=?"); $row->execute([$id]);
+        $obra = (int)($row->fetchColumn() ?: 1);
+        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão.']); exit; }
+        $pdo->prepare("DELETE FROM cotacao_fornecedor WHERE id=?")->execute([$id]);
+        echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'dicionario_salvar') {   // grava os itens-padrão a cotar do serviço (template global)
@@ -196,6 +244,8 @@ try {
         $pdo->exec("DELETE FROM cotacao_proposta_item WHERE proposta_id IN (SELECT id FROM cotacao_proposta WHERE cotacao_id=$cid)");
         $pdo->prepare("DELETE FROM cotacao_proposta WHERE cotacao_id=?")->execute([$cid]);
         $pdo->prepare("DELETE FROM cotacao_item WHERE cotacao_id=?")->execute([$cid]);
+        $pdo->prepare("DELETE FROM cotacao_fornecedor WHERE cotacao_id=?")->execute([$cid]);
+        $pdo->prepare("DELETE FROM cotacao_anexo WHERE cotacao_id=?")->execute([$cid]);
         $pdo->prepare("DELETE FROM cotacao WHERE id=?")->execute([$cid]);
         $pdo->commit();
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;

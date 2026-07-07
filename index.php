@@ -1,5 +1,5 @@
 <?php /* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php. (republicado) */ ?>
-<?php /* build: cotacoes-anexos-dicionario-2026-07-07 */ ?>
+<?php /* build: cotacoes-concorrencia-2026-07-07 */ ?>
 <!doctype html>
 <html lang="pt-br">
 <head>
@@ -3185,7 +3185,7 @@ function cotRender(){
   if(!COT.list.length) html+='<tr><td colspan="9" class="empty">Nenhuma cotação ainda. Crie a primeira.</td></tr>';
   w.innerHTML=html+'</tbody></table></div>';
 }
-function cotNovo(){ COT.mode='novo'; COT.novoServico=null; COT.novoPre=null; COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; cotRender(); }
+function cotNovo(){ COT.mode='novo'; COT.novoServico=null; COT.novoPre=null; COT.novoConvidados=[]; COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; cotRender(); }
 // iniciar cotação A PARTIR de um item do radar: puxa o dicionário de cotação do serviço (itens EDITÁVEIS) + pré-preenche
 async function cotIniciar(sid, obra, nome, grupo){
   ['radar','matriz','oportunidades','dashboards','cotacoes','config','audit','updates'].forEach(x=>{ const v=document.getElementById('view-'+x); if(v)v.style.display=x==='cotacoes'?'':'none'; const n=document.getElementById('nav-'+x); if(n)n.classList.toggle('active',x==='cotacoes'); });
@@ -3193,7 +3193,7 @@ async function cotIniciar(sid, obra, nome, grupo){
   COT.tab='cotacoes'; ['cotacoes','fornecedores'].forEach(x=>{ const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x==='cotacoes'); });
   let dic={itens:[]}; try{ dic=await (await fetch('actions/cotacoes.php?dicionario='+sid+'&_='+Date.now())).json(); }catch(e){}
   const svNome=nome||(dic.servico&&dic.servico.nome)||'';
-  COT.novoServico=sid; COT.novoServicoNome=svNome;
+  COT.novoServico=sid; COT.novoServicoNome=svNome; COT.novoConvidados=[];
   COT.novoPre={obra:obra?String(obra):'', titulo:svNome, categoria:grupo||(dic.servico&&dic.servico.grupo)||''};
   COT.novoItens=(dic.itens&&dic.itens.length)?dic.itens.map(i=>({descricao:i.descricao,unidade:i.unidade||'',quantidade:'',observacao:i.nota||''})):[{descricao:nome||'',unidade:'',quantidade:'',observacao:''}];
   COT.mode='novo'; cotRenderNovo();
@@ -3218,10 +3218,40 @@ function cotRenderNovo(){
       <button class="btn-ghost" style="padding:4px 10px" onclick="cotImportarTexto()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">content_paste</span> Importar via texto</button></span></div>
     <div id="cotItens" style="margin-top:8px"></div>
     <button class="btn-ghost" style="margin-top:6px" onclick="cotAddItem()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar item</button>
-    <div style="margin-top:14px"><button class="btn-prim" onclick="cotCriar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Criar cotação</button></div>
+    <div style="margin-top:16px"><b style="font-size:13px">Fornecedores convidados (concorrência)</b> <span class="muted" style="font-size:11px">— quem vai participar; depois você acompanha quem respondeu</span></div>
+    <div style="position:relative;margin-top:6px"><div class="search" style="min-width:240px;max-width:360px"><span class="material-icons" style="color:var(--muted)">search</span><input id="cotFornBusca" placeholder="Buscar fornecedor por nome…" oninput="cotFornBuscaInput()" autocomplete="off"></div>
+      <div id="cotFornSug" style="display:none;position:absolute;top:100%;left:0;z-index:60;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.14);max-height:260px;overflow:auto;margin-top:2px;min-width:340px"></div></div>
+    <div id="cotConvidados" style="margin-top:8px"></div>
+    <div style="margin-top:16px"><button class="btn-prim" onclick="cotCriar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Criar cotação</button></div>
   </div>`;
-  cotRenderItens();
+  cotRenderItens(); cotRenderConvidados();
 }
+let _cotFT;
+function cotFornBuscaInput(){
+  clearTimeout(_cotFT);
+  const q=(document.getElementById('cotFornBusca').value||'').trim(), box=document.getElementById('cotFornSug'); if(!box)return;
+  if(q.length<2){ box.style.display='none'; box.innerHTML=''; return; }
+  _cotFT=setTimeout(async()=>{
+    const cat=(document.getElementById('cotC')||{}).value||'';
+    try{ const d=await (await fetch('actions/fornecedores.php?nome='+encodeURIComponent(q)+(cat?('&categoria='+encodeURIComponent(cat)):'')+'&limit=12')).json();
+      COT.fornBusca=d.fornecedores||[];
+      box.innerHTML=COT.fornBusca.length?COT.fornBusca.map((f,i)=>`<div onclick="cotAddConvidado(${i})" style="padding:7px 10px;cursor:pointer;font-size:12.5px;border-bottom:1px solid #f1f3f2" onmouseover="this.style.background='#eff7f1'" onmouseout="this.style.background=''"><b>${esc(f.nome)}</b> <span class="muted" style="font-size:10.5px">· ${esc(f.categoria||'')}${f.cidade?' · '+esc(f.cidade):''}${f.tipo?' · '+esc(f.tipo):''}</span></div>`).join(''):'<div class="dmini" style="padding:8px">nenhum fornecedor — tente outra busca'+(cat?' (filtrando por '+esc(cat)+')':'')+'</div>';
+      box.style.display='block';
+    }catch(e){}
+  },300);
+}
+function cotAddConvidado(idx){
+  const f=(COT.fornBusca||[])[idx]; if(!f)return; COT.novoConvidados=COT.novoConvidados||[];
+  if(!COT.novoConvidados.some(c=>(c.id&&c.id===f.id)||c.nome===f.nome)) COT.novoConvidados.push({id:f.id,nome:f.nome,categoria:f.categoria,contato:f.contato,email:f.email,telefone:f.telefone});
+  const inp=document.getElementById('cotFornBusca'); if(inp)inp.value=''; const b=document.getElementById('cotFornSug'); if(b){b.style.display='none';b.innerHTML='';}
+  cotRenderConvidados();
+}
+function cotDelConvidado(idx){ COT.novoConvidados.splice(idx,1); cotRenderConvidados(); }
+function cotRenderConvidados(){
+  const box=document.getElementById('cotConvidados'); if(!box)return; const cv=COT.novoConvidados||[];
+  box.innerHTML=cv.length?('<div style="display:flex;flex-wrap:wrap;gap:6px">'+cv.map((c,i)=>`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-weight:600;display:inline-flex;align-items:center;gap:5px"><span class="material-icons" style="font-size:13px">business</span>${esc(c.nome)}<span onclick="cotDelConvidado(${i})" style="cursor:pointer;color:var(--pend)" title="tirar">×</span></span>`).join('')+`</div><div class="dmini" style="margin-top:4px">${cv.length} convidado(s)</div>`):'<div class="dmini">Nenhum convidado ainda — busque acima (dá pra adicionar depois também).</div>';
+}
+document.addEventListener('click',e=>{ if(!(e.target.closest&&e.target.closest('#cotFornBusca,#cotFornSug'))){ const b=document.getElementById('cotFornSug'); if(b) b.style.display='none'; } });
 async function cotSalvarDicionario(){
   if(!COT.novoServico){ toast('Sem serviço vinculado'); return; }
   const itens=COT.novoItens.filter(it=>(it.descricao||'').trim()).map(it=>({descricao:it.descricao,unidade:it.unidade,nota:it.observacao}));
@@ -3250,7 +3280,7 @@ function cotImportarTexto(){
 async function cotCriar(){
   const titulo=val('cotT').trim(); if(!titulo){toast('Dê um título à cotação');return;}
   const itens=COT.novoItens.filter(it=>(it.descricao||'').trim()); if(!itens.length){toast('Inclua ao menos um item');return;}
-  const body={acao:'criar',me:EU&&EU.bitrix_id,obra_id:Number(val('cotO'))||null,servico_id:COT.novoServico||null,titulo,categoria:val('cotC'),tipo_servico:val('cotTipo'),verba:Number(val('cotV'))||0,descricao:val('cotD'),itens};
+  const body={acao:'criar',me:EU&&EU.bitrix_id,obra_id:Number(val('cotO'))||null,servico_id:COT.novoServico||null,titulo,categoria:val('cotC'),tipo_servico:val('cotTipo'),verba:Number(val('cotV'))||0,descricao:val('cotD'),itens,convidados:COT.novoConvidados||[]};
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error);return;} toast('Cotação criada'); cotOpen(r.id);
   }catch(e){toast('Falha: '+e.message);}
@@ -3279,7 +3309,19 @@ function cotRenderDetalhe(){
       <div class="kpi"><div class="v" style="color:var(--ok)">${m.melhor_total?BRL(m.melhor_total):'—'}</div><div class="l">melhor compra (menor por item)</div></div>
       <div class="kpi"><div class="v">${c.verba?BRL(c.verba):'—'}</div><div class="l">verba prevista</div></div>
     </div></div>`;
-  if(!props.length){ html+='<div class="panel"><div class="empty">Nenhuma proposta ainda. Clique em "Cadastrar proposta" para montar o mapa comparativo.</div></div>'; }
+  // ---- Concorrência (fornecedores convidados) ----
+  const conv=d.convidados||[];
+  html+=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <b style="font-size:13px">Concorrência — fornecedores convidados</b>
+      <span class="dchip" style="background:${conv.length&&conv.every(x=>x.respondeu)?'var(--ok)':'var(--dourado)'}">${conv.filter(x=>x.respondeu).length} de ${conv.length} responderam</span></div>`;
+  if(conv.length) html+='<div style="margin-top:8px">'+conv.map(cf=>`<div class="drow"><span class="dgm" style="background:${cf.respondeu?'var(--ok)':'#cfd6da'}"></span><span style="flex:1">${esc(cf.fornecedor_nome)}${cf.categoria?` <span class="muted" style="font-size:11px">· ${esc(cf.categoria)}</span>`:''}</span>
+      <span class="dchip" style="background:${cf.respondeu?'var(--ok)':'#8a9299'}">${cf.respondeu?('respondeu · '+BRL(cf.proposta_total)):'aguardando'}</span>
+      ${CAN_EDIT&&!cf.respondeu?`<button class="btn-ghost" style="padding:2px 8px" onclick="cotPropostaDe(${JSON.stringify(cf.fornecedor_nome)})">Lançar proposta</button>`:''}
+      ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="cotDesconvidar(${cf.id})" title="tirar da concorrência">×</button>`:''}</div>`).join('')+'</div>';
+  else html+='<div class="dmini" style="margin-top:6px">Nenhum fornecedor convidado ainda — convide abaixo.</div>';
+  if(CAN_EDIT) html+=`<div style="position:relative;margin-top:8px"><div class="search" style="min-width:220px;max-width:340px"><span class="material-icons" style="color:var(--muted)">search</span><input id="cotConvBusca" placeholder="+ convidar fornecedor (por categoria)…" oninput="cotConvBuscaInput()" autocomplete="off"></div><div id="cotConvSug" style="display:none;position:absolute;top:100%;left:0;z-index:60;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.14);max-height:240px;overflow:auto;margin-top:2px;min-width:320px"></div></div>`;
+  html+='</div>';
+  if(!props.length){ html+='<div class="panel"><div class="empty">Nenhuma proposta ainda. Clique em "Cadastrar proposta" ou "Lançar proposta" de um convidado para montar o mapa.</div></div>'; }
   else{
     html+='<div class="panel" style="overflow-x:auto;padding:0"><table class="mtable" style="border:none"><thead><tr><th class="svc-h" style="text-align:left">Item</th>';
     props.forEach(p=>{ html+=`<th style="min-width:120px">${esc(p.fornecedor_nome)}${p.prazo?`<div class="muted" style="font-size:9.5px;font-weight:400">${esc(p.prazo)}</div>`:''}</th>`; });
@@ -3366,6 +3408,20 @@ async function cotUploadAnexo(propostaId, input){
 }
 async function cotDelAnexo(id){ if(!confirm('Excluir este anexo?'))return;
   try{ await fetch('actions/cotacao_anexo.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
+/* --- Concorrência: convidar / desconvidar / lançar proposta de um convidado --- */
+function cotPropostaDe(nome){ cotProposta(0); COT.prop.fornecedor_nome=nome; cotRenderProposta(); cotFornDatalist(((COT.cur||{}).cotacao||{}).categoria); }
+async function cotDesconvidar(id){ if(!confirm('Tirar este fornecedor da concorrência?'))return;
+  try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'desconvidar',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
+let _cotCB;
+function cotConvBuscaInput(){ clearTimeout(_cotCB); const q=(document.getElementById('cotConvBusca').value||'').trim(), box=document.getElementById('cotConvSug'); if(!box)return; if(q.length<2){box.style.display='none';box.innerHTML='';return;}
+  _cotCB=setTimeout(async()=>{ const cat=((COT.cur||{}).cotacao||{}).categoria||''; try{ const d=await (await fetch('actions/fornecedores.php?nome='+encodeURIComponent(q)+(cat?('&categoria='+encodeURIComponent(cat)):'')+'&limit=12')).json(); COT.convBusca=d.fornecedores||[];
+    box.innerHTML=COT.convBusca.length?COT.convBusca.map((f,i)=>`<div onclick="cotConvidar(${i})" style="padding:7px 10px;cursor:pointer;font-size:12.5px;border-bottom:1px solid #f1f3f2" onmouseover="this.style.background='#eff7f1'" onmouseout="this.style.background=''"><b>${esc(f.nome)}</b> <span class="muted" style="font-size:10.5px">· ${esc(f.categoria||'')}${f.cidade?' · '+esc(f.cidade):''}</span></div>`).join(''):'<div class="dmini" style="padding:8px">nenhum fornecedor</div>'; box.style.display='block';
+  }catch(e){} },300); }
+async function cotConvidar(idx){ const f=(COT.convBusca||[])[idx]; if(!f)return;
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'convidar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,convidados:[{id:f.id,nome:f.nome,categoria:f.categoria,contato:f.contato,email:f.email,telefone:f.telefone}]})})).json();
+    if(r.error){toast(r.error);return;} cotOpen(COT.cur.cotacao.id);
+  }catch(e){toast('Falha: '+e.message);} }
+document.addEventListener('click',e=>{ if(!(e.target.closest&&e.target.closest('#cotConvBusca,#cotConvSug'))){ const b=document.getElementById('cotConvSug'); if(b) b.style.display='none'; } });
 
 /* ---------- Fornecedores (sub-aba do Mapa de Cotações) ---------- */
 let FORN={list:[],cats:[],tipos:[],total:0,f:{nome:'',categoria:'',tipo:'',itens:''},edit:null};

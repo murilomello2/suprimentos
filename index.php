@@ -1051,8 +1051,8 @@ async function renderUpdates(){
     for(const h of hs){
       const [lbl,cls]=updCat(h.campo);
       const v=(h.valor_depois!=null&&String(h.valor_depois)!=='')?`: <b>${esc(String(h.valor_depois).slice(0,70))}</b>`:'';
-      const it=byOrdem(h.servico_id);
-      feed+=`<tr ${it?`onclick="openModal(${h.servico_id})" style="cursor:pointer"`:''}>
+      const it=byOrdem(h.servico_id, h.obra_id);   // obra EXPLÍCITA: senão o fallback MAT abriria a 1ª obra c/ essa ordem
+      feed+=`<tr ${it?`onclick="openModal(${h.servico_id},${h.obra_id||1})" style="cursor:pointer"`:''}>
         <td class="muted" style="white-space:nowrap;font-size:12px">${fmtDateTime(h.created_at)}</td>
         <td style="white-space:nowrap">${esc(h.usuario_nome||('#'+(h.bitrix_id||'')))}</td>
         <td><div class="svc">${esc(h.item_nome||'—')}</div><div class="svc-sub">${esc(h.grupo||'')}</div></td>
@@ -1351,7 +1351,7 @@ function rowHtml(i){
     <td class="date">${D(i.fim_cotacao)}${chipFim?'<br>'+chipFim:''}</td>
     <td>${statusSelect(i)}</td>
     <td>${cotCell(i)}</td>
-    <td onclick="event.stopPropagation()"><button class="eye" onclick="openModal(${i.ordem})"><span class="material-icons" style="font-size:17px;line-height:28px">visibility</span></button></td>
+    <td onclick="event.stopPropagation()"><button class="eye" onclick="openModal(${i.ordem},${i.obra_id||1})"><span class="material-icons" style="font-size:17px;line-height:28px">visibility</span></button></td>
   </tr>`;
 }
 // Coluna "Mapa": AUTOMÁTICA — reflete a existência REAL de um mapa de cotação vinculado ao item (servico_id).
@@ -3197,6 +3197,11 @@ function cotRender(){
   const w=document.getElementById('cotwrap');
   COT.filt=COT.filt||{q:'',categoria:'',status:''}; COT.sort=COT.sort||{col:'created_at',dir:-1};
   const all=COT.list||[];
+  const cats=[...new Set(all.map(c=>c.categoria).filter(Boolean))].sort();
+  const sts=[...new Set(all.map(c=>c.status).filter(Boolean))];
+  // filtro que não existe mais nesta obra → limpa (evita lista vazia enganosa com o dropdown mostrando "Todas")
+  if(COT.filt.categoria && !cats.includes(COT.filt.categoria)) COT.filt.categoria='';
+  if(COT.filt.status && !sts.includes(COT.filt.status)) COT.filt.status='';
   // filtros CLIENT-SIDE (a obra continua server-side no cotLoad)
   const qn=opNorm(COT.filt.q||'');
   let rows=all.filter(c=>
@@ -3208,12 +3213,10 @@ function cotRender(){
   const sval=c=>({titulo:(c.titulo||'').toLowerCase(),obra_nome:(c.obra_nome||'').toLowerCase(),categoria:(c.categoria||'').toLowerCase(),
       n_itens:+c.n_itens||0,n_propostas:+c.n_propostas||0,melhor_oferta:+c.melhor_oferta||0,status:(c.status||''),created_at:(c.created_at||''),id:+c.id||0}[sc]);
   rows=rows.slice().sort((a,b)=>{ const x=sval(a),y=sval(b); return (x<y?-1:x>y?1:0)*dir; });
-  const cats=[...new Set(all.map(c=>c.categoria).filter(Boolean))].sort();
-  const sts=[...new Set(all.map(c=>c.status).filter(Boolean))];
   const arw=col=>COT.sort.col===col?(COT.sort.dir>0?' ▲':' ▼'):'';
   const th=(lbl,col,extra)=>`<th ${extra||''} onclick="cotSort('${col}')" style="cursor:pointer;user-select:none;white-space:nowrap">${lbl}${arw(col)}</th>`;
   let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
-     <div class="search" style="min-width:170px"><span class="material-icons" style="color:var(--muted)">search</span><input placeholder="Buscar cotação…" value="${esc(COT.filt.q)}" oninput="COT.filt.q=this.value;cotRender()"></div>
+     <div class="search" style="min-width:170px"><span class="material-icons" style="color:var(--muted)">search</span><input id="cotListBusca" placeholder="Buscar cotação…" value="${esc(COT.filt.q)}" oninput="COT.filt.q=this.value;cotRender()"></div>
      <label class="muted" style="font-size:12px">Obra <select onchange="COT.obra=this.value;cotLoad()" style="margin-left:4px">${cotObraOpts(COT.obra)}</select></label>
      <select onchange="COT.filt.categoria=this.value;cotRender()" style="font-size:12px;padding:6px"><option value="">Todas categorias</option>${cats.map(c=>`<option ${c===COT.filt.categoria?'selected':''}>${esc(c)}</option>`).join('')}</select>
      <select onchange="COT.filt.status=this.value;cotRender()" style="font-size:12px;padding:6px"><option value="">Todos status</option>${sts.map(s=>`<option value="${esc(s)}" ${s===COT.filt.status?'selected':''}>${esc(cotStLabel(s))}</option>`).join('')}</select>
@@ -3226,7 +3229,10 @@ function cotRender(){
       <td><span class="material-icons" style="color:var(--muted)">chevron_right</span></td></tr>`;
   }
   if(!rows.length) html+=`<tr><td colspan="10" class="empty">${all.length?'Nenhuma cotação casa os filtros.':'Nenhuma cotação ainda. Crie a primeira.'}</td></tr>`;
+  // preserva foco/caret da busca — o innerHTML recria o input a cada tecla e mataria o foco
+  const _foc=document.activeElement, _wasBusca=_foc&&_foc.id==='cotListBusca', _car=_wasBusca?_foc.selectionStart:null;
   w.innerHTML=html+'</tbody></table></div>';
+  if(_wasBusca){ const ni=document.getElementById('cotListBusca'); if(ni){ ni.focus(); try{ ni.setSelectionRange(_car,_car); }catch(e){} } }
 }
 function cotNovo(){ COT.mode='novo'; COT.novoServico=null; COT.novoPre=null; COT.novoConvidados=[]; COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; cotRender(); }
 // iniciar cotação A PARTIR de um item do radar: puxa o dicionário de cotação do serviço (itens EDITÁVEIS) + pré-preenche

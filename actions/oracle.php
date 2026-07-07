@@ -48,7 +48,7 @@ function oracle_contexto($pdo, $perms) {
     $obras = $pdo->query("SELECT id, nome, cronograma_id FROM obra ORDER BY id")->fetchAll();
     $obrasNome = []; foreach ($obras as $o) $obrasNome[(int)$o['id']] = $o['nome'];
     $hoje = date('Y-m-d'); $fim_mes = date('Y-m-t');
-    $meus=[]; $atrasadas=[]; $fecharMes=[]; $porObra=[]; $porStatus=[]; $porResp=[]; $atrResp=[]; $verbaAberta=0.0; $ok=false;
+    $meus=[]; $atrasadas=[]; $fecharMes=[]; $catalogo=[]; $porObra=[]; $porStatus=[]; $porResp=[]; $atrResp=[]; $verbaAberta=0.0; $ok=false;
     $q = $pdo->prepare("SELECT s.nome, s.grupo, s.curva, s.lead_dias, s.termos_cronograma,
                 r.status, r.responsavel, r.fornecedor, r.verba_estim, r.verba_override, r.verba_material, r.verba_mo,
                 r.lead_override, r.data_necessaria_override
@@ -83,6 +83,11 @@ function oracle_contexto($pdo, $perms) {
                     'verba'=>$v !== null ? round($v) : null, 'data_em_obra'=>$data_nec ?: null,
                     'inicio_cotacao'=>$ini ?: null, 'fim_cotacao'=>$fim ?: null,
                     'atrasado'=>$atras, 'motivo_atraso'=>$motivo];
+            // CATÁLOGO COMPLETO (compacto) — TODOS os itens de TODAS as obras, inclusive finalizados/sem responsável.
+            // É a fonte de verdade para consultas factuais ("qual fornecedor/status/responsável/verba de X na obra Y").
+            $catalogo[] = ['item'=>$r['nome'], 'obra'=>$onome, 'curva'=>($r['curva'] ?? null) ?: null, 'status'=>$st,
+                           'responsavel'=>$resp ?: null, 'fornecedor'=>($r['fornecedor'] ?? null) ?: null,
+                           'verba'=>$v !== null ? round($v) : null, 'atrasado'=>$atras];
             if ($nome !== '' && strcasecmp($resp, $nome) === 0) $meus[] = $rec;
             if ($atras) { $atrasadas[] = $rec; if ($resp !== '') $atrResp[$resp] = ($atrResp[$resp] ?? 0) + 1; }
             if ($fim !== '' && $fim <= $fim_mes && $st !== 'Finalizado') $fecharMes[] = $rec;
@@ -110,6 +115,8 @@ function oracle_contexto($pdo, $perms) {
         'resumo' => ['itens_por_obra'=>$porObra, 'itens_por_status'=>$porStatus, 'itens_por_responsavel'=>$porResp,
                      'total_atrasadas'=>count($atrasadas), 'atrasadas_por_responsavel'=>$atrResp,
                      'itens_a_fechar_este_mes'=>count($fecharMes), 'verba_total_em_aberto'=>round($verbaAberta)],
+        'catalogo' => array_slice($catalogo, 0, 2000),
+        'catalogo_truncado' => count($catalogo) > 2000,
         'minhas_aquisicoes' => array_slice($meus, 0, 60),
         'aquisicoes_atrasadas' => array_slice($atrasadas, 0, 80),
         'a_fechar_este_mes' => array_slice($fecharMes, 0, 80),
@@ -154,11 +161,14 @@ No JSON, cada item já vem com "atrasado" (true/false) e "motivo_atraso" — CON
 Quando perguntarem "o que tenho que fechar este mês / o que está atrasado", responda pelos ITENS DO RADAR (aquisicoes_atrasadas / a_fechar_este_mes), destacando os ATRASADOS primeiro e o motivo de cada um. O objetivo do time é ZERO atrasos.
 Se "fonte_das_datas" for INDISPONÍVEL, avise que não conseguiu ler o cronograma agora e peça pra tentar de novo.
 
+=== CONSULTAS FACTUAIS (qual fornecedor/status/responsável/verba de um item) ===
+Para responder sobre QUALQUER item específico — ex.: "qual fornecedor fechamos para Sondagem na Trinity?", "qual o status de X?", "quem é o responsável por Y?", "quanto de verba tem Z?" — consulte SEMPRE a lista "catalogo". Ela traz TODOS os itens do radar de TODAS as obras (inclusive os FINALIZADOS e os sem responsável), cada um com: item, obra, curva, status, responsavel, fornecedor, verba, atrasado. Ache a linha pelo nome do item + obra e responda direto (ex.: fornecedor). Só diga "não tenho esse dado" se realmente não houver a linha no "catalogo". As listas minhas_aquisicoes/aquisicoes_atrasadas/a_fechar_este_mes são recortes de agenda; o "catalogo" é a fonte de verdade completa.
+
 === COMO RESPONDER ===
-- Use SOMENTE os dados do JSON do cockpit fornecido abaixo. Se a info não estiver lá, diga que não tem esse dado no seu contexto e ORIENTE onde a pessoa acha no sistema (menu/aba).
+- Use SOMENTE os dados do JSON do cockpit fornecido abaixo. Se a info não estiver lá (nem no "catalogo"), diga que não tem esse dado no seu contexto e ORIENTE onde a pessoa acha no sistema (menu/aba).
 - NUNCA invente números, datas, fornecedores ou valores.
 - Português do Brasil, claro e ACIONÁVEL. Markdown (títulos, listas, negrito, tabelas quando ajudar). Valores em R\$ (formato brasileiro), datas dd/mm/aaaa.
-- "Minha programação/minhas cotações" → use minhas_aquisicoes e prazos_de_cotacao_proximos_90d (o usuário logado está em usuario_logado).
+- "Minha programação/minhas cotações" → use minhas_aquisicoes e a_fechar_este_mes (o usuário logado está em usuario_logado).
 - Destaque o URGENTE (prazos vencendo, cotações sem proposta, verbas 🤖 não conferidas) e as OPORTUNIDADES.
 - Quando fizer sentido, diga ONDE no sistema a pessoa vê/edita aquilo (ex.: "confira no modal do item → aba Cronograma"), pra ela agir.
 - Termine, quando útil, com 1-3 próximos passos sugeridos.
@@ -168,6 +178,9 @@ function oracle_persona($cfg) {
     $p = trim((string)($cfg['prompt'] ?? ''));
     return $p !== '' ? $p : oracle_default_prompt();
 }
+
+// Permite carregar só as funções (testes/CLI) sem executar o endpoint.
+if (defined('ORACLE_LIB_ONLY')) return;
 
 try {
     $pdo = db();

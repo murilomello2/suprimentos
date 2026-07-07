@@ -1,5 +1,5 @@
 <?php /* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php. (republicado) */ ?>
-<?php /* build: responsaveis-multiobra-cards-2026-07-06 */ ?>
+<?php /* build: cotacoes-anexos-dicionario-2026-07-07 */ ?>
 <!doctype html>
 <html lang="pt-br">
 <head>
@@ -2756,9 +2756,10 @@ function resumoTab(i){
       </div>
       ${ro}
       <div class="fld"><label>Observações</label><textarea disabled>${esc(i.observacoes||'')}</textarea></div>
-      <div style="margin-top:4px">
+      <div style="margin-top:4px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         ${CAN_EDIT?`<button class="btn-prim" onclick="EDITR=true;drawModal()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">edit</span> Editar</button>`
                   :`<span class="muted" style="font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">lock</span> Você tem acesso somente leitura.</span>`}
+        ${CAN_EDIT?`<button class="btn-ghost" onclick="cotIniciar(${i.ordem},${i.obra_id||1})" title="Abre uma cotação já com os itens do dicionário deste serviço (editáveis)"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--dourado)">request_quote</span> Iniciar cotação</button>`:''}
       </div>
       ${IS_ADMIN?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;gap:8px">
         <button class="btn-ghost" onclick="desdobrarItem()"><span class="material-icons" style="font-size:15px">call_split</span> Desdobrar em Material + MO</button>
@@ -3184,25 +3185,51 @@ function cotRender(){
   if(!COT.list.length) html+='<tr><td colspan="9" class="empty">Nenhuma cotação ainda. Crie a primeira.</td></tr>';
   w.innerHTML=html+'</tbody></table></div>';
 }
-function cotNovo(){ COT.mode='novo'; COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; cotRender(); }
+function cotNovo(){ COT.mode='novo'; COT.novoServico=null; COT.novoPre=null; COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; cotRender(); }
+// iniciar cotação A PARTIR de um item do radar: puxa o dicionário de cotação do serviço (itens EDITÁVEIS) + pré-preenche
+async function cotIniciar(sid, obra, nome, grupo){
+  ['radar','matriz','oportunidades','dashboards','cotacoes','config','audit','updates'].forEach(x=>{ const v=document.getElementById('view-'+x); if(v)v.style.display=x==='cotacoes'?'':'none'; const n=document.getElementById('nav-'+x); if(n)n.classList.toggle('active',x==='cotacoes'); });
+  if(typeof closeModal==='function'){ try{ closeModal(); }catch(e){} }
+  COT.tab='cotacoes'; ['cotacoes','fornecedores'].forEach(x=>{ const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x==='cotacoes'); });
+  let dic={itens:[]}; try{ dic=await (await fetch('actions/cotacoes.php?dicionario='+sid+'&_='+Date.now())).json(); }catch(e){}
+  const svNome=nome||(dic.servico&&dic.servico.nome)||'';
+  COT.novoServico=sid; COT.novoServicoNome=svNome;
+  COT.novoPre={obra:obra?String(obra):'', titulo:svNome, categoria:grupo||(dic.servico&&dic.servico.grupo)||''};
+  COT.novoItens=(dic.itens&&dic.itens.length)?dic.itens.map(i=>({descricao:i.descricao,unidade:i.unidade||'',quantidade:'',observacao:i.nota||''})):[{descricao:nome||'',unidade:'',quantidade:'',observacao:''}];
+  COT.mode='novo'; cotRenderNovo();
+  toast((dic.itens&&dic.itens.length)?(dic.itens.length+' item(ns) do dicionário — edite como precisar'):'Sem dicionário p/ este serviço ainda — monte os itens e salve como padrão');
+}
 function cotRenderNovo(){
+  const pre=COT.novoPre||{}, vinc=COT.novoServico;
   document.getElementById('cotwrap').innerHTML=`<div class="panel">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="cotLoad()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button><b style="font-size:15px">Nova cotação</b></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="cotLoad()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button><b style="font-size:15px">Nova cotação</b>
+      ${vinc?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d)"><span class="material-icons" style="font-size:12px;vertical-align:-2px">link</span> vinculada ao radar: ${esc(COT.novoServicoNome||'')}</span>`:''}</div>
+    ${vinc?`<div class="dmini" style="margin:-6px 0 10px">Itens puxados do dicionário de cotação do serviço — <b>edite à vontade</b> (a puxada automática é só um ponto de partida).</div>`:''}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
-      ${cotFld('Título *','<input id="cotT" placeholder="Ex.: MO Forro de Gesso">')}
-      ${cotFld('Obra','<select id="cotO">'+cotObraOpts('')+'</select>')}
-      ${cotFld('Categoria','<input id="cotC" placeholder="Ex.: M.O. Gesso">')}
+      ${cotFld('Título *','<input id="cotT" value="'+esc(pre.titulo||'')+'" placeholder="Ex.: MO Forro de Gesso">')}
+      ${cotFld('Obra','<select id="cotO">'+cotObraOpts(pre.obra||'')+'</select>')}
+      ${cotFld('Categoria','<input id="cotC" value="'+esc(pre.categoria||'')+'" placeholder="Ex.: M.O. Gesso">')}
       ${cotFld('Tipo','<select id="cotTipo"><option>Material</option><option>M.O.</option><option>Material + MO</option><option>Locação</option><option>Serviço</option></select>')}
       ${cotFld('Verba (R$)','<input id="cotV" type="number" placeholder="0">')}
     </div>
     ${cotFld('Descrição','<textarea id="cotD" rows="2" placeholder="Escopo / informações gerais da cotação"></textarea>','margin-top:8px')}
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px"><b style="font-size:13px">Itens a cotar *</b>
-      <button class="btn-ghost" style="padding:4px 10px" onclick="cotImportarTexto()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">content_paste</span> Importar via texto</button></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:6px"><b style="font-size:13px">Itens a cotar *</b>
+      <span style="display:flex;gap:6px">${vinc?`<button class="btn-ghost" style="padding:4px 10px" onclick="cotSalvarDicionario()" title="Grava estes itens como padrão do serviço — as próximas cotações deste serviço já vêm com eles"><span class="material-icons" style="font-size:15px;vertical-align:-3px">menu_book</span> Salvar como padrão do serviço</button>`:''}
+      <button class="btn-ghost" style="padding:4px 10px" onclick="cotImportarTexto()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">content_paste</span> Importar via texto</button></span></div>
     <div id="cotItens" style="margin-top:8px"></div>
     <button class="btn-ghost" style="margin-top:6px" onclick="cotAddItem()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar item</button>
     <div style="margin-top:14px"><button class="btn-prim" onclick="cotCriar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Criar cotação</button></div>
   </div>`;
   cotRenderItens();
+}
+async function cotSalvarDicionario(){
+  if(!COT.novoServico){ toast('Sem serviço vinculado'); return; }
+  const itens=COT.novoItens.filter(it=>(it.descricao||'').trim()).map(it=>({descricao:it.descricao,unidade:it.unidade,nota:it.observacao}));
+  if(!itens.length){ toast('Nenhum item para salvar'); return; }
+  if(!confirm('Salvar estes '+itens.length+' itens como padrão do serviço "'+(COT.novoServicoNome||'')+'"?\n\nAs próximas cotações iniciadas deste serviço já virão com eles.')) return;
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'dicionario_salvar',me:EU&&EU.bitrix_id,servico_id:COT.novoServico,itens})})).json();
+    if(r.error){ toast(r.error); return; } toast(r.n+' itens salvos no dicionário do serviço');
+  }catch(e){ toast('Falha: '+e.message); }
 }
 function cotFld(label,inner,extra){ return `<div style="${extra||''}"><div class="muted" style="font-size:11px;margin-bottom:2px">${label}</div>${inner}</div>`; }
 function cotRenderItens(){
@@ -3223,7 +3250,7 @@ function cotImportarTexto(){
 async function cotCriar(){
   const titulo=val('cotT').trim(); if(!titulo){toast('Dê um título à cotação');return;}
   const itens=COT.novoItens.filter(it=>(it.descricao||'').trim()); if(!itens.length){toast('Inclua ao menos um item');return;}
-  const body={acao:'criar',me:EU&&EU.bitrix_id,obra_id:Number(val('cotO'))||null,titulo,categoria:val('cotC'),tipo_servico:val('cotTipo'),verba:Number(val('cotV'))||0,descricao:val('cotD'),itens};
+  const body={acao:'criar',me:EU&&EU.bitrix_id,obra_id:Number(val('cotO'))||null,servico_id:COT.novoServico||null,titulo,categoria:val('cotC'),tipo_servico:val('cotTipo'),verba:Number(val('cotV'))||0,descricao:val('cotD'),itens};
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error);return;} toast('Cotação criada'); cotOpen(r.id);
   }catch(e){toast('Falha: '+e.message);}
@@ -3266,9 +3293,17 @@ function cotRenderDetalhe(){
     html+='<tr style="background:#f7faf8"><td class="svc-c" style="text-align:left;font-weight:800">TOTAL</td>';
     props.forEach(p=>{ const isBS=m.fornecedor_destaque===p.fornecedor_nome; html+=`<td style="text-align:center;font-weight:800;${isBS?'color:var(--verde-d)':''}">${p.total!=null?BRL(p.total):'—'}</td>`; });
     html+=`<td style="text-align:center;font-weight:800;background:#eafaf0;color:var(--verde-d)">${m.melhor_total?BRL(m.melhor_total):'—'}</td></tr></tbody></table></div>`;
-    html+='<div class="panel" style="margin-top:10px"><b style="font-size:13px">Propostas</b><div style="margin-top:8px">';
-    props.forEach(p=>{ html+=`<div class="drow"><span class="dgm" style="background:${m.fornecedor_destaque===p.fornecedor_nome?'var(--ok)':'#8a9299'}"></span><span style="flex:1">${esc(p.fornecedor_nome)}${p.prazo?` <span class="muted">· ${esc(p.prazo)}</span>`:''}</span><b style="min-width:90px;text-align:right">${p.total!=null?BRL(p.total):'—'}</b>
-       ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 8px" onclick="cotProposta(${p.id})">Editar</button><button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="cotExcluirProposta(${p.id})">Excluir</button>`:''}</div>`; });
+    const anexos=d.anexos||[], meB=(EU&&EU.bitrix_id)||'';
+    html+='<div class="panel" style="margin-top:10px"><b style="font-size:13px">Propostas & anexos (PDF)</b><div style="margin-top:8px">';
+    props.forEach(p=>{ const ax=anexos.filter(a=>a.proposta_id===p.id);
+      html+=`<div style="border-bottom:1px solid #f1f3f2;padding:7px 0">
+        <div class="drow" style="padding:0"><span class="dgm" style="background:${m.fornecedor_destaque===p.fornecedor_nome?'var(--ok)':'#8a9299'}"></span><span style="flex:1"><b>${esc(p.fornecedor_nome)}</b>${p.prazo?` <span class="muted">· ${esc(p.prazo)}</span>`:''}</span><b style="min-width:90px;text-align:right">${p.total!=null?BRL(p.total):'—'}</b>
+          ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 8px" onclick="cotProposta(${p.id})">Editar</button><button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="cotExcluirProposta(${p.id})">Excluir</button>`:''}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:5px 0 0 18px">
+          ${ax.map(a=>`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-weight:600;display:inline-flex;align-items:center;gap:4px"><span class="material-icons" style="font-size:13px">picture_as_pdf</span><a href="actions/cotacao_anexo.php?download=${a.id}&me=${encodeURIComponent(meB)}" target="_blank" rel="noopener" style="color:var(--verde-d);text-decoration:none">${esc(a.nome)}</a>${CAN_EDIT?` <span onclick="cotDelAnexo(${a.id})" style="cursor:pointer;color:var(--pend)" title="excluir anexo">×</span>`:''}</span>`).join('')||'<span class="dmini">sem anexo</span>'}
+          ${CAN_EDIT?`<label class="btn-ghost" style="padding:2px 9px;font-size:11px;cursor:pointer"><span class="material-icons" style="font-size:13px;vertical-align:-2px">attach_file</span> anexar PDF<input type="file" accept="application/pdf" style="display:none" onchange="cotUploadAnexo(${p.id},this)"></label>`:''}
+        </div></div>`; });
+    if(!props.length) html+='<div class="dmini">—</div>';
     html+='</div></div>';
   }
   w.innerHTML=html;
@@ -3319,6 +3354,18 @@ async function cotFinalizar(){ const c=COT.cur.cotacao, novo=c.status==='finaliz
   try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'status',me:EU&&EU.bitrix_id,cotacao_id:c.id,status:novo})}); cotOpen(c.id); }catch(e){toast('Falha');} }
 async function cotExcluirProposta(pid){ if(!confirm('Excluir esta proposta?'))return;
   try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir_proposta',me:EU&&EU.bitrix_id,proposta_id:pid})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
+async function cotUploadAnexo(propostaId, input){
+  const file=input.files&&input.files[0]; if(!file){ return; }
+  if(file.type!=='application/pdf' && !/\.pdf$/i.test(file.name)){ toast('Somente PDF'); input.value=''; return; }
+  if(file.size>25*1024*1024){ toast('Máximo 25 MB'); input.value=''; return; }
+  const fd=new FormData(); fd.append('arquivo',file); fd.append('cotacao_id',COT.cur.cotacao.id); if(propostaId)fd.append('proposta_id',propostaId); fd.append('me',(EU&&EU.bitrix_id)||'');
+  toast('Enviando anexo…');
+  try{ const r=await (await fetch('actions/cotacao_anexo.php',{method:'POST',body:fd})).json();
+    if(r.error){ toast(r.error); input.value=''; return; } toast('Anexo salvo'); cotOpen(COT.cur.cotacao.id);
+  }catch(e){ toast('Falha: '+e.message); input.value=''; }
+}
+async function cotDelAnexo(id){ if(!confirm('Excluir este anexo?'))return;
+  try{ await fetch('actions/cotacao_anexo.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
 
 /* ---------- Fornecedores (sub-aba do Mapa de Cotações) ---------- */
 let FORN={list:[],cats:[],tipos:[],total:0,f:{nome:'',categoria:'',tipo:'',itens:''},edit:null};

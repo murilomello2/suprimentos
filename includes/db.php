@@ -140,6 +140,18 @@ function db_schema_mysql($pdo) {
         preco_unit DOUBLE, preco_total DOUBLE, observacao TEXT,
         PRIMARY KEY (id), KEY idx_propi_prop (proposta_id)
     ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (
+        id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, proposta_id INT, nome VARCHAR(255),
+        arquivo VARCHAR(255), tamanho INT, mime VARCHAR(100), criado_por VARCHAR(64), created_at VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_anexo_cot (cotacao_id), KEY idx_anexo_prop (proposta_id)
+    ) $E");
+    // DICIONÁRIO DE COTAÇÃO: aprendizado dos itens/aspectos a cotar por serviço (ex.: GRUA → locação,
+    // frete montagem/desmontagem, combustível, alimentação, hora parada). Ao iniciar cotação do radar,
+    // puxa estes itens (editáveis). Por servico_id (catálogo, reusado entre obras).
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cot_dicionario (
+        id INT NOT NULL AUTO_INCREMENT, servico_id INT NOT NULL, descricao TEXT, unidade VARCHAR(40),
+        ordem INT, nota TEXT, created_at VARCHAR(40), PRIMARY KEY (id), KEY idx_cotdic_sv (servico_id)
+    ) $E");
     // colunas ADITIVAS na produção (radar_item já existe da migração; CREATE IF NOT EXISTS não adiciona coluna).
     // Usa ALTER (privilégio concedido) só se faltar. Espelha o self-heal do caminho SQLite.
     $rc = [];
@@ -326,6 +338,8 @@ function db_schema($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_item (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, quantidade REAL, observacao TEXT, ordem INTEGER)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, prazo TEXT, observacoes TEXT, data_resposta TEXT, total REAL, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta_item (id INTEGER PRIMARY KEY AUTOINCREMENT, proposta_id INTEGER NOT NULL, cotacao_item_id INTEGER NOT NULL, preco_unit REAL, preco_total REAL, observacao TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, proposta_id INTEGER, nome TEXT, arquivo TEXT, tamanho INTEGER, mime TEXT, criado_por TEXT, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cot_dicionario (id INTEGER PRIMARY KEY AUTOINCREMENT, servico_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, ordem INTEGER, nota TEXT, created_at TEXT)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_coti_cot ON cotacao_item(cotacao_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_prop_cot ON cotacao_proposta(cotacao_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_propi_prop ON cotacao_proposta_item(proposta_id)");

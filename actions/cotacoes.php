@@ -66,7 +66,8 @@ function cot_get_full($pdo, $id) {
         foreach ($propostas as &$p) { $p['total'] = $p['total']!==null?(float)$p['total']:null; $p['itens'] = $byp[(int)$p['id']] ?? []; }
         unset($p);
     }
-    return ['cotacao'=>$cot, 'itens'=>$itens, 'propostas'=>$propostas, 'mapa'=>cot_mapa($itens, $propostas)];
+    $anx = $pdo->prepare("SELECT id, proposta_id, nome, tamanho FROM cotacao_anexo WHERE cotacao_id=? ORDER BY id"); $anx->execute([$id]);
+    return ['cotacao'=>$cot, 'itens'=>$itens, 'propostas'=>$propostas, 'anexos'=>$anx->fetchAll(), 'mapa'=>cot_mapa($itens, $propostas)];
 }
 
 try {
@@ -74,6 +75,12 @@ try {
 
     // ---------- GET ----------
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        if (isset($_GET['dicionario'])) {   // itens-padrão a cotar do serviço (aprendizado de cotação)
+            $sid = (int)$_GET['dicionario'];
+            $q = $pdo->prepare("SELECT id, descricao, unidade, nota FROM cot_dicionario WHERE servico_id=? ORDER BY ordem, id"); $q->execute([$sid]);
+            $sv = $pdo->prepare("SELECT nome, grupo FROM servico WHERE id=?"); $sv->execute([$sid]); $sv = $sv->fetch();
+            echo json_encode(['servico'=>$sv, 'itens'=>$q->fetchAll()], JSON_UNESCAPED_UNICODE); exit;
+        }
         if (isset($_GET['id'])) {
             $full = cot_get_full($pdo, (int)$_GET['id']);
             if (!$full) { http_response_code(404); echo json_encode(['error'=>'cotação não encontrada']); exit; }
@@ -120,6 +127,20 @@ try {
                         trim((string)($it['observacao'] ?? '')), $o++]);
         $pdo->commit();
         echo json_encode(['ok'=>true, 'id'=>$cid], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'dicionario_salvar') {   // grava os itens-padrão a cotar do serviço (template global)
+        $perms = user_perms($pdo, $me);
+        if (empty($perms['perm_admin']) && ($perms['editar_escopo'] ?? '') !== 'todas') { http_response_code(403); echo json_encode(['error'=>'Dicionário de cotação é mudança global — só admin ou quem edita todas as obras.']); exit; }
+        $sid = (int)($in['servico_id'] ?? 0); if (!$sid) throw new Exception('servico_id obrigatório');
+        $itens = array_values(array_filter((array)($in['itens'] ?? []), fn($i)=>trim((string)($i['descricao'] ?? '')) !== ''));
+        $pdo->beginTransaction();
+        $pdo->prepare("DELETE FROM cot_dicionario WHERE servico_id=?")->execute([$sid]);
+        $insD = $pdo->prepare("INSERT INTO cot_dicionario (servico_id, descricao, unidade, ordem, nota, created_at) VALUES (?,?,?,?,?,?)");
+        $o = 0; $now = date('c');
+        foreach ($itens as $it) $insD->execute([$sid, trim((string)$it['descricao']), trim((string)($it['unidade'] ?? '')), $o++, trim((string)($it['nota'] ?? '')), $now]);
+        $pdo->commit();
+        echo json_encode(['ok'=>true, 'n'=>count($itens)], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'proposta') {

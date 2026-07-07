@@ -196,12 +196,17 @@
   .c-empty{background:#fff;cursor:default} .c-empty:hover{outline:none} .cell-x{color:#d3d9d6;font-size:12px;font-weight:700}
   #mobra{min-width:170px;height:auto}
   #mwrap{max-height:calc(100vh - 220px);overflow:auto;border:1px solid var(--line);border-radius:12px}
-  .mtable{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:0;border-radius:0;table-layout:fixed}
-  .mtable th{background:#fafbfb;padding:9px 8px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:sticky;top:0;z-index:3}
-  .mtable th:not(.svc-h),.mtable td:not(.svc-c){width:118px}   /* TODAS as colunas de obra do MESMO tamanho */
-  .mtable th.svc-h{text-align:left;width:250px;position:sticky;left:0;top:0;background:#fafbfb;z-index:5}
+  /* base .mtable — compartilhada com as tabelas do Mapa de Cotações; o específico da matriz é escopado em #mwrap */
+  .mtable{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  #mwrap .mtable{border:0;border-radius:0;table-layout:fixed}   /* colunas iguais SÓ na matriz */
+  .mtable th{background:#fafbfb;padding:9px 10px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line);text-align:center;white-space:nowrap}
+  #mwrap .mtable th{padding:9px 8px;overflow:hidden;text-overflow:ellipsis;position:sticky;top:0;z-index:3}   /* cabeçalho FIXO só na matriz */
+  #mwrap .mtable th:not(.svc-h),#mwrap .mtable td:not(.svc-c){width:118px}   /* TODAS as colunas de obra do MESMO tamanho */
+  .mtable th.svc-h{text-align:left;min-width:240px;position:sticky;left:0;background:#fafbfb;z-index:2}
+  #mwrap .mtable th.svc-h{min-width:0;width:250px;top:0;z-index:5}
   .mtable td{border-bottom:1px solid #f1f3f2;padding:0}
-  .mtable td.svc-c{padding:8px 10px;font-size:13px;position:sticky;left:0;background:#fff;border-right:1px solid var(--line);z-index:1}
+  .mtable td.svc-c{padding:8px 10px;font-size:13px;position:sticky;left:0;background:#fff;border-right:1px solid var(--line)}
+  #mwrap .mtable td.svc-c{z-index:1}
   .mtable tr:hover td.svc-c{background:#f7fbf8}
   .mtable .grp-h td{background:#eef4f0;font-weight:800;color:var(--verde-d);font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;padding:7px 10px;position:sticky;left:0}
   .mo-th{cursor:grab} .mo-th.mo-drag{outline:2px dashed var(--dourado);outline-offset:-2px;background:#fff7e6}
@@ -657,7 +662,7 @@ function matExpBlock(i){
 }
 function matGrpToggle(g){ if(MAT_COLLAPSED.has(g))MAT_COLLAPSED.delete(g); else MAT_COLLAPSED.add(g); renderMatriz(); }
 function matSvcToggle(ordem){ ordem=Number(ordem); if(MAT_EXP.has(ordem))MAT_EXP.delete(ordem); else MAT_EXP.add(ordem); renderMatriz(); }
-function matExpandAll(on){ if(on)(MAT_SVCS_CUR||[]).forEach(s=>MAT_EXP.add(s.ordem)); else MAT_EXP.clear(); renderMatriz(); }
+function matExpandAll(on){ if(on)(MAT_SVCS_CUR||[]).forEach(s=>MAT_EXP.add(Number(s.ordem))); else MAT_EXP.clear(); renderMatriz(); }
 function matGrpAll(on){ if(on) MAT_COLLAPSED.clear(); else [...new Set((MAT_SVCS_CUR||[]).map(s=>s.grupo))].forEach(g=>MAT_COLLAPSED.add(g)); renderMatriz(); }
 function matDragStart(e,i){ _matDrag=(MAT_OBRAS_CUR||[])[i]; try{ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', _matDrag||''); }catch(_){} }
 function matDrop(e,i){ e.preventDefault(); const cur=MAT_OBRAS_CUR||[], target=cur[i];
@@ -1188,7 +1193,7 @@ function renderMatriz(){
       html+=`<tr class="grp-h"><td colspan="${obras.length+1}" onclick="matGrpToggle(${jsArg(grupo)})" style="cursor:pointer"><span class="material-icons" style="font-size:15px;vertical-align:-3px">${grpCol?'chevron_right':'expand_more'}</span> ${esc(grupo)} <span class="muted" style="font-weight:400;font-size:10px">(${n})</span></td></tr>`;
     }
     if(agrupado && grpCol) continue;   // grupo recolhido: pula os serviços
-    const isExp=MAT_EXP.has(s.ordem);
+    const isExp=MAT_EXP.has(Number(s.ordem));   // ordem pode vir string (MySQL) — normaliza p/ casar o Set
     html+=`<tr><td class="svc-c"><span class="material-icons" onclick="event.stopPropagation();matSvcToggle(${s.ordem})" title="ver detalhes" style="font-size:15px;vertical-align:-3px;cursor:pointer;color:var(--muted)">${isExp?'expand_more':'chevron_right'}</span>${esc(s.nome)}<small>Curva ${esc(s.curva||'—')}</small></td>`;
     for(const o of obras){
       const i=idx[s.ordem+'|'+o];

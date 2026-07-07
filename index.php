@@ -251,6 +251,11 @@
   .dgm{display:inline-block;width:9px;height:9px;border-radius:50%}
   .dmini{font-size:10.5px;color:var(--muted)}
   .dempty{padding:26px;text-align:center;color:var(--muted);font-size:13px}
+  .oracintro{display:flex;align-items:center;justify-content:center;gap:38px;flex-wrap:wrap;width:100%;height:100%;padding:10px 26px;box-sizing:border-box}
+  .oracintro-av{flex:0 0 auto}
+  .oracintro-av img{height:224px;border-radius:18px;box-shadow:0 10px 30px rgba(0,0,0,.20);display:block}
+  .oracintro-tx{flex:1 1 300px;max-width:480px;text-align:left}
+  @media(max-width:860px){.oracintro{flex-direction:column;gap:14px;text-align:center;padding:16px 10px;height:auto}.oracintro-tx{text-align:center}.oracintro-av img{height:148px}}
   .gantt-row{display:grid;grid-template-columns:130px 1fr;gap:8px;align-items:center;margin-bottom:7px;font-size:11.5px}
   .gantt-track{position:relative;height:16px;background:#f1f4f3;border-radius:8px}
   .gantt-bar{position:absolute;top:0;height:16px;border-radius:8px;opacity:.9}
@@ -860,7 +865,7 @@ function oracRender(){
   w.innerHTML=`${admincfg}
     <div class="panel" style="display:flex;flex-direction:column;min-height:440px">
       <div id="oracMsgs" style="flex:1;overflow:auto;max-height:calc(100vh - 350px);padding:4px 2px">
-        ${vazio?`<div class="dempty" style="text-align:center;padding:20px 10px"><img src="${ORAC_AVATAR}" alt="Radar IA" style="height:172px;border-radius:16px;box-shadow:0 8px 26px rgba(0,0,0,.20)"><div style="margin-top:12px;font-weight:800;font-size:15px">Olá! Sou o <span style="color:var(--dourado)">Radar IA</span> — seu oráculo de suprimentos.</div><div class="muted" style="font-size:12.5px;margin-top:4px">Analiso as aquisições, cotações, prazos e oportunidades das obras. Pergunte à vontade, ou comece por uma sugestão:</div>${sug}</div>`:chat}
+        ${vazio?`<div class="oracintro"><div class="oracintro-av"><img src="${ORAC_AVATAR}" alt="Radar IA"></div><div class="oracintro-tx"><div style="font-weight:800;font-size:17px;line-height:1.25">Olá! Sou o <span style="color:var(--dourado)">Radar IA</span> — seu oráculo de suprimentos.</div><div class="muted" style="font-size:12.5px;margin-top:6px">Analiso as aquisições, cotações, prazos e oportunidades das obras. Pergunte à vontade, ou comece por uma sugestão:</div>${sug}</div></div>`:chat}
         ${ORAC.loading?`<div style="display:flex;justify-content:flex-start;margin:8px 0"><div style="background:#fff;border:1px solid var(--line);padding:10px 14px;border-radius:12px;font-size:12.5px;color:var(--muted)"><span class="material-icons" style="font-size:14px;vertical-align:-3px;color:var(--dourado)">auto_awesome</span> analisando os dados…</div></div>`:''}
       </div>
       ${!vazio?sug:''}

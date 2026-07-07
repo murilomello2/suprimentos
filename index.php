@@ -272,6 +272,7 @@
       <a id="nav-radar" data-menu="radar" class="active" title="Radar de Aquisições" onclick="showView('radar')"><span class="material-icons">radar</span> <span class="navtxt">Radar de Aquisições</span></a>
       <a id="nav-matriz" data-menu="matriz" title="Matriz" onclick="showView('matriz')"><span class="material-icons">grid_on</span> <span class="navtxt">Matriz</span></a>
       <a id="nav-cotacoes" data-menu="cotacoes" title="Mapa de Cotações" onclick="showView('cotacoes')"><span class="material-icons">request_quote</span> <span class="navtxt">Mapa de Cotações</span></a>
+      <a id="nav-oraculo" data-menu="oraculo" title="Radar IA — oráculo de suprimentos" onclick="showView('oraculo')"><span class="material-icons">smart_toy</span> <span class="navtxt">Radar IA</span></a>
     </nav>
     <div class="navlabel">Administração</div>
     <nav class="nav">
@@ -449,6 +450,14 @@
       <button class="dtab" id="ctab-fornecedores" onclick="cotTab('fornecedores')"><span class="material-icons">groups</span> Fornecedores</button>
     </div>
     <div id="cotwrap"><div class="dempty">Carregando…</div></div>
+   </section>
+
+   <section id="view-oraculo" style="display:none">
+    <div class="top">
+      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">smart_toy</span> Radar IA <span style="font-size:12.5px;font-weight:600;color:var(--muted);letter-spacing:0">· oráculo de suprimentos</span></h1>
+      <p class="sub">Pergunte sobre a sua programação, cotações, prazos e oportunidades — a IA analisa os dados do cockpit e responde.</p>
+    </div>
+    <div id="oracwrap"><div class="dempty">Carregando…</div></div>
    </section>
 
    <section id="view-config" style="display:none">
@@ -782,11 +791,12 @@ async function loadMatriz(force){
 
 /* ---------- view switch ---------- */
 function showView(v){
-  ['radar','matriz','oportunidades','dashboards','cotacoes','config','audit','updates'].forEach(x=>{
-    document.getElementById('view-'+x).style.display=v===x?'':'none';
+  ['radar','matriz','oportunidades','dashboards','cotacoes','oraculo','config','audit','updates'].forEach(x=>{
+    const el=document.getElementById('view-'+x); if(el) el.style.display=v===x?'':'none';
     const nav=document.getElementById('nav-'+x); if(nav) nav.classList.toggle('active',v===x);
   });
   if(v==='cotacoes') cotInit();
+  if(v==='oraculo') oracInit();
   if(v==='dashboards') dashInit();
   if(v==='matriz') loadMatriz();
   if(v==='oportunidades') renderOportunidades();
@@ -794,6 +804,86 @@ function showView(v){
   if(v==='radar') fitRadarHeight();
   if(v==='audit') renderAudit();
   if(v==='updates') renderUpdates();
+}
+
+/* ===== Radar IA (oráculo de suprimentos) — chat com LLM (OpenAI via servidor) ===== */
+let ORAC={msgs:[], loading:false, cfg:null};
+const ORAC_SUG=[
+  'Qual é a minha programação de compras para este mês?',
+  'Quais cotações estão em aberto e ainda sem proposta?',
+  'Quais prazos de cotação vencem nos próximos 30 dias?',
+  'Quais oportunidades de contratação eu tenho pela frente?',
+  'Analise o mapa de cotações e me dê insights de economia.',
+  'Resuma o status das aquisições por obra.'
+];
+async function oracInit(){
+  if(!ORAC.cfg){ try{ ORAC.cfg=await (await fetch('actions/oracle.php?_='+Date.now())).json(); }catch(e){ ORAC.cfg={configurado:false}; } }
+  oracRender();
+}
+// markdown leve → html (negrito, código, títulos, listas, parágrafos)
+function oracMd(t){
+  const lines=String(t==null?'':t).split('\n'); let out=[], inList=false;
+  const inl=s=>esc(s).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code style="background:#eef1ef;padding:1px 5px;border-radius:4px;font-size:12px">$1</code>');
+  for(const ln of lines){
+    if(/^\s*[-*]\s+/.test(ln)){ if(!inList){out.push('<ul style="margin:4px 0 6px 20px;padding:0">');inList=true;} out.push('<li style="margin:2px 0">'+inl(ln.replace(/^\s*[-*]\s+/,''))+'</li>'); continue; }
+    if(inList){ out.push('</ul>'); inList=false; }
+    if(/^#{1,6}\s+/.test(ln)){ out.push('<div style="font-weight:800;margin:10px 0 4px;color:var(--verde-d);font-size:13.5px">'+inl(ln.replace(/^#{1,6}\s+/,''))+'</div>'); continue; }
+    if(ln.trim()===''){ out.push('<div style="height:6px"></div>'); continue; }
+    out.push('<div style="margin:2px 0">'+inl(ln)+'</div>');
+  }
+  if(inList) out.push('</ul>');
+  return out.join('');
+}
+function oracRender(){
+  const w=document.getElementById('oracwrap'); if(!w)return; const cfg=ORAC.cfg||{};
+  let admincfg='';
+  if(EU&&EU.perm_admin){ admincfg=`<details style="margin-bottom:10px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)"><span class="material-icons" style="font-size:14px;vertical-align:-3px">settings</span> Configurar chave / modelo da OpenAI (admin)</summary>
+    <div class="panel" style="margin-top:6px">
+      <div class="dmini" style="margin-bottom:8px">A chave fica só no servidor (nunca no navegador). Status: <b style="color:${cfg.configurado?'var(--ok)':'var(--pend)'}">${cfg.configurado?'configurada ✓':'não configurada'}</b> · modelo atual: <b>${esc(cfg.modelo||'gpt-4o')}</b></div>
+      <div style="display:grid;grid-template-columns:1fr 170px;gap:8px;max-width:660px">
+        ${cotFld('Chave da OpenAI (sk-…)','<input id="oracKey" type="password" autocomplete="off" style="width:100%" placeholder="cole a chave — vazio mantém a atual">')}
+        ${cotFld('Modelo','<input id="oracModel" style="width:100%" value="'+esc(cfg.modelo||'gpt-4o')+'">')}
+      </div>
+      <div style="margin-top:8px"><button class="btn-prim" style="padding:6px 12px" onclick="oracSalvarCfg()">Salvar</button></div>
+    </div></details>`; }
+  const chat=ORAC.msgs.map(m=>m.role==='user'
+    ? `<div style="display:flex;justify-content:flex-end;margin:8px 0"><div style="background:var(--verde);color:#fff;padding:8px 12px;border-radius:12px 12px 3px 12px;max-width:78%;font-size:13px;white-space:pre-wrap">${esc(m.content)}</div></div>`
+    : `<div style="display:flex;justify-content:flex-start;margin:8px 0"><div style="background:#fff;border:1px solid var(--line);padding:10px 14px;border-radius:12px 12px 12px 3px;max-width:90%;font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,.05)"><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;color:var(--dourado);font-weight:700;font-size:11px"><span class="material-icons" style="font-size:14px">smart_toy</span> RADAR IA</div>${oracMd(m.content)}</div></div>`
+  ).join('');
+  const vazio=!ORAC.msgs.length;
+  const sug=`<div style="display:flex;flex-wrap:wrap;gap:7px;margin:${vazio?'8px':'10px'} 0">${ORAC_SUG.map(s=>`<button class="btn-ghost" style="padding:6px 11px;font-size:12px;text-align:left" onclick="oracPergunta(${jsArg(s)})">${esc(s)}</button>`).join('')}</div>`;
+  w.innerHTML=`${admincfg}
+    <div class="panel" style="display:flex;flex-direction:column;min-height:440px">
+      <div id="oracMsgs" style="flex:1;overflow:auto;max-height:calc(100vh - 350px);padding:4px 2px">
+        ${vazio?`<div class="dempty" style="text-align:center;padding:22px 10px"><span class="material-icons" style="font-size:42px;color:var(--dourado)">smart_toy</span><div style="margin-top:6px;font-weight:700;font-size:14px">Sou o Radar IA — seu oráculo de suprimentos.</div><div class="muted" style="font-size:12.5px;margin-top:4px">Pergunte à vontade, ou comece por uma sugestão:</div>${sug}</div>`:chat}
+        ${ORAC.loading?`<div style="display:flex;justify-content:flex-start;margin:8px 0"><div style="background:#fff;border:1px solid var(--line);padding:10px 14px;border-radius:12px;font-size:12.5px;color:var(--muted)"><span class="material-icons" style="font-size:14px;vertical-align:-3px;color:var(--dourado)">smart_toy</span> analisando os dados…</div></div>`:''}
+      </div>
+      ${!vazio?sug:''}
+      <div style="display:flex;gap:8px;margin-top:8px;border-top:1px solid var(--line);padding-top:10px">
+        <input id="oracIn" placeholder="Pergunte ao Radar IA…" style="flex:1" onkeydown="if(event.key==='Enter')oracEnviar()" ${ORAC.loading?'disabled':''}>
+        <button class="btn-prim" onclick="oracEnviar()" ${ORAC.loading?'disabled':''}><span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Enviar</button>
+      </div>
+    </div>`;
+  const ms=document.getElementById('oracMsgs'); if(ms) ms.scrollTop=ms.scrollHeight;
+  const inp=document.getElementById('oracIn'); if(inp&&!ORAC.loading) inp.focus();
+}
+function oracEnviar(){ const inp=document.getElementById('oracIn'); if(!inp)return; const q=(inp.value||'').trim(); if(!q)return; inp.value=''; oracPergunta(q); }
+async function oracPergunta(q){
+  if(ORAC.loading)return;
+  ORAC.msgs.push({role:'user',content:q}); ORAC.loading=true; oracRender();
+  try{
+    const hist=ORAC.msgs.slice(-7,-1).map(m=>({role:m.role,content:m.content}));   // histórico curto (sem a última)
+    const r=await (await fetch('actions/oracle.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'perguntar',me:EU&&EU.bitrix_id,pergunta:q,historico:hist})})).json();
+    ORAC.loading=false;
+    ORAC.msgs.push({role:'assistant',content:r.error?('⚠️ '+r.error):(r.resposta||'(sem resposta)')});
+  }catch(e){ ORAC.loading=false; ORAC.msgs.push({role:'assistant',content:'⚠️ Falha ao consultar: '+e.message}); }
+  oracRender();
+}
+async function oracSalvarCfg(){
+  const key=(document.getElementById('oracKey')||{}).value||'', model=(document.getElementById('oracModel')||{}).value||'';
+  try{ const r=await (await fetch('actions/oracle.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'set_key',me:EU&&EU.bitrix_id,key,model})})).json();
+    if(r.error){toast(r.error);return;} ORAC.cfg={configurado:r.configurado,modelo:r.modelo}; toast('Configuração salva'); oracRender();
+  }catch(e){ toast('Falha: '+e.message); }
 }
 
 /* ===== Oportunidades (Curva ABC) — grandes itens do orçamento fora do radar ===== */
@@ -3880,8 +3970,9 @@ function applyMenus(){
   const allow = (EU&&EU.autorizado)?(EU.menus||[]):[];
   document.querySelectorAll('.nav a[data-menu]').forEach(a=>{
     const m=a.getAttribute('data-menu');
-    // Configurações também abre p/ quem tem só a permissão de responsáveis em lote (verá apenas essa aba)
-    a.style.display=(IS_ADMIN||allow.includes(m)||(m==='config'&&CAN_RESP))?'':'none';
+    // Configurações também abre p/ quem tem só a permissão de responsáveis em lote (verá apenas essa aba).
+    // Radar IA (oráculo) é liberado p/ todo usuário autorizado (leitura; a chave fica no servidor).
+    a.style.display=(IS_ADMIN||m==='oraculo'||allow.includes(m)||(m==='config'&&CAN_RESP))?'':'none';
   });
   const bn=document.getElementById('btnNovo'); if(bn) bn.style.display=CAN_EDIT?'':'none'; // só quem edita cria item
 }

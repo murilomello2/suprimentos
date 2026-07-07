@@ -3717,17 +3717,21 @@ function cotRenderProposta(){
   const d=COT.cur,c=d.cotacao,itens=d.itens||[],pr=COT.prop;
   document.getElementById('cotwrap').innerHTML=`<div class="panel">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="cotRenderDetalhe()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar ao mapa</button><b style="font-size:15px">${pr.id?'Editar':'Cadastrar'} proposta · ${esc(c.titulo)}</b></div>
-    <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
-      ${cotFld('Fornecedor *','<input id="prF" list="prFForn" autocomplete="off" value="'+esc(pr.fornecedor_nome||'')+'" placeholder="Fornecedor (sugestões por categoria)"><datalist id="prFForn"></datalist>')}
-      ${cotFld('Prazo de entrega','<input id="prP" value="'+esc(pr.prazo||'')+'" placeholder="Ex.: 15 dias">')}
+    <div style="max-width:860px">
+    <div style="display:grid;grid-template-columns:1fr 220px;gap:10px">
+      ${cotFld('Fornecedor *','<input id="prF" list="prFForn" autocomplete="off" style="width:100%" value="'+esc(pr.fornecedor_nome||'')+'" placeholder="Fornecedor (sugestões por categoria)"><datalist id="prFForn"></datalist>')}
+      ${cotFld('Prazo de entrega','<input id="prP" style="width:100%" value="'+esc(pr.prazo||'')+'" placeholder="Ex.: 15 dias">')}
     </div>
-    ${cotFld('Observações','<textarea id="prO" rows="2">'+esc(pr.observacoes||'')+'</textarea>','margin-top:8px')}
-    <div style="margin-top:12px"><b style="font-size:13px">Preços por item</b> <span class="muted" style="font-size:11px">(preencha unitário — o total calcula pela quantidade)</span></div>
-    <div style="margin-top:6px">${itens.map(it=>`<div style="display:grid;grid-template-columns:1fr 120px 130px;gap:8px;align-items:center;margin-bottom:6px">
-      <div><b style="font-size:12.5px">${esc(it.descricao)}</b> <span class="muted" style="font-size:11px">${cotNum(it.quantidade)} ${esc(it.unidade||'')}</span></div>
-      <div><div class="muted" style="font-size:10px">Preço unit.</div><input type="number" step="0.0001" id="prU${it.id}" value="${pr.precos[it.id].preco_unit}" oninput="cotPrecoIn(${it.id},'u',this.value)"></div>
-      <div><div class="muted" style="font-size:10px">Preço total</div><input type="number" step="0.01" id="prT${it.id}" value="${pr.precos[it.id].preco_total}" oninput="cotPrecoIn(${it.id},'t',this.value)"></div></div>`).join('')}</div>
-    <div style="margin-top:14px"><button class="btn-prim" onclick="cotSalvarProposta()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar proposta</button></div></div>`;
+    ${cotFld('Observações','<textarea id="prO" rows="2" style="width:100%">'+esc(pr.observacoes||'')+'</textarea>','margin-top:8px')}
+    <div style="margin-top:14px"><b style="font-size:13px">Preços por item</b> <span class="muted" style="font-size:11px">(preencha o unitário — o total calcula pela quantidade)</span></div>
+    <div style="margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 130px 150px;gap:10px;padding:7px 12px;background:#fafbfb;border-bottom:1px solid var(--line);font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.3px"><span>Item</span><span style="text-align:right">Preço unit.</span><span style="text-align:right">Preço total</span></div>
+      ${itens.map((it,ix)=>`<div style="display:grid;grid-template-columns:minmax(0,1fr) 130px 150px;gap:10px;align-items:center;padding:9px 12px;${ix<itens.length-1?'border-bottom:1px solid #f1f3f2':''}">
+      <div><b style="font-size:12.5px">${esc(it.descricao)}</b> <span class="muted" style="font-size:11px">· ${cotNum(it.quantidade)} ${esc(it.unidade||'')}</span></div>
+      <input type="number" step="0.0001" id="prU${it.id}" value="${pr.precos[it.id].preco_unit}" oninput="cotPrecoIn(${it.id},'u',this.value)" placeholder="0,00" style="width:100%;text-align:right">
+      <input type="number" step="0.01" id="prT${it.id}" value="${pr.precos[it.id].preco_total}" oninput="cotPrecoIn(${it.id},'t',this.value)" placeholder="0,00" style="width:100%;text-align:right"></div>`).join('')}</div>
+    <div style="margin-top:14px"><button class="btn-prim" onclick="cotSalvarProposta()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar proposta</button></div>
+    </div></div>`;
 }
 function cotPrecoIn(iid,which,v){
   const p=COT.prop.precos[iid], it=(COT.cur.itens||[]).find(x=>x.id===iid), q=it&&it.quantidade?Number(it.quantidade):null;

@@ -159,6 +159,10 @@ function db_schema_mysql($pdo) {
         categoria VARCHAR(191), contato VARCHAR(191), email VARCHAR(191), telefone VARCHAR(60),
         created_at VARCHAR(40), PRIMARY KEY (id), KEY idx_cotf_cot (cotacao_id)
     ) $E");
+    // Radar IA — uso diário por usuário (limite de perguntas/dia editável no admin)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS oracle_uso (
+        bitrix_id VARCHAR(64) NOT NULL, dia VARCHAR(10) NOT NULL, n INT DEFAULT 0, PRIMARY KEY (bitrix_id, dia)
+    ) $E");
     // colunas ADITIVAS na produção (radar_item já existe da migração; CREATE IF NOT EXISTS não adiciona coluna).
     // Usa ALTER (privilégio concedido) só se faltar. Espelha o self-heal do caminho SQLite.
     $rc = [];
@@ -356,6 +360,7 @@ function db_schema($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, proposta_id INTEGER, nome TEXT, arquivo TEXT, tamanho INTEGER, mime TEXT, criado_por TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cot_dicionario (id INTEGER PRIMARY KEY AUTOINCREMENT, servico_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, ordem INTEGER, nota TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_fornecedor (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, categoria TEXT, contato TEXT, email TEXT, telefone TEXT, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS oracle_uso (bitrix_id TEXT NOT NULL, dia TEXT NOT NULL, n INTEGER DEFAULT 0, PRIMARY KEY (bitrix_id, dia))");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_coti_cot ON cotacao_item(cotacao_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_prop_cot ON cotacao_proposta(cotacao_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_propi_prop ON cotacao_proposta_item(proposta_id)");

@@ -807,7 +807,7 @@ function showView(v){
 }
 
 /* ===== Radar IA (oráculo de suprimentos) — chat com LLM (OpenAI via servidor) ===== */
-let ORAC={msgs:[], loading:false, cfg:null};
+let ORAC={msgs:[], loading:false, cfg:null, usadas:null, limite:0, limiteAtingido:false};
 const ORAC_SUG=[
   'Qual é a minha programação de compras para este mês?',
   'Quais cotações estão em aberto e ainda sem proposta?',
@@ -818,6 +818,7 @@ const ORAC_SUG=[
 ];
 async function oracInit(){
   if(!ORAC.cfg){ try{ ORAC.cfg=await (await fetch('actions/oracle.php?_='+Date.now())).json(); }catch(e){ ORAC.cfg={configurado:false}; } }
+  if(ORAC.cfg&&ORAC.cfg.limite_dia!=null) ORAC.limite=ORAC.cfg.limite_dia;
   oracRender();
 }
 // markdown leve → html (negrito, código, títulos, listas, parágrafos)
@@ -835,16 +836,19 @@ function oracMd(t){
   return out.join('');
 }
 function oracRender(){
-  const w=document.getElementById('oracwrap'); if(!w)return; const cfg=ORAC.cfg||{};
+  const w=document.getElementById('oracwrap'); if(!w)return; const cfg=ORAC.cfg||{}; const admin=!!(EU&&EU.perm_admin);
   let admincfg='';
-  if(EU&&EU.perm_admin){ admincfg=`<details style="margin-bottom:10px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)"><span class="material-icons" style="font-size:14px;vertical-align:-3px">settings</span> Configurar chave / modelo da OpenAI (admin)</summary>
+  if(admin){ admincfg=`<details style="margin-bottom:10px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)"><span class="material-icons" style="font-size:14px;vertical-align:-3px">settings</span> Configuração do Radar IA (admin) — chave · modelo · limite · prompt</summary>
     <div class="panel" style="margin-top:6px">
-      <div class="dmini" style="margin-bottom:8px">A chave fica só no servidor (nunca no navegador). Status: <b style="color:${cfg.configurado?'var(--ok)':'var(--pend)'}">${cfg.configurado?'configurada ✓':'não configurada'}</b> · modelo atual: <b>${esc(cfg.modelo||'gpt-4o')}</b></div>
-      <div style="display:grid;grid-template-columns:1fr 170px;gap:8px;max-width:660px">
-        ${cotFld('Chave da OpenAI (sk-…)','<input id="oracKey" type="password" autocomplete="off" style="width:100%" placeholder="cole a chave — vazio mantém a atual">')}
+      <div class="dmini" style="margin-bottom:8px">A chave fica só no servidor (nunca no navegador). Status: <b style="color:${cfg.configurado?'var(--ok)':'var(--pend)'}">${cfg.configurado?'configurada ✓':'não configurada'}</b> · ${cfg.prompt_custom?'usando <b>prompt personalizado</b>':'usando o <b>prompt padrão</b>'}</div>
+      <div style="display:grid;grid-template-columns:1fr 150px 130px;gap:8px;max-width:720px">
+        ${cotFld('Chave da OpenAI (sk-…)','<input id="oracKey" type="password" autocomplete="off" style="width:100%" placeholder="vazio mantém a atual">')}
         ${cotFld('Modelo','<input id="oracModel" style="width:100%" value="'+esc(cfg.modelo||'gpt-4o')+'">')}
+        ${cotFld('Perguntas/dia','<input id="oracLimite" type="number" min="0" style="width:100%" title="0 = ilimitado; admins não contam" value="'+((cfg.limite_dia!=null)?cfg.limite_dia:2)+'">')}
       </div>
-      <div style="margin-top:8px"><button class="btn-prim" style="padding:6px 12px" onclick="oracSalvarCfg()">Salvar</button></div>
+      ${cotFld('Prompt-base do oráculo — ensina o sistema à IA (vazio volta ao padrão)','<textarea id="oracPrompt" rows="10" style="width:100%;font-size:12px;font-family:ui-monospace,Consolas,monospace">'+esc(cfg.prompt_custom?(cfg.prompt||''):'')+'</textarea>','margin-top:8px')}
+      <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn-prim" style="padding:6px 12px" onclick="oracSalvarCfg()">Salvar configuração</button>
+        <button class="btn-ghost" style="padding:6px 12px" onclick="oracVerPadrao()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">download</span> Carregar prompt padrão no campo</button></div>
     </div></details>`; }
   const chat=ORAC.msgs.map(m=>m.role==='user'
     ? `<div style="display:flex;justify-content:flex-end;margin:8px 0"><div style="background:var(--verde);color:#fff;padding:8px 12px;border-radius:12px 12px 3px 12px;max-width:78%;font-size:13px;white-space:pre-wrap">${esc(m.content)}</div></div>`
@@ -860,31 +864,38 @@ function oracRender(){
       </div>
       ${!vazio?sug:''}
       <div style="display:flex;gap:8px;margin-top:8px;border-top:1px solid var(--line);padding-top:10px">
-        <input id="oracIn" placeholder="Pergunte ao Radar IA…" style="flex:1" onkeydown="if(event.key==='Enter')oracEnviar()" ${ORAC.loading?'disabled':''}>
-        <button class="btn-prim" onclick="oracEnviar()" ${ORAC.loading?'disabled':''}><span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Enviar</button>
+        <input id="oracIn" placeholder="${ORAC.limiteAtingido?'Limite diário atingido — volte amanhã':'Pergunte ao Radar IA…'}" style="flex:1" onkeydown="if(event.key==='Enter')oracEnviar()" ${(ORAC.loading||ORAC.limiteAtingido)?'disabled':''}>
+        <button class="btn-prim" onclick="oracEnviar()" ${(ORAC.loading||ORAC.limiteAtingido)?'disabled':''}><span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Enviar</button>
       </div>
+      ${(!admin && ORAC.limite>0)?`<div class="dmini" style="text-align:right;margin-top:4px">${ORAC.usadas!=null?`${ORAC.usadas} de ${ORAC.limite} pergunta(s) hoje`:`limite: ${ORAC.limite} pergunta(s) por dia`}</div>`:''}
     </div>`;
   const ms=document.getElementById('oracMsgs'); if(ms) ms.scrollTop=ms.scrollHeight;
   const inp=document.getElementById('oracIn'); if(inp&&!ORAC.loading) inp.focus();
 }
 function oracEnviar(){ const inp=document.getElementById('oracIn'); if(!inp)return; const q=(inp.value||'').trim(); if(!q)return; inp.value=''; oracPergunta(q); }
 async function oracPergunta(q){
-  if(ORAC.loading)return;
+  if(ORAC.loading||ORAC.limiteAtingido)return;
   ORAC.msgs.push({role:'user',content:q}); ORAC.loading=true; oracRender();
   try{
     const hist=ORAC.msgs.slice(-7,-1).map(m=>({role:m.role,content:m.content}));   // histórico curto (sem a última)
     const r=await (await fetch('actions/oracle.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'perguntar',me:EU&&EU.bitrix_id,pergunta:q,historico:hist})})).json();
     ORAC.loading=false;
+    if(r.usadas!=null){ ORAC.usadas=r.usadas; if(r.limite!=null) ORAC.limite=r.limite; }
+    if(r.limite_atingido) ORAC.limiteAtingido=true;
     ORAC.msgs.push({role:'assistant',content:r.error?('⚠️ '+r.error):(r.resposta||'(sem resposta)')});
+    if(!(EU&&EU.perm_admin) && ORAC.usadas!=null && ORAC.limite>0 && ORAC.usadas>=ORAC.limite) ORAC.limiteAtingido=true;
   }catch(e){ ORAC.loading=false; ORAC.msgs.push({role:'assistant',content:'⚠️ Falha ao consultar: '+e.message}); }
   oracRender();
 }
 async function oracSalvarCfg(){
-  const key=(document.getElementById('oracKey')||{}).value||'', model=(document.getElementById('oracModel')||{}).value||'';
-  try{ const r=await (await fetch('actions/oracle.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'set_key',me:EU&&EU.bitrix_id,key,model})})).json();
-    if(r.error){toast(r.error);return;} ORAC.cfg={configurado:r.configurado,modelo:r.modelo}; toast('Configuração salva'); oracRender();
+  const g=id=>{const e=document.getElementById(id);return e?e.value:'';};
+  const body={acao:'set_key',me:EU&&EU.bitrix_id,key:g('oracKey'),model:g('oracModel'),prompt:g('oracPrompt')};
+  const lim=g('oracLimite'); if(lim!==''&&lim!=null) body.limit_dia=Number(lim);
+  try{ const r=await (await fetch('actions/oracle.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.error){toast(r.error);return;} ORAC.cfg=null; await oracInit(); toast('Configuração do Radar IA salva');
   }catch(e){ toast('Falha: '+e.message); }
 }
+function oracVerPadrao(){ const t=document.getElementById('oracPrompt'); if(t&&ORAC.cfg){ t.value=ORAC.cfg.prompt_padrao||''; toast('Prompt padrão carregado no campo — edite e salve, ou salve como está'); } }
 
 /* ===== Oportunidades (Curva ABC) — grandes itens do orçamento fora do radar ===== */
 let OPP={obra:null, gaps:[], resumo:{}, sel:new Set()};

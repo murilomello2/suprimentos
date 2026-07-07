@@ -7,6 +7,8 @@ data/cockpit.sqlite
 data/.token_cache.json
 data/.crono_*.json
 data/.users_cache.json
+data/.oracle.json
+data/.oracle*.json
 _deploy.json
 includes/secrets.php
 # Fontes de build — NUNCA vão ao servidor (contêm orçamento/De-Para reais)

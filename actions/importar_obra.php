@@ -68,6 +68,21 @@ try {
             JSON_UNESCAPED_UNICODE); exit;
     }
 
+    // Corrige o cronograma_id de uma obra JÁ importada (sem re-importar orçamento/composições).
+    // {acao:'set_cronograma', me, obra_id, cronograma_id}
+    if ($acao === 'set_cronograma') {
+        $oid = (int)($in['obra_id'] ?? 0);
+        $cid = trim((string)($in['cronograma_id'] ?? ''));
+        if ($oid < 1) throw new Exception('obra_id obrigatório');
+        if (!preg_match('/^[0-9a-fA-F-]{8,40}$/', $cid)) throw new Exception('cronograma_id inválido (esperado UUID)');
+        $st = $pdo->prepare("SELECT cronograma_id, nome FROM obra WHERE id=?"); $st->execute([$oid]); $orow = $st->fetch();
+        if (!$orow) throw new Exception('obra não encontrada');
+        $pdo->prepare("UPDATE obra SET cronograma_id=? WHERE id=?")->execute([$cid, $oid]);
+        // limpa o cache do cronograma ANTIGO e do novo p/ forçar releitura do Supabase
+        foreach ([$orow['cronograma_id'], $cid] as $c) { if ($c) { $f = SEED_DIR . '/../.crono_' . substr($c, 0, 8) . '.json'; if (is_file($f)) @unlink($f); } }
+        echo json_encode(['ok'=>true, 'obra'=>$oid, 'nome'=>$orow['nome'], 'de'=>$orow['cronograma_id'], 'para'=>$cid], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     $obraId = (int)($in['obra_id'] ?? 0);
     if ($obraId < 2) throw new Exception('obra_id deve ser >= 2 (a 1 é a Trinity, intocável por aqui)');
     $OFF = $obraId * 100000;   // offset de IDs da obra

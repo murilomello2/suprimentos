@@ -48,6 +48,23 @@ try {
     $st->execute([$OBRA]);
     $rows = $st->fetchAll();
 
+    // FASE 2 — vínculo/status AUTOMÁTICO de cotação: existe mapa de cotação p/ este serviço nesta obra?
+    // (resiliente: se as tabelas de cotação ainda não existirem no deploy parcial, segue sem)
+    $cotByServ = [];
+    try {
+        $cq = $pdo->prepare("SELECT c.id, c.servico_id, c.status, c.titulo,
+                (SELECT COUNT(*) FROM cotacao_fornecedor cf WHERE cf.cotacao_id=c.id) AS convidados,
+                (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id) AS respostas,
+                (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND cp.total>0) AS melhor
+                FROM cotacao c WHERE c.obra_id=? AND c.servico_id IS NOT NULL ORDER BY c.id DESC");
+        $cq->execute([$OBRA]);
+        foreach ($cq->fetchAll() as $cr) {
+            $sid = (int)$cr['servico_id'];
+            if (!isset($cotByServ[$sid])) $cotByServ[$sid] = ['n'=>0, 'ultima'=>$cr]; // 'ultima' = mais recente (ORDER BY id DESC)
+            $cotByServ[$sid]['n']++;
+        }
+    } catch (Throwable $e) { $cotByServ = []; }
+
     // datas vivas do cronograma (com cache); se falhar, segue sem datas
     $tasks = [];
     $crono_erro = null;
@@ -113,6 +130,13 @@ try {
             'verba_metodo'         => $r['verba_metodo'],
             'composicao_sel'       => $r['composicao_sel'] ? json_decode($r['composicao_sel'], true) : [],
         ];
+        // cotação vinculada (status automático) — null se não houver mapa p/ este serviço nesta obra
+        $cs = $cotByServ[(int)$r['ordem']] ?? null;
+        $d['cotacao'] = $cs ? [
+            'id'=>(int)$cs['ultima']['id'], 'n'=>$cs['n'], 'status'=>$cs['ultima']['status'], 'titulo'=>$cs['ultima']['titulo'],
+            'convidados'=>(int)$cs['ultima']['convidados'], 'respostas'=>(int)$cs['ultima']['respostas'],
+            'melhor'=>$cs['ultima']['melhor']!==null?(float)$cs['ultima']['melhor']:null,
+        ] : null;
         $verba_total += $verba;
         $r['obra_nome'] = $obra['nome']; // p/ identificação e busca multi-obra futura
         $itens[] = array_merge($r, $d);

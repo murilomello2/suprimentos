@@ -1343,9 +1343,20 @@ function rowHtml(i){
     <td class="date">${D(i.inicio_cotacao)}${chipIni}</td>
     <td class="date">${D(i.fim_cotacao)}${chipFim}</td>
     <td>${statusSelect(i)}</td>
-    <td>${i.fornecedor?`<span class="mapa-on">● cotando</span>`:'<span class="muted">—</span>'}</td>
+    <td>${cotCell(i)}</td>
     <td onclick="event.stopPropagation()"><button class="eye" onclick="openModal(${i.ordem})"><span class="material-icons" style="font-size:17px;line-height:28px">visibility</span></button></td>
   </tr>`;
+}
+// Coluna "Mapa": AUTOMÁTICA — reflete a existência REAL de um mapa de cotação vinculado ao item (servico_id).
+function cotCell(i){
+  const c=i.cotacao;
+  if(c){
+    const stc={aberta:['var(--cot)','em cotação'],aguardando:['var(--dourado)','aguardando'],finalizada:['var(--ok)','fechada']};
+    const x=stc[c.status]||['var(--cot)','em cotação'];
+    const resp=(c.convidados||c.respostas)?` <span style="font-weight:600;opacity:.85">${c.respostas||0}/${c.convidados||0}</span>`:'';
+    return `<span onclick="event.stopPropagation();cotAbrir(${c.id})" title="Abrir mapa de cotação — ${esc(c.titulo||'')}${c.melhor?(' · melhor '+BRL(c.melhor)):''}${c.n>1?(' · '+c.n+' cotações neste item'):''}" style="cursor:pointer;color:${x[0]};font-weight:800;white-space:nowrap;font-size:11.5px">● ${x[1]}${resp}</span>`;
+  }
+  return i.fornecedor?`<span class="mapa-on" title="fornecedor informado manualmente — ainda sem mapa de cotação vinculado">● ${esc(i.fornecedor)}</span>`:'<span class="muted">—</span>';
 }
 const TIPO_AB={'Material':['MAT','tp-mat'],'Mão de obra':['MO','tp-mo'],'Empreitada':['EMP','tp-emp'],'Material + MO':['M+MO','tp-mat-mo'],'Locação':['LOC','tp-loc']};
 function tipoChip(t){ if(!t) return '<span class="tp-chip tp-none" title="a classificar">?</span>'; const a=TIPO_AB[t]||['?','tp-none']; return `<span class="tp-chip ${a[1]}" title="${esc(t)}">${a[0]}</span>`; }
@@ -2759,7 +2770,8 @@ function resumoTab(i){
       <div style="margin-top:4px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         ${CAN_EDIT?`<button class="btn-prim" onclick="EDITR=true;drawModal()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">edit</span> Editar</button>`
                   :`<span class="muted" style="font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">lock</span> Você tem acesso somente leitura.</span>`}
-        ${CAN_EDIT?`<button class="btn-ghost" onclick="cotIniciar(${i.ordem},${i.obra_id||1})" title="Abre uma cotação já com os itens do dicionário deste serviço (editáveis)"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--dourado)">request_quote</span> Iniciar cotação</button>`:''}
+        ${i.cotacao?`<button class="btn-ghost" onclick="cotAbrir(${i.cotacao.id})" title="${esc(i.cotacao.titulo||'')}"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--verde)">request_quote</span> Ver mapa de cotação</button><span class="muted" style="font-size:11.5px">· ${i.cotacao.respostas}/${i.cotacao.convidados} responderam${i.cotacao.melhor?' · melhor '+BRL(i.cotacao.melhor):''}${i.cotacao.n>1?' · '+i.cotacao.n+' cotações':''}</span>`:''}
+        ${CAN_EDIT?`<button class="btn-ghost" onclick="cotIniciar(${i.ordem},${i.obra_id||1})" title="Abre uma cotação já com os itens do dicionário deste serviço (editáveis)"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--dourado)">request_quote</span> ${i.cotacao?'Nova cotação':'Iniciar cotação'}</button>`:''}
       </div>
       ${IS_ADMIN?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;gap:8px">
         <button class="btn-ghost" onclick="desdobrarItem()"><span class="material-icons" style="font-size:15px">call_split</span> Desdobrar em Material + MO</button>
@@ -3199,12 +3211,27 @@ async function cotIniciar(sid, obra, nome, grupo){
   COT.mode='novo'; cotRenderNovo();
   toast((dic.itens&&dic.itens.length)?(dic.itens.length+' item(ns) do dicionário — edite como precisar'):'Sem dicionário p/ este serviço ainda — monte os itens e salve como padrão');
 }
+async function cotAbrir(id){
+  ['radar','matriz','oportunidades','dashboards','cotacoes','config','audit','updates'].forEach(x=>{ const v=document.getElementById('view-'+x); if(v)v.style.display=x==='cotacoes'?'':'none'; const n=document.getElementById('nav-'+x); if(n)n.classList.toggle('active',x==='cotacoes'); });
+  if(typeof closeModal==='function'){ try{ closeModal(); }catch(e){} }
+  COT.tab='cotacoes'; ['cotacoes','fornecedores'].forEach(x=>{ const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x==='cotacoes'); });
+  await cotOpen(id);
+}
 function cotRenderNovo(){
   const pre=COT.novoPre||{}, vinc=COT.novoServico;
   document.getElementById('cotwrap').innerHTML=`<div class="panel">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="cotLoad()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button><b style="font-size:15px">Nova cotação</b>
-      ${vinc?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d)"><span class="material-icons" style="font-size:12px;vertical-align:-2px">link</span> vinculada ao radar: ${esc(COT.novoServicoNome||'')}</span>`:''}</div>
-    ${vinc?`<div class="dmini" style="margin:-6px 0 10px">Itens puxados do dicionário de cotação do serviço — <b>edite à vontade</b> (a puxada automática é só um ponto de partida).</div>`:''}
+      ${vinc?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d)"><span class="material-icons" style="font-size:12px;vertical-align:-2px">link</span> vinculada ao radar: ${esc(COT.novoServicoNome||'')}</span>`:'<span id="cotVincChip"></span>'}</div>
+    ${vinc?`<div class="dmini" style="margin:-6px 0 10px">Itens puxados do dicionário de cotação do serviço — <b>edite à vontade</b> (a puxada automática é só um ponto de partida).</div>`
+          :`<div id="cotVincBox" style="margin:-4px 0 12px;padding:8px 10px;background:#f7faf8;border:1px dashed var(--line);border-radius:8px">
+      <div id="cotVincClosed"><button class="btn-ghost" style="padding:3px 9px" onclick="cotVincOpen()"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">link</span> Vincular a um item do radar</button>
+        <span class="muted" style="font-size:11px">— opcional; liga o status "em cotação" no radar e mostra o mapa dentro do item</span></div>
+      <div id="cotVincPick" style="display:none">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <select id="cotVincO" onchange="cotVincObra()" style="padding:5px 6px;border:1px solid var(--line);border-radius:7px">${cotObraOpts(pre.obra||'')}</select>
+          <div class="search" style="min-width:220px;max-width:340px"><span class="material-icons" style="color:var(--muted)">search</span><input id="cotVincBusca" placeholder="Buscar item do radar por nome…" oninput="cotVincBuscaInput()" autocomplete="off" ${pre.obra?'':'disabled'}></div>
+          <button class="btn-ghost" style="padding:3px 8px" onclick="cotVincCancel()">cancelar</button></div>
+        <div id="cotVincSug"></div></div></div>`}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
       ${cotFld('Título *','<input id="cotT" value="'+esc(pre.titulo||'')+'" placeholder="Ex.: MO Forro de Gesso">')}
       ${cotFld('Obra','<select id="cotO">'+cotObraOpts(pre.obra||'')+'</select>')}
@@ -3272,6 +3299,49 @@ function cotRenderItens(){
     <button class="btn-ghost" style="padding:2px" onclick="COT.novoItens.splice(${i},1);cotRenderItens()" title="Remover"><span class="material-icons" style="font-size:16px;color:var(--pend)">close</span></button></div>`).join('');
 }
 function cotAddItem(){ COT.novoItens.push({descricao:'',unidade:'',quantidade:'',observacao:''}); cotRenderItens(); }
+/* ---- Vincular cotação standalone a um item do radar (Fase 2) ---- */
+function cotVincOpen(){ const c=document.getElementById('cotVincClosed'),p=document.getElementById('cotVincPick'); if(c)c.style.display='none'; if(p)p.style.display='block'; const o=document.getElementById('cotVincO'); if(o&&o.value){ cotVincObra(); } const i=document.getElementById('cotVincBusca'); if(i&&!i.disabled)i.focus(); }
+function cotVincCancel(){ const c=document.getElementById('cotVincClosed'),p=document.getElementById('cotVincPick'),s=document.getElementById('cotVincSug'); if(p)p.style.display='none'; if(c)c.style.display='block'; if(s)s.innerHTML=''; }
+async function cotVincObra(){
+  const oid=(document.getElementById('cotVincO')||{}).value||'', inp=document.getElementById('cotVincBusca'), s=document.getElementById('cotVincSug');
+  COT.novoVincItens=[]; COT.novoVincObra=oid; if(s)s.innerHTML='';
+  if(inp){ inp.disabled=!oid; inp.value=''; if(oid)inp.focus(); }
+  if(!oid)return;
+  try{ const url='actions/matriz.php'+(String(oid)!=='1'?('?obra='+oid+'&'):'?')+'_='+Date.now(); const d=await (await fetch(url)).json(); COT.novoVincItens=(d.itens||[]); }catch(e){ COT.novoVincItens=[]; }
+}
+let _cotVT;
+function cotVincBuscaInput(){
+  clearTimeout(_cotVT);
+  _cotVT=setTimeout(()=>{
+    const raw=(document.getElementById('cotVincBusca')||{}).value||'', q=opNorm(raw), s=document.getElementById('cotVincSug'); if(!s)return;
+    if(q.length<2){ s.innerHTML=''; return; }
+    const its=(COT.novoVincItens||[]).filter(it=>opNorm(it.nome||'').includes(q)).slice(0,12);
+    s.innerHTML=its.length?`<div style="background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);max-height:260px;overflow:auto;margin-top:4px">`+its.map(it=>`<div onclick="cotVincPick(${it.ordem})" style="padding:7px 10px;cursor:pointer;font-size:12.5px;border-bottom:1px solid #f1f3f2" onmouseover="this.style.background='#eff7f1'" onmouseout="this.style.background=''"><b>${esc(it.nome)}</b> <span class="muted" style="font-size:10.5px">· ${esc(it.grupo||'')}${it.cotacao?' · <span style="color:var(--cot);font-weight:700">já tem mapa</span>':''}</span></div>`).join('')+`</div>`:`<div class="dmini" style="padding:6px">nenhum item casa "${esc(raw)}"</div>`;
+  },160);
+}
+function cotVincPick(ordem){
+  const it=(COT.novoVincItens||[]).find(x=>Number(x.ordem)===Number(ordem)); if(!it)return;
+  COT.novoServico=it.ordem; COT.novoServicoNome=it.nome;
+  const T=document.getElementById('cotT'); if(T&&!T.value.trim())T.value=it.nome;
+  const O=document.getElementById('cotO'); if(O&&COT.novoVincObra)O.value=COT.novoVincObra;
+  const C=document.getElementById('cotC'); if(C&&!C.value.trim()&&it.grupo)C.value=it.grupo;
+  const box=document.getElementById('cotVincBox');
+  if(box) box.outerHTML=`<div id="cotVincBox" class="dmini" style="margin:-4px 0 12px;color:var(--verde-d)"><span class="material-icons" style="font-size:13px;vertical-align:-3px">link</span> Vinculada ao radar: <b>${esc(it.nome)}</b> — o status "em cotação" liga sozinho neste item ao criar. <a onclick="cotVincClear()" style="cursor:pointer;text-decoration:underline">remover</a></div>`;
+  const chip=document.getElementById('cotVincChip'); if(chip) chip.innerHTML=`<span class="dchip" style="background:#eef4f0;color:var(--verde-d)"><span class="material-icons" style="font-size:12px;vertical-align:-2px">link</span> vinculada: ${esc(it.nome)}</span>`;
+  cotVincDic(it);
+  toast('Vinculado ao item do radar: '+it.nome);
+}
+async function cotVincDic(it){
+  const vazio=!COT.novoItens||COT.novoItens.every(x=>!(x.descricao||'').trim()); if(!vazio)return;
+  try{ const dic=await (await fetch('actions/cotacoes.php?dicionario='+it.ordem+'&_='+Date.now())).json();
+    if(dic&&dic.itens&&dic.itens.length){ COT.novoItens=dic.itens.map(i=>({descricao:i.descricao,unidade:i.unidade||'',quantidade:'',observacao:i.nota||''})); cotRenderItens(); toast(dic.itens.length+' item(ns) do dicionário do serviço'); }
+  }catch(e){}
+}
+function cotVincClear(){
+  const g=id=>{const e=document.getElementById(id);return e?e.value:'';};
+  COT.novoPre=Object.assign(COT.novoPre||{},{titulo:g('cotT'),obra:g('cotO'),categoria:g('cotC')});
+  COT.novoServico=null; COT.novoServicoNome=''; cotRenderNovo();
+}
 function cotImportarTexto(){
   const t=prompt('Cole os itens, um por linha.\nFormato: descrição ; unidade ; quantidade'); if(!t)return;
   t.split('\n').map(l=>l.trim()).filter(Boolean).forEach(l=>{ const p=l.split(/[;\t]/).map(x=>x.trim()); COT.novoItens.push({descricao:p[0]||'',unidade:p[1]||'',quantidade:p[2]||'',observacao:''}); });

@@ -175,7 +175,7 @@
   .tnode.tsel{background:var(--okbg);outline:2px solid var(--ok);border-radius:6px;font-weight:600}
   .ckl{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
   .chkbox{margin-top:6px;display:flex;flex-direction:column;gap:5px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fafbfa}
-  .pctw{display:inline-flex;align-items:center;gap:6px} .pctbar{width:42px;height:6px;border-radius:4px;background:#e6e9e7;overflow:hidden;display:inline-block} .pctfill{display:block;height:100%} .pctn{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .pctw{display:inline-flex;align-items:center;gap:4px} .pctbar{width:26px;height:5px;border-radius:4px;background:#e6e9e7;overflow:hidden;display:inline-block} .pctfill{display:block;height:100%} .pctn{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
   .pendbar{font-size:13px;color:var(--verde-d);display:flex;align-items:center;gap:6px}
   .pendbar:empty{display:none}
   .pendbar:not(:empty){background:var(--okbg);border:1px solid var(--ok);border-radius:8px;padding:8px 12px;font-weight:600;margin:6px 0}
@@ -193,6 +193,7 @@
   .c-fin{background:var(--ok)} .c-cot{background:var(--cot)} .c-prop{background:var(--dourado)}
   .c-atras{background:var(--pend)} .c-pend{background:var(--and)} .c-noprazo{background:#cfd6da} .c-none{background:#f0f2f3}
   .c-andamento{background:#0d9488}
+  .c-empty{background:#fff;cursor:default} .c-empty:hover{outline:none} .cell-x{color:#d3d9d6;font-size:12px;font-weight:700}
   #mobra{min-width:170px;height:auto}
   .mtable{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
   .mtable th{background:#fafbfb;padding:9px 10px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line);text-align:center;white-space:nowrap}
@@ -572,7 +573,11 @@ const today=new Date().toISOString().slice(0,10);
 const STK={'Finalizado':'st-Finalizado','Cotação Iniciada':'st-CotacaoIniciada','Com Pendências':'st-ComPendencias','Em Andamento':'st-EmAndamento','Não Iniciado':'st-NaoIniciado'};
 const STATUSES=['Não Iniciado','Cotação Iniciada','Com Pendências','Em Andamento','Finalizado'];
 function toast(m){const t=document.getElementById('toastEl');t.textContent=m;t.style.display='block';clearTimeout(t._);t._=setTimeout(()=>t.style.display='none',2400);}
-const byOrdem=(o,ob)=>DATA.itens.find(i=>i.ordem==o && (ob==null || i.obra_id==ob));   // multi-obra: mesma ordem existe em 2 obras
+// multi-obra: a mesma ordem existe em 2+ obras. Procura no RADAR (DATA.itens = só OBRA_SEL) e, se não achar,
+// cai na MATRIZ (MAT = TODAS as obras) — assim clicar numa célula da matriz abre o item mesmo se a obra
+// não estiver selecionada no radar (as duas telas são independentes).
+const byOrdem=(o,ob)=>DATA.itens.find(i=>i.ordem==o && (ob==null || i.obra_id==ob))
+  || ((typeof MAT!=='undefined' && MAT) ? MAT.find(i=>i.ordem==o && (ob==null || i.obra_id==ob)) : null);
 const OBQ=()=>((CUR&&CUR.obra_id)||OBRA_SEL[0]||1);   // obra do MODAL aberto (ou a primária) — vai em todo fetch do modal
 function daysBetween(a,b){ return Math.round((new Date(b)-new Date(a))/86400000); }
 /* nível de alerta da cotação: 'critico' (fim venceu, não finalizado) > 'atrasado' (início venceu, não iniciou)
@@ -1145,6 +1150,8 @@ function renderMatriz(){
       // filtro por responsável: célula que NÃO é desse responsável fica transparente (a coluna da obra permanece)
       if(fr){ const off = fr==='__sem__' ? (!i||(i.responsavel||'').trim()!=='') : (!i||(i.responsavel||'')!==fr);
         if(off){ html+='<td><div class="cell cell-off"></div></td>'; continue; } }
+      // serviço NÃO existe (ou foi excluído) para esta obra → célula branca com ✕ (distinta do cinza "N/A")
+      if(!i){ html+=`<td><div class="cell c-empty" title="${esc(o)} · ${esc(s.nome)}\nsem este serviço nesta obra"><span class="cell-x">✕</span></div></td>`; continue; }
       const cls=clsFn(i);
       const dt=i&&i.fim_cotacao?(p=>p[2]+'/'+p[1]+'/'+p[0].slice(2))(i.fim_cotacao.split('-')):'';
       const tip=i?`${esc(o)} · ${esc(s.nome)}\n${txtMap[cls]||''}`+(i.fim_cotacao?` · fim cotação ${D(i.fim_cotacao)}`:'')+(i.responsavel?`\n${esc(i.responsavel)}`:''):'N/A';
@@ -1333,15 +1340,15 @@ function rowHtml(i){
   const chipFim=lvl==='critico'?`<span class="tag-al crit">crítico</span>`:lvl==='finalizado'?`<span class="tag-al fin">✓ concluído</span>`:'';
   const obTag=(OBRA_SEL.length>1)?`<span style="display:inline-block;font-size:9px;font-weight:800;color:#fff;background:${obraCor(i.obra_id)};border-radius:4px;padding:1px 6px;vertical-align:1px;margin-right:4px">${esc((i.obra_nome||'').slice(0,10))}</span>`:'';
   return `<tr class="item" onclick="openModal(${i.ordem},${i.obra_id||1})">
-    <td><div class="svc">${obTag}${esc(i.nome)} ${tipoChip(i.tipo)}</div><div class="svc-sub">${esc(i.forma_contratacao||'')}</div></td>
+    <td><div class="svc">${obTag}${esc(i.nome)} ${tipoChip(i.tipo)}</div></td>
     <td><span class="curva c-${i.curva||'C'}">${esc(i.curva||'—')}</span></td>
     <td>${i.responsavel?esc(i.responsavel):`<button class="resp-miss" onclick="event.stopPropagation();openModal(${i.ordem},${i.obra_id||1})">definir</button>`}</td>
     <td class="money">${verbaDefinida(i)?`${BRL(verbaDef(i))}${i.curado_verba?' <span class="material-icons" title="verba curada" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':(i.auto&&i.auto.verba?' <span title="sugerido pelo auto-vínculo (receita) — confira e salve pra confirmar" style="font-size:11px">🤖</span>':'')}`:`<span class="muted" title="sem verba definida — a estimativa preliminar do orçamento não conta como verba">R$ 0 <span style="font-size:10px">· a definir</span></span>`}</td>
     <td>${i.quantitativo!=null?`<div class="qcell" title="${esc(QNUM(i.quantitativo)+' '+(i.quantitativo_unidade||''))}"><b>${QNUM(i.quantitativo)}</b> <span class="muted">${esc(i.quantitativo_unidade||'')}</span>${i.curado_quant?' <span class="material-icons" title="quantitativo curado" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':(i.auto&&i.auto.quant?' <span title="sugerido pelo auto-vínculo (receita)" style="font-size:11px">🤖</span>':'')}</div>`:'<span class="muted">—</span>'}</td>
     <td class="date">${D(i.data_necessaria)}${i.curado_data?' <span class="material-icons" title="data curada" style="font-size:12px;color:var(--ok);vertical-align:-2px">verified</span>':(i.auto&&i.auto.crono?' <span title="sugerido pelo auto-vínculo (receita) — abra o Cronograma e salve pra confirmar" style="font-size:11px">🤖</span>':'')}</td>
     <td>${pctChip(i.cronograma_pct)}</td>
-    <td class="date">${D(i.inicio_cotacao)}${chipIni}</td>
-    <td class="date">${D(i.fim_cotacao)}${chipFim}</td>
+    <td class="date">${D(i.inicio_cotacao)}${chipIni?'<br>'+chipIni:''}</td>
+    <td class="date">${D(i.fim_cotacao)}${chipFim?'<br>'+chipFim:''}</td>
     <td>${statusSelect(i)}</td>
     <td>${cotCell(i)}</td>
     <td onclick="event.stopPropagation()"><button class="eye" onclick="openModal(${i.ordem})"><span class="material-icons" style="font-size:17px;line-height:28px">visibility</span></button></td>
@@ -3173,6 +3180,9 @@ function cotInit(){ cotTab(COT.tab||'cotacoes'); }
 function cotTab(t){ COT.tab=t; ['cotacoes','fornecedores'].forEach(x=>{const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x===t);});
   if(t==='fornecedores') fornLoad(); else cotLoad(); }
 function cotStChip(s){ const m={aberta:['#8a9299','Aberta'],aguardando:['var(--dourado)','Aguardando'],finalizada:['var(--ok)','Finalizada']}; const x=m[s]||['#8a9299',s]; return `<span class="dchip" style="background:${x[0]}">${x[1]}</span>`; }
+function cotStLabel(s){ return ({aberta:'Aberta',aguardando:'Aguardando',finalizada:'Finalizada'})[s]||s; }
+function cotFmtDT(iso){ if(!iso)return '—'; const d=new Date(iso); if(isNaN(d.getTime()))return '—'; const p=n=>('0'+n).slice(-2); return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes()); }
+function cotSort(col){ COT.sort=COT.sort||{col:'created_at',dir:-1}; if(COT.sort.col===col) COT.sort.dir=-COT.sort.dir; else COT.sort={col, dir:(col==='created_at'||col==='n_propostas'||col==='n_itens'||col==='melhor_oferta')?-1:1}; cotRender(); }
 function cotObraOpts(sel){ return '<option value="">— obra —</option>'+((typeof OBRAS!=='undefined'&&OBRAS)||[]).map(o=>`<option value="${o.id}" ${String(sel)===String(o.id)?'selected':''}>${esc(o.nome)}</option>`).join(''); }
 async function cotLoad(){
   const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Carregando cotações…</div>';
@@ -3185,16 +3195,37 @@ function cotRender(){
   if(COT.mode==='detalhe') return cotRenderDetalhe();
   if(COT.mode==='proposta') return cotRenderProposta();
   const w=document.getElementById('cotwrap');
-  let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:10px;flex-wrap:wrap;align-items:center">
-     <label class="muted" style="font-size:12px">Obra <select onchange="COT.obra=this.value;cotLoad()" style="margin-left:6px">${cotObraOpts(COT.obra)}</select></label>
+  COT.filt=COT.filt||{q:'',categoria:'',status:''}; COT.sort=COT.sort||{col:'created_at',dir:-1};
+  const all=COT.list||[];
+  // filtros CLIENT-SIDE (a obra continua server-side no cotLoad)
+  const qn=opNorm(COT.filt.q||'');
+  let rows=all.filter(c=>
+    (!qn || opNorm((c.titulo||'')+' '+(c.categoria||'')+' '+(c.obra_nome||'')).includes(qn)) &&
+    (!COT.filt.categoria || (c.categoria||'')===COT.filt.categoria) &&
+    (!COT.filt.status || (c.status||'')===COT.filt.status));
+  // ordenação
+  const sc=COT.sort.col, dir=COT.sort.dir;
+  const sval=c=>({titulo:(c.titulo||'').toLowerCase(),obra_nome:(c.obra_nome||'').toLowerCase(),categoria:(c.categoria||'').toLowerCase(),
+      n_itens:+c.n_itens||0,n_propostas:+c.n_propostas||0,melhor_oferta:+c.melhor_oferta||0,status:(c.status||''),created_at:(c.created_at||''),id:+c.id||0}[sc]);
+  rows=rows.slice().sort((a,b)=>{ const x=sval(a),y=sval(b); return (x<y?-1:x>y?1:0)*dir; });
+  const cats=[...new Set(all.map(c=>c.categoria).filter(Boolean))].sort();
+  const sts=[...new Set(all.map(c=>c.status).filter(Boolean))];
+  const arw=col=>COT.sort.col===col?(COT.sort.dir>0?' ▲':' ▼'):'';
+  const th=(lbl,col,extra)=>`<th ${extra||''} onclick="cotSort('${col}')" style="cursor:pointer;user-select:none;white-space:nowrap">${lbl}${arw(col)}</th>`;
+  let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
+     <div class="search" style="min-width:170px"><span class="material-icons" style="color:var(--muted)">search</span><input placeholder="Buscar cotação…" value="${esc(COT.filt.q)}" oninput="COT.filt.q=this.value;cotRender()"></div>
+     <label class="muted" style="font-size:12px">Obra <select onchange="COT.obra=this.value;cotLoad()" style="margin-left:4px">${cotObraOpts(COT.obra)}</select></label>
+     <select onchange="COT.filt.categoria=this.value;cotRender()" style="font-size:12px;padding:6px"><option value="">Todas categorias</option>${cats.map(c=>`<option ${c===COT.filt.categoria?'selected':''}>${esc(c)}</option>`).join('')}</select>
+     <select onchange="COT.filt.status=this.value;cotRender()" style="font-size:12px;padding:6px"><option value="">Todos status</option>${sts.map(s=>`<option value="${esc(s)}" ${s===COT.filt.status?'selected':''}>${esc(cotStLabel(s))}</option>`).join('')}</select>
+     <span class="muted" style="font-size:11.5px">${rows.length} de ${all.length}</span>
      ${CAN_EDIT?'<button class="btn-prim" style="margin-left:auto;padding:7px 14px" onclick="cotNovo()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">add</span> Nova cotação</button>':''}
-   </div></div><div class="wrap"><table><thead><tr><th>Cotação</th><th>Obra</th><th>Categoria</th><th>Tipo</th><th style="text-align:center">Itens</th><th style="text-align:center">Propostas</th><th style="text-align:right">Melhor oferta</th><th>Status</th><th></th></tr></thead><tbody>`;
-  for(const c of COT.list){
+   </div></div><div class="wrap"><table><thead><tr>${th('Cotação','titulo')}${th('Obra','obra_nome')}${th('Categoria','categoria')}<th>Tipo</th>${th('Itens','n_itens','style="text-align:center"')}${th('Propostas','n_propostas','style="text-align:center" title="recebidas / convidados"')}${th('Melhor oferta','melhor_oferta','style="text-align:right"')}${th('Criada em','created_at')}${th('Status','status')}<th></th></tr></thead><tbody>`;
+  for(const c of rows){
     html+=`<tr style="cursor:pointer" onclick="cotOpen(${c.id})"><td><b>${esc(c.titulo)}</b></td><td>${esc(c.obra_nome||'—')}</td><td class="muted">${esc(c.categoria||'')}</td><td class="muted">${esc(c.tipo_servico||'')}</td>
-      <td style="text-align:center">${c.n_itens}</td><td style="text-align:center">${c.n_propostas}</td><td style="text-align:right">${c.melhor_oferta?BRL(c.melhor_oferta):'—'}</td><td>${cotStChip(c.status)}</td>
+      <td style="text-align:center">${c.n_itens}</td><td style="text-align:center" title="${c.n_propostas} recebida(s) de ${c.n_convidados||0} convidado(s)"><b>${c.n_propostas}</b><span class="muted">/${c.n_convidados||0}</span></td><td style="text-align:right">${c.melhor_oferta?BRL(c.melhor_oferta):'—'}</td><td class="muted" style="font-size:11.5px;white-space:nowrap">${cotFmtDT(c.created_at)}</td><td>${cotStChip(c.status)}</td>
       <td><span class="material-icons" style="color:var(--muted)">chevron_right</span></td></tr>`;
   }
-  if(!COT.list.length) html+='<tr><td colspan="9" class="empty">Nenhuma cotação ainda. Crie a primeira.</td></tr>';
+  if(!rows.length) html+=`<tr><td colspan="10" class="empty">${all.length?'Nenhuma cotação casa os filtros.':'Nenhuma cotação ainda. Crie a primeira.'}</td></tr>`;
   w.innerHTML=html+'</tbody></table></div>';
 }
 function cotNovo(){ COT.mode='novo'; COT.novoServico=null; COT.novoPre=null; COT.novoConvidados=[]; COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; cotRender(); }

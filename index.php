@@ -198,7 +198,7 @@
   #mwrap{max-height:calc(100vh - 220px);overflow:auto;border:1px solid var(--line);border-radius:12px}
   /* base .mtable — compartilhada com as tabelas do Mapa de Cotações; o específico da matriz é escopado em #mwrap */
   .mtable{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-  #mwrap .mtable{border:0;border-radius:0;table-layout:fixed}   /* colunas iguais SÓ na matriz */
+  #mwrap .mtable{border:0;border-radius:0;table-layout:fixed;overflow:visible}   /* colunas iguais + overflow:visible p/ o cabeçalho sticky funcionar (overflow:hidden do .mtable base quebra o sticky) */
   .mtable th{background:#fafbfb;padding:9px 10px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line);text-align:center;white-space:nowrap}
   #mwrap .mtable th{padding:9px 8px;overflow:hidden;text-overflow:ellipsis;position:sticky;top:0;z-index:3}   /* cabeçalho FIXO só na matriz */
   #mwrap .mtable th:not(.svc-h),#mwrap .mtable td:not(.svc-c){width:118px}   /* TODAS as colunas de obra do MESMO tamanho */
@@ -654,12 +654,21 @@ let MAT_OBRA_ORDER=(()=>{ try{ const v=JSON.parse(localStorage.getItem('sup_mato
 // arg seguro p/ string em atributo HTML de evento (aspas simples no JS + &quot; no atributo)
 function jsArg(s){ return "'"+String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/\n/g,' ')+"'"; }
 // bloco de detalhe (quantitativo/verba/responsável/status) mostrado quando o serviço é expandido na matriz
+// selo de curadoria (✓ curado manual / 🤖 sugerido pelo auto-vínculo) — hover explica, clique abre o item p/ editar
+function matCurIcon(kind, i){
+  const map={verba:['curado_verba','verba','verba'],quant:['curado_quant','quant','quantitativo'],crono:['curado_data','crono','data']};
+  const m=map[kind]; if(!m) return ''; const cur=i[m[0]], auto=i.auto&&i.auto[m[1]];
+  const open=`onclick="event.stopPropagation();openModal(${i.ordem},${i.obra_id||1})"`;
+  if(cur) return ` <span class="material-icons" title="${m[2]} CURADA — confirmada manualmente. Clique p/ abrir e editar." style="font-size:12px;color:var(--ok);cursor:pointer;vertical-align:-2px" ${open}>verified</span>`;
+  if(auto) return ` <span title="${m[2]} SUGERIDA pelo auto-vínculo (receita) — confira. Clique p/ abrir e confirmar." style="font-size:11px;cursor:pointer" ${open}>🤖</span>`;
+  return '';
+}
 function matExpBlock(i){
   const qt=i.quantitativo!=null?`${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}`:'—';
   const vb=verbaDefinida(i)?BRL(verbaDef(i)):'<span style="color:var(--pend)">a definir</span>';
   const rs=i.responsavel?esc(i.responsavel):'<span style="color:var(--pend)">sem resp.</span>';
   const forn=(i.fornecedor&&(''+i.fornecedor).trim())?`<div><b>Fornec.</b>${esc(i.fornecedor)}</div>`:'';   // só quando houver
-  return `<div class="mexpb"><div><b>Qtd</b>${qt}</div><div><b>Verba</b>${vb}</div><div><b>Resp</b>${rs}</div><div><b>Status</b>${esc(i.status||'Não Iniciado')}</div>${forn}</div>`;
+  return `<div class="mexpb"><div><b>Qtd</b>${qt}${matCurIcon('quant',i)}</div><div><b>Verba</b>${vb}${matCurIcon('verba',i)}</div><div><b>Resp</b>${rs}</div><div><b>Status</b>${esc(i.status||'Não Iniciado')}</div>${forn}</div>`;
 }
 function matGrpToggle(g){ if(MAT_COLLAPSED.has(g))MAT_COLLAPSED.delete(g); else MAT_COLLAPSED.add(g); renderMatriz(); }
 function matSvcToggle(ordem){ ordem=Number(ordem); if(MAT_EXP.has(ordem))MAT_EXP.delete(ordem); else MAT_EXP.add(ordem); renderMatriz(); }
@@ -1205,7 +1214,7 @@ function renderMatriz(){
       const dt=i&&i.fim_cotacao?(p=>p[2]+'/'+p[1]+'/'+p[0].slice(2))(i.fim_cotacao.split('-')):'';
       const tip=i?`${esc(o)} · ${esc(s.nome)}\n${txtMap[cls]||''}`+(i.fim_cotacao?` · fim cotação ${D(i.fim_cotacao)}`:'')+(i.responsavel?`\n${esc(i.responsavel)}`:''):'N/A';
       const click=i?`onclick="openModal(${i.ordem},${i.obra_id||1})"`:'';
-      const inner=dt?`<span class="cell-dt">${dt}</span>`:'';
+      const inner=dt?`<span class="cell-dt">${dt}${matCurIcon('crono',i)}</span>`:'';
       html+=`<td><div class="cell ${cls}" title="${tip}" ${click}>${inner}</div></td>`;
     }
     html+='</tr>';

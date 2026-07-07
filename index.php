@@ -3210,7 +3210,7 @@ async function cotIniciar(sid, obra, nome, grupo){
   const svNome=nome||(it&&it.nome)||(dic.servico&&dic.servico.nome)||'';
   const svGrupo=grupo||(it&&it.grupo)||(dic.servico&&dic.servico.grupo)||'';
   COT.novoServico=sid; COT.novoServicoNome=svNome; COT.novoConvidados=[]; COT.novoVincItem=it; COT.novoVincObra=obra?String(obra):'';
-  COT.novoPre={obra:obra?String(obra):'', titulo:svNome, categoria:svGrupo, descricao:(it&&it.escopo)||'', equalizacao:it?cotEqTexto(it):''};
+  COT.novoPre={obra:obra?String(obra):'', titulo:svNome, categoria:svGrupo, descricao:(it&&it.escopo)||'', equalizacao:it?cotEqTexto(it):'', verba:(it&&it.verba&&it.verba>0)?it.verba:'', verba_origem:it?cotVerbaOrigem(it):''};
   // itens a cotar: quantitativo REAL da obra → dicionário do serviço → 1 item vazio
   let itens=it?await cotItensFromQuant(it, obra):[]; let src=itens.length?'quantitativo da obra':'';
   if(!itens.length&&dic.itens&&dic.itens.length){ itens=dic.itens.map(i=>({descricao:i.descricao,unidade:i.unidade||'',quantidade:'',observacao:i.nota||''})); src='dicionário do serviço'; }
@@ -3245,18 +3245,17 @@ function cotRenderNovo(){
       ${cotFld('Obra','<select id="cotO">'+cotObraOpts(pre.obra||'')+'</select>')}
       ${cotFld('Categoria','<input id="cotC" value="'+esc(pre.categoria||'')+'" placeholder="Ex.: M.O. Gesso">')}
       ${cotFld('Tipo','<select id="cotTipo"><option>Material</option><option>M.O.</option><option>Material + MO</option><option>Locação</option><option>Serviço</option></select>')}
-      ${cotFld('Verba (R$)','<input id="cotV" type="number" placeholder="0">')}
+      ${cotFld('Verba (R$) <span id="cotVerbaChip">'+cotVerbaChip(pre.verba_origem||'')+'</span>','<input id="cotV" type="number" placeholder="0" value="'+(pre.verba!=null&&pre.verba!==''?esc(pre.verba):'')+'">')}
     </div>
-    ${cotFld('Descrição / escopo (vai na carta ao fornecedor)','<textarea id="cotD" rows="3" placeholder="Escopo / informações gerais da cotação">'+esc(pre.descricao||'')+'</textarea>','margin-top:8px')}
-    ${cotFld('Pontos a conferir por proposta — equalização (1 por linha)','<textarea id="cotEq" rows="3" placeholder="Ex.: Diesel incluso? · Faturamento mínimo diário · Mobilização/desmobilização · Retenção · ISS · ART">'+esc(pre.equalizacao||'')+'</textarea>','margin-top:8px')}
+    ${cotFld('Descrição / escopo (vai na carta ao fornecedor)','<textarea id="cotD" rows="5" style="width:100%" placeholder="Escopo / informações gerais da cotação">'+esc(pre.descricao||'')+'</textarea>','margin-top:8px')}
+    ${cotFld('Pontos a conferir por proposta — equalização (1 por linha)','<textarea id="cotEq" rows="8" style="width:100%" placeholder="Ex.: Diesel incluso? · Faturamento mínimo diário · Mobilização/desmobilização · Retenção · ISS · ART">'+esc(pre.equalizacao||'')+'</textarea>','margin-top:8px')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:6px"><b style="font-size:13px">Itens a cotar *</b>
       <span style="display:flex;gap:6px">${vinc?`<button class="btn-ghost" style="padding:4px 10px" onclick="cotSalvarDicionario()" title="Grava estes itens como padrão do serviço — as próximas cotações deste serviço já vêm com eles"><span class="material-icons" style="font-size:15px;vertical-align:-3px">menu_book</span> Salvar como padrão do serviço</button>`:''}
       <button class="btn-ghost" style="padding:4px 10px" onclick="cotImportarTexto()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">content_paste</span> Importar via texto</button></span></div>
     <div id="cotItens" style="margin-top:8px"></div>
     <button class="btn-ghost" style="margin-top:6px" onclick="cotAddItem()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar item</button>
-    <div style="margin-top:16px"><b style="font-size:13px">Fornecedores convidados (concorrência)</b> <span class="muted" style="font-size:11px">— quem vai participar; depois você acompanha quem respondeu</span></div>
-    <div style="position:relative;margin-top:6px"><div class="search" style="min-width:240px;max-width:360px"><span class="material-icons" style="color:var(--muted)">search</span><input id="cotFornBusca" placeholder="Buscar fornecedor por nome…" oninput="cotFornBuscaInput()" autocomplete="off"></div>
-      <div id="cotFornSug" style="display:none;position:absolute;top:100%;left:0;z-index:60;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.14);max-height:260px;overflow:auto;margin-top:2px;min-width:340px"></div></div>
+    <div style="margin-top:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:13px">Fornecedores convidados (concorrência)</b> <span class="muted" style="font-size:11px">— quem vai participar; depois você acompanha quem respondeu</span>
+      <button class="btn-ghost" style="padding:4px 11px" onclick="cotFornPickerOpen('novo')"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">group_add</span> Convidar fornecedores</button></div>
     <div id="cotConvidados" style="margin-top:8px"></div>
     <div style="margin-top:16px"><button class="btn-prim" onclick="cotCriar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Criar cotação</button></div>
   </div>`;
@@ -3288,6 +3287,70 @@ function cotRenderConvidados(){
   box.innerHTML=cv.length?('<div style="display:flex;flex-wrap:wrap;gap:6px">'+cv.map((c,i)=>`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-weight:600;display:inline-flex;align-items:center;gap:5px"><span class="material-icons" style="font-size:13px">business</span>${esc(c.nome)}<span onclick="cotDelConvidado(${i})" style="cursor:pointer;color:var(--pend)" title="tirar">×</span></span>`).join('')+`</div><div class="dmini" style="margin-top:4px">${cv.length} convidado(s)</div>`):'<div class="dmini">Nenhum convidado ainda — busque acima (dá pra adicionar depois também).</div>';
 }
 document.addEventListener('click',e=>{ if(!(e.target.closest&&e.target.closest('#cotFornBusca,#cotFornSug'))){ const b=document.getElementById('cotFornSug'); if(b) b.style.display='none'; } });
+/* ====== Picker de fornecedores — multi-seleção por nome/item OU por categoria (usado no criar e no mapa) ====== */
+let COT_PICK={mode:'novo', sel:{}, list:[], cats:[]}; let _cotPickT;
+async function cotFornPickerOpen(mode){
+  COT_PICK={mode, sel:{}, list:[], cats:COT_PICK.cats||[]};
+  let ov=document.getElementById('cotPickOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='cotPickOverlay'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;z-index:250;background:rgba(18,28,22,.5);display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=(e)=>{ if(e.target===ov) cotPickClose(); };
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;width:min(700px,96vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 70px rgba(0,0,0,.35)" onclick="event.stopPropagation()">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px">
+      <span class="material-icons" style="color:var(--verde)">group_add</span><b style="font-size:15px">Convidar fornecedores</b>
+      <span class="muted" style="font-size:11px">busque por nome/item, ou escolha uma categoria — marque vários e adicione de uma vez</span>
+      <button class="btn-ghost" style="margin-left:auto;padding:3px 9px" onclick="cotPickClose()">✕</button></div>
+    <div style="padding:12px 18px 8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <div class="search" style="flex:1;min-width:200px"><span class="material-icons" style="color:var(--muted)">search</span><input id="cotPickQ" placeholder="Nome, item ou categoria…" oninput="cotPickSearch()" autocomplete="off"></div>
+      <select id="cotPickCat" onchange="cotPickSearch()" style="padding:7px 8px;border:1px solid var(--line);border-radius:8px;max-width:240px;font-size:12.5px"><option value="">— navegar por categoria —</option></select>
+    </div>
+    <div id="cotPickList" style="flex:1;overflow:auto;padding:0 18px 4px;min-height:120px"><div class="dmini" style="padding:16px 0">Digite ao menos 2 letras ou escolha uma categoria.</div></div>
+    <div style="padding:12px 18px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px">
+      <span id="cotPickCount" class="muted" style="font-size:12.5px">0 selecionados</span>
+      <button class="btn-prim" style="margin-left:auto;padding:8px 16px" onclick="cotPickAdd()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">check</span> Adicionar selecionados</button></div>
+  </div>`;
+  if(!COT_PICK.cats.length){ try{ const d=await (await fetch('actions/fornecedores.php?categorias=1')).json(); COT_PICK.cats=d.categorias||[]; }catch(e){} }
+  const sel=document.getElementById('cotPickCat'); if(sel) sel.innerHTML='<option value="">— navegar por categoria —</option>'+COT_PICK.cats.map(c=>`<option value="${esc(c.nome)}">${esc(c.nome)}</option>`).join('');
+  const q=document.getElementById('cotPickQ'); if(q) q.focus();
+}
+function cotPickClose(){ const ov=document.getElementById('cotPickOverlay'); if(ov) ov.remove(); }
+function cotPickSearch(){
+  clearTimeout(_cotPickT);
+  _cotPickT=setTimeout(async()=>{
+    const q=(document.getElementById('cotPickQ')||{}).value||'', cat=(document.getElementById('cotPickCat')||{}).value||'', box=document.getElementById('cotPickList'); if(!box)return;
+    if(q.trim().length<2 && !cat){ box.innerHTML='<div class="dmini" style="padding:16px 0">Digite ao menos 2 letras ou escolha uma categoria.</div>'; return; }
+    box.innerHTML='<div class="dmini" style="padding:16px 0">Buscando…</div>';
+    const p=new URLSearchParams(); p.set('limit','300'); if(q.trim())p.set('q',q.trim()); if(cat)p.set('categoria',cat);
+    try{ const d=await (await fetch('actions/fornecedores.php?'+p.toString())).json(); COT_PICK.list=d.fornecedores||[]; cotPickRenderList(); }
+    catch(e){ box.innerHTML='<div class="dmini" style="padding:16px 0">Falha na busca.</div>'; }
+  },250);
+}
+function cotPickKey(f){ return f.id?('id:'+f.id):('n:'+(''+(f.nome||'')).toLowerCase().trim()); }
+function cotPickRenderList(){
+  const box=document.getElementById('cotPickList'); if(!box)return; const L=COT_PICK.list;
+  if(!L.length){ box.innerHTML='<div class="dmini" style="padding:16px 0">Nenhum fornecedor encontrado.</div>'; cotPickCount(); return; }
+  box.innerHTML=`<div class="dmini" style="padding:4px 0">${L.length} fornecedor(es)${L.length>=300?'+ (refine a busca)':''} — marque os que vão participar</div>`+L.map((f,i)=>{ const on=!!COT_PICK.sel[cotPickKey(f)];
+    return `<label style="display:flex;align-items:center;gap:9px;padding:7px 4px;border-bottom:1px solid #f2f4f3;cursor:pointer">
+      <input type="checkbox" ${on?'checked':''} onchange="cotPickToggle(${i})" style="width:16px;height:16px">
+      <span style="flex:1;font-size:12.5px"><b>${esc(f.nome)}</b> <span class="muted" style="font-size:10.5px">· ${esc(f.categoria||'sem categoria')}${f.cidade?' · '+esc(f.cidade):''}${f.tipo?' · '+esc(f.tipo):''}${f.itens?' · '+esc((''+f.itens).slice(0,40)):''}</span></span></label>`;
+  }).join('');
+  cotPickCount();
+}
+function cotPickToggle(i){ const f=COT_PICK.list[i]; if(!f)return; const k=cotPickKey(f); if(COT_PICK.sel[k])delete COT_PICK.sel[k]; else COT_PICK.sel[k]=f; cotPickCount(); }
+function cotPickCount(){ const n=Object.keys(COT_PICK.sel).length, el=document.getElementById('cotPickCount'); if(el)el.textContent=n+' selecionado'+(n===1?'':'s'); }
+async function cotPickAdd(){
+  const chosen=Object.values(COT_PICK.sel); if(!chosen.length){ toast('Marque ao menos um fornecedor'); return; }
+  const norm=f=>({id:f.id,nome:f.nome,categoria:f.categoria,contato:f.contato,email:f.email,telefone:f.telefone});
+  if(COT_PICK.mode==='convite'){
+    try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'convidar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,convidados:chosen.map(norm)})})).json();
+      if(r.error){toast(r.error);return;} cotPickClose(); toast(chosen.length+' fornecedor(es) convidado(s)'); cotOpen(COT.cur.cotacao.id);
+    }catch(e){ toast('Falha: '+e.message); }
+  } else {
+    COT.novoConvidados=COT.novoConvidados||[]; let add=0;
+    chosen.forEach(f=>{ if(!COT.novoConvidados.some(c=>(c.id&&c.id===f.id)||c.nome===f.nome)){ COT.novoConvidados.push(norm(f)); add++; } });
+    cotPickClose(); cotRenderConvidados(); toast(add+' convidado(s) adicionado(s)');
+  }
+}
 async function cotSalvarDicionario(){
   if(!COT.novoServico){ toast('Sem serviço vinculado'); return; }
   const itens=COT.novoItens.filter(it=>(it.descricao||'').trim()).map(it=>({descricao:it.descricao,unidade:it.unidade,nota:it.observacao}));
@@ -3337,14 +3400,22 @@ function cotVincPick(ordem){
   set('cotC',it.grupo,true);
   set('cotD',it.escopo,true);                                                  // ESCOPO do dicionário → Descrição (carta)
   set('cotEq',cotEqTexto(it),true);                                            // VARIÁVEIS A COTAR → pontos de equalização
+  set('cotV',(it.verba&&it.verba>0)?it.verba:'',true);                         // VERBA do vínculo do orçamento
+  const vo=cotVerbaOrigem(it); COT.novoPre=Object.assign(COT.novoPre||{},{verba_origem:vo});
+  const vc=document.getElementById('cotVerbaChip'); if(vc) vc.innerHTML=cotVerbaChip(vo);
   const box=document.getElementById('cotVincBox');
   if(box) box.outerHTML=`<div id="cotVincBox" class="dmini" style="margin:-4px 0 12px;color:var(--verde-d)"><span class="material-icons" style="font-size:13px;vertical-align:-3px">link</span> Vinculada ao radar: <b>${esc(it.nome)}</b> — puxei quantitativo, escopo e pontos de equalização (edite à vontade). <a onclick="cotVincClear()" style="cursor:pointer;text-decoration:underline">remover</a></div>`;
   const chip=document.getElementById('cotVincChip'); if(chip) chip.innerHTML=`<span class="dchip" style="background:#eef4f0;color:var(--verde-d)"><span class="material-icons" style="font-size:12px;vertical-align:-2px">link</span> vinculada: ${esc(it.nome)}</span>`;
   cotVincApply(it);
   toast('Vinculado ao item do radar: '+it.nome);
 }
-// VARIÁVEIS A COTAR (texto do dicionário, separado por "|") → pontos de equalização, 1 por linha
-function cotEqTexto(it){ return (it&&it.variaveis_cotar||'').split('|').map(s=>s.trim()).filter(Boolean).join('\n'); }
+// VARIÁVEIS A COTAR (texto do dicionário) → pontos de equalização, 1 por linha.
+// Separa por "|" (padrão Trinity); se vier em UM bloco, cai pra ";" (padrão de algumas obras, ex. DIAMOND).
+function cotEqTexto(it){ let raw=(it&&it.variaveis_cotar||'').trim(); if(!raw)return ''; let p=raw.split('|'); if(p.length<2)p=raw.split(';'); return p.map(s=>s.trim()).filter(Boolean).join('\n'); }
+// Procedência da verba herdada do item do radar (p/ o botão de info no mapa)
+function cotVerbaOrigem(it){ if(!it)return ''; if(it.curado_verba)return 'curada'; if(it.auto&&it.auto.verba)return 'auto'; if(it.verba)return 'definida'; return ''; }
+function cotVerbaChip(origem){ const m={curada:['var(--ok)','verified','curada (confirmada)'],auto:['var(--dourado)','smart_toy','sugerida pelo auto-vínculo'],definida:['var(--muted)','check','definida no item']}; const x=m[origem]; return x?`<span class="dchip" title="Verba ${esc(x[2])}" style="background:${x[0]};font-size:10px"><span class="material-icons" style="font-size:11px;vertical-align:-2px">${x[1]}</span> ${esc(x[2])}</span>`:''; }
+function cotVerbaInfoBtn(c){ const o=c&&c.verba_origem; if(!o)return ''; const m={curada:['var(--ok)','verified','Verba CURADA — confirmada manualmente no item do radar.'],auto:['var(--dourado)','smart_toy','Verba SUGERIDA pelo auto-vínculo (receita) — confira e cure no item.'],definida:['var(--muted)','info','Verba definida no item do radar (vínculo do orçamento).']}; const x=m[o]||m.definida; return `<span class="material-icons" title="${esc(x[2])}" style="font-size:14px;vertical-align:-2px;color:${x[0]};cursor:help">${x[1]}</span>`; }
 // preenche os "itens a cotar" — PREFERE o quantitativo real da obra; senão o dicionário do serviço
 async function cotVincApply(it){
   const vazio=!COT.novoItens||COT.novoItens.every(x=>!(x.descricao||'').trim()); if(!vazio)return;
@@ -3388,7 +3459,7 @@ function cotImportarTexto(){
 async function cotCriar(){
   const titulo=val('cotT').trim(); if(!titulo){toast('Dê um título à cotação');return;}
   const itens=COT.novoItens.filter(it=>(it.descricao||'').trim()); if(!itens.length){toast('Inclua ao menos um item');return;}
-  const body={acao:'criar',me:EU&&EU.bitrix_id,obra_id:Number(val('cotO'))||null,servico_id:COT.novoServico||null,titulo,categoria:val('cotC'),tipo_servico:val('cotTipo'),verba:Number(val('cotV'))||0,descricao:val('cotD'),equalizacao:val('cotEq'),itens,convidados:COT.novoConvidados||[]};
+  const body={acao:'criar',me:EU&&EU.bitrix_id,obra_id:Number(val('cotO'))||null,servico_id:COT.novoServico||null,titulo,categoria:val('cotC'),tipo_servico:val('cotTipo'),verba:Number(val('cotV'))||0,verba_origem:(COT.novoPre&&COT.novoPre.verba_origem)||'',descricao:val('cotD'),equalizacao:val('cotEq'),itens,convidados:COT.novoConvidados||[]};
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error);return;} toast('Cotação criada'); cotOpen(r.id);
   }catch(e){toast('Falha: '+e.message);}
@@ -3415,7 +3486,7 @@ function cotRenderDetalhe(){
       <div class="kpi"><div class="v">${props.length}</div><div class="l">propostas recebidas</div></div>
       <div class="kpi"><div class="v gold">${m.melhor_oferta?BRL(m.melhor_oferta):'—'}</div><div class="l">melhor fornecedor único${m.fornecedor_destaque?' · '+esc(m.fornecedor_destaque):''}</div></div>
       <div class="kpi"><div class="v" style="color:var(--ok)">${m.melhor_total?BRL(m.melhor_total):'—'}</div><div class="l">melhor compra (menor por item)</div></div>
-      <div class="kpi"><div class="v">${c.verba?BRL(c.verba):'—'}</div><div class="l">verba prevista</div></div>
+      <div class="kpi"><div class="v">${c.verba?BRL(c.verba):'—'} ${cotVerbaInfoBtn(c)}</div><div class="l">verba prevista${c.verba_origem?' · '+esc({curada:'curada ✓',auto:'auto 🤖',definida:'definida'}[c.verba_origem]||c.verba_origem):''}</div></div>
     </div></div>`;
   // ---- Concorrência (fornecedores convidados) ----
   const conv=d.convidados||[];
@@ -3427,7 +3498,7 @@ function cotRenderDetalhe(){
       ${CAN_EDIT&&!cf.respondeu?`<button class="btn-ghost" style="padding:2px 8px" onclick="cotPropostaDe(${JSON.stringify(cf.fornecedor_nome)})">Lançar proposta</button>`:''}
       ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="cotDesconvidar(${cf.id})" title="tirar da concorrência">×</button>`:''}</div>`).join('')+'</div>';
   else html+='<div class="dmini" style="margin-top:6px">Nenhum fornecedor convidado ainda — convide abaixo.</div>';
-  if(CAN_EDIT) html+=`<div style="position:relative;margin-top:8px"><div class="search" style="min-width:220px;max-width:340px"><span class="material-icons" style="color:var(--muted)">search</span><input id="cotConvBusca" placeholder="+ convidar fornecedor (nome, item ou categoria)…" oninput="cotConvBuscaInput()" autocomplete="off"></div><div id="cotConvSug" style="display:none;position:absolute;top:100%;left:0;z-index:60;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.14);max-height:240px;overflow:auto;margin-top:2px;min-width:320px"></div></div>`;
+  if(CAN_EDIT) html+=`<div style="margin-top:8px"><button class="btn-ghost" style="padding:5px 12px" onclick="cotFornPickerOpen('convite')"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">group_add</span> Convidar fornecedores</button></div>`;
   html+='</div>';
   html+=cotEqualizaPanel(d);
   if(!props.length){ html+='<div class="panel"><div class="empty">Nenhuma proposta ainda. Clique em "Cadastrar proposta" ou "Lançar proposta" de um convidado para montar o mapa.</div></div>'; }

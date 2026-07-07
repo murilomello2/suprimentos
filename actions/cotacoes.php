@@ -144,11 +144,11 @@ try {
         if (!$itens) throw new Exception('inclua ao menos um item a cotar');
         $now = date('c');
         $pdo->beginTransaction();
-        $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, descricao, equalizacao, status, aprovacao, criado_por, criado_nome, created_at, updated_at)
-                       VALUES (?,?,?,?,?,?,?,?, 'aberta', 'aguardando', ?,?,?,?)")
+        $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, verba_origem, descricao, equalizacao, status, aprovacao, criado_por, criado_nome, created_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?, 'aberta', 'aguardando', ?,?,?,?)")
             ->execute([$obra ?: null, ($in['servico_id'] ?? null) ?: null, $titulo, trim((string)($in['categoria'] ?? '')),
-                       trim((string)($in['tipo_servico'] ?? '')), (float)($in['verba'] ?? 0) ?: null, trim((string)($in['descricao'] ?? '')),
-                       trim((string)($in['equalizacao'] ?? '')), $me, $perms['nome'] ?? null, $now, $now]);
+                       trim((string)($in['tipo_servico'] ?? '')), (float)($in['verba'] ?? 0) ?: null, trim((string)($in['verba_origem'] ?? '')),
+                       trim((string)($in['descricao'] ?? '')), trim((string)($in['equalizacao'] ?? '')), $me, $perms['nome'] ?? null, $now, $now]);
         $cid = (int)$pdo->lastInsertId();
         $insI = $pdo->prepare("INSERT INTO cotacao_item (cotacao_id, descricao, unidade, quantidade, observacao, ordem) VALUES (?,?,?,?,?,?)");
         $o = 0;

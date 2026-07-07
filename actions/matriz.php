@@ -138,6 +138,12 @@ try {
             'convidados'=>(int)$cs['ultima']['convidados'], 'respostas'=>(int)$cs['ultima']['respostas'],
             'melhor'=>$cs['ultima']['melhor']!==null?(float)$cs['ultima']['melhor']:null,
         ] : null;
+        // STATUS AUTOMÁTICO: existe mapa de cotação vinculado e o status do item ainda é inicial → "Cotação Iniciada"
+        // (não sobrescreve um status manual mais avançado; só destrava o "Não Iniciado"/vazio)
+        if ($cs && in_array((string)($r['status'] ?? ''), ['', 'Não Iniciado'], true)) {
+            $d['status'] = 'Cotação Iniciada';
+            $d['status_auto'] = true;
+        }
         $verba_total += $verba;
         $r['obra_nome'] = $obra['nome']; // p/ identificação e busca multi-obra futura
         $itens[] = array_merge($r, $d);

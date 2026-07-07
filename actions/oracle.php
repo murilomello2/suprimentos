@@ -22,7 +22,9 @@ function oracle_post($url, $key, $payload) {
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_POST           => true,
         CURLOPT_HTTPHEADER     => ['Content-Type: application/json', 'Authorization: Bearer ' . $key],
-        CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE),
+        // JSON_INVALID_UTF8_SUBSTITUTE (7.2+): evita json_encode()==false se algum texto tiver UTF-8 quebrado
+        // (ex.: histórico cortado por substr no meio de um caractere) — sem ele, o corpo iria vazio → HTTP 400.
+        CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE | (defined('JSON_INVALID_UTF8_SUBSTITUTE') ? JSON_INVALID_UTF8_SUBSTITUTE : 0)),
         CURLOPT_TIMEOUT        => 120,
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_SSL_VERIFYHOST => 2,
@@ -186,24 +188,30 @@ function oracle_persona($cfg) {
 }
 
 // ================= FERRAMENTA: detalhar verba (function-calling da IA) =================
-// Resolve nome do item + nome da obra -> [servico_id, obra_id, nome_real].
+// Resolve nome do item + nome da obra -> [servico_id, obra_id, nome_real, erro].
+// erro: 'item_vazio' | 'obra_nao_encontrada' | null. NUNCA cai numa obra diferente quando a obra
+// foi especificada mas não casou (senão reportaria a verba da obra ERRADA silenciosamente).
 function oracle_resolve_item($pdo, $item, $obra) {
     $item = trim((string)$item); $obra = trim((string)$obra);
+    if ($item === '') return [null, null, null, 'item_vazio'];
     $obra_id = null;
     if ($obra !== '') {
         $q = $pdo->prepare("SELECT id FROM obra WHERE nome = ? LIMIT 1"); $q->execute([$obra]); $obra_id = $q->fetchColumn();
         if ($obra_id === false) { $q = $pdo->prepare("SELECT id FROM obra WHERE nome LIKE ? ORDER BY id LIMIT 1"); $q->execute(['%'.$obra.'%']); $obra_id = $q->fetchColumn(); }
+        if ($obra_id === false) return [null, null, null, 'obra_nao_encontrada'];  // obra citada mas inexistente
     }
-    if (!$obra_id) { $obra_id = $pdo->query("SELECT id FROM obra ORDER BY id LIMIT 1")->fetchColumn(); }
+    if (!$obra_id) { $obra_id = $pdo->query("SELECT id FROM obra ORDER BY id LIMIT 1")->fetchColumn(); }  // só quando obra veio vazia
     $obra_id = (int)$obra_id;
     $q = $pdo->prepare("SELECT s.id, s.nome FROM servico s JOIN radar_item r ON r.servico_id=s.id AND r.obra_id=? WHERE s.nome = ? LIMIT 1");
     $q->execute([$obra_id, $item]); $row = $q->fetch();
     if (!$row) { $q = $pdo->prepare("SELECT s.id, s.nome FROM servico s JOIN radar_item r ON r.servico_id=s.id AND r.obra_id=? WHERE s.nome LIKE ? ORDER BY s.id LIMIT 1"); $q->execute([$obra_id, '%'.$item.'%']); $row = $q->fetch(); }
-    return [$row ? (int)$row['id'] : null, $obra_id, $row ? $row['nome'] : null];
+    return [$row ? (int)$row['id'] : null, $obra_id, $row ? $row['nome'] : null, null];
 }
 
 function oracle_tool_detalhar_verba($pdo, $item, $obra) {
-    [$sid, $obra_id, $snome] = oracle_resolve_item($pdo, $item, $obra);
+    [$sid, $obra_id, $snome, $erro] = oracle_resolve_item($pdo, $item, $obra);
+    if ($erro === 'item_vazio') return ['encontrado'=>false, 'motivo'=>'Informe o nome do item para eu detalhar a verba.'];
+    if ($erro === 'obra_nao_encontrada') return ['encontrado'=>false, 'motivo'=>'Obra "'.$obra.'" não encontrada. Confirme o nome da obra (não vou assumir outra obra).'];
     $onome = ''; if ($obra_id) { $q = $pdo->prepare("SELECT nome FROM obra WHERE id=?"); $q->execute([$obra_id]); $onome = (string)$q->fetchColumn(); }
     if (!$sid) return ['encontrado'=>false, 'motivo'=>'Item "'.$item.'" não encontrado no radar da obra '.($onome ?: $obra).'.'];
     $bd = verba_breakdown_data($pdo, $sid, $obra_id);
@@ -307,9 +315,11 @@ try {
 
     // Loop de function-calling: a IA pode chamar detalhar_verba (quebra da verba) antes de responder.
     $base = ['model'=>$model, 'temperature'=>0.3, 'max_tokens'=>1500, 'tools'=>oracle_tools()];
-    $resposta = null;
-    for ($round = 0; $round < 3; $round++) {
-        [$code, $res, $err] = oracle_post('https://api.openai.com/v1/chat/completions', $key, array_merge($base, ['messages'=>$messages]));
+    $ROUNDS = 3; $resposta = null; $respondeu = false;
+    for ($round = 0; $round < $ROUNDS; $round++) {
+        $payload = array_merge($base, ['messages'=>$messages]);
+        if ($round === $ROUNDS - 1) $payload['tool_choice'] = 'none';   // último round: proíbe tools → força resposta em texto
+        [$code, $res, $err] = oracle_post('https://api.openai.com/v1/chat/completions', $key, $payload);
         if ($code !== 200) {
             $msg = 'Falha ao consultar a IA (HTTP ' . $code . ')';
             $ej = json_decode((string)$res, true);
@@ -320,7 +330,7 @@ try {
         $j = json_decode($res, true);
         $m = $j['choices'][0]['message'] ?? [];
         $calls = $m['tool_calls'] ?? null;
-        if (empty($calls)) { $resposta = $m['content'] ?? '(a IA não retornou resposta)'; break; }
+        if (empty($calls)) { $resposta = $m['content'] ?? '(a IA não retornou resposta)'; $respondeu = true; break; }
         $messages[] = $m;   // mensagem do assistant COM os tool_calls (obrigatória antes das respostas tool)
         foreach ($calls as $tc) {
             $fn = $tc['function']['name'] ?? '';
@@ -332,8 +342,8 @@ try {
         }
     }
     if ($resposta === null) $resposta = '(não consegui concluir a resposta — tente reformular a pergunta)';
-    // conta 1 uso do dia (admin não conta) — só depois da resposta OK
-    if (!$isAdmin && $limite > 0) {
+    // conta 1 uso do dia (admin não conta) — SÓ quando a IA de fato respondeu (não cobra por falha/round esgotado)
+    if (!$isAdmin && $limite > 0 && $respondeu) {
         $up = $pdo->prepare("UPDATE oracle_uso SET n=n+1 WHERE bitrix_id=? AND dia=?"); $up->execute([$bid, $hoje]);
         if ($up->rowCount() === 0) {
             try { $pdo->prepare("INSERT INTO oracle_uso (bitrix_id, dia, n) VALUES (?,?,1)")->execute([$bid, $hoje]); }

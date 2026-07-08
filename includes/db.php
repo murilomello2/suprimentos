@@ -164,6 +164,18 @@ function db_schema_mysql($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS oracle_uso (
         bitrix_id VARCHAR(64) NOT NULL, dia VARCHAR(10) NOT NULL, n INT DEFAULT 0, PRIMARY KEY (bitrix_id, dia)
     ) $E");
+    // Cartas convite — MODELO por serviço (camada 🔧) + CONFIG global Caprem (camada 🔒, 1 linha id=1)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS carta_modelo (
+        id INT NOT NULL AUTO_INCREMENT, servico_id INT, servico_nome VARCHAR(191), tipo VARCHAR(60),
+        objeto TEXT, norma_referencia TEXT, pes_ref VARCHAR(191),
+        escopo MEDIUMTEXT, criterios_medicao MEDIUMTEXT, equalizacao_campos MEDIUMTEXT, quantitativos_modelo MEDIUMTEXT,
+        observacoes TEXT, versao INT DEFAULT 1, is_padrao TINYINT DEFAULT 1, origem VARCHAR(40) DEFAULT 'seed',
+        criado_por VARCHAR(64), criado_nome VARCHAR(191), created_at VARCHAR(40), updated_at VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_cmod_serv (servico_id)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS carta_config (
+        id INT NOT NULL, bloco_json MEDIUMTEXT, updated_at VARCHAR(40), PRIMARY KEY (id)
+    ) $E");
     // colunas ADITIVAS na produção (radar_item já existe da migração; CREATE IF NOT EXISTS não adiciona coluna).
     // Usa ALTER (privilégio concedido) só se faltar. Espelha o self-heal do caminho SQLite.
     $rc = [];
@@ -363,6 +375,8 @@ function db_schema($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, proposta_id INTEGER, nome TEXT, arquivo TEXT, tamanho INTEGER, mime TEXT, criado_por TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cot_dicionario (id INTEGER PRIMARY KEY AUTOINCREMENT, servico_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, ordem INTEGER, nota TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_fornecedor (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, categoria TEXT, contato TEXT, email TEXT, telefone TEXT, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS carta_modelo (id INTEGER PRIMARY KEY AUTOINCREMENT, servico_id INTEGER, servico_nome TEXT, tipo TEXT, objeto TEXT, norma_referencia TEXT, pes_ref TEXT, escopo TEXT, criterios_medicao TEXT, equalizacao_campos TEXT, quantitativos_modelo TEXT, observacoes TEXT, versao INTEGER DEFAULT 1, is_padrao INTEGER DEFAULT 1, origem TEXT DEFAULT 'seed', criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS carta_config (id INTEGER PRIMARY KEY, bloco_json TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS oracle_uso (bitrix_id TEXT NOT NULL, dia TEXT NOT NULL, n INTEGER DEFAULT 0, PRIMARY KEY (bitrix_id, dia))");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_coti_cot ON cotacao_item(cotacao_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_prop_cot ON cotacao_proposta(cotacao_id)");

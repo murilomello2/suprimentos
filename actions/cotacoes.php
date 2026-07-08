@@ -120,6 +120,7 @@ try {
         $where = ''; $args = [];
         if (isset($_GET['obra']) && $_GET['obra'] !== '') { $where = 'WHERE c.obra_id=?'; $args[] = (int)$_GET['obra']; }
         $q = $pdo->prepare("SELECT c.id, c.obra_id, c.servico_id, c.titulo, c.categoria, c.tipo_servico, c.verba,
+                                   c.num_solicitacao, c.num_pedido,
                                    c.status, c.aprovacao, c.criado_nome, c.created_at, o.nome AS obra_nome,
                                    (SELECT COUNT(*) FROM cotacao_item ci WHERE ci.cotacao_id=c.id) AS n_itens,
                                    (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id) AS n_propostas,
@@ -145,11 +146,13 @@ try {
         if (!$itens) throw new Exception('inclua ao menos um item a cotar');
         $now = date('c');
         $pdo->beginTransaction();
-        $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, verba_origem, descricao, equalizacao, status, aprovacao, criado_por, criado_nome, created_at, updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?, 'aberta', 'aguardando', ?,?,?,?)")
+        $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, verba_origem, descricao, equalizacao, num_solicitacao, num_pedido, status, aprovacao, criado_por, criado_nome, created_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?, 'aberta', 'aguardando', ?,?,?,?)")
             ->execute([$obra ?: null, ($in['servico_id'] ?? null) ?: null, $titulo, trim((string)($in['categoria'] ?? '')),
                        trim((string)($in['tipo_servico'] ?? '')), (float)($in['verba'] ?? 0) ?: null, trim((string)($in['verba_origem'] ?? '')),
-                       trim((string)($in['descricao'] ?? '')), trim((string)($in['equalizacao'] ?? '')), $me, $perms['nome'] ?? null, $now, $now]);
+                       trim((string)($in['descricao'] ?? '')), trim((string)($in['equalizacao'] ?? '')),
+                       trim((string)($in['num_solicitacao'] ?? '')) ?: null, trim((string)($in['num_pedido'] ?? '')) ?: null,
+                       $me, $perms['nome'] ?? null, $now, $now]);
         $cid = (int)$pdo->lastInsertId();
         $insI = $pdo->prepare("INSERT INTO cotacao_item (cotacao_id, descricao, unidade, quantidade, observacao, ordem) VALUES (?,?,?,?,?,?)");
         $o = 0;
@@ -186,6 +189,19 @@ try {
         $verba = (float)($in['verba'] ?? 0);
         $pdo->prepare("UPDATE cotacao SET verba=?, verba_origem=?, updated_at=? WHERE id=?")
             ->execute([$verba ?: null, trim((string)($in['verba_origem'] ?? 'manual')), date('c'), $cid]);
+        echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'numeros_salvar') {   // nº da SOLICITAÇÃO de compra (SC) e/ou nº do PEDIDO de compra (PC)
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
+        $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
+        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+        $sets = []; $args = [];
+        if (array_key_exists('num_solicitacao', $in)) { $sets[] = 'num_solicitacao=?'; $args[] = trim((string)$in['num_solicitacao']) ?: null; }
+        if (array_key_exists('num_pedido', $in))      { $sets[] = 'num_pedido=?';      $args[] = trim((string)$in['num_pedido']) ?: null; }
+        if (!$sets) throw new Exception('nada a atualizar');
+        $sets[] = 'updated_at=?'; $args[] = date('c'); $args[] = $cid;
+        $pdo->prepare("UPDATE cotacao SET " . implode(',', $sets) . " WHERE id=?")->execute($args);
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -256,10 +272,22 @@ try {
 
     if ($acao === 'status') {
         $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
-        $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
+        $row = $pdo->prepare("SELECT COALESCE(obra_id,1) AS obra, servico_id, num_pedido FROM cotacao WHERE id=?"); $row->execute([$cid]);
+        $cot = $row->fetch(); if (!$cot) throw new Exception('cotação não encontrada');
+        $obra = (int)$cot['obra'];
         if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
         $sets = []; $args = [];
-        if (isset($in['status']) && in_array($in['status'], ['aberta','aguardando','finalizada'], true)) { $sets[] = 'status=?'; $args[] = $in['status']; }
+        // se veio o nº do pedido junto, grava e usa ele na trava
+        $pc = trim((string)($cot['num_pedido'] ?? ''));
+        if (array_key_exists('num_pedido', $in)) { $pc = trim((string)$in['num_pedido']); $sets[] = 'num_pedido=?'; $args[] = $pc ?: null; }
+        if (isset($in['status']) && in_array($in['status'], ['aberta','aguardando','finalizada'], true)) {
+            // TRAVA: cotação AVULSA (sem vínculo ao radar) só finaliza com nº do PEDIDO DE COMPRA — exceto admin (exceção)
+            if ($in['status'] === 'finalizada' && empty($cot['servico_id']) && $pc === '') {
+                $perms = user_perms($pdo, $me);
+                if (empty($perms['perm_admin'])) { echo json_encode(['error'=>'Informe o nº do PEDIDO DE COMPRA para finalizar esta cotação avulsa (sem vínculo ao radar).', 'precisa_pedido'=>true], JSON_UNESCAPED_UNICODE); exit; }
+            }
+            $sets[] = 'status=?'; $args[] = $in['status'];
+        }
         if (isset($in['aprovacao']) && in_array($in['aprovacao'], ['aguardando','aprovada','reprovada'], true)) { $sets[] = 'aprovacao=?'; $args[] = $in['aprovacao']; }
         if (!$sets) throw new Exception('nada a atualizar');
         $sets[] = 'updated_at=?'; $args[] = date('c'); $args[] = $cid;

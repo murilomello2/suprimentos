@@ -172,13 +172,14 @@ function carta_gerar($pdo, $cid) {
     if (!$cot) return ['error' => 'cotação não encontrada'];
     // TIPO da carta: cotação nascida de SOLICITAÇÃO (num_solicitacao + sem serviço) => carta de COTAÇÃO (material); senão CONVITE (serviço/radar)
     $tipo = (!empty($cot['num_solicitacao']) && empty($cot['servico_id'])) ? 'material' : 'convite';
-    $obraNome = $cot['obra_nome']; $obraCnpj = ''; $compradorResp = $cot['criado_nome'] ?? '';
-    if (!empty($cot['solic_coligada'])) {   // resolve nome comercial + CNPJ da obra + comprador responsável pelo de-para
-        $sq = $pdo->prepare("SELECT nome_comercial, cnpj, comprador_nome FROM solic_obra WHERE coligada=? AND obra_cod=?");
+    $obraNome = $cot['obra_nome']; $obraCnpj = ''; $obraEndereco = ''; $compradorResp = $cot['criado_nome'] ?? '';
+    if (!empty($cot['solic_coligada'])) {   // resolve nome comercial + CNPJ + endereço da obra + comprador responsável pelo de-para
+        $sq = $pdo->prepare("SELECT nome_comercial, cnpj, endereco, comprador_nome FROM solic_obra WHERE coligada=? AND obra_cod=?");
         $sq->execute([$cot['solic_coligada'], (string)($cot['solic_obra_cod'] ?? '')]); $so = $sq->fetch();
         if ($so) {
             if (!empty($so['nome_comercial'])) $obraNome = $so['nome_comercial'];
             $obraCnpj = (string)($so['cnpj'] ?? '');
+            $obraEndereco = (string)($so['endereco'] ?? '');
             if (!empty($so['comprador_nome'])) $compradorResp = $so['comprador_nome'];
         }
     }
@@ -202,7 +203,7 @@ function carta_gerar($pdo, $cid) {
             'categoria' => $cot['categoria'], 'servico_nome' => $cot['servico_nome'], 'servico_id' => $cot['servico_id'],
             'descricao' => $cot['descricao'], 'verba' => $cot['verba'], 'criado_nome' => $cot['criado_nome'],
             'created_at' => $cot['created_at'], 'num_solicitacao' => $cot['num_solicitacao'],
-            'tipo' => $tipo, 'obra_cnpj' => $obraCnpj, 'comprador_resp' => $compradorResp,
+            'tipo' => $tipo, 'obra_cnpj' => $obraCnpj, 'obra_endereco' => $obraEndereco, 'comprador_resp' => $compradorResp,
         ],
         'modelo' => $modelo,
         'tem_modelo' => (bool)$modelo,

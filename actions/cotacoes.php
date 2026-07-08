@@ -336,6 +336,10 @@ try {
         $pdo->prepare("DELETE FROM cotacao_item WHERE cotacao_id=?")->execute([$cid]);
         $pdo->prepare("DELETE FROM cotacao_fornecedor WHERE cotacao_id=?")->execute([$cid]);
         $pdo->prepare("DELETE FROM cotacao_anexo WHERE cotacao_id=?")->execute([$cid]);
+        $pdo->prepare("DELETE FROM carta_gerada WHERE cotacao_id=?")->execute([$cid]);
+        // desvincula a solicitação de compra que apontava p/ esta cotação (evita "marcação órfã" na fila de Solicitações)
+        // e reverte o status automático 'em_cotacao' -> 'pendente' (a solicitação volta a precisar de cotação)
+        try { $pdo->prepare("UPDATE solic_overlay SET cotacao_id=NULL, status=CASE WHEN status='em_cotacao' THEN 'pendente' ELSE status END WHERE cotacao_id=?")->execute([$cid]); } catch (Throwable $e) {}
         $pdo->prepare("DELETE FROM cotacao WHERE id=?")->execute([$cid]);
         $pdo->commit();
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;

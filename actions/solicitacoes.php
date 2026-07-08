@@ -42,13 +42,24 @@ try {
             foreach ($pares as $k => $p) { $o = $obraMap[$k] ?? null;
                 $out[] = ['coligada'=>$p['coligada'],'obra_cod'=>$p['obra_cod'],'n'=>$p['n'],
                     'nome_comercial'=>$o['nome_comercial'] ?? sol_nome_default($p['coligada'],$p['obra_cod']),
-                    'cnpj'=>$o['cnpj'] ?? '',
+                    'cnpj'=>$o['cnpj'] ?? '', 'endereco'=>$o['endereco'] ?? '',
                     'comprador_id'=>$o['comprador_id'] ?? '','comprador_nome'=>$o['comprador_nome'] ?? '',
                     'radar_obra_id'=>$o['radar_obra_id'] ?? null]; }
             usort($out, fn($a,$b)=>$b['n']-$a['n']);
             $usuarios = $pdo->query("SELECT bitrix_id, nome FROM usuario WHERE ativo=1 ORDER BY nome")->fetchAll();
             $radar = $pdo->query("SELECT id, nome FROM obra ORDER BY id")->fetchAll();
             echo json_encode(['obras'=>$out, 'usuarios'=>$usuarios, 'radar_obras'=>$radar], JSON_UNESCAPED_UNICODE); exit;
+        }
+
+        // HEAL: overlay apontando p/ cotação inexistente (o comprador excluiu a cotação) — limpa o vínculo pendurado
+        // e, se o status ainda era o automático 'em_cotacao', reverte p/ 'pendente' (a solicitação volta a precisar de cotação).
+        $cotIds = []; foreach ($pdo->query("SELECT id FROM cotacao") as $r) $cotIds[(int)$r['id']] = true;
+        foreach ($ovMap as $kk => $vv) {
+            if (!empty($vv['cotacao_id']) && !isset($cotIds[(int)$vv['cotacao_id']])) {
+                $ns = ($vv['status'] === 'em_cotacao') ? 'pendente' : $vv['status'];
+                $pdo->prepare("UPDATE solic_overlay SET cotacao_id=NULL, status=? WHERE id=?")->execute([$ns, $vv['id']]);
+                $ovMap[$kk]['cotacao_id'] = null; $ovMap[$kk]['status'] = $ns;
+            }
         }
 
         // LISTA + DASHBOARD
@@ -95,10 +106,11 @@ try {
         $compNome = '';
         if ($compId !== '') { $q = $pdo->prepare("SELECT nome FROM usuario WHERE bitrix_id=?"); $q->execute([$compId]); $compNome = (string)$q->fetchColumn(); }
         $cnpj = trim((string)($o['cnpj'] ?? ''));
+        $endereco = trim((string)($o['endereco'] ?? ''));
         $q = $pdo->prepare("SELECT id FROM solic_obra WHERE coligada=? AND obra_cod=?"); $q->execute([$col,$cod]); $id = (int)($q->fetchColumn() ?: 0);
-        $vals = [trim((string)($o['nome_comercial'] ?? '')), $cnpj ?: null, $compId ?: null, $compNome ?: null, ($o['radar_obra_id'] ?? null) ?: null];
-        if ($id) $pdo->prepare("UPDATE solic_obra SET nome_comercial=?, cnpj=?, comprador_id=?, comprador_nome=?, radar_obra_id=?, updated_at=? WHERE id=?")->execute(array_merge($vals,[$now,$id]));
-        else $pdo->prepare("INSERT INTO solic_obra (coligada,obra_cod,nome_comercial,cnpj,comprador_id,comprador_nome,radar_obra_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")->execute(array_merge([$col,$cod],$vals,[$now,$now]));
+        $vals = [trim((string)($o['nome_comercial'] ?? '')), $cnpj ?: null, $endereco ?: null, $compId ?: null, $compNome ?: null, ($o['radar_obra_id'] ?? null) ?: null];
+        if ($id) $pdo->prepare("UPDATE solic_obra SET nome_comercial=?, cnpj=?, endereco=?, comprador_id=?, comprador_nome=?, radar_obra_id=?, updated_at=? WHERE id=?")->execute(array_merge($vals,[$now,$id]));
+        else $pdo->prepare("INSERT INTO solic_obra (coligada,obra_cod,nome_comercial,cnpj,endereco,comprador_id,comprador_nome,radar_obra_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)")->execute(array_merge([$col,$cod],$vals,[$now,$now]));
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 

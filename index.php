@@ -256,6 +256,31 @@
   .oracintro-av img{height:224px;border-radius:18px;box-shadow:0 10px 30px rgba(0,0,0,.20);display:block}
   .oracintro-tx{flex:1 1 300px;max-width:480px;text-align:left}
   @media(max-width:860px){.oracintro{flex-direction:column;gap:14px;text-align:center;padding:16px 10px;height:auto}.oracintro-tx{text-align:center}.oracintro-av img{height:148px}}
+  /* Carta Convite — conferência + PDF/Word */
+  .cvdoc{max-width:900px;margin:0 auto;background:#fff;color:#1b221e;font-size:13.5px;line-height:1.6;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .cvmast{background:linear-gradient(160deg,#1e3a2e,#25493a);color:#eef4ef;padding:24px 34px}
+  .cvmast .br{font-weight:800;letter-spacing:.12em;font-size:11px;text-transform:uppercase;color:#cfe0d6}
+  .cvmast .kick{margin-top:14px;font-size:11px;font-weight:700;letter-spacing:.3em;text-transform:uppercase;color:#cbb26a}
+  .cvmast h2{font-family:Georgia,serif;font-size:23px;margin:4px 0 0;color:#fff;line-height:1.15}
+  .cvinfo{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+  .cvinfo>div{flex:1 1 170px;padding:10px 34px}
+  .cvinfo .k{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--verde-d)}
+  .cvbody{padding:20px 34px 30px}
+  .cvsec{margin-top:20px}
+  .cvsh{display:flex;align-items:baseline;gap:12px;border-bottom:2px solid #cbb26a;padding-bottom:6px;margin-bottom:10px}
+  .cvsn{font-family:Georgia,serif;font-size:24px;font-weight:700;color:#b0862a;line-height:1}
+  .cvst{font-size:15px;font-weight:800;color:var(--verde-d)}
+  .cvdoc ul{margin:0 0 10px;padding-left:18px} .cvdoc li{margin-bottom:6px}
+  .cvdoc table{width:100%;border-collapse:collapse;font-size:12.5px;margin:6px 0}
+  .cvdoc th{background:#1e3a2e;color:#fff;text-align:left;padding:6px 9px;font-size:11px;text-transform:uppercase;font-weight:700}
+  .cvdoc td{padding:6px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  .cvph{background:#f5eed6;color:#7a5e12;padding:0 4px;border-radius:3px}
+  .cvnote{border-left:3px solid #b0862a;background:#f5eed6;padding:9px 13px;border-radius:0 6px 6px 0;color:#5f4b12;font-size:12.5px;margin:6px 0}
+  .cvgrid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  .cvcard{border:1px solid var(--line);border-radius:8px;padding:11px 13px} .cvcard h5{margin:0 0 5px;font-size:10.5px;text-transform:uppercase;color:var(--verde-d)} .cvcard p{margin:0;font-size:12px}
+  .cvdoc [contenteditable=true]:focus{outline:2px solid rgba(203,178,106,.5);border-radius:3px}
+  @media(max-width:640px){.cvmast,.cvbody,.cvinfo>div{padding-left:18px;padding-right:18px}.cvgrid3{grid-template-columns:1fr}}
+  @media print{ body *{visibility:hidden!important} #cvGerada,#cvGerada *{visibility:visible!important} #cvGerada{position:absolute;left:0;top:0;width:100%} #cvGerada .cvdoc{border:none;max-width:none} .cv-noprint{display:none!important} .cvsec{break-inside:avoid} @page{size:A4;margin:12mm} }
   /* Mapa em UMA PÁGINA (resumo imprimível) */
   .up-tbl{width:100%;border-collapse:collapse;font-size:11px}
   .up-tbl th,.up-tbl td{border:1px solid #e3e8e6;padding:5px 7px;text-align:center;vertical-align:top}
@@ -467,6 +492,7 @@
     <div class="dtabs" id="cottabs" style="margin-bottom:12px">
       <button class="dtab on" id="ctab-cotacoes" onclick="cotTab('cotacoes')"><span class="material-icons">request_quote</span> Cotações</button>
       <button class="dtab" id="ctab-fornecedores" onclick="cotTab('fornecedores')"><span class="material-icons">groups</span> Fornecedores</button>
+      <button class="dtab" id="ctab-cartas" onclick="cotTab('cartas')"><span class="material-icons">description</span> Modelos de carta</button>
     </div>
     <div id="cotwrap"><div class="dempty">Carregando…</div></div>
    </section>
@@ -3384,8 +3410,8 @@ function renderDashOpp(D){
 /* ===================== MAPA DE COTAÇÕES ===================== */
 let COT={mode:'list', tab:'cotacoes', list:[], obra:'', cur:null, novoItens:[], prop:null};
 function cotInit(){ cotTab(COT.tab||'cotacoes'); }
-function cotTab(t){ COT.tab=t; ['cotacoes','fornecedores'].forEach(x=>{const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x===t);});
-  if(t==='fornecedores') fornLoad(); else cotLoad(); }
+function cotTab(t){ COT.tab=t; ['cotacoes','fornecedores','cartas'].forEach(x=>{const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x===t);});
+  if(t==='fornecedores') fornLoad(); else if(t==='cartas') cartaLoad(); else cotLoad(); }
 function cotStChip(s){ const m={aberta:['#8a9299','Aberta'],aguardando:['var(--dourado)','Aguardando'],finalizada:['var(--ok)','Finalizada']}; const x=m[s]||['#8a9299',s]; return `<span class="dchip" style="background:${x[0]}">${x[1]}</span>`; }
 function cotStLabel(s){ return ({aberta:'Aberta',aguardando:'Aguardando',finalizada:'Finalizada'})[s]||s; }
 function cotFmtDT(iso){ if(!iso)return '—'; const d=new Date(iso); if(isNaN(d.getTime()))return '—'; const p=n=>('0'+n).slice(-2); return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes()); }
@@ -3749,6 +3775,7 @@ function cotRenderDetalhe(){
       <b style="font-size:16px">${esc(c.titulo)}</b> ${cotStChip(c.status)}
       <span class="muted" style="font-size:12px">${esc(c.obra_nome||'sem obra')}${c.categoria?' · '+esc(c.categoria):''}${c.tipo_servico?' · '+esc(c.tipo_servico):''}</span>
       <span style="margin-left:auto;display:flex;gap:6px">
+        ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cartaGerar(${c.id})" title="Gerar a carta convite desta cotação (PDF/Word)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> Gerar carta</button>`:''}
         <button class="btn-ghost" style="padding:6px 12px" onclick="cotUmaPagina()" title="Resumo de uma página, pronto pra imprimir/PDF"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Uma página</button>
         ${CAN_EDIT?`<button class="btn-prim" style="padding:6px 12px" onclick="cotProposta()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Cadastrar proposta</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotFinalizar()">${c.status==='finalizada'?'Reabrir':'Finalizar'}</button>`:''}
@@ -4040,6 +4067,183 @@ async function cotConvidar(idx){ const f=(COT.convBusca||[])[idx]; if(!f)return;
   }catch(e){toast('Falha: '+e.message);} }
 document.addEventListener('click',e=>{ if(!(e.target.closest&&e.target.closest('#cotConvBusca,#cotConvSug'))){ const b=document.getElementById('cotConvSug'); if(b) b.style.display='none'; } });
 
+/* ---------- Modelos de Carta Convite (sub-aba) + geração ---------- */
+const CART={modelos:[],config:null,servicos:[],mode:'list',cur:null,gen:null};
+async function cartaLoad(){
+  const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Carregando modelos de carta…</div>';
+  try{ const j=await (await fetch('actions/cartas.php?me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    CART.modelos=j.modelos||[]; CART.config=j.config||null; CART.servicos=j.servicos||[]; CART.mode='list'; cartaRender();
+  }catch(e){ w.innerHTML='<div class="empty">Falha ao carregar modelos.</div>'; }
+}
+function cartaServNome(id){ if(!id)return ''; const s=CART.servicos.find(x=>String(x.id)===String(id)); return s?s.nome:('#'+id); }
+function cartaRender(){
+  if(CART.mode==='edit') return cartaRenderEdit();
+  if(CART.mode==='config') return cartaRenderConfig();
+  const w=document.getElementById('cotwrap');
+  const rows=CART.modelos.map(m=>`<tr style="cursor:pointer" onclick="cartaEditar(${m.id})">
+    <td><b>${esc(m.servico_nome||'')}</b></td><td class="muted" style="font-size:12px">${esc(m.tipo||'')}</td>
+    <td>${m.servico_id?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d)">${esc(cartaServNome(m.servico_id))}</span>`:'<span class="dchip" style="background:var(--pend)">atribuir serviço</span>'}</td>
+    <td class="muted" style="font-size:11px">${esc(m.pes_ref||'—')}</td>
+    <td style="text-align:center">${Number(m.tem_medicao)?'<span title="tem critérios de medição" style="color:var(--ok);font-weight:700">✓</span>':'<span style="color:var(--pend)">—</span>'}</td>
+    <td style="text-align:right">${m.origem==='seed'?'<span class="dchip" style="background:#8a9299;font-size:10px">seed IA</span>':'<span class="dchip" style="background:var(--ok);font-size:10px">curado</span>'} <span class="material-icons" style="color:var(--muted);vertical-align:-4px">chevron_right</span></td></tr>`).join('');
+  w.innerHTML=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div><b style="font-size:14px">Modelos de carta convite</b> <span class="muted" style="font-size:11.5px">— o conteúdo padrão por serviço (escopo, critérios de medição, equalização). Editar aqui vale p/ toda cotação do serviço.</span></div>
+      ${IS_ADMIN?`<button class="btn-ghost" style="padding:6px 12px" onclick="cartaConfigAbrir()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">gavel</span> Bloco padrão Caprem</button>`:''}
+    </div></div>
+    <div class="wrap"><table><thead><tr><th>Serviço (modelo)</th><th>Tipo</th><th>Serviço vinculado</th><th>PES</th><th style="text-align:center">Medição</th><th></th></tr></thead>
+    <tbody>${rows||'<tr><td colspan="6" class="empty">Nenhum modelo cadastrado.</td></tr>'}</tbody></table></div>`;
+}
+async function cartaEditar(id){
+  try{ const j=await (await fetch('actions/cartas.php?modelo='+id+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    if(!j.modelo){toast('Modelo não encontrado');return;} CART.cur=j.modelo; CART.mode='edit'; cartaRender();
+  }catch(e){toast('Falha');}
+}
+function cartaRenderEdit(){
+  const m=CART.cur, w=document.getElementById('cotwrap'), L=a=>(a||[]).join('\n');
+  const servOpts='<option value="">— nenhum (atribuir) —</option>'+CART.servicos.map(s=>`<option value="${s.id}" ${String(s.id)===String(m.servico_id)?'selected':''}>${esc(s.nome)}</option>`).join('');
+  w.innerHTML=`<div class="panel">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap"><button class="btn-ghost" onclick="CART.mode='list';cartaRender()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button>
+      <b style="font-size:15px">Modelo · ${esc(m.servico_nome||'')}</b> ${m.origem==='seed'?'<span class="dchip" style="background:#8a9299;font-size:10px">seed IA — confira e cure</span>':''}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      ${cotFld('Nome do serviço (modelo)','<input id="cm_nome" value="'+esc(m.servico_nome||'')+'">')}
+      ${cotFld('Serviço vinculado <span class="muted" style="font-weight:400">(usado na geração da carta)</span>','<select id="cm_serv">'+servOpts+'</select>')}
+      ${cotFld('Tipo','<input id="cm_tipo" value="'+esc(m.tipo||'')+'" placeholder="Mão de obra / Empreitada / Material + MO…">')}
+      ${cotFld('PES (procedimento de inspeção)','<input id="cm_pes" value="'+esc(m.pes_ref||'')+'">')}
+    </div>
+    ${cotFld('Objeto (1-2 frases)','<textarea id="cm_obj" rows="2" style="width:100%">'+esc(m.objeto||'')+'</textarea>','margin-top:8px')}
+    ${cotFld('Normas de referência (uma por linha)','<textarea id="cm_norma" rows="2" style="width:100%">'+esc(L(m.norma_referencia))+'</textarea>','margin-top:8px')}
+    ${cotFld('Escopo — incluso / da obra (um por linha)','<textarea id="cm_escopo" rows="7" style="width:100%">'+esc(L(m.escopo))+'</textarea>','margin-top:8px')}
+    ${cotFld('Critérios de medição (um por linha) — o coração','<textarea id="cm_med" rows="7" style="width:100%">'+esc(L(m.criterios_medicao))+'</textarea>','margin-top:8px')}
+    ${cotFld('Campos de equalização — o que a proposta declara (um por linha)','<textarea id="cm_eq" rows="5" style="width:100%">'+esc(L(m.equalizacao_campos))+'</textarea>','margin-top:8px')}
+    ${cotFld('Quantitativos-modelo (item | unidade, um por linha)','<textarea id="cm_quant" rows="4" style="width:100%">'+esc((m.quantitativos_modelo||[]).map(q=>(q.item||'')+' | '+(q.unidade||'')).join('\n'))+'</textarea>','margin-top:8px')}
+    ${cotFld('Observações','<textarea id="cm_obs" rows="2" style="width:100%">'+esc(m.observacoes||'')+'</textarea>','margin-top:8px')}
+    <div style="margin-top:12px"><button class="btn-prim" onclick="cartaSalvar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar modelo</button></div>
+  </div>`;
+}
+async function cartaSalvar(){
+  const g=id=>((document.getElementById(id)||{}).value||''), lines=id=>g(id).split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  const quant=g('cm_quant').split(/\r?\n/).map(l=>{const p=l.split('|');return (p[0]||'').trim()?{item:p[0].trim(),unidade:(p[1]||'').trim()}:null;}).filter(Boolean);
+  const modelo={id:CART.cur.id,servico_nome:g('cm_nome'),servico_id:Number(g('cm_serv'))||null,tipo:g('cm_tipo'),pes_ref:g('cm_pes'),objeto:g('cm_obj'),norma_referencia:lines('cm_norma'),escopo:lines('cm_escopo'),criterios_medicao:lines('cm_med'),equalizacao_campos:lines('cm_eq'),quantitativos_modelo:quant,observacoes:g('cm_obs')};
+  try{ const r=await (await fetch('actions/cartas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'save_modelo',me:EU&&EU.bitrix_id,modelo})})).json();
+    if(r.error){toast(r.error);return;} toast('Modelo salvo'); cartaLoad(); }catch(e){toast('Falha: '+e.message);}
+}
+function cartaConfigAbrir(){ CART.mode='config'; cartaRender(); }
+function cartaRenderConfig(){
+  const c=CART.config||{}, s=c.seguranca||{}, w=document.getElementById('cotwrap'), L=a=>(a||[]).join('\n');
+  w.innerHTML=`<div class="panel">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><button class="btn-ghost" onclick="CART.mode='list';cartaRender()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button><b style="font-size:15px">Bloco padrão Caprem</b></div>
+    <div class="dmini" style="margin-bottom:10px">O texto FIXO que entra em toda carta (obrigações, SST, julgamento, faturamento, contatos). Editar aqui vale para todas.</div>
+    ${cotFld('Obrigações da contratada (uma por linha)','<textarea id="cc_obr" rows="6" style="width:100%">'+esc(L(c.obrigacoes))+'</textarea>')}
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:8px">
+      ${cotFld('SST · a cada medição','<textarea id="cc_s1" rows="4" style="width:100%">'+esc(s.a_cada_medicao||'')+'</textarea>')}
+      ${cotFld('SST · da empresa','<textarea id="cc_s2" rows="4" style="width:100%">'+esc(s.da_empresa||'')+'</textarea>')}
+      ${cotFld('SST · dos empregados','<textarea id="cc_s3" rows="4" style="width:100%">'+esc(s.dos_empregados||'')+'</textarea>')}
+    </div>
+    ${cotFld('SST · nota (EPI / atraso de pagamento)','<textarea id="cc_snota" rows="2" style="width:100%">'+esc(s.nota||'')+'</textarea>','margin-top:8px')}
+    ${cotFld('Julgamento das propostas (uma por linha)','<textarea id="cc_julg" rows="3" style="width:100%">'+esc(L(c.julgamento))+'</textarea>','margin-top:8px')}
+    ${cotFld('Faturamento e pagamento','<textarea id="cc_fat" rows="3" style="width:100%">'+esc(c.faturamento||'')+'</textarea>','margin-top:8px')}
+    ${cotFld('Contato gestor de suprimentos','<input id="cc_gest" style="width:100%" value="'+esc((c.contatos||{}).gestor_suprimentos||'')+'">','margin-top:8px')}
+    ${cotFld('Declaração final','<textarea id="cc_decl" rows="2" style="width:100%">'+esc(c.declaracao||'')+'</textarea>','margin-top:8px')}
+    ${cotFld('Validade da proposta (dias)','<input id="cc_val" type="number" style="width:120px" value="'+esc(c.validade_dias||30)+'">','margin-top:8px')}
+    <div style="margin-top:12px"><button class="btn-prim" onclick="cartaConfigSalvar()">Salvar bloco Caprem</button></div>
+  </div>`;
+}
+async function cartaConfigSalvar(){
+  const g=id=>((document.getElementById(id)||{}).value||''), lines=id=>g(id).split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  const config={obrigacoes:lines('cc_obr'),seguranca:{a_cada_medicao:g('cc_s1'),da_empresa:g('cc_s2'),dos_empregados:g('cc_s3'),nota:g('cc_snota')},julgamento:lines('cc_julg'),faturamento:g('cc_fat'),contatos:{gestor_suprimentos:g('cc_gest')},declaracao:g('cc_decl'),validade_dias:Number(g('cc_val'))||30};
+  try{ const r=await (await fetch('actions/cartas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'save_config',me:EU&&EU.bitrix_id,config})})).json();
+    if(r.error){toast(r.error);return;} toast('Bloco Caprem salvo'); cartaLoad(); }catch(e){toast('Falha');}
+}
+/* --- GERAÇÃO da carta a partir de uma cotação --- */
+async function cartaGerar(cid){
+  const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Montando a carta…</div>';
+  try{ const g=await (await fetch('actions/cartas.php?gerar='+cid+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    if(g.error){w.innerHTML='<div class="empty">'+esc(g.error)+'</div>';return;} CART.gen=g; cartaRenderGerar();
+  }catch(e){ w.innerHTML='<div class="empty">Falha ao gerar.</div>'; }
+}
+function cvList(a){ return (a&&a.length)?'<ul>'+a.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':''; }
+function cartaMontarHTML(g){
+  const c=g.cotacao||{}, m=g.modelo||null, cf=g.config||{}, s=cf.seguranca||{};
+  const titulo=(c.servico_nome||(m&&m.servico_nome)||c.titulo||'').replace(/^(Execução de|Execução|MO)\s*/i,'').trim()||c.titulo||'Serviço';
+  const norma=m&&m.norma_referencia&&m.norma_referencia.length?m.norma_referencia.join(' / '):'—';
+  const eqCampos=[...new Set([...(m?m.equalizacao_campos:[]),...(g.equalizacao_cotacao||[])])];
+  const quant=g.quantitativos||[];
+  let h=`<div class="cvdoc" id="cvInner" contenteditable="true">
+    <div class="cvmast"><div class="br">◤ Caprem Construtora · Engenharia &amp; Fundações</div>
+      <div class="kick">Carta Convite</div><h2>${esc(titulo)}</h2></div>
+    <div class="cvinfo">
+      <div><div class="k">Obra</div><div>${esc(c.obra_nome||'—')}</div></div>
+      <div><div class="k">Norma de referência</div><div>${esc(norma)}</div></div>
+      <div><div class="k">Procedimento (PES)</div><div>${esc((m&&m.pes_ref)||'—')}</div></div>
+    </div>
+    <div class="cvbody">`;
+  if(!m) h+=`<div class="cvnote cv-noprint">⚠️ Não há modelo vinculado a este serviço — a carta saiu só com os blocos padrão + quantitativos. Atribua um modelo na aba <b>Modelos de carta</b>.</div>`;
+  // 00 Apresentação
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">00</span><span class="cvst">Apresentação</span></div>
+    <p>${esc((m&&m.objeto)||c.descricao||'')||'<span class="cvph">[objeto — descreva o serviço]</span>'}</p></div>`;
+  // 01 Especificação
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">01</span><span class="cvst">Especificação e critérios de medição</span></div>
+    ${m&&m.escopo.length?'<p><b>Escopo</b></p>'+cvList(m.escopo):''}
+    ${m&&m.criterios_medicao.length?'<p><b>Critérios de medição</b></p>'+cvList(m.criterios_medicao):'<p class="cvph">[defina o escopo e os critérios de medição no modelo do serviço]</p>'}</div>`;
+  // 02 Quantitativos
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">02</span><span class="cvst">Quantitativos</span></div>
+    <table><thead><tr><th>Item</th><th style="width:70px">Unid.</th><th style="width:110px;text-align:right">Qtde</th></tr></thead><tbody>
+    ${quant.length?quant.map(q=>`<tr><td>${esc(q.item||'')}</td><td>${esc(q.unidade||'')}</td><td style="text-align:right">${q.qtde!=null&&q.qtde!==''?esc(cotNum(q.qtde)):'—'}</td></tr>`).join(''):'<tr><td colspan="3" class="cvph">[itens da cotação]</td></tr>'}
+    </tbody></table></div>`;
+  // 03 Planilha de preços / equalização
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">03</span><span class="cvst">Planilha de preços e equalização</span></div>
+    <p>A proponente deve cotar e declarar expressamente:</p>
+    <table><thead><tr><th>Campo a declarar / cotar</th><th style="width:150px">Resposta da proponente</th></tr></thead><tbody>
+    ${(eqCampos.length?eqCampos:['Preço unitário','Prazo de execução','Validade da proposta']).map(x=>`<tr><td>${esc(x)}</td><td style="color:#9aa">____________________</td></tr>`).join('')}
+    </tbody></table></div>`;
+  // 04 Obrigações
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">04</span><span class="cvst">Obrigações da contratada</span></div>${cvList(cf.obrigacoes)}</div>`;
+  // 05 Segurança
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">05</span><span class="cvst">Segurança e documentação</span></div>
+    <div class="cvgrid3"><div class="cvcard"><h5>A cada medição</h5><p>${esc(s.a_cada_medicao||'')}</p></div>
+      <div class="cvcard"><h5>Da empresa</h5><p>${esc(s.da_empresa||'')}</p></div>
+      <div class="cvcard"><h5>Dos empregados</h5><p>${esc(s.dos_empregados||'')}</p></div></div>
+    ${s.nota?`<div class="cvnote">${esc(s.nota)}</div>`:''}</div>`;
+  // 06 Julgamento
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">06</span><span class="cvst">Julgamento das propostas</span></div>${cvList(cf.julgamento)}</div>`;
+  // 07 Faturamento
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">07</span><span class="cvst">Faturamento e pagamento</span></div><p>${esc(cf.faturamento||'')}</p></div>`;
+  // 08 Contatos
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">08</span><span class="cvst">Esclarecimentos e contatos</span></div>
+    <p><b>Gestor de suprimentos:</b> ${esc((cf.contatos||{}).gestor_suprimentos||'')}</p>
+    <p><b>Validade da proposta:</b> mínimo ${esc(cf.validade_dias||30)} dias · <b>Distribuição:</b> <span class="cvph">__/__/____</span> · <b>Retorno até:</b> <span class="cvph">__/__/____</span></p>
+    ${cf.declaracao?`<p style="font-style:italic;border-left:2px solid #cbb26a;padding-left:10px;color:#455">"${esc(cf.declaracao)}"</p>`:''}</div>`;
+  h+=`</div></div>`;
+  return h;
+}
+function cartaRenderGerar(){
+  const w=document.getElementById('cotwrap'), g=CART.gen, cid=g.cotacao.id;
+  w.innerHTML=`<div class="cv-noprint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn-ghost" onclick="cotOpen(${cid})"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar ao mapa</button>
+      <button class="btn-prim" style="padding:6px 13px" onclick="window.print()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">print</span> Imprimir / PDF</button>
+      <button class="btn-ghost" style="padding:6px 13px" onclick="cartaWord()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Baixar Word</button>
+      <button class="btn-ghost" style="padding:6px 13px" onclick="cartaAnexarGerada()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar na cotação</button>
+      <span class="muted" style="font-size:11.5px">Confira e edite o texto direto na carta antes de gerar (clique e digite).</span></div>
+    <div id="cvGerada">${cartaMontarHTML(g)}</div>`;
+  window.scrollTo(0,0);
+}
+function cartaExportHTML(){
+  const inner=document.getElementById('cvInner'); if(!inner)return '';
+  const css=[...document.styleSheets].map(ss=>{try{return [...ss.cssRules].filter(r=>/\.cv|cvdoc/.test(r.selectorText||'')).map(r=>r.cssText).join('')}catch(e){return''}}).join('');
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><style>${css}</style></head><body>${inner.outerHTML}</body></html>`;
+}
+function cartaWord(){
+  const html=cartaExportHTML(); const blob=new Blob(['﻿'+html],{type:'application/msword'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='Carta_Convite_'+((CART.gen.cotacao.servico_nome||CART.gen.cotacao.titulo||'servico').replace(/[^\w]+/g,'_').slice(0,40))+'.doc';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+async function cartaAnexarGerada(){
+  const inner=document.getElementById('cvInner'); if(!inner)return;
+  const html=cartaExportHTML();
+  try{ const r=await (await fetch('actions/cartas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_carta',me:EU&&EU.bitrix_id,cotacao_id:CART.gen.cotacao.id,servico_nome:CART.gen.cotacao.servico_nome||'',titulo:'Carta Convite · '+(CART.gen.cotacao.titulo||''),html})})).json();
+    if(r.error){toast(r.error);return;} toast('Carta salva na cotação'); }catch(e){toast('Falha: '+e.message);}
+}
 /* ---------- Fornecedores (sub-aba do Mapa de Cotações) ---------- */
 let FORN={list:[],cats:[],tipos:[],total:0,f:{nome:'',categoria:'',tipo:'',itens:''},edit:null};
 async function fornLoad(){

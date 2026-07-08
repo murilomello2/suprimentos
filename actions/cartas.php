@@ -70,11 +70,20 @@ try {
             $m = $q->fetch(); echo json_encode(['modelo' => $m ? carta_modelo_out($m) : null], JSON_UNESCAPED_UNICODE); exit;
         }
         if (isset($_GET['gerar'])) { echo json_encode(carta_gerar($pdo, (int)$_GET['gerar']), JSON_UNESCAPED_UNICODE); exit; }
+        if (isset($_GET['geradas'])) {
+            $q = $pdo->prepare("SELECT id, titulo, servico_nome, criado_nome, created_at FROM carta_gerada WHERE cotacao_id=? ORDER BY id DESC"); $q->execute([(int)$_GET['geradas']]);
+            echo json_encode(['geradas' => $q->fetchAll()], JSON_UNESCAPED_UNICODE); exit;
+        }
+        if (isset($_GET['gerada'])) {
+            $q = $pdo->prepare("SELECT id, cotacao_id, titulo, html, created_at FROM carta_gerada WHERE id=?"); $q->execute([(int)$_GET['gerada']]);
+            echo json_encode(['gerada' => $q->fetch() ?: null], JSON_UNESCAPED_UNICODE); exit;
+        }
         // lista compacta
         $ms = $pdo->query("SELECT id, servico_id, servico_nome, tipo, pes_ref, is_padrao, versao, updated_at,
                                   (LENGTH(criterios_medicao)>4) AS tem_medicao, (LENGTH(equalizacao_campos)>4) AS tem_eq
                            FROM carta_modelo ORDER BY servico_nome")->fetchAll();
-        echo json_encode(['modelos' => $ms, 'config' => carta_get_config($pdo)], JSON_UNESCAPED_UNICODE); exit;
+        $servs = $pdo->query("SELECT DISTINCT id, nome FROM servico ORDER BY nome")->fetchAll();
+        echo json_encode(['modelos' => $ms, 'config' => carta_get_config($pdo), 'servicos' => $servs], JSON_UNESCAPED_UNICODE); exit;
     }
 
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
@@ -126,6 +135,21 @@ try {
             $n++;
         }
         echo json_encode(['ok' => true, 'n' => $n], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'salvar_carta') {   // guarda a carta gerada (HTML) na cotação — vira o registro do que foi enviado
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
+        $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
+        // permissão: quem edita a obra da cotação
+        $pe = user_perms($pdo, $me);
+        $pode = !empty($pe['perm_admin']) || ($pe['editar_escopo'] ?? '') === 'todas'
+             || (is_array($pe['obras_editar'] ?? null) && in_array((string)$obra, array_map('strval', $pe['obras_editar']), true));
+        if (!$pode) { http_response_code(403); echo json_encode(['error' => 'Sem permissão de edição.']); exit; }
+        $html = (string)($in['html'] ?? ''); if (strlen($html) < 20) throw new Exception('carta vazia');
+        if (strlen($html) > 2000000) throw new Exception('carta muito grande');
+        $pdo->prepare("INSERT INTO carta_gerada (cotacao_id, servico_nome, titulo, html, criado_por, criado_nome, created_at) VALUES (?,?,?,?,?,?,?)")
+            ->execute([$cid, trim((string)($in['servico_nome'] ?? '')), trim((string)($in['titulo'] ?? 'Carta convite')), $html, $me, $pe['nome'] ?? null, date('c')]);
+        echo json_encode(['ok' => true, 'id' => (int)$pdo->lastInsertId()], JSON_UNESCAPED_UNICODE); exit;
     }
 
     echo json_encode(['error' => 'ação desconhecida'], JSON_UNESCAPED_UNICODE);

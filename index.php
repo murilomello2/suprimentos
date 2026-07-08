@@ -580,7 +580,19 @@ let GORDER=[];                     // ordem atual dos grupos (preenchida no rend
 let COLLAPSED=new Set();           // grupos recolhidos (persistido em localStorage)
 try{ COLLAPSED=new Set(JSON.parse(localStorage.getItem('sup_collapsed')||'[]')); }catch(e){}
 function saveCollapsed(){ try{ localStorage.setItem('sup_collapsed',JSON.stringify([...COLLAPSED])); }catch(e){} }
-const BRL=n=>n?Number(n).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0}):'—';
+const BRL=n=>n?Number(n).toLocaleString('pt-BR',{style:'currency',currency:'BRL',minimumFractionDigits:2,maximumFractionDigits:2}):'—';
+// Moeda BR: número -> "1.500.000,00" (sem R$, p/ inputs/totais). fmtMoney(0) mostra "0,00".
+const fmtMoney=n=>(n===0||n)?Number(n).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
+// Lê o valor de um input mascarado (pt-BR: ponto=milhar, vírgula=centavo) -> número (ou null).
+function parseBRLInput(s){ if(s==null)return null; s=String(s).replace(/[^\d,]/g,''); if(s==='')return null; s=s.replace(/\./g,'').replace(',','.'); const n=Number(s); return isFinite(n)?n:null; }
+// Máscara AO VIVO de moeda num <input type=text inputmode=decimal>: 150000 -> 150.000 ; 150000,5 -> 150.000,5
+function maskMoneyInput(el){ let v=el.value.replace(/[^\d,]/g,''); const k=v.indexOf(','); let ip,dp=null;
+  if(k>=0){ ip=v.slice(0,k).replace(/\D/g,''); dp=v.slice(k+1).replace(/\D/g,'').slice(0,2); } else ip=v.replace(/\D/g,'');
+  ip=ip.replace(/^0+(?=\d)/,''); const ii=ip===''?(dp!==null?'0':''):Number(ip).toLocaleString('pt-BR'); el.value=ii+(dp!==null?(','+dp):''); }
+// Ao sair do campo, normaliza p/ 2 casas: "150.000" -> "150.000,00"
+function moneyBlur(el){ const n=parseBRLInput(el.value); el.value=(n==null)?'':fmtMoney(n); }
+// Moeda COMPACTA p/ espaços apertados (donut/badges): R$ 4,2 mi ; R$ 350 mil ; senão o valor cheio.
+const BRLc=n=>{n=Number(n)||0;const a=Math.abs(n);if(a>=1e6)return 'R$ '+(n/1e6).toLocaleString('pt-BR',{maximumFractionDigits:1})+' mi';if(a>=1e3)return 'R$ '+(n/1e3).toLocaleString('pt-BR',{maximumFractionDigits:0})+' mil';return BRL(n);};
 const D=s=>{if(!s)return'—';const p=String(s).split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:s;};
 const esc=s=>(s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 // classe do insumo: material | mo | mat_mo (material+MO) | equip (equipamento)
@@ -2227,7 +2239,7 @@ function orcCLExpand(gi){
       return `<div style="padding:5px 0;border-bottom:1px dashed var(--line)">
         <div style="font-size:11.5px"><span class="material-icons" style="font-size:12px;vertical-align:-2px;color:var(--verde)">category</span> ${esc((e.compdesc||'').slice(0,52)||'(composição)')} <span class="money" style="float:right">${BRL(e.custo)}</span></div>
         <div style="font-size:11px;margin-top:2px"><span class="material-icons" style="font-size:12px;vertical-align:-2px;color:var(--dourado)">place</span> ${locs}</div>
-        <div class="muted" style="font-size:10.5px;margin-top:1px">${QNUM(e.area)} × ${QNUM(e.coef)} × R$${QNUM(e.rs_unit)}${e.q?' · define o quantitativo':''}</div></div>`;
+        <div class="muted" style="font-size:10.5px;margin-top:1px">${QNUM(e.area)} × ${QNUM(e.coef)} × ${BRL(e.rs_unit)}${e.q?' · define o quantitativo':''}</div></div>`;
     }).join('');
     ins.dataset.loaded='1';
   }
@@ -2262,7 +2274,7 @@ function orcBdExpand(li){
     const l=ORC_BD.linhas[li];
     ins.innerHTML='<table style="width:100%;font-size:11px;border-collapse:collapse">'+l.insumos.map(x=>
       `<tr style="${x.excl?'opacity:.45':''}"><td style="padding:2px 4px;width:42px">${tpBadge(x.tipo)}</td><td style="padding:2px 4px;${x.excl?'text-decoration:line-through':''}">${esc((x.desc||'').slice(0,42))}${x.excl?' <span style="color:var(--and);font-size:9px;text-decoration:none">· fora</span>':''}</td>`+
-      `<td style="padding:2px 4px;text-align:right;color:var(--muted);white-space:nowrap">${QNUM(x.qtde)} ${esc(x.unidade||'')} × R$${QNUM(x.rs_unit)}</td>`+
+      `<td style="padding:2px 4px;text-align:right;color:var(--muted);white-space:nowrap">${QNUM(x.qtde)} ${esc(x.unidade||'')} × ${BRL(x.rs_unit)}</td>`+
       `<td style="padding:2px 6px;text-align:right;white-space:nowrap;${x.excl?'text-decoration:line-through':''}">${BRL(x.valor)}</td></tr>`).join('')+'</table>';
     ins.dataset.loaded='1';
   }
@@ -2620,7 +2632,7 @@ async function compBuscar(){
   if(!COMP_LAST.length){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Nada encontrado. É <b>mão de obra ou insumo</b> (ex.: eletricista, encanador)? Eles ficam <b>dentro</b> das composições — use a <b>Busca em massa por insumo</b> logo abaixo.</div>';return;}
   box.innerHTML='<div class="srbox">'+COMP_LAST.map(c=>`<div class="pickrow" onclick="compEscolher(${c.id})">
     <span class="material-icons" style="font-size:16px;color:var(--verde)">playlist_add</span>
-    <div><div>${esc(c.descricao)}</div><small class="muted">${QNUM(c.qtde_total)} ${esc(c.unidade||'')} · R$${QNUM(c.rs_unit)}/un</small></div></div>`).join('')+'</div>';
+    <div><div>${esc(c.descricao)}</div><small class="muted">${QNUM(c.qtde_total)} ${esc(c.unidade||'')} · ${BRL(c.rs_unit)}/un</small></div></div>`).join('')+'</div>';
 }
 let COMP_SEQ=0;
 async function compEscolher(id){
@@ -2711,7 +2723,7 @@ function compRenderDetail(){
         <span class="material-icons chk" onclick="compToggleInsumo(${ix})" style="color:${on?'var(--ok)':'var(--muted)'}">${on?'check_box':'check_box_outline_blank'}</span>
         ${tpBadge(in_.tipo)}
         <span class="tname">${esc(in_.descricao)}${partial?` <span style="color:var(--and);font-size:11px">· ⚠️ ${sp.conf.length} local(is) já em “${esc(sp.items[0]||'')}” (não conta)</span>`:''}</span>
-        <span class="tval">${QNUM(in_.coef)} ${esc(in_.unidade||'')} × R$${QNUM(in_.rs_unit)}</span>
+        <span class="tval">${QNUM(in_.coef)} ${esc(in_.unidade||'')} × ${BRL(in_.rs_unit)}</span>
       </div>`;}).join(''); })()}
     </div>
     <div class="muted" style="font-size:11.5px;margin-top:4px">Ex.: marque só a MO do reboco. Insumo/local já usado em outro item aparece 🔒/⚠️ e não conta de novo.</div>`);
@@ -2756,7 +2768,7 @@ function compRenderBasket(){
       return `<div class="pickrow" style="gap:8px;align-items:center">
         ${tpBadge(s.tipo)}
         <div style="flex:1;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.desc)}</div>
-          <small class="muted">${esc((s.compdesc||'').slice(0,38))} · ${QNUM(s.coef)}×R$${QNUM(s.rs_unit)}</small></div>
+          <small class="muted">${esc((s.compdesc||'').slice(0,38))} · ${QNUM(s.coef)}× ${BRL(s.rs_unit)}</small></div>
         <input type="number" step="any" style="width:84px;border:1px solid var(--line);border-radius:7px;padding:4px 6px" value="${s.area}" oninput="COMP_SEL[${k}].area=parseFloat(this.value)||0;compRenderBasket()" title="área/quantidade">
         <span class="money" style="min-width:88px;text-align:right">${BRL(custo)}</span>
         <label class="ckl" style="font-size:11px" title="usar pro quantitativo"><input type="checkbox" ${s.q?'checked':''} onchange="COMP_SEL[${k}].q=this.checked;compRenderBasket()"> qtd</label>
@@ -3319,7 +3331,7 @@ function renderDashDiretor(D){
   <div class="dgrid">
     <div class="dcard"><h3>Ranking de obras por risco</h3>${dashBars(D.porObra.slice(0,8).map(o=>({label:o.nome,v:o.exposta,color:o.cor,sub:o.criticos?o.criticos+' crít.':''})),BRL)}</div>
     <div class="dcard"><h3>Curva ABC em risco</h3><div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-      <svg viewBox="0 0 120 120" width="120" height="120">${(function(){const cir=2*Math.PI*54;let off=0;return donut.filter(s=>s.v>0).map(s=>{const len=cir*s.v/(totRiscoV||1);const el=`<circle cx="60" cy="60" r="54" fill="none" stroke="${s.color}" stroke-width="12" stroke-dasharray="${len} ${cir-len}" stroke-dashoffset="${-off}" transform="rotate(-90 60 60)"/>`;off+=len;return el;}).join('');})()}<text x="60" y="64" text-anchor="middle" font-size="13" font-weight="800" fill="#1e3a2e">${BRL(totRiscoV).replace('R$','')}</text></svg>
+      <svg viewBox="0 0 120 120" width="120" height="120">${(function(){const cir=2*Math.PI*54;let off=0;return donut.filter(s=>s.v>0).map(s=>{const len=cir*s.v/(totRiscoV||1);const el=`<circle cx="60" cy="60" r="54" fill="none" stroke="${s.color}" stroke-width="12" stroke-dasharray="${len} ${cir-len}" stroke-dashoffset="${-off}" transform="rotate(-90 60 60)"/>`;off+=len;return el;}).join('');})()}<text x="60" y="64" text-anchor="middle" font-size="13" font-weight="800" fill="#1e3a2e">${BRLc(totRiscoV).replace('R$ ','')}</text></svg>
       <div style="flex:1;min-width:130px">
         <div class="drow"><span class="dchip a">A</span><span style="flex:1">≥ R$200 mil</span><b>${cr.A.n}</b> <span class="dmini">${dpct(cr.A.v)}%</span></div>
         <div class="drow"><span class="dchip b">B</span><span style="flex:1">R$100–200 mil</span><b>${cr.B.n}</b> <span class="dmini">${dpct(cr.B.v)}%</span></div>
@@ -3463,7 +3475,7 @@ function cotRenderNovo(){
       ${cotFld('Obra','<select id="cotO">'+cotObraOpts(pre.obra||'')+'</select>')}
       ${cotFld('Categoria','<input id="cotC" value="'+esc(pre.categoria||'')+'" placeholder="Ex.: M.O. Gesso">')}
       ${cotFld('Tipo','<select id="cotTipo"><option>Material</option><option>M.O.</option><option>Material + MO</option><option>Locação</option><option>Serviço</option></select>')}
-      ${cotFld('Verba (R$) <span id="cotVerbaChip">'+cotVerbaChip(pre.verba_origem||'')+'</span>','<input id="cotV" type="number" placeholder="0" value="'+(pre.verba!=null&&pre.verba!==''?esc(pre.verba):'')+'">')}
+      ${cotFld('Verba (R$) <span id="cotVerbaChip">'+cotVerbaChip(pre.verba_origem||'')+'</span>','<input id="cotV" type="text" inputmode="decimal" placeholder="0,00" oninput="maskMoneyInput(this)" onblur="moneyBlur(this)" value="'+(pre.verba!=null&&pre.verba!==''?esc(fmtMoney(pre.verba)):'')+'">')}
     </div>
     ${cotFld('Descrição / escopo (vai na carta ao fornecedor)','<textarea id="cotD" rows="5" style="width:100%" placeholder="Escopo / informações gerais da cotação">'+esc(pre.descricao||'')+'</textarea>','margin-top:8px')}
     ${cotFld('Pontos a conferir por proposta — equalização (1 por linha)','<textarea id="cotEq" rows="8" style="width:100%" placeholder="Ex.: Diesel incluso? · Faturamento mínimo diário · Mobilização/desmobilização · Retenção · ISS · ART">'+esc(pre.equalizacao||'')+'</textarea>','margin-top:8px')}
@@ -3623,7 +3635,7 @@ function cotVincPick(ordem){
   set('cotC',it.grupo,true);
   set('cotD',it.escopo,true);                                                  // ESCOPO do dicionário → Descrição (carta)
   set('cotEq',cotEqTexto(it),true);                                            // VARIÁVEIS A COTAR → pontos de equalização
-  set('cotV',(it.verba&&it.verba>0)?it.verba:'',true);                         // VERBA do vínculo do orçamento
+  set('cotV',(it.verba&&it.verba>0)?fmtMoney(it.verba):'',true);               // VERBA do vínculo do orçamento (mascarada)
   const vo=cotVerbaOrigem(it); COT.novoPre=Object.assign(COT.novoPre||{},{verba_origem:vo});
   const vc=document.getElementById('cotVerbaChip'); if(vc) vc.innerHTML=cotVerbaChip(vo);
   const box=document.getElementById('cotVincBox');
@@ -3701,7 +3713,7 @@ function cotImportarTexto(){
 async function cotCriar(){
   const titulo=val('cotT').trim(); if(!titulo){toast('Dê um título à cotação');return;}
   const itens=COT.novoItens.filter(it=>(it.descricao||'').trim()); if(!itens.length){toast('Inclua ao menos um item');return;}
-  const body={acao:'criar',me:EU&&EU.bitrix_id,obra_id:Number(val('cotO'))||null,servico_id:COT.novoServico||null,titulo,categoria:val('cotC'),tipo_servico:val('cotTipo'),verba:Number(val('cotV'))||0,verba_origem:(COT.novoPre&&COT.novoPre.verba_origem)||'',descricao:val('cotD'),equalizacao:val('cotEq'),itens,convidados:COT.novoConvidados||[]};
+  const body={acao:'criar',me:EU&&EU.bitrix_id,obra_id:Number(val('cotO'))||null,servico_id:COT.novoServico||null,titulo,categoria:val('cotC'),tipo_servico:val('cotTipo'),verba:parseBRLInput(val('cotV'))||0,verba_origem:(COT.novoPre&&COT.novoPre.verba_origem)||'',descricao:val('cotD'),equalizacao:val('cotEq'),itens,convidados:COT.novoConvidados||[]};
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error);return;} toast('Cotação criada'); cotOpen(r.id);
   }catch(e){toast('Falha: '+e.message);}
@@ -3846,15 +3858,17 @@ function cotRenderProposta(){
       <div style="display:grid;grid-template-columns:minmax(0,1fr) 130px 150px;gap:10px;padding:7px 12px;background:#fafbfb;border-bottom:1px solid var(--line);font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.3px"><span>Item</span><span style="text-align:right">Preço unit.</span><span style="text-align:right">Preço total</span></div>
       ${itens.map((it,ix)=>`<div style="display:grid;grid-template-columns:minmax(0,1fr) 130px 150px;gap:10px;align-items:center;padding:9px 12px;${ix<itens.length-1?'border-bottom:1px solid #f1f3f2':''}">
       <div><b style="font-size:12.5px">${esc(it.descricao)}</b> <span class="muted" style="font-size:11px">· ${cotNum(it.quantidade)} ${esc(it.unidade||'')}</span></div>
-      <input type="number" step="0.0001" id="prU${it.id}" value="${pr.precos[it.id].preco_unit}" oninput="cotPrecoIn(${it.id},'u',this.value)" placeholder="0,00" style="width:100%;text-align:right">
-      <input type="number" step="0.01" id="prT${it.id}" value="${pr.precos[it.id].preco_total}" oninput="cotPrecoIn(${it.id},'t',this.value)" placeholder="0,00" style="width:100%;text-align:right"></div>`).join('')}</div>
+      <input type="text" inputmode="decimal" id="prU${it.id}" value="${pr.precos[it.id].preco_unit!==''?fmtMoney(pr.precos[it.id].preco_unit):''}" oninput="cotPrecoIn(${it.id},'u',this)" onblur="moneyBlur(this)" placeholder="0,00" style="width:100%;text-align:right">
+      <input type="text" inputmode="decimal" id="prT${it.id}" value="${pr.precos[it.id].preco_total!==''?fmtMoney(pr.precos[it.id].preco_total):''}" oninput="cotPrecoIn(${it.id},'t',this)" onblur="moneyBlur(this)" placeholder="0,00" style="width:100%;text-align:right"></div>`).join('')}</div>
     <div style="margin-top:14px"><button class="btn-prim" onclick="cotSalvarProposta()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar proposta</button></div>
     </div></div>`;
 }
-function cotPrecoIn(iid,which,v){
+function cotPrecoIn(iid,which,el){
+  maskMoneyInput(el);                              // reformata ao vivo (150000 -> 150.000)
+  const n=parseBRLInput(el.value);                 // número (ou null)
   const p=COT.prop.precos[iid], it=(COT.cur.itens||[]).find(x=>x.id===iid), q=it&&it.quantidade?Number(it.quantidade):null;
-  if(which==='u'){ p.preco_unit=v; if(q&&v!==''){ p.preco_total=(Number(v)*q).toFixed(2); const el=document.getElementById('prT'+iid); if(el)el.value=p.preco_total; } }
-  else p.preco_total=v;
+  if(which==='u'){ p.preco_unit=(n==null?'':n); if(q&&n!=null){ p.preco_total=+(n*q).toFixed(2); const el2=document.getElementById('prT'+iid); if(el2)el2.value=fmtMoney(p.preco_total); } }
+  else p.preco_total=(n==null?'':n);
 }
 async function cotSalvarProposta(){
   const forn=val('prF').trim(); if(!forn){toast('Informe o fornecedor');return;}

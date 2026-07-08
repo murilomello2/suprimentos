@@ -264,9 +264,11 @@
     body *{visibility:hidden!important}
     #cotUmaPagina, #cotUmaPagina *{visibility:visible!important}
     #cotUmaPagina{position:absolute;left:0;top:0;width:100%}
+    #cotUmaPagina div{overflow:visible!important}   /* não clipar tabelas na impressão */
     .up-noprint{display:none!important}
-    .up-tbl{font-size:9.5px} .up-tbl th,.up-tbl td{padding:3px 5px}
-    @page{size:landscape;margin:8mm}
+    .up-tbl{font-size:9px} .up-tbl th,.up-tbl td{padding:3px 5px}
+    .up-tbl tr,.up-tbl thead{break-inside:avoid}
+    @page{size:A4 landscape;margin:8mm}
   }
   .gantt-row{display:grid;grid-template-columns:130px 1fr;gap:8px;align-items:center;margin-bottom:7px;font-size:11.5px}
   .gantt-track{position:relative;height:16px;background:#f1f4f3;border-radius:8px}
@@ -3802,6 +3804,63 @@ function upCard(label,val,sub,color){ return `<div style="border:1px solid var(-
   <div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#889;font-weight:700">${esc(label)}</div>
   <div style="font-size:17px;font-weight:800;color:${color};margin-top:3px">${val}</div>
   ${sub?`<div style="font-size:10.5px;color:#889;margin-top:1px">${esc(sub)}</div>`:''}</div>`; }
+// Comparativo de PREÇOS adaptativo: se há mais FORNECEDORES que itens, vira a tabela (fornecedores nas LINHAS,
+// ranqueados pelo total) — fica uma lista vertical que cabe na página; senão itens nas linhas (estilo clássico).
+function upPrecos(itens,props,m,best,verba){
+  const melhor=Number(m.melhor_total)||0;
+  let h=`<div style="font-weight:800;font-size:14px;margin:14px 0 8px;color:var(--verde-d)">Comparativo de Preços</div><div style="overflow-x:auto"><table class="up-tbl">`;
+  if(props.length>itens.length && props.length>=5){
+    // ---- FORNECEDORES nas linhas (ranking por total) ----
+    const ranked=props.slice().sort((a,b)=>((a.total==null?Infinity:a.total)-(b.total==null?Infinity:b.total)));
+    let cheapest=null; ranked.forEach(p=>{ if(p.total!=null&&(cheapest==null||p.total<cheapest))cheapest=p.total; });
+    h+=`<thead><tr><th style="width:26px">#</th><th style="text-align:left;min-width:150px">Fornecedor</th>`;
+    itens.forEach(it=>{ const dsc=String(it.descricao||''); h+=`<th style="min-width:88px" title="${esc(dsc)}">${esc(dsc.slice(0,36))}${dsc.length>36?'…':''}<div style="font-weight:400;font-size:9px;color:#889">${cotNum(it.quantidade)} ${esc(it.unidade||'')}</div></th>`; });
+    h+=`<th>Total</th>${verba>0?'<th>vs verba</th>':''}</tr></thead><tbody>`;
+    ranked.forEach((p,idx)=>{ const win=p.total!=null&&p.total===cheapest;
+      h+=`<tr style="${win?'background:#eafaf0':''}"><td style="font-weight:700;text-align:center">${win?'🏆':(idx+1)}</td><td style="text-align:left;font-weight:${win?'800':'600'}">${esc(p.fornecedor_nome)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}</td>`;
+      itens.forEach(it=>{ const pi=(p.itens||{})[it.id], bb=best[it.id], isBI=bb&&bb.proposta_id===p.id;
+        h+=`<td style="${isBI?'background:#d9f2e3;font-weight:700':''}">${pi&&pi.preco_unit!=null?BRL(pi.preco_unit):'<span style="color:#bbb">—</span>'}</td>`; });
+      const vv=(verba>0&&p.total!=null)?verba-p.total:null;
+      h+=`<td style="font-weight:800">${p.total!=null?BRL(p.total):'—'}</td>${verba>0?`<td style="font-size:10.5px;color:${vv==null?'#889':(vv>=0?'var(--ok)':'var(--pend)')}">${vv==null?'—':(vv>=0?'+':'')+BRL(vv)}</td>`:''}</tr>`; });
+    if(itens.length>1){ h+=`<tr style="background:#f4f7f5;font-weight:800"><td style="text-align:center">★</td><td style="text-align:left">Melhor por item</td>`;
+      itens.forEach(it=>{ const bb=best[it.id]; h+=`<td style="color:var(--verde-d)">${bb?BRL(bb.preco_unit):'—'}</td>`; });
+      h+=`<td style="color:var(--verde-d)">${melhor?BRL(melhor):'—'}</td>${verba>0?'<td></td>':''}</tr>`; }
+  } else {
+    // ---- ITENS nas linhas (poucos fornecedores) ----
+    h+=`<thead><tr><th style="text-align:left;min-width:150px;max-width:260px">Item</th><th style="width:40px">Qtd</th><th style="width:34px">Un</th>`;
+    props.forEach(p=>{ h+=`<th style="min-width:92px">${esc(p.fornecedor_nome)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}</th>`; });
+    h+=`<th style="background:#eafaf0;color:var(--verde-d)">Melhor preço</th></tr></thead><tbody>`;
+    itens.forEach(it=>{ const b=best[it.id];
+      h+=`<tr><td style="text-align:left">${esc(it.descricao)}</td><td>${cotNum(it.quantidade)}</td><td>${esc(it.unidade||'')}</td>`;
+      props.forEach(p=>{ const pi=(p.itens||{})[it.id], isB=b&&b.proposta_id===p.id;
+        h+=`<td style="${isB?'background:#d9f2e3;font-weight:700':''}">${pi&&pi.preco_total!=null?`${BRL(pi.preco_unit)}${isB?' 🏆':''}<div style="font-size:9.5px;color:#889;font-weight:400">${BRL(pi.preco_total)}</div>`:'<span style="color:#bbb">—</span>'}</td>`; });
+      h+=`<td style="background:#eafaf0">${b?`<b>${BRL(b.preco_unit)}</b><div style="font-size:9.5px;color:#889">${BRL(b.preco_total)} · ${esc(b.fornecedor)}</div>`:'—'}</td></tr>`; });
+    h+=`<tr style="background:#f4f7f5;font-weight:800"><td style="text-align:left">TOTAL GERAL</td><td></td><td></td>`;
+    props.forEach(p=>{ const isBS=m.fornecedor_destaque===p.fornecedor_nome; h+=`<td style="${isBS?'color:var(--verde-d)':''}">${p.total!=null?BRL(p.total):'—'}</td>`; });
+    h+=`<td style="background:#eafaf0;color:var(--verde-d)">${melhor?BRL(melhor):'—'}</td></tr>`;
+  }
+  return h+`</tbody></table></div>`;
+}
+// Equalização adaptativa: pontos nas linhas (padrão) OU, se há mais fornecedores que pontos, fornecedores nas linhas.
+function upEqualiza(props,pontos){
+  let h=`<div style="font-weight:800;font-size:14px;margin:16px 0 8px;color:var(--verde-d)">Comparativo de Equalização</div><div style="overflow-x:auto"><table class="up-tbl">`;
+  if(props.length>pontos.length && props.length>=5){
+    h+=`<thead><tr><th style="text-align:left;min-width:150px">Fornecedor</th>`;
+    pontos.forEach(pt=>{ h+=`<th style="min-width:90px" title="${esc(pt)}">${esc(pt.slice(0,34))}${pt.length>34?'…':''}</th>`; });
+    h+=`</tr></thead><tbody>`;
+    props.forEach(p=>{ h+=`<tr><td style="text-align:left;font-weight:600">${esc(p.fornecedor_nome)}</td>`;
+      pontos.forEach(pt=>{ const v=((p.equaliza||{})[pt])||''; h+=`<td style="text-align:left">${v?esc(v):'<span style="color:#bbb">—</span>'}</td>`; });
+      h+='</tr>'; });
+  } else {
+    h+=`<thead><tr><th style="text-align:left;min-width:180px">Ponto a conferir</th>`;
+    props.forEach(p=>{ h+=`<th style="min-width:92px">${esc(p.fornecedor_nome)}</th>`; });
+    h+=`</tr></thead><tbody>`;
+    pontos.forEach(pt=>{ h+=`<tr><td style="text-align:left;font-weight:600">${esc(pt)}</td>`;
+      props.forEach(p=>{ const v=((p.equaliza||{})[pt])||''; h+=`<td style="text-align:left">${v?esc(v):'<span style="color:#bbb">—</span>'}</td>`; });
+      h+='</tr>'; });
+  }
+  return h+`</tbody></table></div>`;
+}
 function cotUmaPagina(){
   const d=COT.cur,c=d.cotacao,itens=d.itens||[],props=d.propostas||[],m=d.mapa||{},best=m.melhor_por_item||{},w=document.getElementById('cotwrap');
   const pontos=cotEqPontos(c);
@@ -3812,39 +3871,19 @@ function cotUmaPagina(){
   let h=`<div class="up-noprint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
     <button class="btn-ghost" onclick="cotRenderDetalhe()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar ao mapa</button>
     <button class="btn-prim" style="padding:6px 14px" onclick="window.print()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">print</span> Imprimir / PDF</button>
-    <span class="muted" style="font-size:11.5px">Resumo de uma página — pronto pra imprimir ou salvar em PDF.</span></div>`;
+    <span class="muted" style="font-size:11.5px">Resumo de uma página (paisagem) — pronto pra imprimir ou salvar em PDF.</span></div>`;
   h+=`<div id="cotUmaPagina" style="background:#fff;color:#1e2b24;padding:6px 2px">`;
   h+=`<div style="border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px;background:#f7faf8">
     <div style="font-size:19px;font-weight:800;color:var(--verde-d)"><span class="material-icons" style="font-size:20px;vertical-align:-3px;color:var(--dourado)">request_quote</span> Mapa de Cotações — ${esc(c.titulo||'')}</div>
     <div style="font-size:12px;margin-top:5px;color:#667"><b>Obra:</b> ${esc(c.obra_nome||'—')} &nbsp;·&nbsp; <b>Data:</b> ${dataC}${c.criado_nome?` &nbsp;·&nbsp; <b>Criado por:</b> ${esc(c.criado_nome)}`:''}${c.categoria?` &nbsp;·&nbsp; <b>Categoria:</b> ${esc(c.categoria)}`:''}${props.length?` &nbsp;·&nbsp; <b>${props.length}</b> proposta(s)`:''}</div>
     ${c.descricao?`<div style="font-size:12.5px;margin-top:8px;line-height:1.5;color:#334">${esc(c.descricao)}</div>`:''}</div>`;
-  h+=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">
+  h+=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:4px">
     ${upCard('Verba prevista', verba?BRL(verba):'—', vOrig, 'var(--muted)')}
     ${upCard('Melhor compra', melhor?BRL(melhor):'—', 'menor preço por item', 'var(--ok)')}
     ${upCard('Melhor fornecedor único', m.melhor_oferta?BRL(m.melhor_oferta):'—', m.fornecedor_destaque||'', 'var(--dourado)')}
     ${economia!=null?upCard('Economia vs verba', BRL(economia), (ecoPct!=null?ecoPct+'% da verba':''), economia>=0?'var(--ok)':'var(--pend)'):''}</div>`;
-  if(props.length){
-    h+=`<div style="font-weight:800;font-size:14px;margin:6px 0 8px;color:var(--verde-d)">Comparativo de Preços</div><div style="overflow-x:auto"><table class="up-tbl"><thead><tr><th style="text-align:left">Item</th><th>Qtd</th><th>Un</th>`;
-    props.forEach(p=>{ h+=`<th>${esc(p.fornecedor_nome)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}</th>`; });
-    h+=`<th style="background:#eafaf0;color:var(--verde-d)">Melhor preço</th></tr></thead><tbody>`;
-    itens.forEach(it=>{ const b=best[it.id];
-      h+=`<tr><td style="text-align:left">${esc(it.descricao)}</td><td>${cotNum(it.quantidade)}</td><td>${esc(it.unidade||'')}</td>`;
-      props.forEach(p=>{ const pi=(p.itens||{})[it.id], isB=b&&b.proposta_id===p.id;
-        h+=`<td style="${isB?'background:#e7f6ee;font-weight:700':''}">${pi&&pi.preco_total!=null?`${BRL(pi.preco_unit)}${isB?' 🏆':''}<div style="font-size:9.5px;color:#889;font-weight:400">${BRL(pi.preco_total)}</div>`:'<span style="color:#bbb">—</span>'}</td>`; });
-      h+=`<td style="background:#eafaf0">${b?`<b>${BRL(b.preco_unit)}</b><div style="font-size:9.5px;color:#889">${BRL(b.preco_total)} · ${esc(b.fornecedor)}</div>`:'—'}</td></tr>`; });
-    h+=`<tr style="background:#f4f7f5;font-weight:800"><td style="text-align:left">TOTAL GERAL</td><td></td><td></td>`;
-    props.forEach(p=>{ const isBS=m.fornecedor_destaque===p.fornecedor_nome; h+=`<td style="${isBS?'color:var(--verde-d)':''}">${p.total!=null?BRL(p.total):'—'}</td>`; });
-    h+=`<td style="background:#eafaf0;color:var(--verde-d)">${melhor?BRL(melhor):'—'}</td></tr></tbody></table></div>`;
-  } else h+=`<div class="dmini">Sem propostas ainda — cadastre propostas para montar o comparativo.</div>`;
-  if(pontos.length&&props.length){
-    h+=`<div style="font-weight:800;font-size:14px;margin:16px 0 8px;color:var(--verde-d)">Comparativo de Equalização</div><div style="overflow-x:auto"><table class="up-tbl"><thead><tr><th style="text-align:left">Ponto a conferir</th>`;
-    props.forEach(p=>{ h+=`<th>${esc(p.fornecedor_nome)}</th>`; });
-    h+=`</tr></thead><tbody>`;
-    pontos.forEach(pt=>{ h+=`<tr><td style="text-align:left;font-weight:600">${esc(pt)}</td>`;
-      props.forEach(p=>{ const v=((p.equaliza||{})[pt])||''; h+=`<td style="text-align:left">${v?esc(v):'<span style="color:#bbb">—</span>'}</td>`; });
-      h+='</tr>'; });
-    h+=`</tbody></table></div>`;
-  }
+  h+= props.length ? upPrecos(itens,props,m,best,verba) : `<div class="dmini" style="margin-top:12px">Sem propostas ainda — cadastre propostas para montar o comparativo.</div>`;
+  if(pontos.length&&props.length) h+=upEqualiza(props,pontos);
   h+=`<div style="font-size:10px;margin-top:14px;text-align:right;color:#99a">Cockpit de Suprimentos · Caprem · gerado em ${D(new Date().toISOString().slice(0,10))}</div></div>`;
   w.innerHTML=h; window.scrollTo(0,0);
 }

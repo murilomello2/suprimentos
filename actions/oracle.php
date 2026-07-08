@@ -153,6 +153,8 @@ CURADORIA (importante): cada dado pode estar CURADO (✓ verde = confirmado manu
 VERBA: o valor "definitivo" do item é a verba curada (override) ou a soma material+MO ou a estimativa. "Verba a definir / R\$ 0" = ainda não definida (sinalize isso).
 FERRAMENTA `detalhar_verba(item, obra)`: quando perguntarem o VALOR ou o DETALHE da verba de um item específico (ex.: "qual a verba dos elevadores definitivos da Trinity?"), CHAME esta ferramenta — ela devolve método (composição/analítico), verba total, material, mão de obra e as composições/insumos que geraram o valor. Traga a resposta DETALHADA: total, split material×MO, método, e a lista de composições/insumos com seus valores (tabela ajuda). NUNCA responda "verba não definida" sem antes chamar a ferramenta; só diga que não há verba se ela retornar metodo "não definida". Se retornar encontrado=false, aí sim diga que não achou o item e confirme o nome/obra.
 
+FERRAMENTA `agregar_verba(agrupar_por, top, obra?)`: para qualquer pergunta de RANKING, SOMA ou AGRUPAMENTO de verba — ex.: "15 maiores itens por verba de todas as obras", "verba total por grupo/curva/responsável", "maiores itens da obra X" — CHAME esta ferramenta. É PROIBIDO somar, agrupar ou ordenar o "catalogo" na mão (você erra as contas): a ferramenta já faz o GROUP BY + SUM + ORDER no servidor e devolve `ranking` = lista JÁ ORDENADA do maior total pro menor, cada linha com `chave` (o item/grupo/etc.), `por_obra` (a verba de CADA obra) e `total`. Regras ao apresentar: (1) use EXATAMENTE os números e a ordem que a ferramenta devolveu — não recalcule nem reordene; (2) para "maiores itens", chame com agrupar_por="item" (isso já junta o MESMO item de TODAS as obras numa linha só — não repita o item); (3) mostre como lista numerada 1..N, e sob cada item liste a verba de cada obra em `por_obra` + o **Total**; (4) se uma obra não aparece no `por_obra` de um item, é porque aquele item não tem verba definida naquela obra — não invente valor.
+
 === ATRASOS E PRAZOS (o CORAÇÃO do radar — o principal problema a evitar) ===
 Cada item do radar tem INÍCIO e FIM da cotação (datas calculadas do cronograma). Um item está ATRASADO quando:
 1) o FIM da cotação já passou (fim_cotacao < hoje) E o item NÃO está "Finalizado"; OU
@@ -240,18 +242,61 @@ function oracle_tool_detalhar_verba($pdo, $item, $obra) {
             'composicoes'=>$comps, 'insumos'=>array_slice($ins, 0, 20)];
 }
 
+// AGREGA a verba do radar por uma dimensão (item/grupo/curva/responsavel/obra) — SOMA + quebra por obra + ordena,
+// tudo no SERVIDOR (exato). É o jeito CERTO de responder ranking/soma; o LLM não deve somar centenas de linhas na mão.
+function oracle_tool_agregar_verba($pdo, $agrupar, $top, $obra = null) {
+    $dims = ['item','grupo','curva','responsavel','obra'];
+    $agrupar = strtolower(trim((string)$agrupar)); if (!in_array($agrupar, $dims, true)) $agrupar = 'item';
+    $top = (int)$top; if ($top <= 0) $top = 15; $top = min(60, $top);
+    $obraId = null; $obraNome = '';
+    if ($obra !== null && trim((string)$obra) !== '') {
+        $ob = trim((string)$obra);
+        $q = $pdo->prepare("SELECT id, nome FROM obra WHERE nome = ? LIMIT 1"); $q->execute([$ob]); $row = $q->fetch();
+        if (!$row) { $q = $pdo->prepare("SELECT id, nome FROM obra WHERE nome LIKE ? ORDER BY id LIMIT 1"); $q->execute(['%'.$ob.'%']); $row = $q->fetch(); }
+        if (!$row) return ['erro'=>'Obra "'.$ob.'" não encontrada.'];
+        $obraId = (int)$row['id']; $obraNome = $row['nome'];
+    }
+    $sql = "SELECT s.nome AS item, s.grupo AS grupo, s.curva AS curva, o.nome AS obra, r.responsavel AS responsavel,
+                   r.verba_override, r.verba_material, r.verba_mo, r.verba_estim
+            FROM servico s JOIN radar_item r ON r.servico_id = s.id JOIN obra o ON o.id = r.obra_id";
+    $args = []; if ($obraId) { $sql .= " WHERE r.obra_id = ?"; $args[] = $obraId; }
+    $st = $pdo->prepare($sql); $st->execute($args);
+    $grp = [];
+    foreach ($st->fetchAll() as $r) {
+        $v = o_verba($r); if ($v === null || $v <= 0) continue;
+        $key = trim((string)$r[$agrupar]);
+        if ($key === '') $key = ($agrupar === 'responsavel') ? '(sem responsável)' : ('(sem ' . $agrupar . ')');
+        if (!isset($grp[$key])) $grp[$key] = ['chave'=>$key, 'total'=>0.0, 'por_obra'=>[]];
+        $grp[$key]['total'] += $v;
+        $ob = $r['obra']; $grp[$key]['por_obra'][$ob] = round(($grp[$key]['por_obra'][$ob] ?? 0) + $v);
+    }
+    foreach ($grp as &$g) { $g['total'] = round($g['total']); $g['n_obras'] = count($g['por_obra']); } unset($g);
+    $arr = array_values($grp);
+    usort($arr, function($a, $b) { return $b['total'] <=> $a['total']; });
+    return ['agrupado_por'=>$agrupar, 'obra'=>$obraNome ?: 'todas as obras', 'top'=>$top,
+            'total_de_grupos'=>count($grp), 'ranking'=>array_slice($arr, 0, $top)];
+}
+
 function oracle_tools() {
-    return [[
-        'type'=>'function',
-        'function'=>[
+    return [
+        ['type'=>'function', 'function'=>[
             'name'=>'detalhar_verba',
             'description'=>'Retorna a QUEBRA da verba de um item do radar: método (composição de insumos / orçamento analítico), verba total, material, mão de obra, e as composições e insumos que geraram o valor. Chame SEMPRE que perguntarem o VALOR ou o DETALHE/COMPOSIÇÃO da verba de um item específico — não responda "não definida" sem antes tentar esta ferramenta.',
             'parameters'=>['type'=>'object', 'properties'=>[
                 'item'=>['type'=>'string', 'description'=>'Nome do item/serviço do radar. Ex.: "Elevadores Definitivos".'],
                 'obra'=>['type'=>'string', 'description'=>'Nome da obra. Ex.: "Trinity".'],
             ], 'required'=>['item','obra']],
-        ],
-    ]];
+        ]],
+        ['type'=>'function', 'function'=>[
+            'name'=>'agregar_verba',
+            'description'=>'AGREGA (soma) a verba do radar por uma dimensão, já com a quebra por obra e o TOTAL, ordenado do maior pro menor. Use SEMPRE para RANKING/SOMA/AGRUPAMENTO — ex.: "15 maiores itens por verba de todas as obras", "verba total por grupo", "quanto por curva", "maiores itens da obra X". NUNCA some/agrupe/ordene o catálogo na mão: chame esta ferramenta e só formate o resultado.',
+            'parameters'=>['type'=>'object', 'properties'=>[
+                'agrupar_por'=>['type'=>'string', 'enum'=>['item','grupo','curva','responsavel','obra'], 'description'=>'Dimensão do agrupamento. Para "maiores itens" use "item" (agrupa o mesmo item de TODAS as obras).'],
+                'top'=>['type'=>'integer', 'description'=>'Quantos retornar (padrão 15).'],
+                'obra'=>['type'=>'string', 'description'=>'Opcional: filtra por uma obra. Vazio/omresso = TODAS as obras.'],
+            ], 'required'=>['agrupar_por']],
+        ]],
+    ];
 }
 
 // Permite carregar só as funções (testes/CLI) sem executar o endpoint.
@@ -337,7 +382,9 @@ try {
             $args = json_decode($tc['function']['arguments'] ?? '{}', true) ?: [];
             $out = ($fn === 'detalhar_verba')
                  ? oracle_tool_detalhar_verba($pdo, $args['item'] ?? '', $args['obra'] ?? '')
-                 : ['error'=>'ferramenta desconhecida: ' . $fn];
+                 : (($fn === 'agregar_verba')
+                    ? oracle_tool_agregar_verba($pdo, $args['agrupar_por'] ?? 'item', $args['top'] ?? 15, $args['obra'] ?? null)
+                    : ['error'=>'ferramenta desconhecida: ' . $fn]);
             $messages[] = ['role'=>'tool', 'tool_call_id'=>$tc['id'] ?? '', 'content'=>json_encode($out, JSON_UNESCAPED_UNICODE)];
         }
     }

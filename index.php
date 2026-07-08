@@ -316,6 +316,7 @@
       <a id="nav-radar" data-menu="radar" class="active" title="Radar de Aquisições" onclick="showView('radar')"><span class="material-icons">radar</span> <span class="navtxt">Radar de Aquisições</span></a>
       <a id="nav-matriz" data-menu="matriz" title="Matriz" onclick="showView('matriz')"><span class="material-icons">grid_on</span> <span class="navtxt">Matriz</span></a>
       <a id="nav-cotacoes" data-menu="cotacoes" title="Cotações" onclick="showView('cotacoes')"><span class="material-icons">request_quote</span> <span class="navtxt">Cotações</span></a>
+      <a id="nav-solicitacoes" data-menu="solicitacoes" title="Solicitações de Compra" onclick="showView('solicitacoes')"><span class="material-icons">inbox</span> <span class="navtxt">Solicitações</span></a>
       <a id="nav-oraculo" data-menu="oraculo" title="Radar IA — oráculo de suprimentos" onclick="showView('oraculo')"><span class="material-icons">auto_awesome</span> <span class="navtxt">Radar IA</span></a>
     </nav>
     <div class="navlabel">Administração</div>
@@ -484,6 +485,18 @@
     <div id="dwrap"><div class="dempty">Carregando…</div></div>
    </section>
 
+   <section id="view-solicitacoes" style="display:none">
+    <div class="head">
+      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">inbox</span> Solicitações de Compra</h1>
+      <p class="sub">Fila de solicitações pendentes (TOTVS, ao vivo) — priorize os atrasos, atribua compradores e vire cotação com 1 clique.</p>
+    </div>
+    <div class="dtabs" style="padding:0 26px">
+      <button class="dtab on" id="stab-dashboard" onclick="solTab('dashboard')"><span class="material-icons">insights</span> Painel</button>
+      <button class="dtab" id="stab-lista" onclick="solTab('lista')"><span class="material-icons">list_alt</span> Solicitações</button>
+      <button class="dtab" id="stab-obras" onclick="solTab('obras')"><span class="material-icons">apartment</span> Obras &amp; compradores</button>
+    </div>
+    <div id="solwrap"><div class="dempty">Carregando…</div></div>
+   </section>
    <section id="view-cotacoes" style="display:none">
     <div class="top">
       <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">request_quote</span> Cotações</h1>
@@ -849,11 +862,12 @@ async function loadMatriz(force){
 
 /* ---------- view switch ---------- */
 function showView(v){
-  ['radar','matriz','oportunidades','dashboards','cotacoes','oraculo','config','audit','updates'].forEach(x=>{
+  ['radar','matriz','oportunidades','dashboards','cotacoes','solicitacoes','oraculo','config','audit','updates'].forEach(x=>{
     const el=document.getElementById('view-'+x); if(el) el.style.display=v===x?'':'none';
     const nav=document.getElementById('nav-'+x); if(nav) nav.classList.toggle('active',v===x);
   });
   if(v==='cotacoes') cotInit();
+  if(v==='solicitacoes') solInit();
   if(v==='oraculo') oracInit();
   if(v==='dashboards') dashInit();
   if(v==='matriz') loadMatriz();
@@ -4347,6 +4361,109 @@ async function precExcluir(id){ if(!confirm('Excluir esta tabela de preços?'))r
   try{ const r=await (await fetch('actions/precos.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir_tabela',me:EU&&EU.bitrix_id,id})})).json();
     if(r.error){toast(r.error);return;} toast('Excluída'); precLoad(); }catch(e){toast('Falha');}
 }
+/* ========== SOLICITAÇÕES DE COMPRA (fila TOTVS ao vivo + de-para + overlay) ========== */
+const SOL={tab:'dashboard',data:null,obras:null,filt:{obra:'',comprador:'',status:'',bucket:'',busca:''},exp:{}};
+const SOL_ST={pendente:['#8a9299','Pendente'],em_cotacao:['var(--cot)','Em cotação'],cotacoes_recebidas:['var(--dourado)','Cotações recebidas'],pedido_criado:['var(--ok)','Pedido criado'],cancelado:['var(--pend)','Cancelado']};
+const SOL_BK={r:['#eafaf0','#1f7a44','No prazo'],a:['#fdf4d9','#8a6d12','Atenção'],l:['#fde8cf','#b5610f','Atrasado'],c:['#fbe4e4','#b02020','Crítico']};
+function solMe(){ return encodeURIComponent((EU&&EU.bitrix_id)||''); }
+function solInit(){ solTab(SOL.tab||'dashboard'); }
+function solTab(t){ SOL.tab=t; ['dashboard','lista','obras'].forEach(x=>{const b=document.getElementById('stab-'+x); if(b)b.classList.toggle('on',x===t);});
+  if(t==='obras') solObrasLoad(); else if(SOL.data) solRender(); else solLoad(); }
+async function solLoad(){
+  const w=document.getElementById('solwrap'); if(!SOL.data) w.innerHTML='<div class="dempty">Lendo a fila de solicitações ao vivo…</div>';
+  try{ const j=await (await fetch('actions/solicitacoes.php?me='+solMe())).json();
+    if(j.error){w.innerHTML='<div class="empty">'+esc(j.error)+'</div>';return;} SOL.data=j; solRender();
+  }catch(e){ w.innerHTML='<div class="empty">Falha ao ler a fila.</div>'; }
+}
+function solRender(){ if(SOL.tab==='lista') return solRenderLista(); return solRenderDash(); }
+function solPill(l){ const b=SOL_BK[l.bucket]||SOL_BK.r; return `<span class="dchip" style="background:${b[0]};color:${b[1]};font-weight:700" title="${b[2]}">${l.dias!=null?l.dias+' dias':'—'}</span>`; }
+function solRenderDash(){
+  const w=document.getElementById('solwrap'), d=SOL.data.dashboard, b=d.b;
+  const card=(lbl,val,sub,cor)=>`<div class="kpi" style="min-width:150px"><div class="v" style="color:${cor||'inherit'}">${val}</div><div class="l">${lbl}${sub?` · ${sub}`:''}</div></div>`;
+  const bkCard=(k,lbl)=>{const x=SOL_BK[k];return `<div style="flex:1;min-width:130px;border:1px solid ${x[1]}33;background:${x[0]};border-radius:10px;padding:12px 14px"><div style="font-size:24px;font-weight:800;color:${x[1]}">${b[k]}</div><div style="font-size:11.5px;color:${x[1]}">${lbl}</div></div>`;};
+  const obras=Object.entries(d.por_obra), comps=Object.entries(d.por_comprador);
+  w.innerHTML=`<div class="panel" style="margin-bottom:10px"><div class="kpis">
+      ${card('Solicitações pendentes',d.total,'',null)}
+      ${card('Obras com pendência',obras.length,'',null)}
+      ${card('Compradores',comps.filter(c=>c[0]!=='(sem comprador)').length,'',null)}
+      ${card('Críticos (+30 dias)',b.c,'precisam atenção','var(--pend)')}
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">${bkCard('r','0 a 7 dias')}${bkCard('a','8 a 14 dias')}${bkCard('l','15 a 30 dias')}${bkCard('c','+30 dias')}</div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="panel"><b style="font-size:13px">Resumo por obra</b><div class="wrap" style="margin-top:6px;max-height:360px;overflow:auto"><table><thead><tr><th>Obra</th><th style="text-align:center">Total</th><th style="text-align:center;color:var(--ok)">Recentes</th><th style="text-align:center;color:var(--pend)">Críticos</th></tr></thead><tbody>
+        ${obras.map(([n,v])=>`<tr style="cursor:pointer" onclick="SOL.filt={obra:'${esc(n).replace(/'/g,"")}',comprador:'',status:'',bucket:'',busca:''};solTab('lista')"><td>${esc(n)}</td><td style="text-align:center"><b>${v.total}</b></td><td style="text-align:center;color:var(--ok)">${v.recentes||''}</td><td style="text-align:center;color:${v.criticos?'var(--pend)':'#bbb'}">${v.criticos||'0'}</td></tr>`).join('')}
+      </tbody></table></div></div>
+      <div class="panel"><b style="font-size:13px">Resumo por comprador</b><div class="wrap" style="margin-top:6px;max-height:360px;overflow:auto"><table><thead><tr><th>Comprador</th><th style="text-align:center">Total</th><th style="text-align:center;color:var(--ok)">0-7</th><th style="text-align:center;color:#8a6d12">8-14</th><th style="text-align:center;color:#b5610f">15-30</th><th style="text-align:center;color:var(--pend)">+30</th></tr></thead><tbody>
+        ${comps.map(([n,v])=>`<tr style="cursor:pointer" onclick="SOL.filt={obra:'',comprador:'${esc(n).replace(/'/g,"")}',status:'',bucket:'',busca:''};solTab('lista')"><td>${esc(n)}</td><td style="text-align:center"><b>${v.total}</b></td><td style="text-align:center;color:var(--ok)">${v.r||''}</td><td style="text-align:center;color:#8a6d12">${v.a||''}</td><td style="text-align:center;color:#b5610f">${v.l||''}</td><td style="text-align:center;color:${v.c?'var(--pend)':'#bbb'}">${v.c||'0'}</td></tr>`).join('')}
+      </tbody></table></div></div></div>`;
+}
+function solRenderLista(){
+  const w=document.getElementById('solwrap'), all=SOL.data.solicitacoes||[], f=SOL.filt, qn=(f.busca||'').toLowerCase();
+  const obras=[...new Set(all.map(s=>s.nome_obra))].sort(), comps=[...new Set(all.map(s=>s.comprador_nome).filter(Boolean))].sort();
+  let rows=all.filter(s=>(!f.obra||s.nome_obra===f.obra)&&(!f.comprador||s.comprador_nome===f.comprador)&&(!f.status||s.status===f.status)&&(!f.bucket||s.bucket===f.bucket)&&(!qn||((s.numero+' '+s.primeiro).toLowerCase().includes(qn))));
+  rows.sort((a,b)=>(b.dias||0)-(a.dias||0));
+  let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
+     <div class="search" style="min-width:180px"><span class="material-icons" style="color:var(--muted)">search</span><input id="solBusca" placeholder="Buscar nº ou item…" value="${esc(f.busca)}" oninput="SOL.filt.busca=this.value;solRenderLista()"></div>
+     <select onchange="SOL.filt.obra=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todas as obras</option>${obras.map(o=>`<option ${o===f.obra?'selected':''}>${esc(o)}</option>`).join('')}</select>
+     <select onchange="SOL.filt.comprador=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todos compradores</option>${comps.map(c=>`<option ${c===f.comprador?'selected':''}>${esc(c)}</option>`).join('')}</select>
+     <select onchange="SOL.filt.bucket=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todos prazos</option><option value="r" ${f.bucket==='r'?'selected':''}>No prazo (0-7)</option><option value="a" ${f.bucket==='a'?'selected':''}>Atenção (8-14)</option><option value="l" ${f.bucket==='l'?'selected':''}>Atrasado (15-30)</option><option value="c" ${f.bucket==='c'?'selected':''}>Crítico (+30)</option></select>
+     <select onchange="SOL.filt.status=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todos status</option>${Object.entries(SOL_ST).map(([k,v])=>`<option value="${k}" ${f.status===k?'selected':''}>${v[1]}</option>`).join('')}</select>
+     <span class="muted" style="font-size:11.5px">${rows.length} de ${all.length}</span>
+     <button class="btn-ghost" style="margin-left:auto;padding:5px 10px" onclick="SOL.data=null;SOL.filt={obra:'',comprador:'',status:'',bucket:'',busca:''};solLoad()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">refresh</span> Atualizar fila</button>
+   </div></div><div class="wrap"><table><thead><tr><th>Pedido</th><th style="text-align:center">Itens</th><th>Descrição</th><th>Obra</th><th>Emissão</th><th style="text-align:center">Dias</th><th>Status</th><th>Comprador</th><th>Observações</th><th>Ações</th></tr></thead><tbody>`;
+  for(const s of rows){ const key=s.coligada+'|'+s.numero, ex=SOL.exp[key];
+    html+=`<tr><td><b style="cursor:pointer" onclick="SOL.exp['${esc(key)}']=${ex?'false':'true'};solRenderLista()">${ex?'▾':'▸'} ${esc(String(s.numero).replace(/^0+/,'')||s.numero)}</b></td>
+      <td style="text-align:center">${s.n_itens}</td><td style="max-width:220px"><span title="${esc(s.primeiro)}">${esc((s.primeiro||'').slice(0,40))}</span></td>
+      <td class="muted" style="font-size:11.5px">${esc(s.nome_obra)}</td><td class="muted" style="font-size:11.5px;white-space:nowrap">${s.emissao?D(s.emissao):'—'}</td>
+      <td style="text-align:center">${solPill(s)}</td>
+      <td>${CAN_EDIT?`<select onchange="solStatus('${esc(key)}',this.value)" style="font-size:11px;padding:3px">${Object.entries(SOL_ST).map(([k,v])=>`<option value="${k}" ${s.status===k?'selected':''}>${v[1]}</option>`).join('')}</select>`:`<span class="dchip" style="background:${(SOL_ST[s.status]||['#8a9299'])[0]}">${(SOL_ST[s.status]||['','?'])[1]}</span>`}</td>
+      <td class="muted" style="font-size:11.5px">${esc(s.comprador_nome||'—')}</td>
+      <td>${CAN_EDIT?`<input value="${esc(s.observacoes||'')}" onchange="solObs('${esc(key)}',this.value)" placeholder="anotação…" style="width:130px;font-size:11px;padding:3px 5px">`:esc(s.observacoes||'')}</td>
+      <td style="white-space:nowrap"><button class="btn-ghost" style="padding:2px 6px" title="Copiar mensagem para orçamento" onclick="solCopiar('${esc(key)}')"><span class="material-icons" style="font-size:15px">content_copy</span></button>
+        ${s.cotacao_id?`<button class="btn-ghost" style="padding:2px 6px;color:var(--verde-d)" title="Ver cotação gerada" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${s.cotacao_id}),200)"><span class="material-icons" style="font-size:15px">request_quote</span></button>`:(CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px" title="Gerar cotação desta solicitação" onclick="solGerar('${esc(key)}')"><span class="material-icons" style="font-size:15px;color:var(--verde)">playlist_add</span></button>`:'')}</td></tr>`;
+    if(ex) html+=`<tr><td colspan="10" style="background:#fafbfb;padding:8px 14px"><b style="font-size:11px;color:var(--muted)">ITENS</b>${s.itens.map(it=>`<div style="font-size:12px;padding:2px 0">• ${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</div>`).join('')}</td></tr>`;
+  }
+  if(!rows.length) html+='<tr><td colspan="10" class="empty">Nenhuma solicitação nesse filtro.</td></tr>';
+  const foc=document.activeElement, wasB=foc&&foc.id==='solBusca', car=wasB?foc.selectionStart:null;
+  w.innerHTML=html+'</tbody></table></div>';
+  if(wasB){const ni=document.getElementById('solBusca'); if(ni){ni.focus(); try{ni.setSelectionRange(car,car);}catch(e){}}}
+}
+function solFind(key){ return (SOL.data.solicitacoes||[]).find(s=>(s.coligada+'|'+s.numero)===key); }
+async function solStatus(key,v){ const s=solFind(key); if(!s)return; s.status=v;
+  await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_overlay',me:EU&&EU.bitrix_id,coligada:s.coligada,numero:s.numero,status:v})}); toast('Status salvo'); }
+async function solObs(key,v){ const s=solFind(key); if(!s)return; s.observacoes=v;
+  await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_overlay',me:EU&&EU.bitrix_id,coligada:s.coligada,numero:s.numero,observacoes:v})}); toast('Anotação salva'); }
+function solCopiar(key){ const s=solFind(key); if(!s)return;
+  const sub=/CAPRETZ/i.test(s.coligada)?(s.nome_obra||'Geral'):'Geral';
+  const num=String(s.numero).replace(/^0+/,'')||s.numero;
+  const txt='Por favor cotar os itens abaixo para obra:\n\n'+s.coligada+' - '+sub+'\n\nPedido nº '+num+'\n\nItens:\n\n'+s.itens.map(it=>'- '+cotNum(it.qtd)+' '+it.und+' - '+it.produto+(it.observacao?' ('+it.observacao+')':'')).join('\n');
+  navigator.clipboard.writeText(txt).then(()=>toast('Mensagem copiada!'),()=>{ const t=document.createElement('textarea');t.value=txt;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();toast('Mensagem copiada!'); }); }
+async function solGerar(key){ const s=solFind(key); if(!s)return; if(!confirm('Gerar uma cotação no Mapa com os '+s.n_itens+' itens desta solicitação?'))return;
+  try{ const r=await (await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'gerar_cotacao',me:EU&&EU.bitrix_id,coligada:s.coligada,numero:s.numero})})).json();
+    if(r.error){toast(r.error);return;} toast('Cotação gerada!'); s.cotacao_id=r.cotacao_id; s.status='em_cotacao'; showView('cotacoes'); setTimeout(()=>cotAbrir(r.cotacao_id),250);
+  }catch(e){toast('Falha: '+e.message);} }
+async function solObrasLoad(){
+  const w=document.getElementById('solwrap'); w.innerHTML='<div class="dempty">Carregando obras…</div>';
+  try{ SOL.obras=await (await fetch('actions/solicitacoes.php?obras&me='+solMe())).json(); solRenderObras(); }catch(e){ w.innerHTML='<div class="empty">Falha.</div>'; }
+}
+function solRenderObras(){
+  const w=document.getElementById('solwrap'), o=SOL.obras, uOpts=id=>'<option value="">— comprador —</option>'+(o.usuarios||[]).map(u=>`<option value="${esc(u.bitrix_id)}" ${String(u.bitrix_id)===String(id)?'selected':''}>${esc(u.nome)}</option>`).join('');
+  const rOpts=id=>'<option value="">— vincular à obra do radar (opcional) —</option>'+(o.radar_obras||[]).map(r=>`<option value="${r.id}" ${String(r.id)===String(id)?'selected':''}>${esc(r.nome)}</option>`).join('');
+  const semComp=(o.obras||[]).filter(x=>!x.comprador_id).length;
+  w.innerHTML=`<div class="panel" style="margin-bottom:10px"><b style="font-size:14px">Obras &amp; compradores</b>
+      <span class="muted" style="font-size:11.5px"> — cada obra (coligada + centro de custo) tem 1 comprador; a solicitação entra já atribuída. ${semComp?`<b style="color:var(--pend)">${semComp} sem comprador</b>`:'todas atribuídas ✓'}</span></div>
+    <div class="wrap"><table><thead><tr><th>Obra (nome comercial)</th><th>Coligada (TOTVS)</th><th style="text-align:center">CC</th><th style="text-align:center">Pend.</th><th>Comprador responsável</th><th>Obra do radar (opcional)</th></tr></thead><tbody>
+    ${(o.obras||[]).map((x,i)=>`<tr>
+      <td><input value="${esc(x.nome_comercial)}" onchange="SOL.obras.obras[${i}].nome_comercial=this.value;solObraSave(${i})" style="width:150px;font-size:12px"></td>
+      <td class="muted" style="font-size:11px">${esc(x.coligada)}</td><td style="text-align:center" class="muted">${esc(x.obra_cod)}</td>
+      <td style="text-align:center"><b>${x.n}</b></td>
+      <td><select onchange="SOL.obras.obras[${i}].comprador_id=this.value;solObraSave(${i})" style="font-size:12px;padding:3px;${x.comprador_id?'':'border-color:var(--pend)'}">${uOpts(x.comprador_id)}</select></td>
+      <td><select onchange="SOL.obras.obras[${i}].radar_obra_id=this.value;solObraSave(${i})" style="font-size:11.5px;padding:3px">${rOpts(x.radar_obra_id)}</select></td></tr>`).join('')}
+    </tbody></table></div>`;
+}
+async function solObraSave(i){ const x=SOL.obras.obras[i];
+  try{ const r=await (await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_obra',me:EU&&EU.bitrix_id,obra:{coligada:x.coligada,obra_cod:x.obra_cod,nome_comercial:x.nome_comercial,comprador_id:x.comprador_id,radar_obra_id:x.radar_obra_id||null}})})).json();
+    if(r.error){toast(r.error);return;} toast('Atribuição salva'); SOL.data=null; }catch(e){toast('Falha');} }
 /* ---------- Fornecedores (sub-aba do Mapa de Cotações) ---------- */
 let FORN={list:[],cats:[],tipos:[],total:0,f:{nome:'',categoria:'',tipo:'',itens:''},edit:null};
 async function fornLoad(){
@@ -4402,7 +4519,7 @@ async function fornExcluir(id){ if(!confirm('Excluir este fornecedor?'))return;
 
 /* ===== Configuração / Permissões (Bloco 2) ===== */
 let CFG={usuarios:[],obras:[]}, NUSER=null;
-const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['oportunidades','Oportunidades'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações']];
+const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['solicitacoes','Solicitações'],['oportunidades','Oportunidades'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações']];
 const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',comprador:'Suprimentos',coordenador:'Coordenador',personalizado:'Personalizado'};
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},
@@ -4450,7 +4567,7 @@ function applyMenus(){
   document.querySelectorAll('.nav a[data-menu]').forEach(a=>{
     const m=a.getAttribute('data-menu');
     let show;
-    if(m==='oraculo') show = auth;                                         // Radar IA p/ todo autorizado
+    if(m==='oraculo'||m==='solicitacoes') show = auth;                     // Radar IA + Solicitações p/ todo autorizado
     else if(m==='config') show = IS_ADMIN||allow.includes('config')||CAN_RESP;  // Config nunca some p/ admin
     else if(adminSel) show = allow.includes(m);                            // admin escolheu → mostra só o marcado
     else show = IS_ADMIN||allow.includes(m);

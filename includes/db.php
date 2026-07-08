@@ -198,6 +198,17 @@ function db_schema_mysql($pdo) {
         unidade VARCHAR(40), preco DOUBLE, frete_incluso TINYINT DEFAULT 0, observacao TEXT, created_at VARCHAR(40),
         PRIMARY KEY (id), KEY idx_pitem_tab (tabela_id), KEY idx_pitem_ins (insumo_id)
     ) $E");
+    // SOLICITAÇÕES DE COMPRA — de-para (coligada+centro de custo → nome+comprador+obra radar) + overlay do comprador
+    $pdo->exec("CREATE TABLE IF NOT EXISTS solic_obra (
+        id INT NOT NULL AUTO_INCREMENT, coligada VARCHAR(255), obra_cod VARCHAR(20), nome_comercial VARCHAR(191),
+        comprador_id VARCHAR(64), comprador_nome VARCHAR(191), radar_obra_id INT, created_at VARCHAR(40), updated_at VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_sobra_col (obra_cod)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS solic_overlay (
+        id INT NOT NULL AUTO_INCREMENT, coligada VARCHAR(255), numero VARCHAR(40), status VARCHAR(40),
+        observacoes TEXT, fornecedores TEXT, orcamento_recebido TINYINT DEFAULT 0, cotacao_id INT,
+        updated_by VARCHAR(64), updated_at VARCHAR(40), PRIMARY KEY (id), KEY idx_sov_num (numero)
+    ) $E");
     // colunas ADITIVAS na produção (radar_item já existe da migração; CREATE IF NOT EXISTS não adiciona coluna).
     // Usa ALTER (privilégio concedido) só se faltar. Espelha o self-heal do caminho SQLite.
     $rc = [];
@@ -403,6 +414,8 @@ function db_schema($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS preco_insumo (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, unidade TEXT, sinonimos TEXT, servico_id INTEGER, categoria TEXT, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS preco_tabela (id INTEGER PRIMARY KEY AUTOINCREMENT, fornecedor_id INTEGER, fornecedor_nome TEXT, titulo TEXT, validade_inicio TEXT, validade_fim TEXT, observacao TEXT, anexo_id INTEGER, criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS preco_item (id INTEGER PRIMARY KEY AUTOINCREMENT, tabela_id INTEGER NOT NULL, insumo_id INTEGER, descricao_original TEXT, unidade TEXT, preco REAL, frete_incluso INTEGER DEFAULT 0, observacao TEXT, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS solic_obra (id INTEGER PRIMARY KEY AUTOINCREMENT, coligada TEXT, obra_cod TEXT, nome_comercial TEXT, comprador_id TEXT, comprador_nome TEXT, radar_obra_id INTEGER, created_at TEXT, updated_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS solic_overlay (id INTEGER PRIMARY KEY AUTOINCREMENT, coligada TEXT, numero TEXT, status TEXT, observacoes TEXT, fornecedores TEXT, orcamento_recebido INTEGER DEFAULT 0, cotacao_id INTEGER, updated_by TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS oracle_uso (bitrix_id TEXT NOT NULL, dia TEXT NOT NULL, n INTEGER DEFAULT 0, PRIMARY KEY (bitrix_id, dia))");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_coti_cot ON cotacao_item(cotacao_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_prop_cot ON cotacao_proposta(cotacao_id)");

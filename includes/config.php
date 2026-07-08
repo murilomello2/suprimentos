@@ -23,6 +23,13 @@ define('SUPABASE_SVC_EMAIL','api-externo@caprem.com.br');
 // Senha: usa env CAPREM_API_PASSWORD se existir; senão cai no literal (rotacionar depois).
 define('CAPREM_API_PASSWORD', getenv('CAPREM_API_PASSWORD') ?: 'CapremApi#2026!vQz9LpXr');
 
+// ============================================================
+// Solicitações de Compra (Supabase alimentado pelo Power Automate/TOTVS).
+// SOMENTE LEITURA (RLS anon). Fila item-a-item em `solicitacoes_fila`.
+// ============================================================
+define('SOLIC_SUPABASE_URL', 'https://casfxrtkhcbbexoagxvd.supabase.co');
+define('SOLIC_SUPABASE_KEY', getenv('SOLIC_SUPABASE_KEY') ?: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhc2Z4cnRraGNiYmV4b2FneHZkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYyNTQ4ODMsImV4cCI6MjA5MTgzMDg4M30.-CwNK8yALyjqrNgglT9lNggw32EIYHjnuPhOqw70RQQ');
+
 // Caminho da base local (SQLite interina; portará para MySQL quando o TI liberar).
 define('DB_PATH', __DIR__ . '/../data/cockpit.sqlite');
 define('TOKEN_CACHE', __DIR__ . '/../data/.token_cache.json');

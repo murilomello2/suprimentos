@@ -294,7 +294,8 @@
     .up-noprint{display:none!important}
     .up-tbl{font-size:9px} .up-tbl th,.up-tbl td{padding:3px 5px}
     .up-tbl tr,.up-tbl thead{break-inside:avoid}
-    @page{size:A4 landscape;margin:8mm}
+    #cotUmaPagina{page:upland}   /* SÓ a uma-página é paisagem (named page); o @page padrão (retrato) vale p/ carta e demais */
+    @page upland{size:A4 landscape;margin:8mm}
   }
   .gantt-row{display:grid;grid-template-columns:130px 1fr;gap:8px;align-items:center;margin-bottom:7px;font-size:11.5px}
   .gantt-track{position:relative;height:16px;background:#f1f4f3;border-radius:8px}
@@ -4463,9 +4464,9 @@ function solRenderLista(){
       <td style="text-align:center">${s.n_itens}</td><td style="max-width:220px"><span title="${esc(s.primeiro)}">${esc((s.primeiro||'').slice(0,40))}</span></td>
       <td class="muted" style="font-size:11.5px">${esc(s.nome_obra)}</td><td class="muted" style="font-size:11.5px;white-space:nowrap">${s.emissao?D(s.emissao):'—'}</td>
       <td style="text-align:center">${solPill(s)}</td>
-      <td style="background:${st[2]};border-left:3px solid ${st[0]}">${CAN_EDIT?`<select onchange="solStatus('${esc(key)}',this.value)" style="font-size:11px;padding:3px 4px;font-weight:700;color:${st[0]};background:${st[2]};border:1px solid ${st[0]};border-radius:6px;cursor:pointer">${Object.entries(SOL_ST).map(([k,v])=>`<option value="${k}" ${s.status===k?'selected':''}>${v[1]}</option>`).join('')}</select>`:`<span class="dchip" style="background:${st[0]};color:#fff;font-weight:700">${st[1]}</span>`}</td>
+      <td style="background:${st[2]};border-left:3px solid ${st[0]}">${CAN_EDIT?`<select onchange="solStatus('${esc(key)}',this.value,this)" style="font-size:11px;padding:3px 4px;font-weight:700;color:${st[0]};background:${st[2]};border:1px solid ${st[0]};border-radius:6px;cursor:pointer">${Object.entries(SOL_ST).map(([k,v])=>`<option value="${k}" ${s.status===k?'selected':''}>${v[1]}</option>`).join('')}</select>`:`<span class="dchip" style="background:${st[0]};color:#fff;font-weight:700">${st[1]}</span>`}</td>
       <td class="muted" style="font-size:11.5px">${esc(s.comprador_nome||'—')}</td>
-      <td>${CAN_EDIT?`<input value="${esc(obs)}" title="${esc(obs)}" oninput="this.title=this.value" onchange="solObs('${esc(key)}',this.value)" placeholder="anotação…" style="width:150px;font-size:11px;padding:3px 5px">`:`<span title="${esc(obs)}">${esc(obs.slice(0,32))}${obs.length>32?'…':''}</span>`}</td>
+      <td>${CAN_EDIT?`<input value="${esc(obs)}" title="${esc(obs)}" oninput="this.title=this.value" onchange="solObs('${esc(key)}',this.value,this)" placeholder="anotação…" style="width:150px;font-size:11px;padding:3px 5px">`:`<span title="${esc(obs)}">${esc(obs.slice(0,32))}${obs.length>32?'…':''}</span>`}</td>
       <td style="white-space:nowrap"><button class="btn-ghost" style="padding:2px 6px" title="Copiar mensagem para orçamento" onclick="solCopiar('${esc(key)}')"><span class="material-icons" style="font-size:15px">content_copy</span></button>
         ${s.cotacao_id?`<button class="btn-ghost" style="padding:2px 6px;color:var(--verde-d)" title="Ver cotação gerada" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${s.cotacao_id}),200)"><span class="material-icons" style="font-size:15px">request_quote</span></button>`:(CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px" title="Gerar cotação desta solicitação" onclick="solGerar('${esc(key)}')"><span class="material-icons" style="font-size:15px;color:var(--verde)">playlist_add</span></button>`:'')}</td></tr>`;
     if(ex) html+=`<tr><td colspan="10" style="background:#fafbfb;padding:8px 14px"><b style="font-size:11px;color:var(--muted)">ITENS</b>${s.itens.map(it=>`<div style="font-size:12px;padding:2px 0">• ${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</div>`).join('')}</td></tr>`;
@@ -4476,10 +4477,18 @@ function solRenderLista(){
   if(wasB){const ni=document.getElementById('solBusca'); if(ni){ni.focus(); try{ni.setSelectionRange(car,car);}catch(e){}}}
 }
 function solFind(key){ return (SOL.data.solicitacoes||[]).find(s=>(s.coligada+'|'+s.numero)===key); }
-async function solStatus(key,v){ const s=solFind(key); if(!s)return; s.status=v; solRenderLista();
-  await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_overlay',me:EU&&EU.bitrix_id,coligada:s.coligada,numero:s.numero,status:v})}); toast('Status salvo'); }
-async function solObs(key,v){ const s=solFind(key); if(!s)return; s.observacoes=v;
-  await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_overlay',me:EU&&EU.bitrix_id,coligada:s.coligada,numero:s.numero,observacoes:v})}); toast('Anotação salva'); }
+async function solStatus(key,v,el){ const s=solFind(key); if(!s)return; const prev=s.status; s.status=v;
+  const st=SOL_ST[v]||['var(--neu)','?','var(--neubg)'];
+  if(el){ el.style.color=st[0]; el.style.background=st[2]; el.style.borderColor=st[0]; const td=el.closest('td'); if(td){ td.style.background=st[2]; td.style.borderLeft='3px solid '+st[0]; } }
+  try{ const r=await (await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_overlay',me:EU&&EU.bitrix_id,coligada:s.coligada,numero:s.numero,status:v})})).json();
+    if(r&&r.error){ s.status=prev; solRenderLista(); toast('Não salvou: '+r.error); return; }
+    toast('Status salvo');
+  }catch(e){ s.status=prev; solRenderLista(); toast('Falha ao salvar status — tente de novo'); } }
+async function solObs(key,v,el){ const s=solFind(key); if(!s)return; const prev=s.observacoes||''; s.observacoes=v;
+  try{ const r=await (await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_overlay',me:EU&&EU.bitrix_id,coligada:s.coligada,numero:s.numero,observacoes:v})})).json();
+    if(r&&r.error){ s.observacoes=prev; if(el){el.value=prev;el.title=prev;} toast('Não salvou: '+r.error); return; }
+    toast('Anotação salva');
+  }catch(e){ s.observacoes=prev; if(el){el.value=prev;el.title=prev;} toast('Falha ao salvar anotação — tente de novo'); } }
 function solCopiar(key){ const s=solFind(key); if(!s)return;
   const sub=/CAPRETZ/i.test(s.coligada)?(s.nome_obra||'Geral'):'Geral';
   const num=String(s.numero).replace(/^0+/,'')||s.numero;

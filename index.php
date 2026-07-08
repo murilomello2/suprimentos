@@ -4409,7 +4409,7 @@ async function precExcluir(id){ if(!confirm('Excluir esta tabela de preços?'))r
 }
 /* ========== SOLICITAÇÕES DE COMPRA (fila TOTVS ao vivo + de-para + overlay) ========== */
 const SOL={tab:'dashboard',data:null,obras:null,filt:{obra:'',comprador:'',status:'',bucket:'',busca:''},exp:{}};
-const SOL_ST={pendente:['#8a9299','Pendente'],em_cotacao:['var(--cot)','Em cotação'],cotacoes_recebidas:['var(--dourado)','Cotações recebidas'],pedido_criado:['var(--ok)','Pedido criado'],cancelado:['var(--pend)','Cancelado']};
+const SOL_ST={pendente:['var(--neu)','Pendente','var(--neubg)'],em_cotacao:['var(--cot)','Em cotação','var(--cotbg)'],cotacoes_recebidas:['var(--and)','Cotações recebidas','var(--andbg)'],pedido_criado:['var(--ok)','Pedido criado','var(--okbg)'],cancelado:['var(--pend)','Cancelado','var(--pendbg)']};
 const SOL_BK={r:['#eafaf0','#1f7a44','No prazo'],a:['#fdf4d9','#8a6d12','Atenção'],l:['#fde8cf','#b5610f','Atrasado'],c:['#fbe4e4','#b02020','Crítico']};
 function solMe(){ return encodeURIComponent((EU&&EU.bitrix_id)||''); }
 function solInit(){ solTab(SOL.tab||'dashboard'); }
@@ -4458,13 +4458,14 @@ function solRenderLista(){
      <button class="btn-ghost" style="margin-left:auto;padding:5px 10px" onclick="SOL.data=null;SOL.filt={obra:'',comprador:'',status:'',bucket:'',busca:''};solLoad()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">refresh</span> Atualizar fila</button>
    </div></div><div class="wrap"><table><thead><tr><th>Pedido</th><th style="text-align:center">Itens</th><th>Descrição</th><th>Obra</th><th>Emissão</th><th style="text-align:center">Dias</th><th>Status</th><th>Comprador</th><th>Observações</th><th>Ações</th></tr></thead><tbody>`;
   for(const s of rows){ const key=s.coligada+'|'+s.numero, ex=SOL.exp[key];
+    const st=SOL_ST[s.status]||['var(--neu)','?','var(--neubg)'], obs=s.observacoes||'';
     html+=`<tr><td><b style="cursor:pointer" onclick="SOL.exp['${esc(key)}']=${ex?'false':'true'};solRenderLista()">${ex?'▾':'▸'} ${esc(String(s.numero).replace(/^0+/,'')||s.numero)}</b></td>
       <td style="text-align:center">${s.n_itens}</td><td style="max-width:220px"><span title="${esc(s.primeiro)}">${esc((s.primeiro||'').slice(0,40))}</span></td>
       <td class="muted" style="font-size:11.5px">${esc(s.nome_obra)}</td><td class="muted" style="font-size:11.5px;white-space:nowrap">${s.emissao?D(s.emissao):'—'}</td>
       <td style="text-align:center">${solPill(s)}</td>
-      <td>${CAN_EDIT?`<select onchange="solStatus('${esc(key)}',this.value)" style="font-size:11px;padding:3px">${Object.entries(SOL_ST).map(([k,v])=>`<option value="${k}" ${s.status===k?'selected':''}>${v[1]}</option>`).join('')}</select>`:`<span class="dchip" style="background:${(SOL_ST[s.status]||['#8a9299'])[0]}">${(SOL_ST[s.status]||['','?'])[1]}</span>`}</td>
+      <td style="background:${st[2]};border-left:3px solid ${st[0]}">${CAN_EDIT?`<select onchange="solStatus('${esc(key)}',this.value)" style="font-size:11px;padding:3px 4px;font-weight:700;color:${st[0]};background:${st[2]};border:1px solid ${st[0]};border-radius:6px;cursor:pointer">${Object.entries(SOL_ST).map(([k,v])=>`<option value="${k}" ${s.status===k?'selected':''}>${v[1]}</option>`).join('')}</select>`:`<span class="dchip" style="background:${st[0]};color:#fff;font-weight:700">${st[1]}</span>`}</td>
       <td class="muted" style="font-size:11.5px">${esc(s.comprador_nome||'—')}</td>
-      <td>${CAN_EDIT?`<input value="${esc(s.observacoes||'')}" onchange="solObs('${esc(key)}',this.value)" placeholder="anotação…" style="width:130px;font-size:11px;padding:3px 5px">`:esc(s.observacoes||'')}</td>
+      <td>${CAN_EDIT?`<input value="${esc(obs)}" title="${esc(obs)}" oninput="this.title=this.value" onchange="solObs('${esc(key)}',this.value)" placeholder="anotação…" style="width:150px;font-size:11px;padding:3px 5px">`:`<span title="${esc(obs)}">${esc(obs.slice(0,32))}${obs.length>32?'…':''}</span>`}</td>
       <td style="white-space:nowrap"><button class="btn-ghost" style="padding:2px 6px" title="Copiar mensagem para orçamento" onclick="solCopiar('${esc(key)}')"><span class="material-icons" style="font-size:15px">content_copy</span></button>
         ${s.cotacao_id?`<button class="btn-ghost" style="padding:2px 6px;color:var(--verde-d)" title="Ver cotação gerada" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${s.cotacao_id}),200)"><span class="material-icons" style="font-size:15px">request_quote</span></button>`:(CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px" title="Gerar cotação desta solicitação" onclick="solGerar('${esc(key)}')"><span class="material-icons" style="font-size:15px;color:var(--verde)">playlist_add</span></button>`:'')}</td></tr>`;
     if(ex) html+=`<tr><td colspan="10" style="background:#fafbfb;padding:8px 14px"><b style="font-size:11px;color:var(--muted)">ITENS</b>${s.itens.map(it=>`<div style="font-size:12px;padding:2px 0">• ${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</div>`).join('')}</td></tr>`;
@@ -4475,7 +4476,7 @@ function solRenderLista(){
   if(wasB){const ni=document.getElementById('solBusca'); if(ni){ni.focus(); try{ni.setSelectionRange(car,car);}catch(e){}}}
 }
 function solFind(key){ return (SOL.data.solicitacoes||[]).find(s=>(s.coligada+'|'+s.numero)===key); }
-async function solStatus(key,v){ const s=solFind(key); if(!s)return; s.status=v;
+async function solStatus(key,v){ const s=solFind(key); if(!s)return; s.status=v; solRenderLista();
   await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_overlay',me:EU&&EU.bitrix_id,coligada:s.coligada,numero:s.numero,status:v})}); toast('Status salvo'); }
 async function solObs(key,v){ const s=solFind(key); if(!s)return; s.observacoes=v;
   await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_overlay',me:EU&&EU.bitrix_id,coligada:s.coligada,numero:s.numero,observacoes:v})}); toast('Anotação salva'); }

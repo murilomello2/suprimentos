@@ -181,6 +181,23 @@ function db_schema_mysql($pdo) {
         html MEDIUMTEXT, criado_por VARCHAR(64), criado_nome VARCHAR(191), created_at VARCHAR(40),
         PRIMARY KEY (id), KEY idx_cg_cot (cotacao_id)
     ) $E");
+    // PREÇOS TABELADOS — item canônico (dedup) + tabela (contrato do fornecedor) + itens da tabela
+    $pdo->exec("CREATE TABLE IF NOT EXISTS preco_insumo (
+        id INT NOT NULL AUTO_INCREMENT, nome VARCHAR(255) NOT NULL, unidade VARCHAR(40), sinonimos MEDIUMTEXT,
+        servico_id INT, categoria VARCHAR(191), created_at VARCHAR(40), updated_at VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_pins_serv (servico_id)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS preco_tabela (
+        id INT NOT NULL AUTO_INCREMENT, fornecedor_id INT, fornecedor_nome VARCHAR(255), titulo VARCHAR(255),
+        validade_inicio VARCHAR(20), validade_fim VARCHAR(20), observacao TEXT, anexo_id INT,
+        criado_por VARCHAR(64), criado_nome VARCHAR(191), created_at VARCHAR(40), updated_at VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_ptab_forn (fornecedor_id)
+    ) $E");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS preco_item (
+        id INT NOT NULL AUTO_INCREMENT, tabela_id INT NOT NULL, insumo_id INT, descricao_original VARCHAR(255),
+        unidade VARCHAR(40), preco DOUBLE, frete_incluso TINYINT DEFAULT 0, observacao TEXT, created_at VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_pitem_tab (tabela_id), KEY idx_pitem_ins (insumo_id)
+    ) $E");
     // colunas ADITIVAS na produção (radar_item já existe da migração; CREATE IF NOT EXISTS não adiciona coluna).
     // Usa ALTER (privilégio concedido) só se faltar. Espelha o self-heal do caminho SQLite.
     $rc = [];
@@ -383,6 +400,9 @@ function db_schema($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS carta_modelo (id INTEGER PRIMARY KEY AUTOINCREMENT, servico_id INTEGER, servico_nome TEXT, tipo TEXT, objeto TEXT, norma_referencia TEXT, pes_ref TEXT, escopo TEXT, criterios_medicao TEXT, equalizacao_campos TEXT, quantitativos_modelo TEXT, observacoes TEXT, versao INTEGER DEFAULT 1, is_padrao INTEGER DEFAULT 1, origem TEXT DEFAULT 'seed', criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS carta_config (id INTEGER PRIMARY KEY, bloco_json TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS carta_gerada (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, servico_nome TEXT, titulo TEXT, html TEXT, criado_por TEXT, criado_nome TEXT, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS preco_insumo (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, unidade TEXT, sinonimos TEXT, servico_id INTEGER, categoria TEXT, created_at TEXT, updated_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS preco_tabela (id INTEGER PRIMARY KEY AUTOINCREMENT, fornecedor_id INTEGER, fornecedor_nome TEXT, titulo TEXT, validade_inicio TEXT, validade_fim TEXT, observacao TEXT, anexo_id INTEGER, criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS preco_item (id INTEGER PRIMARY KEY AUTOINCREMENT, tabela_id INTEGER NOT NULL, insumo_id INTEGER, descricao_original TEXT, unidade TEXT, preco REAL, frete_incluso INTEGER DEFAULT 0, observacao TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS oracle_uso (bitrix_id TEXT NOT NULL, dia TEXT NOT NULL, n INTEGER DEFAULT 0, PRIMARY KEY (bitrix_id, dia))");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_coti_cot ON cotacao_item(cotacao_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_prop_cot ON cotacao_proposta(cotacao_id)");

@@ -315,7 +315,7 @@
       <a id="nav-dashboards" data-menu="dashboard" title="Dashboards" onclick="showView('dashboards')"><span class="material-icons">dashboard</span> <span class="navtxt">Dashboards</span></a>
       <a id="nav-radar" data-menu="radar" class="active" title="Radar de Aquisições" onclick="showView('radar')"><span class="material-icons">radar</span> <span class="navtxt">Radar de Aquisições</span></a>
       <a id="nav-matriz" data-menu="matriz" title="Matriz" onclick="showView('matriz')"><span class="material-icons">grid_on</span> <span class="navtxt">Matriz</span></a>
-      <a id="nav-cotacoes" data-menu="cotacoes" title="Mapa de Cotações" onclick="showView('cotacoes')"><span class="material-icons">request_quote</span> <span class="navtxt">Mapa de Cotações</span></a>
+      <a id="nav-cotacoes" data-menu="cotacoes" title="Cotações" onclick="showView('cotacoes')"><span class="material-icons">request_quote</span> <span class="navtxt">Cotações</span></a>
       <a id="nav-oraculo" data-menu="oraculo" title="Radar IA — oráculo de suprimentos" onclick="showView('oraculo')"><span class="material-icons">auto_awesome</span> <span class="navtxt">Radar IA</span></a>
     </nav>
     <div class="navlabel">Administração</div>
@@ -486,13 +486,14 @@
 
    <section id="view-cotacoes" style="display:none">
     <div class="top">
-      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">request_quote</span> Mapa de Cotações</h1>
+      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">request_quote</span> Cotações</h1>
       <p class="sub">Monte a concorrência: itens a cotar → propostas dos fornecedores → mapa comparativo (melhor preço por item).</p>
     </div>
     <div class="dtabs" id="cottabs" style="margin-bottom:12px">
       <button class="dtab on" id="ctab-cotacoes" onclick="cotTab('cotacoes')"><span class="material-icons">request_quote</span> Cotações</button>
       <button class="dtab" id="ctab-fornecedores" onclick="cotTab('fornecedores')"><span class="material-icons">groups</span> Fornecedores</button>
       <button class="dtab" id="ctab-cartas" onclick="cotTab('cartas')"><span class="material-icons">description</span> Modelos de carta</button>
+      <button class="dtab" id="ctab-precos" onclick="cotTab('precos')"><span class="material-icons">sell</span> Preços tabelados</button>
     </div>
     <div id="cotwrap"><div class="dempty">Carregando…</div></div>
    </section>
@@ -3410,8 +3411,8 @@ function renderDashOpp(D){
 /* ===================== MAPA DE COTAÇÕES ===================== */
 let COT={mode:'list', tab:'cotacoes', list:[], obra:'', cur:null, novoItens:[], prop:null};
 function cotInit(){ cotTab(COT.tab||'cotacoes'); }
-function cotTab(t){ COT.tab=t; ['cotacoes','fornecedores','cartas'].forEach(x=>{const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x===t);});
-  if(t==='fornecedores') fornLoad(); else if(t==='cartas') cartaLoad(); else cotLoad(); }
+function cotTab(t){ COT.tab=t; ['cotacoes','fornecedores','cartas','precos'].forEach(x=>{const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x===t);});
+  if(t==='fornecedores') fornLoad(); else if(t==='cartas') cartaLoad(); else if(t==='precos') precLoad(); else cotLoad(); }
 function cotStChip(s){ const m={aberta:['#8a9299','Aberta'],aguardando:['var(--dourado)','Aguardando'],finalizada:['var(--ok)','Finalizada']}; const x=m[s]||['#8a9299',s]; return `<span class="dchip" style="background:${x[0]}">${x[1]}</span>`; }
 function cotStLabel(s){ return ({aberta:'Aberta',aguardando:'Aguardando',finalizada:'Finalizada'})[s]||s; }
 function cotFmtDT(iso){ if(!iso)return '—'; const d=new Date(iso); if(isNaN(d.getTime()))return '—'; const p=n=>('0'+n).slice(-2); return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes()); }
@@ -4244,6 +4245,108 @@ async function cartaAnexarGerada(){
   try{ const r=await (await fetch('actions/cartas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_carta',me:EU&&EU.bitrix_id,cotacao_id:CART.gen.cotacao.id,servico_nome:CART.gen.cotacao.servico_nome||'',titulo:'Carta Convite · '+(CART.gen.cotacao.titulo||''),html})})).json();
     if(r.error){toast(r.error);return;} toast('Carta salva na cotação'); }catch(e){toast('Falha: '+e.message);}
 }
+/* ---------- Preços Tabelados (sub-aba) ---------- */
+const PREC={tabelas:[],mode:'home',busca:'',grupos:[],cur:null,itens:[],insumos:[]};
+function precMe(){ return encodeURIComponent((EU&&EU.bitrix_id)||''); }
+async function precLoad(){
+  const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Carregando preços tabelados…</div>';
+  try{ const j=await (await fetch('actions/precos.php?me='+precMe())).json(); PREC.tabelas=j.tabelas||[]; PREC.mode='home'; precRender(); }
+  catch(e){ w.innerHTML='<div class="empty">Falha ao carregar.</div>'; }
+}
+function precVenc(o){ return o.vigente?'':'opacity:.45;text-decoration:line-through'; }
+function precOfertaTbl(g){
+  const ofs=g.ofertas.slice().sort((a,b)=>((a.preco==null?9e15:a.preco)-(b.preco==null?9e15:b.preco)));
+  return `<table class="up-tbl" style="margin-top:6px"><thead><tr><th style="text-align:left">Fornecedor</th><th style="text-align:right">Preço</th><th>Unid.</th><th>Frete</th><th>Validade</th><th style="text-align:left">Observação</th></tr></thead><tbody>
+    ${ofs.map((o,i)=>`<tr style="${precVenc(o)}"><td style="text-align:left">${i===0&&o.vigente?'🏆 ':''}${esc(o.fornecedor||'—')}${o.descricao_original&&o.descricao_original!==g.nome?`<div style="font-size:9px;color:#99a">"${esc(o.descricao_original)}"</div>`:''}</td>
+      <td style="text-align:right;font-weight:700">${o.preco!=null?BRL(o.preco):'—'}</td><td>${esc(o.unidade||'')}</td>
+      <td>${o.frete_incluso?'✓ incluso':'—'}</td><td style="white-space:nowrap">${o.validade_fim?D(o.validade_fim):'—'}</td>
+      <td style="text-align:left;font-size:11px">${esc(o.obs||'')}</td></tr>`).join('')}</tbody></table>`;
+}
+function precRender(){
+  if(PREC.mode==='nova') return precRenderNova();
+  const w=document.getElementById('cotwrap');
+  const tabs=PREC.tabelas.map(t=>`<tr><td><b>${esc(t.fornecedor_nome||'—')}</b>${t.titulo?` <span class="muted">· ${esc(t.titulo)}</span>`:''}</td>
+    <td class="muted" style="font-size:12px">${t.validade_inicio?D(t.validade_inicio)+' – ':''}${t.validade_fim?D(t.validade_fim):'sem validade'}</td>
+    <td style="text-align:center">${t.n_itens}</td><td>${Number(t.vigente)?'<span class="dchip" style="background:var(--ok);font-size:10px">vigente</span>':'<span class="dchip" style="background:var(--pend);font-size:10px">vencida</span>'}</td>
+    <td class="muted" style="font-size:11px">${esc(t.observacao||'')}</td>
+    <td style="text-align:right">${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 8px" onclick="precEditar(${t.id})">Editar</button><button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="precExcluir(${t.id})">×</button>`:''}</td></tr>`).join('');
+  w.innerHTML=`<div class="panel" style="margin-bottom:10px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b style="font-size:14px">Consultar preço tabelado</b>
+        <div class="search" style="flex:1;min-width:240px"><span class="material-icons" style="color:var(--muted)">search</span><input id="precBusca" placeholder="Buscar insumo… (ex.: barra de aço, bloco cerâmico)" value="${esc(PREC.busca)}" oninput="precBuscarIn(this.value)"></div>
+        ${CAN_EDIT?`<button class="btn-prim" style="padding:7px 13px" onclick="precNova()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">add</span> Nova tabela</button>`:''}</div>
+      <div id="precResult" style="margin-top:10px"></div></div>
+    <div class="panel"><b style="font-size:13px">Tabelas cadastradas</b> <span class="muted" style="font-size:11.5px">— contratos/tabelas por fornecedor</span>
+      <div class="wrap" style="margin-top:8px"><table><thead><tr><th>Fornecedor</th><th>Validade</th><th style="text-align:center">Itens</th><th>Situação</th><th>Observação</th><th></th></tr></thead>
+      <tbody>${tabs||'<tr><td colspan="6" class="empty">Nenhuma tabela ainda. Clique em “Nova tabela”.</td></tr>'}</tbody></table></div></div>`;
+  if(PREC.busca) precBuscar(PREC.busca);
+}
+let _precT;
+function precBuscarIn(q){ PREC.busca=q; clearTimeout(_precT); _precT=setTimeout(()=>precBuscar(q),250); }
+async function precBuscar(q){
+  const box=document.getElementById('precResult'); if(!box)return;
+  if(!q.trim()){ box.innerHTML='<div class="dmini">Digite um insumo para comparar os preços tabelados dos fornecedores.</div>'; return; }
+  try{ const j=await (await fetch('actions/precos.php?buscar='+encodeURIComponent(q)+'&me='+precMe())).json();
+    PREC.grupos=j.grupos||[];
+    box.innerHTML=PREC.grupos.length? PREC.grupos.map(g=>`<div style="border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:8px">
+        <div style="font-weight:700;color:var(--verde-d)">${esc(g.nome)} <span class="muted" style="font-weight:400;font-size:11px">${esc(g.unidade||'')} · ${g.ofertas.length} oferta(s)</span></div>${precOfertaTbl(g)}</div>`).join('')
+      : `<div class="dmini">Nenhum preço tabelado casa "${esc(q)}".</div>`;
+  }catch(e){ box.innerHTML='<div class="dmini">Falha na busca.</div>'; }
+}
+async function precNova(){ PREC.cur=null; PREC.itens=[{descricao_original:'',insumo_nome:'',unidade:'',preco:'',frete_incluso:0,observacao:''}]; await precCarregaInsumos(); PREC.mode='nova'; precRender(); }
+async function precEditar(id){
+  try{ const j=await (await fetch('actions/precos.php?tabela='+id+'&me='+precMe())).json();
+    if(j.error){toast(j.error);return;} PREC.cur=j.tabela;
+    PREC.itens=(j.itens||[]).map(it=>({id:it.id,descricao_original:it.descricao_original||'',insumo_nome:it.insumo_nome||'',unidade:it.unidade||'',preco:it.preco!=null?it.preco:'',frete_incluso:Number(it.frete_incluso)||0,observacao:it.observacao||''}));
+    if(!PREC.itens.length) PREC.itens=[{descricao_original:'',insumo_nome:'',unidade:'',preco:'',frete_incluso:0,observacao:''}];
+    await precCarregaInsumos(); PREC.mode='nova'; precRender();
+  }catch(e){toast('Falha');}
+}
+async function precCarregaInsumos(){ try{ const j=await (await fetch('actions/precos.php?insumos=&me='+precMe())).json(); PREC.insumos=j.insumos||[]; }catch(e){ PREC.insumos=[]; } }
+function precRenderNova(){
+  const t=PREC.cur||{}, w=document.getElementById('cotwrap');
+  const dl='<datalist id="precInsDL">'+PREC.insumos.map(i=>`<option value="${esc(i.nome)}">`).join('')+'</datalist>';
+  w.innerHTML=`<div class="panel">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="PREC.mode='home';precRender()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button><b style="font-size:15px">${t.id?'Editar':'Nova'} tabela de preços</b></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+      ${cotFld('Fornecedor *','<input id="pt_forn" value="'+esc(t.fornecedor_nome||'')+'" placeholder="Nome do fornecedor">')}
+      ${cotFld('Título/contrato','<input id="pt_tit" value="'+esc(t.titulo||'')+'" placeholder="Ex.: Tabela 2026 / Contrato XPTO">')}
+      ${cotFld('Validade — início','<input id="pt_vi" type="date" value="'+esc(t.validade_inicio||'')+'">')}
+      ${cotFld('Validade — fim','<input id="pt_vf" type="date" value="'+esc(t.validade_fim||'')+'">')}
+    </div>
+    ${cotFld('Observação (ex.: “atende obras da região de Americana”)','<input id="pt_obs" style="width:100%" value="'+esc(t.observacao||'')+'">','margin-top:8px')}
+    <div class="dmini" style="margin-top:10px">📎 O PDF da tabela/contrato e a leitura por IA entram no próximo passo. Por ora, cadastre os itens abaixo.</div>
+    <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center"><b style="font-size:13px">Itens</b>
+      <span class="muted" style="font-size:11px">“Item canônico” agrupa a mesma coisa entre fornecedores (dedup)</span></div>
+    <div id="pt_itens" style="margin-top:8px"></div>
+    <button class="btn-ghost" style="margin-top:6px" onclick="precAddItem()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar item</button>
+    <div style="margin-top:14px"><button class="btn-prim" onclick="precSalvar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar tabela</button></div>
+    ${dl}</div>`;
+  precRenderItens();
+}
+function precRenderItens(){
+  const box=document.getElementById('pt_itens'); if(!box)return;
+  box.innerHTML=PREC.itens.map((it,i)=>`<div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1.2fr) 70px 110px 62px 34px;gap:6px;align-items:center;margin-bottom:6px">
+    <input placeholder="Descrição do fornecedor" value="${esc(it.descricao_original)}" oninput="PREC.itens[${i}].descricao_original=this.value" style="font-size:12px">
+    <input list="precInsDL" placeholder="Item canônico (dedup)" value="${esc(it.insumo_nome)}" oninput="PREC.itens[${i}].insumo_nome=this.value" style="font-size:12px" title="agrupa a mesma coisa entre fornecedores">
+    <input placeholder="unid" value="${esc(it.unidade)}" oninput="PREC.itens[${i}].unidade=this.value" style="font-size:12px">
+    <input inputmode="decimal" placeholder="preço" value="${it.preco!==''&&it.preco!=null?esc(fmtMoney(it.preco)):''}" oninput="maskMoneyInput(this);PREC.itens[${i}].preco=parseBRLInput(this.value)" onblur="moneyBlur(this)" style="font-size:12px;text-align:right">
+    <label style="font-size:10.5px;display:flex;align-items:center;gap:3px;justify-content:center" title="frete incluso"><input type="checkbox" ${it.frete_incluso?'checked':''} onchange="PREC.itens[${i}].frete_incluso=this.checked?1:0"> frete</label>
+    <button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="PREC.itens.splice(${i},1);precRenderItens()" title="remover">×</button>
+  </div>`).join('')||'<div class="dmini">Sem itens.</div>';
+}
+function precAddItem(){ PREC.itens.push({descricao_original:'',insumo_nome:'',unidade:'',preco:'',frete_incluso:0,observacao:''}); precRenderItens(); }
+async function precSalvar(){
+  const v=id=>((document.getElementById(id)||{}).value||'');
+  const forn=v('pt_forn').trim(); if(!forn){toast('Informe o fornecedor');return;}
+  const itens=PREC.itens.filter(it=>(it.descricao_original||'').trim()).map(it=>({id:it.id,descricao_original:it.descricao_original,insumo_nome:it.insumo_nome,unidade:it.unidade,preco:(it.preco===''||it.preco==null)?'':Number(it.preco),frete_incluso:it.frete_incluso?1:0,observacao:it.observacao}));
+  const body={acao:'salvar_tabela',me:EU&&EU.bitrix_id,tabela:{id:PREC.cur&&PREC.cur.id,fornecedor_nome:forn,titulo:v('pt_tit'),validade_inicio:v('pt_vi'),validade_fim:v('pt_vf'),observacao:v('pt_obs')},itens};
+  try{ const r=await (await fetch('actions/precos.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.error){toast(r.error);return;} toast('Tabela salva'); precLoad(); }catch(e){toast('Falha: '+e.message);}
+}
+async function precExcluir(id){ if(!confirm('Excluir esta tabela de preços?'))return;
+  try{ const r=await (await fetch('actions/precos.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir_tabela',me:EU&&EU.bitrix_id,id})})).json();
+    if(r.error){toast(r.error);return;} toast('Excluída'); precLoad(); }catch(e){toast('Falha');}
+}
 /* ---------- Fornecedores (sub-aba do Mapa de Cotações) ---------- */
 let FORN={list:[],cats:[],tipos:[],total:0,f:{nome:'',categoria:'',tipo:'',itens:''},edit:null};
 async function fornLoad(){
@@ -4299,7 +4402,7 @@ async function fornExcluir(id){ if(!confirm('Excluir este fornecedor?'))return;
 
 /* ===== Configuração / Permissões (Bloco 2) ===== */
 let CFG={usuarios:[],obras:[]}, NUSER=null;
-const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Mapa de Cotações'],['oportunidades','Oportunidades'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações']];
+const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['oportunidades','Oportunidades'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações']];
 const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',comprador:'Suprimentos',coordenador:'Coordenador',personalizado:'Personalizado'};
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},

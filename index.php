@@ -256,6 +256,18 @@
   .oracintro-av img{height:224px;border-radius:18px;box-shadow:0 10px 30px rgba(0,0,0,.20);display:block}
   .oracintro-tx{flex:1 1 300px;max-width:480px;text-align:left}
   @media(max-width:860px){.oracintro{flex-direction:column;gap:14px;text-align:center;padding:16px 10px;height:auto}.oracintro-tx{text-align:center}.oracintro-av img{height:148px}}
+  /* Mapa em UMA PÁGINA (resumo imprimível) */
+  .up-tbl{width:100%;border-collapse:collapse;font-size:11px}
+  .up-tbl th,.up-tbl td{border:1px solid #e3e8e6;padding:5px 7px;text-align:center;vertical-align:top}
+  .up-tbl thead th{background:#f0f4f2;font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:#556}
+  @media print{
+    body *{visibility:hidden!important}
+    #cotUmaPagina, #cotUmaPagina *{visibility:visible!important}
+    #cotUmaPagina{position:absolute;left:0;top:0;width:100%}
+    .up-noprint{display:none!important}
+    .up-tbl{font-size:9.5px} .up-tbl th,.up-tbl td{padding:3px 5px}
+    @page{size:landscape;margin:8mm}
+  }
   .gantt-row{display:grid;grid-template-columns:130px 1fr;gap:8px;align-items:center;margin-bottom:7px;font-size:11.5px}
   .gantt-track{position:relative;height:16px;background:#f1f4f3;border-radius:8px}
   .gantt-bar{position:absolute;top:0;height:16px;border-radius:8px;opacity:.9}
@@ -3733,6 +3745,7 @@ function cotRenderDetalhe(){
       <b style="font-size:16px">${esc(c.titulo)}</b> ${cotStChip(c.status)}
       <span class="muted" style="font-size:12px">${esc(c.obra_nome||'sem obra')}${c.categoria?' · '+esc(c.categoria):''}${c.tipo_servico?' · '+esc(c.tipo_servico):''}</span>
       <span style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn-ghost" style="padding:6px 12px" onclick="cotUmaPagina()" title="Resumo de uma página, pronto pra imprimir/PDF"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Uma página</button>
         ${CAN_EDIT?`<button class="btn-prim" style="padding:6px 12px" onclick="cotProposta()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Cadastrar proposta</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotFinalizar()">${c.status==='finalizada'?'Reabrir':'Finalizar'}</button>`:''}
       </span></div>
@@ -3783,6 +3796,57 @@ function cotRenderDetalhe(){
     html+='</div></div>';
   }
   w.innerHTML=html;
+}
+// ---- MAPA EM UMA PÁGINA: resumo compacto e imprimível (obra/data/verba + comparativo de preços + equalização) ----
+function upCard(label,val,sub,color){ return `<div style="border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:#fff">
+  <div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#889;font-weight:700">${esc(label)}</div>
+  <div style="font-size:17px;font-weight:800;color:${color};margin-top:3px">${val}</div>
+  ${sub?`<div style="font-size:10.5px;color:#889;margin-top:1px">${esc(sub)}</div>`:''}</div>`; }
+function cotUmaPagina(){
+  const d=COT.cur,c=d.cotacao,itens=d.itens||[],props=d.propostas||[],m=d.mapa||{},best=m.melhor_por_item||{},w=document.getElementById('cotwrap');
+  const pontos=cotEqPontos(c);
+  const dataC=c.created_at?D(String(c.created_at).slice(0,10)):'—';
+  const verba=Number(c.verba)||0, melhor=Number(m.melhor_total)||0;
+  const economia=(verba>0&&melhor>0)?verba-melhor:null, ecoPct=(economia!=null&&verba>0)?Math.round(economia/verba*100):null;
+  const vOrig={curada:'curada ✓',auto:'auto 🤖',definida:'definida',manual:'manual'}[c.verba_origem]||c.verba_origem||'';
+  let h=`<div class="up-noprint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+    <button class="btn-ghost" onclick="cotRenderDetalhe()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar ao mapa</button>
+    <button class="btn-prim" style="padding:6px 14px" onclick="window.print()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">print</span> Imprimir / PDF</button>
+    <span class="muted" style="font-size:11.5px">Resumo de uma página — pronto pra imprimir ou salvar em PDF.</span></div>`;
+  h+=`<div id="cotUmaPagina" style="background:#fff;color:#1e2b24;padding:6px 2px">`;
+  h+=`<div style="border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px;background:#f7faf8">
+    <div style="font-size:19px;font-weight:800;color:var(--verde-d)"><span class="material-icons" style="font-size:20px;vertical-align:-3px;color:var(--dourado)">request_quote</span> Mapa de Cotações — ${esc(c.titulo||'')}</div>
+    <div style="font-size:12px;margin-top:5px;color:#667"><b>Obra:</b> ${esc(c.obra_nome||'—')} &nbsp;·&nbsp; <b>Data:</b> ${dataC}${c.criado_nome?` &nbsp;·&nbsp; <b>Criado por:</b> ${esc(c.criado_nome)}`:''}${c.categoria?` &nbsp;·&nbsp; <b>Categoria:</b> ${esc(c.categoria)}`:''}${props.length?` &nbsp;·&nbsp; <b>${props.length}</b> proposta(s)`:''}</div>
+    ${c.descricao?`<div style="font-size:12.5px;margin-top:8px;line-height:1.5;color:#334">${esc(c.descricao)}</div>`:''}</div>`;
+  h+=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">
+    ${upCard('Verba prevista', verba?BRL(verba):'—', vOrig, 'var(--muted)')}
+    ${upCard('Melhor compra', melhor?BRL(melhor):'—', 'menor preço por item', 'var(--ok)')}
+    ${upCard('Melhor fornecedor único', m.melhor_oferta?BRL(m.melhor_oferta):'—', m.fornecedor_destaque||'', 'var(--dourado)')}
+    ${economia!=null?upCard('Economia vs verba', BRL(economia), (ecoPct!=null?ecoPct+'% da verba':''), economia>=0?'var(--ok)':'var(--pend)'):''}</div>`;
+  if(props.length){
+    h+=`<div style="font-weight:800;font-size:14px;margin:6px 0 8px;color:var(--verde-d)">Comparativo de Preços</div><div style="overflow-x:auto"><table class="up-tbl"><thead><tr><th style="text-align:left">Item</th><th>Qtd</th><th>Un</th>`;
+    props.forEach(p=>{ h+=`<th>${esc(p.fornecedor_nome)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}</th>`; });
+    h+=`<th style="background:#eafaf0;color:var(--verde-d)">Melhor preço</th></tr></thead><tbody>`;
+    itens.forEach(it=>{ const b=best[it.id];
+      h+=`<tr><td style="text-align:left">${esc(it.descricao)}</td><td>${cotNum(it.quantidade)}</td><td>${esc(it.unidade||'')}</td>`;
+      props.forEach(p=>{ const pi=(p.itens||{})[it.id], isB=b&&b.proposta_id===p.id;
+        h+=`<td style="${isB?'background:#e7f6ee;font-weight:700':''}">${pi&&pi.preco_total!=null?`${BRL(pi.preco_unit)}${isB?' 🏆':''}<div style="font-size:9.5px;color:#889;font-weight:400">${BRL(pi.preco_total)}</div>`:'<span style="color:#bbb">—</span>'}</td>`; });
+      h+=`<td style="background:#eafaf0">${b?`<b>${BRL(b.preco_unit)}</b><div style="font-size:9.5px;color:#889">${BRL(b.preco_total)} · ${esc(b.fornecedor)}</div>`:'—'}</td></tr>`; });
+    h+=`<tr style="background:#f4f7f5;font-weight:800"><td style="text-align:left">TOTAL GERAL</td><td></td><td></td>`;
+    props.forEach(p=>{ const isBS=m.fornecedor_destaque===p.fornecedor_nome; h+=`<td style="${isBS?'color:var(--verde-d)':''}">${p.total!=null?BRL(p.total):'—'}</td>`; });
+    h+=`<td style="background:#eafaf0;color:var(--verde-d)">${melhor?BRL(melhor):'—'}</td></tr></tbody></table></div>`;
+  } else h+=`<div class="dmini">Sem propostas ainda — cadastre propostas para montar o comparativo.</div>`;
+  if(pontos.length&&props.length){
+    h+=`<div style="font-weight:800;font-size:14px;margin:16px 0 8px;color:var(--verde-d)">Comparativo de Equalização</div><div style="overflow-x:auto"><table class="up-tbl"><thead><tr><th style="text-align:left">Ponto a conferir</th>`;
+    props.forEach(p=>{ h+=`<th>${esc(p.fornecedor_nome)}</th>`; });
+    h+=`</tr></thead><tbody>`;
+    pontos.forEach(pt=>{ h+=`<tr><td style="text-align:left;font-weight:600">${esc(pt)}</td>`;
+      props.forEach(p=>{ const v=((p.equaliza||{})[pt])||''; h+=`<td style="text-align:left">${v?esc(v):'<span style="color:#bbb">—</span>'}</td>`; });
+      h+='</tr>'; });
+    h+=`</tbody></table></div>`;
+  }
+  h+=`<div style="font-size:10px;margin-top:14px;text-align:right;color:#99a">Cockpit de Suprimentos · Caprem · gerado em ${D(new Date().toISOString().slice(0,10))}</div></div>`;
+  w.innerHTML=h; window.scrollTo(0,0);
 }
 // EQUALIZAÇÃO — pontos a conferir por proposta (diesel? faturamento mín., mobilização, retenção, ISS, ART…)
 function cotEqPontos(c){ return ((c&&c.equalizacao)||'').split(/\r?\n|\|/).map(s=>s.trim()).filter(Boolean); }

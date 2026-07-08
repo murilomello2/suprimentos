@@ -280,7 +280,8 @@
   .cvcard{border:1px solid var(--line);border-radius:8px;padding:11px 13px} .cvcard h5{margin:0 0 5px;font-size:10.5px;text-transform:uppercase;color:var(--verde-d)} .cvcard p{margin:0;font-size:12px}
   .cvdoc [contenteditable=true]:focus{outline:2px solid rgba(203,178,106,.5);border-radius:3px}
   @media(max-width:640px){.cvmast,.cvbody,.cvinfo>div{padding-left:18px;padding-right:18px}.cvgrid3{grid-template-columns:1fr}}
-  @media print{ body *{visibility:hidden!important} #cvGerada,#cvGerada *{visibility:visible!important} #cvGerada{position:absolute;left:0;top:0;width:100%} #cvGerada .cvdoc{border:none;max-width:none} .cv-noprint{display:none!important} .cvsec{break-inside:avoid} @page{size:A4;margin:12mm} }
+  .cvdoc,.cvdoc *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  @media print{ body *{visibility:hidden!important} #cvGerada,#cvGerada *{visibility:visible!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important} #cvGerada{position:absolute;left:0;top:0;width:100%} #cvGerada .cvdoc{border:none;max-width:none;box-shadow:none} .cv-noprint{display:none!important} .cvsec{break-inside:avoid} .cvmast{background:#1e3a2e!important} @page{size:A4;margin:10mm} }
   /* Mapa em UMA PÁGINA (resumo imprimível) */
   .up-tbl{width:100%;border-collapse:collapse;font-size:11px}
   .up-tbl th,.up-tbl td{border:1px solid #e3e8e6;padding:5px 7px;text-align:center;vertical-align:top}
@@ -3790,7 +3791,7 @@ function cotRenderDetalhe(){
       <b style="font-size:16px">${esc(c.titulo)}</b> ${cotStChip(c.status)}
       <span class="muted" style="font-size:12px">${esc(c.obra_nome||'sem obra')}${c.categoria?' · '+esc(c.categoria):''}${c.tipo_servico?' · '+esc(c.tipo_servico):''}</span>
       <span style="margin-left:auto;display:flex;gap:6px">
-        ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cartaGerar(${c.id})" title="Gerar a carta convite desta cotação (PDF/Word)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> Gerar carta</button>`:''}
+        ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cartaGerar(${c.id})" title="Carta convite desta cotação (PDF/Word)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> ${(d.cartas_geradas&&d.cartas_geradas.length)?'Ver/editar carta':'Gerar carta'}</button>${(d.cartas_geradas&&d.cartas_geradas.length)?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="carta convite salva em ${D(String(d.cartas_geradas[0].created_at).slice(0,10))}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">description</span> carta salva</span>`:''}`:''}
         <button class="btn-ghost" style="padding:6px 12px" onclick="cotUmaPagina()" title="Resumo de uma página, pronto pra imprimir/PDF"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Uma página</button>
         ${CAN_EDIT?`<button class="btn-prim" style="padding:6px 12px" onclick="cotProposta()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Cadastrar proposta</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotFinalizar()">${c.status==='finalizada'?'Reabrir':'Finalizar'}</button>`:''}
@@ -4157,7 +4158,7 @@ function cartaRenderConfig(){
     ${cotFld('SST · nota (EPI / atraso de pagamento)','<textarea id="cc_snota" rows="2" style="width:100%">'+esc(s.nota||'')+'</textarea>','margin-top:8px')}
     ${cotFld('Julgamento das propostas (uma por linha)','<textarea id="cc_julg" rows="3" style="width:100%">'+esc(L(c.julgamento))+'</textarea>','margin-top:8px')}
     ${cotFld('Faturamento e pagamento','<textarea id="cc_fat" rows="3" style="width:100%">'+esc(c.faturamento||'')+'</textarea>','margin-top:8px')}
-    ${cotFld('Contato gestor de suprimentos','<input id="cc_gest" style="width:100%" value="'+esc((c.contatos||{}).gestor_suprimentos||'')+'">','margin-top:8px')}
+    <div class="dmini" style="margin-top:8px">O <b>Responsável do Departamento de Suprimentos</b> na carta é sempre o usuário que criou a cotação — não precisa configurar aqui.</div>
     ${cotFld('Declaração final','<textarea id="cc_decl" rows="2" style="width:100%">'+esc(c.declaracao||'')+'</textarea>','margin-top:8px')}
     ${cotFld('Validade da proposta (dias)','<input id="cc_val" type="number" style="width:120px" value="'+esc(c.validade_dias||30)+'">','margin-top:8px')}
     <div style="margin-top:12px"><button class="btn-prim" onclick="cartaConfigSalvar()">Salvar bloco Caprem</button></div>
@@ -4165,17 +4166,23 @@ function cartaRenderConfig(){
 }
 async function cartaConfigSalvar(){
   const g=id=>((document.getElementById(id)||{}).value||''), lines=id=>g(id).split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-  const config={obrigacoes:lines('cc_obr'),seguranca:{a_cada_medicao:g('cc_s1'),da_empresa:g('cc_s2'),dos_empregados:g('cc_s3'),nota:g('cc_snota')},julgamento:lines('cc_julg'),faturamento:g('cc_fat'),contatos:{gestor_suprimentos:g('cc_gest')},declaracao:g('cc_decl'),validade_dias:Number(g('cc_val'))||30};
+  const config={obrigacoes:lines('cc_obr'),seguranca:{a_cada_medicao:g('cc_s1'),da_empresa:g('cc_s2'),dos_empregados:g('cc_s3'),nota:g('cc_snota')},julgamento:lines('cc_julg'),faturamento:g('cc_fat'),contatos:{gestor_suprimentos:''},declaracao:g('cc_decl'),validade_dias:Number(g('cc_val'))||30};
   try{ const r=await (await fetch('actions/cartas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'save_config',me:EU&&EU.bitrix_id,config})})).json();
     if(r.error){toast(r.error);return;} toast('Bloco Caprem salvo'); cartaLoad(); }catch(e){toast('Falha');}
 }
 /* --- GERAÇÃO da carta a partir de uma cotação --- */
 async function cartaGerar(cid){
   const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Montando a carta…</div>';
-  try{ const g=await (await fetch('actions/cartas.php?gerar='+cid+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
-    if(g.error){w.innerHTML='<div class="empty">'+esc(g.error)+'</div>';return;} CART.gen=g; cartaRenderGerar();
+  const enc=encodeURIComponent((EU&&EU.bitrix_id)||'');
+  try{ const g=await (await fetch('actions/cartas.php?gerar='+cid+'&me='+enc)).json();
+    if(g.error){w.innerHTML='<div class="empty">'+esc(g.error)+'</div>';return;} CART.gen=g; CART.savedHTML=null;
+    // já existe carta salva nesta cotação? carrega a ÚLTIMA pra continuar editando (não refaz do zero)
+    const gl=await (await fetch('actions/cartas.php?geradas='+cid+'&me='+enc)).json();
+    if(gl.geradas&&gl.geradas.length){ const one=await (await fetch('actions/cartas.php?gerada='+gl.geradas[0].id+'&me='+enc)).json(); if(one.gerada&&one.gerada.html) CART.savedHTML=one.gerada.html; }
+    cartaRenderGerar();
   }catch(e){ w.innerHTML='<div class="empty">Falha ao gerar.</div>'; }
 }
+function cartaGerarZero(){ if(!confirm('Descartar a carta salva e gerar uma NOVA a partir do modelo? (as suas edições serão perdidas)'))return; CART.savedHTML=null; cartaRenderGerar(); }
 function cvList(a){ return (a&&a.length)?'<ul>'+a.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':''; }
 function cartaMontarHTML(g){
   const c=g.cotacao||{}, m=g.modelo||null, cf=g.config||{}, s=cf.seguranca||{};
@@ -4225,7 +4232,7 @@ function cartaMontarHTML(g){
   h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">07</span><span class="cvst">Faturamento e pagamento</span></div><p>${esc(cf.faturamento||'')}</p></div>`;
   // 08 Contatos
   h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">08</span><span class="cvst">Esclarecimentos e contatos</span></div>
-    <p><b>Gestor de suprimentos:</b> ${esc((cf.contatos||{}).gestor_suprimentos||'')}</p>
+    <p><b>Responsável do Departamento de Suprimentos:</b> ${esc(c.criado_nome||'')}</p>
     <p><b>Validade da proposta:</b> mínimo ${esc(cf.validade_dias||30)} dias · <b>Distribuição:</b> <span class="cvph">__/__/____</span> · <b>Retorno até:</b> <span class="cvph">__/__/____</span></p>
     ${cf.declaracao?`<p style="font-style:italic;border-left:2px solid #cbb26a;padding-left:10px;color:#455">"${esc(cf.declaracao)}"</p>`:''}</div>`;
   h+=`</div></div>`;
@@ -4233,13 +4240,17 @@ function cartaMontarHTML(g){
 }
 function cartaRenderGerar(){
   const w=document.getElementById('cotwrap'), g=CART.gen, cid=g.cotacao.id;
+  let bodyHTML;
+  if(CART.savedHTML){ try{ const doc=new DOMParser().parseFromString(CART.savedHTML,'text/html'); const cv=doc.querySelector('#cvInner')||doc.querySelector('.cvdoc'); bodyHTML=cv?cv.outerHTML:cartaMontarHTML(g); }catch(e){ bodyHTML=cartaMontarHTML(g); } }
+  else bodyHTML=cartaMontarHTML(g);
   w.innerHTML=`<div class="cv-noprint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
       <button class="btn-ghost" onclick="cotOpen(${cid})"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar ao mapa</button>
       <button class="btn-prim" style="padding:6px 13px" onclick="window.print()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">print</span> Imprimir / PDF</button>
       <button class="btn-ghost" style="padding:6px 13px" onclick="cartaWord()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Baixar Word</button>
-      <button class="btn-ghost" style="padding:6px 13px" onclick="cartaAnexarGerada()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar na cotação</button>
-      <span class="muted" style="font-size:11.5px">Confira e edite o texto direto na carta antes de gerar (clique e digite).</span></div>
-    <div id="cvGerada">${cartaMontarHTML(g)}</div>`;
+      <button class="btn-prim" style="padding:6px 13px" onclick="cartaAnexarGerada()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar na cotação</button>
+      ${CART.savedHTML?`<button class="btn-ghost" style="padding:6px 13px" onclick="cartaGerarZero()" title="descartar e refazer do modelo"><span class="material-icons" style="font-size:15px;vertical-align:-3px">refresh</span> Gerar do zero</button><span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px">editando a carta salva</span>`:''}
+      <span class="muted" style="font-size:11.5px">Edite o texto direto na carta (clique e digite) e clique <b>Salvar na cotação</b>.</span></div>
+    <div id="cvGerada">${bodyHTML}</div>`;
   window.scrollTo(0,0);
 }
 function cartaExportHTML(){

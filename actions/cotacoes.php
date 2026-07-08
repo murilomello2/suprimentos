@@ -96,8 +96,9 @@ function cot_get_full($pdo, $id) {
         $c['respondeu'] = $resp ? 1 : 0; $c['proposta_id'] = $resp['id'] ?? null; $c['proposta_total'] = $resp['total'] ?? null;
     }
     unset($c);
+    $ger = $pdo->prepare("SELECT id, titulo, criado_nome, created_at FROM carta_gerada WHERE cotacao_id=? ORDER BY id DESC"); $ger->execute([$id]);
     return ['cotacao'=>$cot, 'itens'=>$itens, 'propostas'=>$propostas, 'anexos'=>$anx->fetchAll(),
-            'convidados'=>$convidados, 'mapa'=>cot_mapa($itens, $propostas)];
+            'convidados'=>$convidados, 'mapa'=>cot_mapa($itens, $propostas), 'cartas_geradas'=>$ger->fetchAll()];
 }
 
 try {

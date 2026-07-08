@@ -35,9 +35,8 @@ function carta_default_config() {
             'Serão classificadas apenas as propostas que atenderem integralmente às disposições desta Carta Convite.',
         ],
         'faturamento' => 'O pagamento será efetuado no prazo de até 28 (vinte e oito) dias corridos contados da retirada da nota fiscal, acompanhada da documentação fiscal e trabalhista completa, admitido o parcelamento acordado no fechamento. Eventuais retenções e garantias seguirão o padrão Caprem, conforme a natureza do serviço.',
-        'contatos' => [
-            'gestor_suprimentos' => 'Eng. Camila Maggiolli · (19) 9 7145-1529 · camila.maggiolli@capremconstrutora.com.br',
-        ],
+        // Responsável do Departamento de Suprimentos = o usuário (Bitrix) que CRIOU a cotação (preenchido na geração).
+        'contatos' => [],
         'declaracao' => 'Ao receber esta Carta Convite, a proponente declara que está ciente e de posse de todas as informações necessárias para a participação na concorrência ao serviço destacado.',
         'validade_dias' => 30,
     ];

@@ -42,6 +42,7 @@ try {
             foreach ($pares as $k => $p) { $o = $obraMap[$k] ?? null;
                 $out[] = ['coligada'=>$p['coligada'],'obra_cod'=>$p['obra_cod'],'n'=>$p['n'],
                     'nome_comercial'=>$o['nome_comercial'] ?? sol_nome_default($p['coligada'],$p['obra_cod']),
+                    'cnpj'=>$o['cnpj'] ?? '',
                     'comprador_id'=>$o['comprador_id'] ?? '','comprador_nome'=>$o['comprador_nome'] ?? '',
                     'radar_obra_id'=>$o['radar_obra_id'] ?? null]; }
             usort($out, fn($a,$b)=>$b['n']-$a['n']);
@@ -93,10 +94,11 @@ try {
         $compId = trim((string)($o['comprador_id'] ?? ''));
         $compNome = '';
         if ($compId !== '') { $q = $pdo->prepare("SELECT nome FROM usuario WHERE bitrix_id=?"); $q->execute([$compId]); $compNome = (string)$q->fetchColumn(); }
+        $cnpj = trim((string)($o['cnpj'] ?? ''));
         $q = $pdo->prepare("SELECT id FROM solic_obra WHERE coligada=? AND obra_cod=?"); $q->execute([$col,$cod]); $id = (int)($q->fetchColumn() ?: 0);
-        $vals = [trim((string)($o['nome_comercial'] ?? '')), $compId ?: null, $compNome ?: null, ($o['radar_obra_id'] ?? null) ?: null];
-        if ($id) $pdo->prepare("UPDATE solic_obra SET nome_comercial=?, comprador_id=?, comprador_nome=?, radar_obra_id=?, updated_at=? WHERE id=?")->execute(array_merge($vals,[$now,$id]));
-        else $pdo->prepare("INSERT INTO solic_obra (coligada,obra_cod,nome_comercial,comprador_id,comprador_nome,radar_obra_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)")->execute(array_merge([$col,$cod],$vals,[$now,$now]));
+        $vals = [trim((string)($o['nome_comercial'] ?? '')), $cnpj ?: null, $compId ?: null, $compNome ?: null, ($o['radar_obra_id'] ?? null) ?: null];
+        if ($id) $pdo->prepare("UPDATE solic_obra SET nome_comercial=?, cnpj=?, comprador_id=?, comprador_nome=?, radar_obra_id=?, updated_at=? WHERE id=?")->execute(array_merge($vals,[$now,$id]));
+        else $pdo->prepare("INSERT INTO solic_obra (coligada,obra_cod,nome_comercial,cnpj,comprador_id,comprador_nome,radar_obra_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")->execute(array_merge([$col,$cod],$vals,[$now,$now]));
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -127,8 +129,8 @@ try {
         $obraId = $so['radar_obra_id'] ?? null;
         $titulo = 'SC ' . $num . ' · ' . $nomeObra;
         $pdo->beginTransaction();
-        $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, descricao, num_solicitacao, status, aprovacao, criado_por, criado_nome, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?, 'aberta','aguardando', ?,?,?,?)")
-            ->execute([$obraId ?: null, null, $titulo, '', '', null, 'Solicitação de compra nº '.$num.' — '.$col.($obraCod?(' (centro de custo '.$obraCod.')'):''), $num, $me, $perms['nome'] ?? null, $now, $now]);
+        $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, descricao, num_solicitacao, solic_coligada, solic_obra_cod, status, aprovacao, criado_por, criado_nome, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'aberta','aguardando', ?,?,?,?)")
+            ->execute([$obraId ?: null, null, $titulo, '', '', null, 'Solicitação de compra nº '.$num.' — '.$col.($obraCod?(' (centro de custo '.$obraCod.')'):''), $num, $col, $obraCod, $me, $perms['nome'] ?? null, $now, $now]);
         $cid = (int)$pdo->lastInsertId();
         $insI = $pdo->prepare("INSERT INTO cotacao_item (cotacao_id, descricao, unidade, quantidade, observacao, ordem) VALUES (?,?,?,?,?,?)");
         $o = 0; foreach ($rows as $r) $insI->execute([$cid, trim((string)($r['produto'] ?? '')), trim((string)($r['und'] ?? '')), ($r['qtd'] ?? null) !== null ? (float)$r['qtd'] : null, trim((string)($r['observacao'] ?? '')), $o++]);

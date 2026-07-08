@@ -201,7 +201,7 @@ function db_schema_mysql($pdo) {
     // SOLICITAÇÕES DE COMPRA — de-para (coligada+centro de custo → nome+comprador+obra radar) + overlay do comprador
     $pdo->exec("CREATE TABLE IF NOT EXISTS solic_obra (
         id INT NOT NULL AUTO_INCREMENT, coligada VARCHAR(255), obra_cod VARCHAR(20), nome_comercial VARCHAR(191),
-        comprador_id VARCHAR(64), comprador_nome VARCHAR(191), radar_obra_id INT, created_at VARCHAR(40), updated_at VARCHAR(40),
+        cnpj VARCHAR(24), comprador_id VARCHAR(64), comprador_nome VARCHAR(191), radar_obra_id INT, created_at VARCHAR(40), updated_at VARCHAR(40),
         PRIMARY KEY (id), KEY idx_sobra_col (obra_cod)
     ) $E");
     $pdo->exec("CREATE TABLE IF NOT EXISTS solic_overlay (
@@ -243,8 +243,14 @@ function db_schema_mysql($pdo) {
         if ($cc && !isset($cc['verba_origem'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN verba_origem VARCHAR(40)");
         if ($cc && !isset($cc['num_solicitacao'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_solicitacao VARCHAR(60)");
         if ($cc && !isset($cc['num_pedido'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_pedido VARCHAR(60)");
+        // origem solicitação: guarda coligada+centro de custo p/ a carta de cotação (material) resolver CNPJ/comprador via solic_obra
+        if ($cc && !isset($cc['solic_coligada'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_coligada VARCHAR(255)");
+        if ($cc && !isset($cc['solic_obra_cod'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_obra_cod VARCHAR(20)");
         $pc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cotacao_proposta'") as $c) $pc[$c['COLUMN_NAME']] = true;
         if ($pc && !isset($pc['equaliza'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN equaliza TEXT");
+        // solic_obra.cnpj (CNPJ da obra p/ a carta de cotação) — self-heal p/ tabela já existente
+        $sc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='solic_obra'") as $c) $sc[$c['COLUMN_NAME']] = true;
+        if ($sc && !isset($sc['cnpj'])) $pdo->exec("ALTER TABLE solic_obra ADD COLUMN cnpj VARCHAR(24)");
     } catch (Throwable $e) {}
 }
 
@@ -401,7 +407,7 @@ function db_schema($pdo) {
     // ---- MAPA DE COTAÇÕES (reconstruído no cockpit) ----
     $pdo->exec("CREATE TABLE IF NOT EXISTS cot_categoria (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL UNIQUE, ext_id TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cot_fornecedor (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, categoria TEXT, cidade TEXT, contato TEXT, telefone TEXT, whatsapp TEXT, email TEXT, itens TEXT, tipo TEXT, cnpj TEXT, ativo INTEGER DEFAULT 1, ext_id TEXT, created_at TEXT)");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao (id INTEGER PRIMARY KEY AUTOINCREMENT, obra_id INTEGER, servico_id INTEGER, titulo TEXT NOT NULL, categoria TEXT, tipo_servico TEXT, verba REAL, verba_origem TEXT, descricao TEXT, equalizacao TEXT, num_solicitacao TEXT, num_pedido TEXT, status TEXT DEFAULT 'rascunho', aprovacao TEXT DEFAULT 'aguardando', criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao (id INTEGER PRIMARY KEY AUTOINCREMENT, obra_id INTEGER, servico_id INTEGER, titulo TEXT NOT NULL, categoria TEXT, tipo_servico TEXT, verba REAL, verba_origem TEXT, descricao TEXT, equalizacao TEXT, num_solicitacao TEXT, num_pedido TEXT, solic_coligada TEXT, solic_obra_cod TEXT, status TEXT DEFAULT 'rascunho', aprovacao TEXT DEFAULT 'aguardando', criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_item (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, quantidade REAL, observacao TEXT, ordem INTEGER)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, prazo TEXT, observacoes TEXT, equaliza TEXT, data_resposta TEXT, total REAL, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta_item (id INTEGER PRIMARY KEY AUTOINCREMENT, proposta_id INTEGER NOT NULL, cotacao_item_id INTEGER NOT NULL, preco_unit REAL, preco_total REAL, observacao TEXT)");
@@ -414,7 +420,7 @@ function db_schema($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS preco_insumo (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, unidade TEXT, sinonimos TEXT, servico_id INTEGER, categoria TEXT, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS preco_tabela (id INTEGER PRIMARY KEY AUTOINCREMENT, fornecedor_id INTEGER, fornecedor_nome TEXT, titulo TEXT, validade_inicio TEXT, validade_fim TEXT, observacao TEXT, anexo_id INTEGER, criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS preco_item (id INTEGER PRIMARY KEY AUTOINCREMENT, tabela_id INTEGER NOT NULL, insumo_id INTEGER, descricao_original TEXT, unidade TEXT, preco REAL, frete_incluso INTEGER DEFAULT 0, observacao TEXT, created_at TEXT)");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS solic_obra (id INTEGER PRIMARY KEY AUTOINCREMENT, coligada TEXT, obra_cod TEXT, nome_comercial TEXT, comprador_id TEXT, comprador_nome TEXT, radar_obra_id INTEGER, created_at TEXT, updated_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS solic_obra (id INTEGER PRIMARY KEY AUTOINCREMENT, coligada TEXT, obra_cod TEXT, nome_comercial TEXT, cnpj TEXT, comprador_id TEXT, comprador_nome TEXT, radar_obra_id INTEGER, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS solic_overlay (id INTEGER PRIMARY KEY AUTOINCREMENT, coligada TEXT, numero TEXT, status TEXT, observacoes TEXT, fornecedores TEXT, orcamento_recebido INTEGER DEFAULT 0, cotacao_id INTEGER, updated_by TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS oracle_uso (bitrix_id TEXT NOT NULL, dia TEXT NOT NULL, n INTEGER DEFAULT 0, PRIMARY KEY (bitrix_id, dia))");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_coti_cot ON cotacao_item(cotacao_id)");
@@ -426,6 +432,10 @@ function db_schema($pdo) {
     if (!isset($ccols['verba_origem'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN verba_origem TEXT");
     if (!isset($ccols['num_solicitacao'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_solicitacao TEXT");
     if (!isset($ccols['num_pedido'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_pedido TEXT");
+    if (!isset($ccols['solic_coligada'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_coligada TEXT");
+    if (!isset($ccols['solic_obra_cod'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_obra_cod TEXT");
+    $scols = []; foreach ($pdo->query("PRAGMA table_info(solic_obra)") as $c) $scols[$c['name']] = true;
+    if (!isset($scols['cnpj'])) $pdo->exec("ALTER TABLE solic_obra ADD COLUMN cnpj TEXT");
     $pcols = []; foreach ($pdo->query("PRAGMA table_info(cotacao_proposta)") as $c) $pcols[$c['name']] = true;
     if (!isset($pcols['equaliza'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN equaliza TEXT");
 

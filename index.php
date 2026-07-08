@@ -3825,7 +3825,7 @@ function cotRenderDetalhe(){
       <b style="font-size:16px">${esc(c.titulo)}</b> ${cotStChip(c.status)}
       <span class="muted" style="font-size:12px">${esc(c.obra_nome||'sem obra')}${c.categoria?' · '+esc(c.categoria):''}${c.tipo_servico?' · '+esc(c.tipo_servico):''}</span>
       <span style="margin-left:auto;display:flex;gap:6px">
-        ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cartaGerar(${c.id})" title="Carta convite desta cotação (PDF/Word)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> ${(d.cartas_geradas&&d.cartas_geradas.length)?'Ver/editar carta':'Gerar carta'}</button>${(d.cartas_geradas&&d.cartas_geradas.length)?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="carta convite salva em ${D(String(d.cartas_geradas[0].created_at).slice(0,10))}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">description</span> carta salva</span>`:''}`:''}
+        ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cartaGerar(${c.id})" title="${(c.num_solicitacao&&!c.servico_id)?'Carta de cotação (material) desta cotação':'Carta convite desta cotação'} — PDF / Word"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> ${(d.cartas_geradas&&d.cartas_geradas.length)?'Ver/editar carta':'Gerar carta'}</button>${(d.cartas_geradas&&d.cartas_geradas.length)?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="carta salva em ${D(String(d.cartas_geradas[0].created_at).slice(0,10))}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">description</span> carta salva</span>`:''}`:''}
         <button class="btn-ghost" style="padding:6px 12px" onclick="cotUmaPagina()" title="Resumo de uma página, pronto pra imprimir/PDF"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Uma página</button>
         ${CAN_EDIT?`<button class="btn-prim" style="padding:6px 12px" onclick="cotProposta()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Cadastrar proposta</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotFinalizar()">${c.status==='finalizada'?'Reabrir':'Finalizar'}</button>`:''}
@@ -4221,6 +4221,7 @@ async function cartaGerar(cid){
 function cartaGerarZero(){ if(!confirm('Descartar a carta salva e gerar uma NOVA a partir do modelo? (as suas edições serão perdidas)'))return; CART.savedHTML=null; cartaRenderGerar(); }
 function cvList(a){ return (a&&a.length)?'<ul>'+a.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':''; }
 function cartaMontarHTML(g){
+  if(g&&g.cotacao&&g.cotacao.tipo==='material') return cartaMontarHTMLMaterial(g);   // cotação nascida de solicitação → carta de COTAÇÃO (material)
   const c=g.cotacao||{}, m=g.modelo||null, cf=g.config||{}, s=cf.seguranca||{};
   const titulo=(c.servico_nome||(m&&m.servico_nome)||c.titulo||'').replace(/^(Execução de|Execução|MO)\s*/i,'').trim()||c.titulo||'Serviço';
   const norma=m&&m.norma_referencia&&m.norma_referencia.length?m.norma_referencia.join(' / '):'—';
@@ -4274,6 +4275,43 @@ function cartaMontarHTML(g){
   h+=`</div></div>`;
   return h;
 }
+/* Carta de COTAÇÃO (material) — nasce de uma solicitação de compra. Mesmo visual da convite, mas sem cláusula de contrato:
+   pede preço + condições comerciais, traz dados/CNPJ da obra e comprador responsável. */
+function cartaMontarHTMLMaterial(g){
+  const c=g.cotacao||{}, cf=g.config||{}, quant=g.quantitativos||[];
+  const obra=c.obra_nome||'—', cnpj=c.obra_cnpj||'', comp=c.comprador_resp||c.criado_nome||'', sc=c.num_solicitacao||'', validade=cf.validade_dias||30;
+  const phCnpj='<span class="cvph">[preencha o CNPJ em Solicitações › Obras &amp; compradores]</span>';
+  let h=`<div class="cvdoc" id="cvInner" contenteditable="true">
+    <div class="cvmast"><div class="br">◤ Caprem Construtora · Engenharia &amp; Fundações</div>
+      <div class="kick">Solicitação de Cotação</div><h2>${esc(obra)}</h2></div>
+    <div class="cvinfo">
+      <div><div class="k">Obra</div><div>${esc(obra)}</div></div>
+      <div><div class="k">CNPJ da obra</div><div>${cnpj?esc(cnpj):phCnpj}</div></div>
+      <div><div class="k">Nº da solicitação</div><div>${sc?esc(sc):'—'}</div></div>
+    </div>
+    <div class="cvbody">`;
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">00</span><span class="cvst">Apresentação</span></div>
+    <p>Prezado fornecedor, a <b>Caprem Construtora</b> solicita a cotação dos materiais relacionados abaixo, destinados à obra <b>${esc(obra)}</b>. Pedimos a gentileza de preencher os preços e as condições comerciais e retornar esta cotação ao comprador responsável.</p></div>`;
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">01</span><span class="cvst">Itens para cotação</span></div>
+    <table><thead><tr><th style="width:32px">#</th><th>Material / especificação</th><th style="width:54px">Unid.</th><th style="width:78px;text-align:right">Qtde</th><th style="width:108px;text-align:right">Preço unit. (R$)</th><th style="width:108px;text-align:right">Preço total (R$)</th></tr></thead><tbody>
+    ${quant.length?quant.map((q,i)=>`<tr><td style="text-align:center">${i+1}</td><td>${esc(q.item||'')}${q.obs?`<div style="font-size:10px;color:#667;margin-top:2px">${esc(q.obs)}</div>`:''}</td><td>${esc(q.unidade||'')}</td><td style="text-align:right">${q.qtde!=null&&q.qtde!==''?esc(cotNum(q.qtde)):'—'}</td><td style="text-align:right;color:#9aa">__________</td><td style="text-align:right;color:#9aa">__________</td></tr>`).join(''):'<tr><td colspan="6" class="cvph">[itens da cotação]</td></tr>'}
+    </tbody></table></div>`;
+  const cond=['Prazo de entrega','Condição de pagamento','Validade da proposta','Frete (incluso / CIF / FOB)','Prazo de faturamento'];
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">02</span><span class="cvst">Condições comerciais (a informar pelo fornecedor)</span></div>
+    <table><thead><tr><th>Condição</th><th style="width:200px">Resposta do fornecedor</th></tr></thead><tbody>
+    ${cond.map(x=>`<tr><td>${esc(x)}</td><td style="color:#9aa">____________________</td></tr>`).join('')}
+    </tbody></table></div>`;
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">03</span><span class="cvst">Dados para faturamento</span></div>
+    <div class="cvgrid3"><div class="cvcard"><h5>Obra</h5><p>${esc(obra)}</p></div>
+      <div class="cvcard"><h5>CNPJ da obra</h5><p>${cnpj?esc(cnpj):phCnpj}</p></div>
+      <div class="cvcard"><h5>Nº da solicitação</h5><p>${sc?esc(sc):'—'}</p></div></div></div>`;
+  h+=`<div class="cvsec"><div class="cvsh"><span class="cvsn">04</span><span class="cvst">Contato e retorno</span></div>
+    <p><b>Comprador responsável:</b> ${comp?esc(comp):'<span class="cvph">[comprador]</span>'}</p>
+    <p><b>Validade mínima da proposta:</b> ${esc(validade)} dias · <b>Retorno até:</b> <span class="cvph">__/__/____</span></p>
+    ${cf.declaracao?`<p style="font-style:italic;border-left:2px solid #cbb26a;padding-left:10px;color:#455">"${esc(cf.declaracao)}"</p>`:''}</div>`;
+  h+=`</div></div>`;
+  return h;
+}
 function cartaRenderGerar(){
   const w=document.getElementById('cotwrap'), g=CART.gen, cid=g.cotacao.id;
   let bodyHTML;
@@ -4297,13 +4335,15 @@ function cartaExportHTML(){
 function cartaWord(){
   const html=cartaExportHTML(); const blob=new Blob(['﻿'+html],{type:'application/msword'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download='Carta_Convite_'+((CART.gen.cotacao.servico_nome||CART.gen.cotacao.titulo||'servico').replace(/[^\w]+/g,'_').slice(0,40))+'.doc';
+  const isMat=CART.gen&&CART.gen.cotacao&&CART.gen.cotacao.tipo==='material';
+  a.download=(isMat?'Carta_Cotacao_':'Carta_Convite_')+((CART.gen.cotacao.servico_nome||CART.gen.cotacao.titulo||(isMat?'cotacao':'servico')).replace(/[^\w]+/g,'_').slice(0,40))+'.doc';
   document.body.appendChild(a); a.click(); a.remove();
 }
 async function cartaAnexarGerada(){
   const inner=document.getElementById('cvInner'); if(!inner)return;
   const html=cartaExportHTML();
-  try{ const r=await (await fetch('actions/cartas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_carta',me:EU&&EU.bitrix_id,cotacao_id:CART.gen.cotacao.id,servico_nome:CART.gen.cotacao.servico_nome||'',titulo:'Carta Convite · '+(CART.gen.cotacao.titulo||''),html})})).json();
+  const isMat=CART.gen&&CART.gen.cotacao&&CART.gen.cotacao.tipo==='material';
+  try{ const r=await (await fetch('actions/cartas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_carta',me:EU&&EU.bitrix_id,cotacao_id:CART.gen.cotacao.id,servico_nome:CART.gen.cotacao.servico_nome||'',titulo:(isMat?'Carta de Cotação · ':'Carta Convite · ')+(CART.gen.cotacao.titulo||''),html})})).json();
     if(r.error){toast(r.error);return;} toast('Carta salva na cotação'); }catch(e){toast('Falha: '+e.message);}
 }
 /* ---------- Preços Tabelados (sub-aba) ---------- */
@@ -4508,9 +4548,10 @@ function solRenderObras(){
   const semComp=(o.obras||[]).filter(x=>!x.comprador_id).length;
   w.innerHTML=`<div class="panel" style="margin-bottom:10px"><b style="font-size:14px">Obras &amp; compradores</b>
       <span class="muted" style="font-size:11.5px"> — cada obra (coligada + centro de custo) tem 1 comprador; a solicitação entra já atribuída. ${semComp?`<b style="color:var(--pend)">${semComp} sem comprador</b>`:'todas atribuídas ✓'}</span></div>
-    <div class="wrap"><table><thead><tr><th>Obra (nome comercial)</th><th>Coligada (TOTVS)</th><th style="text-align:center">CC</th><th style="text-align:center">Pend.</th><th>Comprador responsável</th><th>Obra do radar (opcional)</th></tr></thead><tbody>
+    <div class="wrap"><table><thead><tr><th>Obra (nome comercial)</th><th>CNPJ da obra</th><th>Coligada (TOTVS)</th><th style="text-align:center">CC</th><th style="text-align:center">Pend.</th><th>Comprador responsável</th><th>Obra do radar (opcional)</th></tr></thead><tbody>
     ${(o.obras||[]).map((x,i)=>`<tr>
       <td><input value="${esc(x.nome_comercial)}" onchange="SOL.obras.obras[${i}].nome_comercial=this.value;solObraSave(${i})" style="width:150px;font-size:12px"></td>
+      <td><input value="${esc(x.cnpj||'')}" onchange="SOL.obras.obras[${i}].cnpj=this.value;solObraSave(${i})" placeholder="00.000.000/0001-00" title="CNPJ que vai na carta de cotação de material desta obra" style="width:145px;font-size:11.5px"></td>
       <td class="muted" style="font-size:11px">${esc(x.coligada)}</td><td style="text-align:center" class="muted">${esc(x.obra_cod)}</td>
       <td style="text-align:center"><b>${x.n}</b></td>
       <td><select onchange="SOL.obras.obras[${i}].comprador_id=this.value;solObraSave(${i})" style="font-size:12px;padding:3px;${x.comprador_id?'':'border-color:var(--pend)'}">${uOpts(x.comprador_id)}</select></td>
@@ -4518,7 +4559,7 @@ function solRenderObras(){
     </tbody></table></div>`;
 }
 async function solObraSave(i){ const x=SOL.obras.obras[i];
-  try{ const r=await (await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_obra',me:EU&&EU.bitrix_id,obra:{coligada:x.coligada,obra_cod:x.obra_cod,nome_comercial:x.nome_comercial,comprador_id:x.comprador_id,radar_obra_id:x.radar_obra_id||null}})})).json();
+  try{ const r=await (await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_obra',me:EU&&EU.bitrix_id,obra:{coligada:x.coligada,obra_cod:x.obra_cod,nome_comercial:x.nome_comercial,cnpj:x.cnpj||'',comprador_id:x.comprador_id,radar_obra_id:x.radar_obra_id||null}})})).json();
     if(r.error){toast(r.error);return;} toast('Atribuição salva'); SOL.data=null; }catch(e){toast('Falha');} }
 /* ---------- Fornecedores (sub-aba do Mapa de Cotações) ---------- */
 let FORN={list:[],cats:[],tipos:[],total:0,f:{nome:'',categoria:'',tipo:'',itens:''},edit:null};

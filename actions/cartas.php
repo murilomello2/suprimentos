@@ -59,6 +59,8 @@ function carta_modelo_out($m) {
     ];
 }
 
+if (defined('CARTAS_LIB_ONLY')) return;   // permite require em CLI/testes só p/ usar as funções (carta_gerar etc.) sem rodar o endpoint
+
 try {
     $pdo = db();
 
@@ -168,26 +170,39 @@ function carta_gerar($pdo, $cid) {
     $c = $pdo->prepare("SELECT c.*, o.nome AS obra_nome, s.nome AS servico_nome FROM cotacao c LEFT JOIN obra o ON o.id=c.obra_id LEFT JOIN servico s ON s.id=c.servico_id WHERE c.id=?");
     $c->execute([$cid]); $cot = $c->fetch();
     if (!$cot) return ['error' => 'cotação não encontrada'];
+    // TIPO da carta: cotação nascida de SOLICITAÇÃO (num_solicitacao + sem serviço) => carta de COTAÇÃO (material); senão CONVITE (serviço/radar)
+    $tipo = (!empty($cot['num_solicitacao']) && empty($cot['servico_id'])) ? 'material' : 'convite';
+    $obraNome = $cot['obra_nome']; $obraCnpj = ''; $compradorResp = $cot['criado_nome'] ?? '';
+    if (!empty($cot['solic_coligada'])) {   // resolve nome comercial + CNPJ da obra + comprador responsável pelo de-para
+        $sq = $pdo->prepare("SELECT nome_comercial, cnpj, comprador_nome FROM solic_obra WHERE coligada=? AND obra_cod=?");
+        $sq->execute([$cot['solic_coligada'], (string)($cot['solic_obra_cod'] ?? '')]); $so = $sq->fetch();
+        if ($so) {
+            if (!empty($so['nome_comercial'])) $obraNome = $so['nome_comercial'];
+            $obraCnpj = (string)($so['cnpj'] ?? '');
+            if (!empty($so['comprador_nome'])) $compradorResp = $so['comprador_nome'];
+        }
+    }
     // modelo do serviço (por servico_id; senão por nome do serviço/título)
     $mod = null;
     if (!empty($cot['servico_id'])) { $q = $pdo->prepare("SELECT * FROM carta_modelo WHERE servico_id=? ORDER BY is_padrao DESC, versao DESC LIMIT 1"); $q->execute([(int)$cot['servico_id']]); $mod = $q->fetch(); }
     if (!$mod) { $q = $pdo->prepare("SELECT * FROM carta_modelo WHERE servico_nome LIKE ? ORDER BY is_padrao DESC LIMIT 1"); $q->execute(['%'.trim((string)($cot['servico_nome'] ?? $cot['titulo'])).'%']); $mod = $q->fetch(); }
     $modelo = $mod ? carta_modelo_out($mod) : null;
     // quantitativos da COTAÇÃO (itens reais); fallback = quantitativos_modelo
-    $iq = $pdo->prepare("SELECT descricao, unidade, quantidade FROM cotacao_item WHERE cotacao_id=? ORDER BY ordem, id"); $iq->execute([$cid]);
+    $iq = $pdo->prepare("SELECT descricao, unidade, quantidade, observacao FROM cotacao_item WHERE cotacao_id=? ORDER BY ordem, id"); $iq->execute([$cid]);
     $itens = $iq->fetchAll();
     $quant = [];
-    foreach ($itens as $it) $quant[] = ['item' => $it['descricao'], 'unidade' => $it['unidade'], 'qtde' => $it['quantidade']];
-    if (!$quant && $modelo) foreach ($modelo['quantitativos_modelo'] as $q2) $quant[] = ['item' => $q2['item'] ?? '', 'unidade' => $q2['unidade'] ?? '', 'qtde' => null];
+    foreach ($itens as $it) $quant[] = ['item' => $it['descricao'], 'unidade' => $it['unidade'], 'qtde' => $it['quantidade'], 'obs' => $it['observacao'] ?? ''];
+    if (!$quant && $modelo) foreach ($modelo['quantitativos_modelo'] as $q2) $quant[] = ['item' => $q2['item'] ?? '', 'unidade' => $q2['unidade'] ?? '', 'qtde' => null, 'obs' => ''];
     // pontos de equalização da cotação (se houver) senão os campos do modelo
     $eqCot = array_values(array_filter(array_map('trim', preg_split('/\r?\n|\|/', (string)($cot['equalizacao'] ?? '')))));
     return [
         'ok' => true,
         'cotacao' => [
-            'id' => (int)$cot['id'], 'titulo' => $cot['titulo'], 'obra_nome' => $cot['obra_nome'],
+            'id' => (int)$cot['id'], 'titulo' => $cot['titulo'], 'obra_nome' => $obraNome,
             'categoria' => $cot['categoria'], 'servico_nome' => $cot['servico_nome'], 'servico_id' => $cot['servico_id'],
             'descricao' => $cot['descricao'], 'verba' => $cot['verba'], 'criado_nome' => $cot['criado_nome'],
             'created_at' => $cot['created_at'], 'num_solicitacao' => $cot['num_solicitacao'],
+            'tipo' => $tipo, 'obra_cnpj' => $obraCnpj, 'comprador_resp' => $compradorResp,
         ],
         'modelo' => $modelo,
         'tem_modelo' => (bool)$modelo,

@@ -3780,12 +3780,45 @@ async function cotOpen(id){
   const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Abrindo mapa…</div>';
   try{ const d=await (await fetch('actions/cotacoes.php?id='+id+'&_='+Date.now())).json();
     if(d.error){w.innerHTML='<div class="dempty">'+esc(d.error)+'</div>';return;}
-    COT.cur=d; COT.mode='detalhe'; cotRenderDetalhe();
+    COT.cur=d; COT.mode='detalhe'; COT.editItens=false; cotRenderDetalhe();
   }catch(e){w.innerHTML='<div class="dempty">Falha: '+esc(e.message)+'</div>';}
 }
 function cotNum(x){ return x!=null&&x!==''?Number(x).toLocaleString('pt-BR'):''; }
+// --- Itens a cotar: exibição (com observação = complemento) + edição (add/editar/excluir) ---
+function cotItensPanel(d){
+  const c=d.cotacao, itens=d.itens||[], podeGerir=!!(IS_ADMIN||CAN_EDIT||(c.criado_por&&EU&&String(c.criado_por)===String(EU.bitrix_id)));
+  if(COT.editItens){
+    return `<div class="panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px"><b style="font-size:13px">Itens a cotar — editando</b>
+        <span><button class="btn-prim" style="padding:4px 11px" onclick="cotItensSalvar()">Salvar itens</button> <button class="btn-ghost" style="padding:4px 11px" onclick="COT.editItens=false;cotRenderDetalhe()">Cancelar</button></span></div>
+      <div class="dmini" style="margin:4px 0 8px">Descrição = o item. Complemento = a observação/histórico (detalhe do item).</div>
+      <div id="cotItEd"></div>
+      <button class="btn-ghost" style="margin-top:6px" onclick="cotItAdd()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar item</button></div>`;
+  }
+  const rows=itens.map(it=>`<tr><td style="text-align:left"><b>${esc(it.descricao)}</b>${it.observacao?`<div class="muted" style="font-size:11px;margin-top:1px">${esc(it.observacao)}</div>`:''}</td><td style="text-align:right;white-space:nowrap">${cotNum(it.quantidade)} ${esc(it.unidade||'')}</td></tr>`).join('');
+  return `<div class="panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+      <b style="font-size:13px">Itens a cotar <span class="muted" style="font-weight:400;font-size:11px">(${itens.length})</span></b>
+      ${podeGerir?`<button class="btn-ghost" style="padding:4px 11px" onclick="cotEditItens()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit</span> Editar itens</button>`:''}</div>
+    ${itens.length?`<div class="wrap" style="margin-top:6px"><table><thead><tr><th>Item</th><th style="text-align:right;width:110px">Qtde</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="dmini" style="margin-top:6px">Nenhum item. Clique em “Editar itens” para adicionar.</div>'}</div>`;
+}
+function cotEditItens(){ COT.itensEdit=(COT.cur.itens||[]).map(it=>({id:it.id,descricao:it.descricao||'',unidade:it.unidade||'',quantidade:it.quantidade!=null?it.quantidade:'',observacao:it.observacao||''})); if(!COT.itensEdit.length) COT.itensEdit=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; COT.editItens=true; cotRenderDetalhe(); cotItRenderEd(); }
+function cotItRenderEd(){ const box=document.getElementById('cotItEd'); if(!box)return;
+  box.innerHTML=COT.itensEdit.map((it,i)=>`<div style="display:grid;grid-template-columns:minmax(0,2fr) 56px 74px minmax(0,2fr) 30px;gap:6px;align-items:center;margin-bottom:6px">
+    <input placeholder="Descrição do item" value="${esc(it.descricao)}" oninput="COT.itensEdit[${i}].descricao=this.value" style="font-size:12px">
+    <input placeholder="un" value="${esc(it.unidade)}" oninput="COT.itensEdit[${i}].unidade=this.value" style="font-size:12px">
+    <input placeholder="qtd" value="${esc(it.quantidade)}" oninput="COT.itensEdit[${i}].quantidade=this.value" style="font-size:12px;text-align:right">
+    <input placeholder="Complemento (observação / histórico)" value="${esc(it.observacao)}" oninput="COT.itensEdit[${i}].observacao=this.value" style="font-size:12px">
+    <button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="COT.itensEdit.splice(${i},1);cotItRenderEd()" title="remover">×</button></div>`).join('')||'<div class="dmini">Sem itens.</div>';
+}
+function cotItAdd(){ COT.itensEdit.push({descricao:'',unidade:'',quantidade:'',observacao:''}); cotItRenderEd(); }
+async function cotItensSalvar(){ const itens=COT.itensEdit.filter(it=>(it.descricao||'').trim()).map(it=>({id:it.id,descricao:it.descricao,unidade:it.unidade,quantidade:(it.quantidade===''||it.quantidade==null)?'':Number(it.quantidade),observacao:it.observacao}));
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'itens_salvar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,itens})})).json();
+    if(r&&r.error){toast(r.error);return;} COT.editItens=false; toast('Itens salvos'); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha: '+e.message);} }
+async function cotExcluir(){ const c=COT.cur.cotacao; if(!confirm('Excluir a cotação "'+(c.titulo||'')+'"?\nIsso apaga o mapa, propostas, convidados e itens. Não dá pra desfazer.'))return;
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',me:EU&&EU.bitrix_id,cotacao_id:c.id})})).json();
+    if(r&&r.error){toast(r.error);return;} toast('Cotação excluída'); COT.mode='list'; cotLoad(); }catch(e){toast('Falha: '+e.message);} }
 function cotRenderDetalhe(){
   const d=COT.cur,c=d.cotacao,itens=d.itens||[],props=d.propostas||[],m=d.mapa||{},best=m.melhor_por_item||{},w=document.getElementById('cotwrap');
+  const podeGerir=!!(IS_ADMIN||CAN_EDIT||(c.criado_por&&EU&&String(c.criado_por)===String(EU.bitrix_id)));   // admin, edita a obra, ou criador
   let html=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <button class="btn-ghost" onclick="cotLoad()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button>
       <b style="font-size:16px">${esc(c.titulo)}</b> ${cotStChip(c.status)}
@@ -3795,6 +3828,7 @@ function cotRenderDetalhe(){
         <button class="btn-ghost" style="padding:6px 12px" onclick="cotUmaPagina()" title="Resumo de uma página, pronto pra imprimir/PDF"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Uma página</button>
         ${CAN_EDIT?`<button class="btn-prim" style="padding:6px 12px" onclick="cotProposta()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Cadastrar proposta</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotFinalizar()">${c.status==='finalizada'?'Reabrir':'Finalizar'}</button>`:''}
+        ${podeGerir?`<button class="btn-ghost" style="padding:6px 12px;color:var(--pend)" onclick="cotExcluir()" title="Excluir esta cotação (admin ou quem criou)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">delete</span> Excluir</button>`:''}
       </span></div>
     <div class="kpis" style="padding:10px 0 0">
       <div class="kpi"><div class="v">${props.length}</div><div class="l">propostas recebidas</div></div>
@@ -3808,6 +3842,7 @@ function cotRenderDetalhe(){
       ${CAN_EDIT?`<button class="btn-ghost" style="padding:4px 11px" onclick="cotNumerosSalvar()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">save</span> Salvar nºs</button>`:''}
       ${!c.servico_id?`<span class="dchip" style="background:#8a9299;font-size:10px" title="cotação criada do zero, sem vínculo ao radar de aquisições">avulsa</span>`:'<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="cotação vinculada a um item do radar">do radar</span>'}
     </div></div>`;
+  html+=cotItensPanel(d);
   // ---- Concorrência (fornecedores convidados) ----
   const conv=d.convidados||[];
   html+=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -3827,7 +3862,7 @@ function cotRenderDetalhe(){
     props.forEach(p=>{ html+=`<th style="min-width:120px">${esc(p.fornecedor_nome)}${p.prazo?`<div class="muted" style="font-size:9.5px;font-weight:400">${esc(p.prazo)}</div>`:''}</th>`; });
     html+='<th style="min-width:140px;color:var(--verde-d)">🏆 Melhor Compra</th></tr></thead><tbody>';
     itens.forEach(it=>{ const b=best[it.id];
-      html+=`<tr><td class="svc-c" style="text-align:left">${esc(it.descricao)}<small>${cotNum(it.quantidade)} ${esc(it.unidade||'')}</small></td>`;
+      html+=`<tr><td class="svc-c" style="text-align:left">${esc(it.descricao)}<small>${cotNum(it.quantidade)} ${esc(it.unidade||'')}${it.observacao?' · '+esc(it.observacao):''}</small></td>`;
       props.forEach(p=>{ const pi=(p.itens||{})[it.id]; const isB=b&&b.proposta_id===p.id;
         html+=`<td style="text-align:center;padding:6px 8px;${isB?'background:#e7f6ee':''}">${pi&&pi.preco_total!=null?`<b>${BRL(pi.preco_unit)}</b>${isB?' 🏆':''}<div class="muted" style="font-size:10px">${BRL(pi.preco_total)}</div>`:'<span class="muted">—</span>'}</td>`; });
       html+=`<td style="text-align:center;padding:6px 8px;background:#eafaf0">${b?`<b>${BRL(b.preco_total)}</b><div class="muted" style="font-size:10px">${esc(b.fornecedor)}</div>`:'—'}</td></tr>`;
@@ -4011,7 +4046,7 @@ function cotRenderProposta(){
     <div style="margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden">
       <div style="display:grid;grid-template-columns:minmax(0,1fr) 130px 150px;gap:10px;padding:7px 12px;background:#fafbfb;border-bottom:1px solid var(--line);font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.3px"><span>Item</span><span style="text-align:right">Preço unit.</span><span style="text-align:right">Preço total</span></div>
       ${itens.map((it,ix)=>`<div style="display:grid;grid-template-columns:minmax(0,1fr) 130px 150px;gap:10px;align-items:center;padding:9px 12px;${ix<itens.length-1?'border-bottom:1px solid #f1f3f2':''}">
-      <div><b style="font-size:12.5px">${esc(it.descricao)}</b> <span class="muted" style="font-size:11px">· ${cotNum(it.quantidade)} ${esc(it.unidade||'')}</span></div>
+      <div><b style="font-size:12.5px">${esc(it.descricao)}</b> <span class="muted" style="font-size:11px">· ${cotNum(it.quantidade)} ${esc(it.unidade||'')}</span>${it.observacao?`<div class="muted" style="font-size:10.5px;margin-top:1px">${esc(it.observacao)}</div>`:''}</div>
       <input type="text" inputmode="decimal" id="prU${it.id}" value="${pr.precos[it.id].preco_unit!==''?fmtMoney(pr.precos[it.id].preco_unit):''}" oninput="cotPrecoIn(${it.id},'u',this)" onblur="moneyBlur(this)" placeholder="0,00" style="width:100%;text-align:right">
       <input type="text" inputmode="decimal" id="prT${it.id}" value="${pr.precos[it.id].preco_total!==''?fmtMoney(pr.precos[it.id].preco_total):''}" oninput="cotPrecoIn(${it.id},'t',this)" onblur="moneyBlur(this)" placeholder="0,00" style="width:100%;text-align:right"></div>`).join('')}</div>
     <div style="margin-top:14px"><button class="btn-prim" onclick="cotSalvarProposta()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar proposta</button></div>

@@ -21,6 +21,15 @@ function cot_can_edit($pdo, $me, $obra) {
     if (can_edit_obra($perms, max(1, (int)$obra))) return $perms;
     return null;
 }
+// Gerir a cotação (excluir / editar itens): ADMIN, ou quem CRIOU, ou quem edita a obra dela.
+function cot_can_manage($pdo, $me, $cid) {
+    $q = $pdo->prepare("SELECT COALESCE(obra_id,1) AS obra, criado_por FROM cotacao WHERE id=?"); $q->execute([(int)$cid]); $r = $q->fetch();
+    if (!$r) return false;
+    $perms = user_perms($pdo, $me);
+    if (!empty($perms['perm_admin'])) return true;
+    if ($me !== null && $me !== '' && (string)$r['criado_por'] === (string)$me) return true;
+    return (bool)cot_can_edit($pdo, $me, (int)$r['obra'] ?: 1);
+}
 // insere fornecedores CONVIDADOS na concorrência (dedup por fornecedor_id/nome)
 function cot_insert_convidados($pdo, $cid, $lista) {
     $ins = $pdo->prepare("INSERT INTO cotacao_fornecedor (cotacao_id, fornecedor_id, fornecedor_nome, categoria, contato, email, telefone, created_at) VALUES (?,?,?,?,?,?,?,?)");
@@ -296,10 +305,31 @@ try {
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    if ($acao === 'itens_salvar') {   // add/editar/excluir itens a cotar (preserva IDs; remove os tirados + suas propostas)
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editar os itens.']); exit; }
+        $itens = (array)($in['itens'] ?? []); $now = date('c');
+        $pdo->beginTransaction();
+        $existing = []; foreach ($pdo->query("SELECT id FROM cotacao_item WHERE cotacao_id=$cid") as $r) $existing[(int)$r['id']] = true;
+        $keep = []; $o = 0;
+        $ins = $pdo->prepare("INSERT INTO cotacao_item (cotacao_id, descricao, unidade, quantidade, observacao, ordem) VALUES (?,?,?,?,?,?)");
+        $upd = $pdo->prepare("UPDATE cotacao_item SET descricao=?, unidade=?, quantidade=?, observacao=?, ordem=? WHERE id=? AND cotacao_id=?");
+        foreach ($itens as $it) {
+            $desc = trim((string)($it['descricao'] ?? '')); if ($desc === '') continue;
+            $q = (($it['quantidade'] ?? null) !== null && $it['quantidade'] !== '') ? (float)$it['quantidade'] : null;
+            $id = (int)($it['id'] ?? 0);
+            if ($id && isset($existing[$id])) { $upd->execute([$desc, trim((string)($it['unidade'] ?? '')), $q, trim((string)($it['observacao'] ?? '')), $o++, $id, $cid]); $keep[$id] = true; }
+            else { $ins->execute([$cid, $desc, trim((string)($it['unidade'] ?? '')), $q, trim((string)($it['observacao'] ?? '')), $o++]); }
+        }
+        foreach ($existing as $id => $_) if (empty($keep[$id])) { $pdo->prepare("DELETE FROM cotacao_proposta_item WHERE cotacao_item_id=?")->execute([$id]); $pdo->prepare("DELETE FROM cotacao_item WHERE id=?")->execute([$id]); }
+        $pdo->prepare("UPDATE cotacao SET updated_at=? WHERE id=?")->execute([$now, $cid]);
+        $pdo->commit();
+        echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($acao === 'excluir') {
         $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
-        $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
-        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode excluí-la.']); exit; }
         $pdo->beginTransaction();
         $pdo->exec("DELETE FROM cotacao_proposta_item WHERE proposta_id IN (SELECT id FROM cotacao_proposta WHERE cotacao_id=$cid)");
         $pdo->prepare("DELETE FROM cotacao_proposta WHERE cotacao_id=?")->execute([$cid]);

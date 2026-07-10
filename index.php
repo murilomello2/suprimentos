@@ -3845,6 +3845,7 @@ function cotRenderDetalhe(){
       <div style="display:flex;align-items:center;gap:6px"><span class="muted" style="font-size:11px;font-weight:700">Nº Solicitação</span><input id="cotDetSC" value="${esc(c.num_solicitacao||'')}" placeholder="—" style="width:120px;padding:3px 7px;font-size:12px" ${CAN_EDIT?'':'disabled'}></div>
       <div style="display:flex;align-items:center;gap:6px"><span class="muted" style="font-size:11px;font-weight:700">Nº Pedido de compra</span><input id="cotDetPC" value="${esc(c.num_pedido||'')}" placeholder="${!c.servico_id?'obrigatório p/ finalizar':'—'}" style="width:150px;padding:3px 7px;font-size:12px" ${CAN_EDIT?'':'disabled'}></div>
       ${CAN_EDIT?`<button class="btn-ghost" style="padding:4px 11px" onclick="cotNumerosSalvar()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">save</span> Salvar nºs</button>`:''}
+      ${c.num_pedido?`<button class="btn-ghost" style="padding:4px 11px;color:var(--verde-d)" onclick="cotPedidoVer('${esc(String(c.num_pedido)).replace(/'/g,'')}')" title="ver o pedido no TOTVS: fornecedor, itens, preços e total"><span class="material-icons" style="font-size:14px;vertical-align:-3px">receipt_long</span> Ver pedido</button>`:''}
       ${!c.servico_id?`<span class="dchip" style="background:#8a9299;font-size:10px" title="cotação criada do zero, sem vínculo ao radar de aquisições">avulsa</span>`:'<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="cotação vinculada a um item do radar">do radar</span>'}
     </div></div>`;
   html+=cotItensPanel(d);
@@ -4113,6 +4114,25 @@ async function cotNumerosSalvar(){ const c=COT.cur.cotacao;
   const body={acao:'numeros_salvar',me:EU&&EU.bitrix_id,cotacao_id:c.id,num_solicitacao:val('cotDetSC'),num_pedido:val('cotDetPC')};
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r&&r.error){toast(r.error);return;} c.num_solicitacao=val('cotDetSC'); c.num_pedido=val('cotDetPC'); toast('Números salvos'); }catch(e){toast('Falha: '+e.message);} }
+/* "Fotinha" do pedido de compra (dados do TOTVS via Supabase): fornecedor(es), itens, preços unit e total */
+async function cotPedidoVer(numero){
+  let ov=document.getElementById('pedOverlay'); if(!ov){ ov=document.createElement('div'); ov.id='pedOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }
+  ov.onclick=()=>ov.remove();
+  const shell=b=>`<div style="background:#fff;border-radius:14px;padding:18px;max-width:740px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">${b}</div>`;
+  ov.innerHTML=shell(`<div class="dempty">Buscando o pedido ${esc(numero)} no TOTVS…</div>`);
+  try{ const r=await (await fetch('actions/pedidos.php?numero='+encodeURIComponent(numero)+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    const close=`<span class="material-icons" onclick="document.getElementById('pedOverlay').remove()" style="cursor:pointer;color:var(--muted)">close</span>`;
+    if(r.error){ ov.innerHTML=shell(`<div style="display:flex;justify-content:space-between;align-items:center"><b>Pedido ${esc(numero)}</b>${close}</div><div class="empty" style="margin-top:10px">${esc(r.error)}</div>`); return; }
+    const p=r.pedido, forn=(p.fornecedores||[]).join(', ')||'—';
+    ov.innerHTML=shell(`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><b style="font-size:15px"><span class="material-icons" style="font-size:17px;vertical-align:-3px;color:var(--verde-d)">receipt_long</span> Pedido de compra ${esc(p.numero)}</b>${close}</div>
+      <div class="muted" style="font-size:11.5px;margin-bottom:10px">${esc(p.coligada||'')}${p.data?' · '+D(String(p.data).slice(0,10)):''}${p.status?' · TOTVS '+esc(p.status):''} · ${p.n_itens} item(ns) · Fornecedor(es): ${esc(forn)}</div>
+      <div style="overflow-x:auto"><table class="mtable" style="border:none"><thead><tr><th class="svc-h" style="text-align:left">Item</th><th style="text-align:right">Qtde</th><th style="text-align:right">Preço unit.</th><th style="text-align:right">Total</th></tr></thead><tbody>
+      ${p.itens.map(it=>`<tr><td class="svc-c" style="text-align:left;font-size:12px">${esc(it.produto)}<small>${it.codprd?esc(it.codprd)+' · ':''}forn. ${esc(it.fornecedor_cod||'—')}</small></td><td style="text-align:right">${cotNum(it.qtd)} ${esc(it.und||'')}</td><td style="text-align:right">${BRL(it.preco_unit)}</td><td style="text-align:right"><b>${BRL(it.total)}</b></td></tr>`).join('')}
+      <tr style="background:#f7faf8"><td class="svc-c" style="text-align:left;font-weight:800">TOTAL</td><td></td><td></td><td style="text-align:right;font-weight:800;color:var(--verde-d)">${BRL(p.total)}</td></tr>
+      </tbody></table></div>
+      <div class="dmini" style="margin-top:8px">Dados do TOTVS (somente leitura). O total usa preço unit × qtde quando o valor líquido ainda não foi gravado no TOTVS.</div>`);
+  }catch(e){ ov.innerHTML=shell('<div class="empty">Falha ao buscar o pedido.</div>'); }
+}
 async function cotExcluirProposta(pid){ if(!confirm('Excluir esta proposta?'))return;
   try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir_proposta',me:EU&&EU.bitrix_id,proposta_id:pid})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
 // ícone por tipo de anexo

@@ -78,6 +78,12 @@ function cot_get_full($pdo, $id) {
                         WHERE c.id=?");
     $c->execute([$id]); $cot = $c->fetch();
     if (!$cot) return null;
+    // obra: se não há obra do radar vinculada mas a cotação nasceu de uma solicitação, mostra o nome comercial do de-para
+    if (empty($cot['obra_nome']) && !empty($cot['solic_coligada'])) {
+        $so = $pdo->prepare("SELECT nome_comercial FROM solic_obra WHERE coligada=? AND obra_cod=?");
+        $so->execute([$cot['solic_coligada'], (string)($cot['solic_obra_cod'] ?? '')]);
+        $nc = (string)$so->fetchColumn(); if ($nc !== '') $cot['obra_nome'] = $nc;
+    }
     $iq = $pdo->prepare("SELECT * FROM cotacao_item WHERE cotacao_id=? ORDER BY ordem, id"); $iq->execute([$id]);
     $itens = $iq->fetchAll();
     $pq = $pdo->prepare("SELECT * FROM cotacao_proposta WHERE cotacao_id=? ORDER BY (total IS NULL), total, id"); $pq->execute([$id]);

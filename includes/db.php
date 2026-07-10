@@ -165,6 +165,26 @@ function db_schema_mysql($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS oracle_uso (
         bitrix_id VARCHAR(64) NOT NULL, dia VARCHAR(10) NOT NULL, n INT DEFAULT 0, PRIMARY KEY (bitrix_id, dia)
     ) $E");
+    // E-MAIL FASE 4 — enviados (guarda o Message-ID/token por convidado p/ casar EXATO a resposta via In-Reply-To/References)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_email_out (
+        id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, cotacao_fornecedor_id INT, fornecedor_id INT,
+        fornecedor_nome VARCHAR(255), email VARCHAR(191), message_id VARCHAR(191), token VARCHAR(64),
+        assunto VARCHAR(255), enviado_em VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_ceo_cot (cotacao_id), KEY idx_ceo_tok (token)
+    ) $E");
+    // E-MAIL FASE 4 — recebidos (log inbound; casado ao par cotação×fornecedor; classificação da IA; rascunho). MEDIUMTEXT p/ JSON (lição do TEXT 64KB)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_email_in (
+        id INT NOT NULL AUTO_INCREMENT, cotacao_id INT, cotacao_fornecedor_id INT, fornecedor_id INT, fornecedor_nome VARCHAR(255),
+        imap_uid BIGINT, uidvalidity BIGINT, dedup_key VARCHAR(191) NOT NULL,
+        message_id VARCHAR(191), in_reply_to VARCHAR(191),
+        from_email VARCHAR(191), from_nome VARCHAR(255), assunto VARCHAR(255), data_email VARCHAR(40),
+        match_metodo VARCHAR(20), match_confianca VARCHAR(10),
+        tipo VARCHAR(20) DEFAULT 'indefinido', resumo VARCHAR(600), tem_proposta TINYINT DEFAULT 0, precisa_humano TINYINT DEFAULT 1,
+        ia_confianca VARCHAR(10), tem_anexo TINYINT DEFAULT 0, ia_modelo VARCHAR(60), anexos_ids VARCHAR(191),
+        draft_json MEDIUMTEXT, corpo_preview MEDIUMTEXT,
+        status VARCHAR(20) DEFAULT 'novo', lido_por VARCHAR(64), lido_em VARCHAR(40), created_at VARCHAR(40),
+        PRIMARY KEY (id), UNIQUE KEY uq_in_dedup (dedup_key), KEY idx_in_cot (cotacao_id), KEY idx_in_status (status)
+    ) $E");
     // Cartas convite — MODELO por serviço (camada 🔧) + CONFIG global Caprem (camada 🔒, 1 linha id=1)
     $pdo->exec("CREATE TABLE IF NOT EXISTS carta_modelo (
         id INT NOT NULL AUTO_INCREMENT, servico_id INT, servico_nome VARCHAR(191), tipo VARCHAR(60),
@@ -263,6 +283,10 @@ function db_schema_mysql($pdo) {
         if ($cfc && !isset($cfc['enviado_em'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN enviado_em VARCHAR(40)");
         if ($cfc && !isset($cfc['enviado_canal'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN enviado_canal VARCHAR(20)");
         if ($cfc && !isset($cfc['enviado_por'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN enviado_por VARCHAR(64)");
+        // Fase 4 (inbound): estado da resposta do fornecedor no card da Concorrência
+        if ($cfc && !isset($cfc['inbound_em'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN inbound_em VARCHAR(40)");
+        if ($cfc && !isset($cfc['inbound_tipo'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN inbound_tipo VARCHAR(20)");
+        if ($cfc && !isset($cfc['inbound_resumo'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN inbound_resumo VARCHAR(600)");
     } catch (Throwable $e) {}
 }
 
@@ -435,6 +459,12 @@ function db_schema($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS solic_obra (id INTEGER PRIMARY KEY AUTOINCREMENT, coligada TEXT, obra_cod TEXT, nome_comercial TEXT, cnpj TEXT, endereco TEXT, comprador_id TEXT, comprador_nome TEXT, radar_obra_id INTEGER, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS solic_overlay (id INTEGER PRIMARY KEY AUTOINCREMENT, coligada TEXT, numero TEXT, status TEXT, observacoes TEXT, fornecedores TEXT, orcamento_recebido INTEGER DEFAULT 0, cotacao_id INTEGER, updated_by TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS oracle_uso (bitrix_id TEXT NOT NULL, dia TEXT NOT NULL, n INTEGER DEFAULT 0, PRIMARY KEY (bitrix_id, dia))");
+    // E-MAIL FASE 4 — enviados/recebidos (espelho do MySQL)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_email_out (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, cotacao_fornecedor_id INTEGER, fornecedor_id INTEGER, fornecedor_nome TEXT, email TEXT, message_id TEXT, token TEXT, assunto TEXT, enviado_em TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_email_in (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER, cotacao_fornecedor_id INTEGER, fornecedor_id INTEGER, fornecedor_nome TEXT, imap_uid INTEGER, uidvalidity INTEGER, dedup_key TEXT, message_id TEXT, in_reply_to TEXT, from_email TEXT, from_nome TEXT, assunto TEXT, data_email TEXT, match_metodo TEXT, match_confianca TEXT, tipo TEXT DEFAULT 'indefinido', resumo TEXT, tem_proposta INTEGER DEFAULT 0, precisa_humano INTEGER DEFAULT 1, ia_confianca TEXT, tem_anexo INTEGER DEFAULT 0, ia_modelo TEXT, anexos_ids TEXT, draft_json TEXT, corpo_preview TEXT, status TEXT DEFAULT 'novo', lido_por TEXT, lido_em TEXT, created_at TEXT)");
+    $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_in_dedup ON cotacao_email_in(dedup_key)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ceo_tok ON cotacao_email_out(token)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_in_cot ON cotacao_email_in(cotacao_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_coti_cot ON cotacao_item(cotacao_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_prop_cot ON cotacao_proposta(cotacao_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_propi_prop ON cotacao_proposta_item(proposta_id)");
@@ -458,6 +488,9 @@ function db_schema($pdo) {
     if (!isset($cfcols['enviado_em'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN enviado_em TEXT");
     if (!isset($cfcols['enviado_canal'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN enviado_canal TEXT");
     if (!isset($cfcols['enviado_por'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN enviado_por TEXT");
+    if (!isset($cfcols['inbound_em'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN inbound_em TEXT");
+    if (!isset($cfcols['inbound_tipo'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN inbound_tipo TEXT");
+    if (!isset($cfcols['inbound_resumo'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN inbound_resumo TEXT");
     $pcols = []; foreach ($pdo->query("PRAGMA table_info(cotacao_proposta)") as $c) $pcols[$c['name']] = true;
     if (!isset($pcols['equaliza'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN equaliza TEXT");
 

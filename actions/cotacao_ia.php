@@ -53,6 +53,10 @@ function ia_xlsx_text($path) {
     return trim(implode("\n", array_slice($out, 0, 400)));
 }
 
+// Permite ao actions/inbox.php reaproveitar ia_xlsx_text() + (via o require acima) oracle_cfg/oracle_post/prompts,
+// sem executar este endpoint. (Espelha o ORACLE_LIB_ONLY do oracle.php.)
+if (defined('COTACAO_IA_LIB_ONLY')) return;
+
 try {
     $pdo = db();
 

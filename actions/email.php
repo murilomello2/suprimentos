@@ -34,6 +34,7 @@ try {
         $cfg = email_cfg();
         echo json_encode(['ok' => true, 'configurada' => !empty($cfg['senha']),
             'host' => $cfg['host'] ?? 'mail.capremconstrutora.com.br', 'port' => (int)($cfg['port'] ?? 465),
+            'imap_port' => (int)($cfg['imap_port'] ?? 993),
             'user' => $cfg['user'] ?? 'suprimentos@capremconstrutora.com.br', 'from' => $cfg['from'] ?? ($cfg['user'] ?? 'suprimentos@capremconstrutora.com.br'),
             'is_admin' => !empty($perms['perm_admin'])], JSON_UNESCAPED_UNICODE); exit;
     }
@@ -50,6 +51,7 @@ try {
             $cfg = email_cfg();
             if (array_key_exists('host', $in)) $cfg['host'] = trim((string)$in['host']);
             if (array_key_exists('port', $in)) $cfg['port'] = (int)$in['port'] ?: 465;
+            if (array_key_exists('imap_port', $in)) $cfg['imap_port'] = (int)$in['imap_port'] ?: 993;
             if (array_key_exists('user', $in)) $cfg['user'] = trim((string)$in['user']);
             if (array_key_exists('from', $in)) $cfg['from'] = trim((string)$in['from']);
             if (array_key_exists('senha', $in) && trim((string)$in['senha']) !== '') $cfg['senha'] = (string)$in['senha']; // vazio mantém a atual
@@ -86,17 +88,23 @@ try {
 
             // DISPARO real: individual por fornecedor convidado com e-mail
             if (!$cid) throw new Exception('cotacao_id obrigatório');
-            $cf = $pdo->prepare("SELECT cf.id, cf.fornecedor_nome, f.email AS f_email, cf.email AS s_email
+            $cf = $pdo->prepare("SELECT cf.id, cf.fornecedor_id, cf.fornecedor_nome, f.email AS f_email, cf.email AS s_email
                                  FROM cotacao_fornecedor cf LEFT JOIN cot_fornecedor f ON f.id=cf.fornecedor_id WHERE cf.cotacao_id=?");
             $cf->execute([$cid]); $conv = $cf->fetchAll();
             $enviados = 0; $falhas = []; $now = date('c');
             $upd = $pdo->prepare("UPDATE cotacao_fornecedor SET enviado_em=?, enviado_canal='email', enviado_por=? WHERE id=?");
+            // grava o Message-ID de cada disparo p/ casar EXATO a resposta depois (Fase 4 inbound, via In-Reply-To/References)
+            $insOut = $pdo->prepare("INSERT INTO cotacao_email_out (cotacao_id,cotacao_fornecedor_id,fornecedor_id,fornecedor_nome,email,message_id,token,assunto,enviado_em) VALUES (?,?,?,?,?,?,?,?,?)");
             foreach ($conv as $c) {
                 $em = ($c['f_email'] ?? '') !== '' ? $c['f_email'] : ($c['s_email'] ?? '');
                 if (!filter_var($em, FILTER_VALIDATE_EMAIL)) { $falhas[] = $c['fornecedor_nome'] . ' (sem e-mail)'; continue; }
-                [$ok, $msg] = smtp_send($cfg, $em, $assunto, $corpo, $anexos);
-                if ($ok) { $upd->execute([$now, $me, (int)$c['id']]); $enviados++; }
-                else $falhas[] = $c['fornecedor_nome'] . ': ' . $msg;
+                $token = bin2hex(random_bytes(9));
+                $msgid = '<cot-' . $cid . '-' . ((int)$c['id']) . '-' . $token . '@capremconstrutora.com.br>';
+                [$ok, $msg] = smtp_send($cfg, $em, $assunto, $corpo, $anexos, ['Message-ID' => $msgid]);
+                if ($ok) {
+                    $upd->execute([$now, $me, (int)$c['id']]); $enviados++;
+                    try { $insOut->execute([$cid, (int)$c['id'], $c['fornecedor_id'] ?: null, $c['fornecedor_nome'], $em, $msgid, $token, $assunto, $now]); } catch (Throwable $e) {}
+                } else $falhas[] = $c['fornecedor_nome'] . ': ' . $msg;
             }
             echo json_encode(['ok' => true, 'enviados' => $enviados, 'falhas' => $falhas], JSON_UNESCAPED_UNICODE); exit;
         }

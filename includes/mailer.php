@@ -10,7 +10,7 @@ function smtp_hdr_enc($s) { return '=?UTF-8?B?' . base64_encode((string)$s) . '?
  * Envia UM e-mail. $cfg = {host, port, user, senha, from, from_name}. $attachments = [{nome, mime, conteudo(raw bytes)}].
  * Retorna [bool ok, string msg].
  */
-function smtp_send($cfg, $to, $subject, $body, $attachments = []) {
+function smtp_send($cfg, $to, $subject, $body, $attachments = [], $extraHeaders = []) {
     $host = trim((string)($cfg['host'] ?? '')); $port = (int)($cfg['port'] ?? 465);
     $user = trim((string)($cfg['user'] ?? '')); $pass = (string)($cfg['senha'] ?? '');
     $from = trim((string)($cfg['from'] ?? '')) ?: $user; $fromName = (string)($cfg['from_name'] ?? 'Suprimentos · Caprem');
@@ -39,6 +39,11 @@ function smtp_send($cfg, $to, $subject, $body, $attachments = []) {
     $h .= 'To: <' . $to . ">\r\n";
     $h .= 'Subject: ' . smtp_hdr_enc($subject) . "\r\n";
     $h .= "MIME-Version: 1.0\r\n" . 'Date: ' . date('r') . "\r\n";
+    // headers extras (ex.: Message-ID p/ casar a resposta via In-Reply-To/References). Sanitiza CRLF (anti header-injection).
+    foreach ((array)$extraHeaders as $hk => $hv) {
+        $hk = trim(str_replace(["\r", "\n"], '', (string)$hk)); $hv = trim(str_replace(["\r", "\n"], '', (string)$hv));
+        if ($hk !== '' && $hv !== '') $h .= $hk . ': ' . $hv . "\r\n";
+    }
     if ($attachments) {
         $h .= 'Content-Type: multipart/mixed; boundary="' . $bd . "\"\r\n\r\n";
         $m  = '--' . $bd . "\r\n" . "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode($body)) . "\r\n";

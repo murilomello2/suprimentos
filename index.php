@@ -3875,7 +3875,7 @@ function cotRenderDetalhe(){
   const anxNorm=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
   const anexosDoForn=cf=>anx.filter(a=>((a.fornecedor_id&&cf.fornecedor_id&&String(a.fornecedor_id)===String(cf.fornecedor_id))||(a.fornecedor_nome&&anxNorm(a.fornecedor_nome)===anxNorm(cf.fornecedor_nome))));
   const anexoChip=a=>`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-weight:600;display:inline-flex;align-items:center;gap:4px;max-width:190px"><span class="material-icons" style="font-size:13px">${cotAnexoIcon(a.mime,a.nome)}</span><a href="actions/cotacao_anexo.php?download=${a.id}&me=${encodeURIComponent(meB)}" target="_blank" rel="noopener" style="color:var(--verde-d);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(a.nome)}">${esc(a.nome)}</a>${CAN_EDIT?` <span onclick="cotDelAnexo(${a.id})" style="cursor:pointer;color:var(--pend)" title="excluir anexo">×</span>`:''}</span>`;
-  html+=`<div class="panel" style="margin-bottom:10px">${cotSecHead('groups','Concorrência','fornecedores convidados','<span class="dchip" style="background:'+(conv.length&&conv.every(x=>x.respondeu)?'var(--ok)':'var(--dourado)')+'">'+conv.filter(x=>x.respondeu).length+' de '+conv.length+' responderam</span>')}`;
+  html+=`<div class="panel" style="margin-bottom:10px">${cotSecHead('groups','Concorrência','fornecedores convidados',(CAN_EDIT?'<button class="btn-ghost" style="padding:3px 10px" onclick="cotInboxBuscar()" title="ler as respostas dos fornecedores na caixa suprimentos@ (IMAP)"><span class="material-icons" style="font-size:14px;vertical-align:-3px">mark_email_unread</span> Buscar respostas</button> ':'')+'<span class="dchip" style="background:'+(conv.length&&conv.every(x=>x.respondeu)?'var(--ok)':'var(--dourado)')+'">'+conv.filter(x=>x.respondeu).length+' de '+conv.length+' responderam</span>')}`;
   if(conv.length) html+='<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">'+conv.map((cf,ci)=>{ const ax=anexosDoForn(cf);
     return `<div style="border:1px solid var(--line);border-radius:10px;padding:9px 11px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -3883,6 +3883,7 @@ function cotRenderDetalhe(){
         <span style="flex:1;min-width:130px;font-weight:600">${esc(cf.fornecedor_nome)}${cf.categoria?` <span class="muted" style="font-size:11px;font-weight:400">· ${esc(cf.categoria)}</span>`:''}</span>
         ${cf.enviado_em?`<span class="dchip" style="background:var(--verde-d);color:#fff" title="e-mail enviado em ${D(String(cf.enviado_em).slice(0,10))}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">outbox</span> enviado</span>`:''}
         <span class="dchip" style="background:${cf.respondeu?'var(--ok)':'#8a9299'}">${cf.respondeu?('respondeu · '+BRL(cf.proposta_total)):'aguardando'}</span>
+        ${cf.inbound_em?`<span class="dchip" style="background:${cf.inbound_tipo==='cotacao'?'#1f7a44':(cf.inbound_tipo==='duvida'?'var(--pend)':'#5b6b7a')};color:#fff" title="${esc(cf.inbound_resumo||'')}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">mail</span> e-mail · ${cf.inbound_tipo==='cotacao'?'cotação':(cf.inbound_tipo==='duvida'?'dúvida':'resposta')}</span>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotAnexarAbrir(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="anexar PDF, Excel ou print — arraste, cole (Ctrl+V) ou clique"><span class="material-icons" style="font-size:14px;vertical-align:-2px">attach_file</span> anexar${ax.length?` (${ax.length})`:''}</button>`:''}
         ${CAN_EDIT&&ax.length?`<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotIAPreencher(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="a IA lê os anexos e preenche a proposta (rascunho para você conferir)"><span class="material-icons" style="font-size:14px;vertical-align:-2px">auto_awesome</span> preencher com IA</button>`:''}
         ${CAN_EDIT&&!cf.respondeu?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotPropostaDe(${ci})">Lançar proposta</button>`:''}
@@ -3895,6 +3896,7 @@ function cotRenderDetalhe(){
   else html+='<div class="dmini" style="margin-top:6px">Nenhum fornecedor convidado ainda — convide abaixo.</div>';
   if(CAN_EDIT) html+=`<div style="margin-top:10px"><button class="btn-ghost" style="padding:5px 12px" onclick="cotFornPickerOpen('convite')"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">group_add</span> Convidar fornecedores</button></div>`;
   html+='</div>';
+  html+='<div id="cotInboxPanel"></div>';   // Fase 4: respostas recebidas por e-mail (preenchido async por cotInboxLoad)
   html+=cotEqualizaPanel(d);
   if(!props.length){ html+='<div class="panel"><div class="empty">Nenhuma proposta ainda. Clique em "Cadastrar proposta" ou "Lançar proposta" de um convidado para montar o mapa.</div></div>'; }
   else{
@@ -3913,6 +3915,7 @@ function cotRenderDetalhe(){
   }
   w.innerHTML=html;
   if(c.num_solicitacao) cotDetectarPedido(c);   // nasceu de solicitação → detecta/autopreenche o PC pelo vínculo exato (solic_numeros)
+  cotInboxLoad(c.id);                            // Fase 4: carrega as respostas de e-mail desta cotação (se houver)
 }
 // detecta os pedidos de compra que nasceram desta solicitação (SC→PC exato) e autopreenche o nº do PC
 async function cotDetectarPedido(c){
@@ -3929,6 +3932,50 @@ async function cotDetectarPedido(c){
     host.innerHTML='<span class="muted" style="font-size:11px;font-weight:700">Pedido(s) desta solicitação:</span> '+peds.map(p=>`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-weight:700;cursor:pointer;margin-right:5px" onclick="cotPedidoVer('${esc(p.pedido_numero)}')" title="${p.n_itens} item(ns) desta solicitação · ver detalhes">PC ${esc(String(p.pedido_numero).replace(/^0+/,''))}${p.status?' · '+esc(p.status):''} <span class="material-icons" style="font-size:12px;vertical-align:-2px">visibility</span></span>`).join('');
   }catch(e){}
 }
+/* ===== E-MAIL FASE 4 — ler respostas (inbound): buscar na caixa, listar, usar rascunho, marcar lido ===== */
+async function cotInboxBuscar(){
+  const c=(COT.cur||{}).cotacao; if(!c)return;
+  toast('Buscando respostas na caixa…');
+  try{ const r=await (await fetch('actions/inbox.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'varrer',me:EU&&EU.bitrix_id})})).json();
+    if(r.error){toast(r.error);return;}
+    if(r.throttled){toast(r.msg||'Aguarde um instante entre as buscas.');return;}
+    const parts=[]; if(r.novas)parts.push(r.novas+' nova(s)'); if(r.casadas)parts.push(r.casadas+' casada(s)'); if(r.cotacoes)parts.push(r.cotacoes+' cotação'); if(r.duvidas)parts.push(r.duvidas+' dúvida(s)'); if(r.sem_match)parts.push(r.sem_match+' sem vínculo');
+    toast((r.lidas!=null?('Caixa: '+r.lidas+' lida(s)'):'Busca concluída')+(parts.length?' · '+parts.join(' · '):(r.novas?'':' · nada novo')));
+    if(r.avisos&&r.avisos.length) setTimeout(()=>toast(r.avisos[0]),1500);
+    cotOpen(c.id);   // recarrega: os cards atualizam o estado e o painel da caixa recarrega
+  }catch(e){toast('Falha: '+e.message);}
+}
+async function cotInboxLoad(cid){
+  const host=document.getElementById('cotInboxPanel'); if(!host||!cid)return;
+  try{ const r=await (await fetch('actions/inbox.php?listar=1&cotacao='+cid+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    if((((COT.cur||{}).cotacao||{}).id)!=cid) return;   // o usuário já trocou de cotação — não sobrescreve o painel/estado da atual
+    const its=(r&&r.itens)||[]; if(!its.length){ host.innerHTML=''; return; }
+    COT.inbox=its; const meB=(EU&&EU.bitrix_id)||'';
+    const tipoChip=t=>t==='cotacao'?'<span class="dchip" style="background:#1f7a44;color:#fff">COTAÇÃO</span>':(t==='duvida'?'<span class="dchip" style="background:var(--pend);color:#fff">DÚVIDA</span>':(t==='fora_de_escopo'?'<span class="dchip" style="background:#8a9299;color:#fff">FORA DE ESCOPO</span>':'<span class="dchip" style="background:#5b6b7a;color:#fff">'+esc(String(t||'?').toUpperCase())+'</span>'));
+    const rows=its.map((m,i)=>{ const anx=String(m.anexos_ids||'').split(',').filter(Boolean); const lido=(m.status==='lido'||m.status==='convertido'||m.status==='ignorado');
+      return `<div style="border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#fff;${lido?'opacity:.6;':''}">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          ${tipoChip(m.tipo)}
+          <span style="flex:1;min-width:140px;font-weight:600">${esc(m.fornecedor_nome||m.from_nome||m.from_email||'—')}</span>
+          <span class="muted" style="font-size:11px">${esc(m.from_email||'')}${m.data_email?' · '+D(String(m.data_email).slice(0,10)):''}</span>
+          ${m.match_metodo==='heuristica'?`<span class="dchip" style="background:#fff3e0;color:#a15c00" title="vínculo deduzido por remetente/assunto — confira">vínculo ${esc(m.match_confianca||'')}</span>`:''}
+          ${m.tem_anexo?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d)"><span class="material-icons" style="font-size:11px;vertical-align:-2px">attach_file</span> ${anx.length||1}</span>`:''}
+        </div>
+        ${m.resumo?`<div style="font-size:12.5px;margin-top:5px">${esc(m.resumo)}</div>`:''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">
+          ${m.tem_rascunho&&CAN_EDIT?`<button class="btn-prim" style="padding:3px 11px" onclick="cotInboxUsarRascunho(${i})" title="abre a proposta pré-preenchida pela IA (rascunho — confira e salve)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">auto_awesome</span> Usar rascunho</button>`:''}
+          ${anx.map(id=>`<a class="btn-ghost" style="padding:3px 9px;text-decoration:none" href="actions/cotacao_anexo.php?download=${id}&me=${encodeURIComponent(meB)}" target="_blank" rel="noopener"><span class="material-icons" style="font-size:13px;vertical-align:-2px">description</span> anexo</a>`).join('')}
+          ${m.corpo_preview?`<button class="btn-ghost" style="padding:3px 9px" onclick="cotInboxVerCorpo(${i})">ver e-mail</button>`:''}
+          ${!lido?`<button class="btn-ghost" style="padding:3px 9px;color:var(--muted)" onclick="cotInboxMarcar(${m.id},'marcar_lido')">marcar lido</button>`:'<span class="muted" style="font-size:11px;align-self:center">✓ '+esc(m.status)+'</span>'}
+        </div></div>`;
+    }).join('');
+    host.innerHTML=`<div class="panel" style="margin-bottom:10px">${cotSecHead('inbox','Respostas por e-mail','a IA leu a caixa e classificou — valide antes de usar','')}<div style="display:flex;flex-direction:column;gap:8px">${rows}</div>
+      <div class="dmini" style="margin-top:7px">⚠ Vínculo e classificação são sugestões da IA sobre e-mails (conteúdo não confiável). Confira antes de gerar a proposta; dúvidas nunca viram rascunho.</div></div>`;
+  }catch(e){ host.innerHTML=''; }
+}
+function cotInboxUsarRascunho(i){ const m=(COT.inbox||[])[i]; if(!m||!m.draft){toast('Sem rascunho neste e-mail');return;} cotIAAplicar(m.fornecedor_nome||'', m.draft, {}); }
+function cotInboxVerCorpo(i){ const m=(COT.inbox||[])[i]; if(!m)return; alert('De: '+(m.from_nome||'')+' <'+(m.from_email||'')+'>\nAssunto: '+(m.assunto||'')+'\n\n'+(m.corpo_preview||'(sem corpo)')); }
+async function cotInboxMarcar(id,acao){ try{ const r=await (await fetch('actions/inbox.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao,me:EU&&EU.bitrix_id,id})})).json(); if(r&&r.error){toast(r.error);return;} const c=(COT.cur||{}).cotacao; if(c)cotInboxLoad(c.id); }catch(e){toast('Falha: '+e.message);} }
 function upCard(label,val,sub,color){ return `<div style="border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:#fff">
   <div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#889;font-weight:700">${esc(label)}</div>
   <div style="font-size:17px;font-weight:800;color:${color};margin-top:3px">${val}</div>
@@ -5020,8 +5067,8 @@ async function cfgEmailLoad(){ const w=document.getElementById('cfgEmailWrap'); 
   try{ const cfg=await (await fetch('actions/email.php?config=1&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
     if(cfg.error){ w.innerHTML='<div class="panel"><div class="empty">'+esc(cfg.error)+'</div></div>'; return; }
     w.innerHTML=`<div class="panel" style="max-width:640px">
-      ${cotSecHead('mail','Conta de envio (SMTP)','a senha fica só no servidor — nunca aparece aqui','<span class="dchip" style="background:'+(cfg.configurada?'var(--ok)':'var(--pend)')+'">'+(cfg.configurada?'configurada ✓':'falta a senha')+'</span>')}
-      <div style="display:grid;grid-template-columns:1fr 100px;gap:10px">${cotFld('Servidor SMTP','<input id="ceHost" value="'+esc(cfg.host||'')+'" style="width:100%">')}${cotFld('Porta','<input id="cePort" type="number" value="'+esc(cfg.port||465)+'" style="width:100%">')}</div>
+      ${cotSecHead('mail','Conta de e-mail (envio + leitura)','SMTP dispara as cotações; IMAP lê as respostas — mesma conta/senha (fica só no servidor)','<span class="dchip" style="background:'+(cfg.configurada?'var(--ok)':'var(--pend)')+'">'+(cfg.configurada?'configurada ✓':'falta a senha')+'</span>')}
+      <div style="display:grid;grid-template-columns:1fr 100px 110px;gap:10px">${cotFld('Servidor','<input id="ceHost" value="'+esc(cfg.host||'')+'" style="width:100%">')}${cotFld('Porta SMTP','<input id="cePort" type="number" value="'+esc(cfg.port||465)+'" style="width:100%">')}${cotFld('Porta IMAP','<input id="ceImapPort" type="number" value="'+esc(cfg.imap_port||993)+'" style="width:100%" title="leitura das respostas (Fase 4)">')}</div>
       <div style="margin-top:8px">${cotFld('Usuário (e-mail remetente)','<input id="ceUser" value="'+esc(cfg.user||'')+'" style="width:100%">')}</div>
       <div style="margin-top:8px">${cotFld('Senha (vazio mantém a atual)','<input id="ceSenha" type="password" autocomplete="new-password" placeholder="••••••••" style="width:100%">')}</div>
       <div style="margin-top:10px"><button class="btn-prim" onclick="cfgEmailSalvar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar conta</button></div>
@@ -5031,7 +5078,7 @@ async function cfgEmailLoad(){ const w=document.getElementById('cfgEmailWrap'); 
     </div>`;
   }catch(e){ w.innerHTML='<div class="panel"><div class="empty">Falha ao carregar.</div></div>'; } }
 async function cfgEmailSalvar(){ const g=id=>((document.getElementById(id)||{}).value||'');
-  try{ const r=await (await fetch('actions/email.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'config',me:EU&&EU.bitrix_id,host:g('ceHost'),port:Number(g('cePort'))||465,user:g('ceUser'),senha:g('ceSenha')})})).json();
+  try{ const r=await (await fetch('actions/email.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'config',me:EU&&EU.bitrix_id,host:g('ceHost'),port:Number(g('cePort'))||465,imap_port:Number(g('ceImapPort'))||993,user:g('ceUser'),senha:g('ceSenha')})})).json();
     if(r.error){toast(r.error);return;} toast('Conta salva'); cfgEmailLoad(); }catch(e){toast('Falha: '+e.message);} }
 async function cfgEmailTeste(){ const to=((document.getElementById('ceTeste')||{}).value||'').trim(); if(!to){toast('Informe seu e-mail');return;}
   toast('Enviando teste…');

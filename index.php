@@ -3846,6 +3846,7 @@ function cotRenderDetalhe(){
       <span style="margin-left:auto;display:flex;gap:6px">
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cartaGerar(${c.id})" title="${(c.num_solicitacao&&!c.servico_id)?'Carta de cotação (material) desta cotação':'Carta convite desta cotação'} — PDF / Word"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> ${(d.cartas_geradas&&d.cartas_geradas.length)?'Ver/editar carta':'Gerar carta'}</button>${(d.cartas_geradas&&d.cartas_geradas.length)?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="carta salva em ${D(String(d.cartas_geradas[0].created_at).slice(0,10))}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">description</span> carta salva</span>`:''}`:''}
         <button class="btn-ghost" style="padding:6px 12px" onclick="cotUmaPagina()" title="Resumo de uma página, pronto pra imprimir/PDF"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Uma página</button>
+        ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotEmailAbrir(${c.id})" title="montar o e-mail de cotação para os fornecedores convidados"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> E-mail</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px;color:var(--verde-d)" onclick="cotPropIAAbrir()" title="a IA lê um PDF/print de proposta, identifica o fornecedor e preenche os preços"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Proposta via IA</button>`:''}
         ${CAN_EDIT?`<button class="btn-prim" style="padding:6px 12px" onclick="cotProposta()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Cadastrar proposta</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotFinalizar()">${c.status==='finalizada'?'Reabrir':'Finalizar'}</button>`:''}
@@ -4279,6 +4280,29 @@ async function cotIAAplicar(fornNome,draft,meta){ const d=COT.cur; draft=draft||
   }
   COT.mode='proposta'; cotRenderProposta(); cotFornDatalist(((COT.cur||{}).cotacao||{}).categoria);
   toast(preench+' item(ns) preenchido(s) pela IA'+(novos?' · '+novos+' ponto(s) de equalização novo(s)':'')+((meta&&meta.avisos&&meta.avisos.length)?' · '+meta.avisos.length+' aviso(s)':'')); }
+/* ===== E-MAIL DE COTAÇÃO — Fase 2: compositor (prévia editável, individual por fornecedor; envio real na próxima fase) ===== */
+async function cotEmailAbrir(cid){
+  let ov=document.getElementById('emailOverlay'); if(!ov){ ov=document.createElement('div'); ov.id='emailOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }
+  ov.onclick=()=>ov.remove();
+  const shell=b=>`<div style="background:#fff;border-radius:14px;padding:18px;max-width:720px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">${b}</div>`;
+  ov.innerHTML=shell('<div class="dempty">Montando o e-mail…</div>');
+  try{ const g=await (await fetch('actions/email.php?compor='+cid+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    const close=`<span class="material-icons" onclick="document.getElementById('emailOverlay').remove()" style="cursor:pointer;color:var(--muted)">close</span>`;
+    if(g.error){ ov.innerHTML=shell(`<div style="display:flex;justify-content:space-between"><b>E-mail de cotação</b>${close}</div><div class="empty" style="margin-top:10px">${esc(g.error)}</div>`); return; }
+    const semEmail=(g.destinatarios||[]).filter(d=>!d.tem_email).length;
+    const dchips=(g.destinatarios||[]).map(d=>`<span class="dchip" style="background:${d.tem_email?'#eef4f0':'#fbeae8'};color:${d.tem_email?'var(--verde-d)':'var(--pend)'};font-weight:600;margin:2px 4px 2px 0"><span class="material-icons" style="font-size:12px;vertical-align:-2px">${d.tem_email?'check':'error'}</span> ${esc(d.fornecedor_nome)}${d.email?' · '+esc(d.email):' · sem e-mail'}</span>`).join('')||'<span class="dmini">Nenhum fornecedor convidado.</span>';
+    ov.innerHTML=shell(`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><b style="font-size:15px"><span class="material-icons" style="font-size:17px;vertical-align:-3px;color:var(--verde-d)">mail</span> E-mail de cotação — prévia</b>${close}</div>
+      <div class="muted" style="font-size:11.5px;margin-bottom:10px">Modelo <b>${g.variante==='radar'?'do radar (com carta anexa)':'de solicitação (itens no corpo)'}</b> · remetente <b>${esc(g.remetente)}</b> · assinatura de <b>${esc(g.remetente_nome||'—')}</b>. Cada fornecedor recebe <b>individualmente</b>.</div>
+      <div style="font-size:11px;font-weight:700;color:var(--muted)">DESTINATÁRIOS ${semEmail?`<span style="color:var(--pend)">· ${semEmail} sem e-mail (preencha na Concorrência)</span>`:'✓'}</div>
+      <div style="margin:5px 0 10px">${dchips}</div>
+      ${cotFld('Assunto','<input id="emAssunto" value="'+esc(g.assunto)+'" style="width:100%">')}
+      ${cotFld('Corpo do e-mail (edite à vontade antes de disparar)','<textarea id="emCorpo" rows="14" style="width:100%;font-size:12.5px;font-family:inherit">'+esc(g.corpo)+'</textarea>','margin-top:8px')}
+      ${g.tem_carta?'<div class="dmini" style="margin-top:6px">📎 A carta de cotação vinculada entra como anexo.</div>':''}
+      <div style="background:#fbf7e8;border:1px solid #eadfb0;border-radius:8px;padding:8px 11px;margin-top:12px;font-size:11.5px;color:#6b5a1e"><b>Disparo:</b> ${g.configurada?'a conta está configurada.':'ainda falta configurar a senha do e-mail no servidor (admin).'} O envio real (individual por fornecedor, via ${'Bitrix/SMTP'}) entra na próxima fase — com um <b>envio-teste pra você</b> antes de sair pros fornecedores.</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn-ghost" onclick="document.getElementById('emailOverlay').remove()">Fechar</button>
+        <button class="btn-prim" disabled style="opacity:.5" title="disponível na próxima fase, após configurar a conta"><span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Disparar (em breve)</button></div>`);
+  }catch(e){ ov.innerHTML=shell('<div class="empty">Falha ao montar o e-mail.</div>'); }
+}
 /* ===== ITEM B: cadastrar proposta a partir de um PDF/print SEM escolher fornecedor — IA lê, IDENTIFICA o fornecedor e preenche ===== */
 function cotPropIAAbrir(){ COT.propIA={files:[],busy:false}; let ov=document.getElementById('propiaOverlay');
   if(!ov){ ov=document.createElement('div'); ov.id='propiaOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }

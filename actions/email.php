@@ -1,0 +1,82 @@
+<?php
+/**
+ * E-MAIL DE COTAÇÃO — Fase 2: COMPOSITOR (monta o corpo humanizado por cotação; NÃO envia).
+ * GET ?compor=<cotacao_id>&me=..  -> {assunto, corpo, remetente, destinatarios[{fornecedor_nome,email,tem_email}], tem_carta, variante, configurada}
+ * O disparo real (SMTP) e a leitura de respostas (IMAP) são fases seguintes — a credencial fica SÓ no servidor.
+ */
+header('Content-Type: application/json; charset=utf-8');
+require_once __DIR__ . '/../includes/db.php';
+
+// telefone da assinatura por comprador (o Murilo passou; casar pelo nome do usuário logado)
+function email_fone($nome) {
+    $n = mb_strtolower(trim((string)$nome), 'UTF-8');
+    $map = [
+        'anselmo' => '(19) 99331-1588', 'gabriel borges' => '(19) 97413-3339', 'gabriel souza' => '(19) 97413-3339',
+        'gabriel machado' => '(19) 99688-8181', 'paloma' => '(19) 97118-8464', 'natalia' => '(19) 99816-7057',
+        'natália' => '(19) 99816-7057', 'alex' => '(19) 99789-3994', 'joão nogueira' => '(19) 98802-9682', 'joao nogueira' => '(19) 98802-9682',
+    ];
+    foreach ($map as $k => $v) if (mb_strpos($n, $k) !== false) return $v;
+    return '';
+}
+function email_qtd($q) { if ($q === null || $q === '') return ''; return rtrim(rtrim(number_format((float)$q, 2, ',', '.'), '0'), ','); }
+
+try {
+    $pdo = db();
+    $perms = user_perms($pdo, $_GET['me'] ?? null);
+    if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }
+
+    if (isset($_GET['compor'])) {
+        $cid = (int)$_GET['compor'];
+        $c = $pdo->prepare("SELECT c.*, o.nome AS obra_nome, s.nome AS servico_nome FROM cotacao c LEFT JOIN obra o ON o.id=c.obra_id LEFT JOIN servico s ON s.id=c.servico_id WHERE c.id=?");
+        $c->execute([$cid]); $cot = $c->fetch();
+        if (!$cot) { echo json_encode(['error' => 'cotação não encontrada']); exit; }
+        $obraNome = $cot['obra_nome'];
+        if (empty($obraNome) && !empty($cot['solic_coligada'])) {
+            $so = $pdo->prepare("SELECT nome_comercial FROM solic_obra WHERE coligada=? AND obra_cod=?");
+            $so->execute([$cot['solic_coligada'], (string)($cot['solic_obra_cod'] ?? '')]); $nc = (string)$so->fetchColumn();
+            if ($nc !== '') $obraNome = $nc;
+        }
+        $iq = $pdo->prepare("SELECT descricao, unidade, quantidade, observacao FROM cotacao_item WHERE cotacao_id=? ORDER BY ordem, id");
+        $iq->execute([$cid]); $itens = $iq->fetchAll();
+        $cf = $pdo->prepare("SELECT cf.fornecedor_id, cf.fornecedor_nome, f.email AS f_email, cf.email AS s_email
+                             FROM cotacao_fornecedor cf LEFT JOIN cot_fornecedor f ON f.id=cf.fornecedor_id WHERE cf.cotacao_id=? ORDER BY cf.fornecedor_nome");
+        $cf->execute([$cid]);
+        $dest = []; foreach ($cf->fetchAll() as $r) {
+            $em = ($r['f_email'] ?? '') !== '' ? $r['f_email'] : ($r['s_email'] ?? '');
+            $dest[] = ['fornecedor_nome' => $r['fornecedor_nome'], 'email' => $em, 'tem_email' => $em !== ''];
+        }
+        $temCarta = (int)$pdo->query("SELECT COUNT(*) FROM carta_gerada WHERE cotacao_id=" . $cid)->fetchColumn() > 0;
+        $isRadar = !empty($cot['servico_id']);
+        $titulo = $cot['servico_nome'] ?: $cot['titulo'];
+        $remNome = $perms['nome'] ?? ''; $remFone = email_fone($remNome);
+
+        $assunto = 'Cotação — ' . $titulo . ($obraNome ? (' · ' . $obraNome) : '');
+        $L = ['Prezado fornecedor, tudo bem?', ''];
+        if ($isRadar) {
+            $L[] = 'A Caprem Construtora está cotando ' . $titulo . ($obraNome ? (' para a obra ' . $obraNome) : '') . '.';
+            if ($temCarta) $L[] = 'Os detalhes, o escopo e os quantitativos estão na CARTA DE COTAÇÃO em anexo.';
+            else { $L[] = ''; $L[] = 'Itens a cotar:'; foreach ($itens as $it) $L[] = ' • ' . email_qtd($it['quantidade']) . ' ' . $it['unidade'] . ' — ' . $it['descricao'] . ($it['observacao'] ? (' (' . $it['observacao'] . ')') : ''); }
+        } else {
+            $L[] = 'A Caprem Construtora solicita a sua cotação para os itens abaixo' . ($obraNome ? (' — obra ' . $obraNome) : '') . ':'; $L[] = '';
+            foreach ($itens as $it) $L[] = ' • ' . email_qtd($it['quantidade']) . ' ' . $it['unidade'] . ' — ' . $it['descricao'] . ($it['observacao'] ? (' (' . $it['observacao'] . ')') : '');
+        }
+        $L[] = ''; $L[] = 'Por gentileza, informe: preço unitário por item, prazo de entrega, condição de pagamento e validade da proposta.';
+        $L[] = 'Qualquer dúvida, estou à disposição por e-mail ou WhatsApp.';
+        $L[] = ''; $L[] = 'Atenciosamente,';
+        $L[] = ($remNome ?: 'Suprimentos') . ' — Departamento de Suprimentos · Caprem Construtora';
+        if ($remFone) $L[] = 'WhatsApp: ' . $remFone;
+        $L[] = 'suprimentos@capremconstrutora.com.br';
+
+        $cfg = @json_decode(@file_get_contents(__DIR__ . '/../data/.email.json'), true);
+        $configurada = is_array($cfg) && !empty($cfg['senha']);
+        echo json_encode(['ok' => true, 'assunto' => $assunto, 'corpo' => implode("\n", $L),
+            'remetente' => 'suprimentos@capremconstrutora.com.br', 'remetente_nome' => $remNome,
+            'destinatarios' => $dest, 'tem_carta' => $temCarta, 'variante' => $isRadar ? 'radar' : 'material',
+            'configurada' => $configurada], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    echo json_encode(['error' => 'ação inválida'], JSON_UNESCAPED_UNICODE);
+} catch (Throwable $e) {
+    http_response_code(500);
+    echo json_encode(['error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+}

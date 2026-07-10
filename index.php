@@ -3443,8 +3443,16 @@ function cotObraOpts(sel){ return '<option value="">— obra —</option>'+((typ
 async function cotLoad(){
   const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Carregando cotações…</div>';
   try{ const d=await (await fetch('actions/cotacoes.php'+(COT.obra?('?obra='+COT.obra+'&'):'?')+'_='+Date.now())).json();
-    COT.list=d.cotacoes||[]; COT.mode='list'; cotRender();
+    COT.list=d.cotacoes||[]; COT.mode='list'; cotRender(); cotInboxSweepAuto();
   }catch(e){ w.innerHTML='<div class="dempty">Falha: '+esc(e.message)+'</div>'; }
+}
+// varredura OPORTUNISTA da caixa ao abrir Cotações (no máx 1x/10min no cliente; o servidor tb tem trava de 30s).
+// Enquanto o cron horário não estiver ligado, isto já mantém as respostas chegando quando alguém usa o sistema.
+let INBOX_SWEEP_TS=0;
+function cotInboxSweepAuto(){ const now=Date.now(); if(now-INBOX_SWEEP_TS<600000)return; INBOX_SWEEP_TS=now;
+  fetch('actions/inbox.php?sync=1&me='+encodeURIComponent((EU&&EU.bitrix_id)||'')).then(r=>r.json()).then(r=>{
+    if(r&&r.novas){ toast('📨 '+r.novas+' nova(s) resposta(s) na caixa'+(r.casadas?' · '+r.casadas+' casada(s)':'')); if(COT.cur&&COT.cur.cotacao&&COT.mode==='detalhe')cotOpen(COT.cur.cotacao.id); }
+  }).catch(()=>{});
 }
 function cotRender(){
   if(COT.mode==='novo') return cotRenderNovo();
@@ -5066,6 +5074,7 @@ function cfgTab(t){
 async function cfgEmailLoad(){ const w=document.getElementById('cfgEmailWrap'); if(!w)return; w.innerHTML='<div class="dempty">Carregando…</div>';
   try{ const cfg=await (await fetch('actions/email.php?config=1&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
     if(cfg.error){ w.innerHTML='<div class="panel"><div class="empty">'+esc(cfg.error)+'</div></div>'; return; }
+    const cronUrl=cfg.cron_token?new URL('actions/inbox.php?cron='+encodeURIComponent(cfg.cron_token),location.href).href:'';
     w.innerHTML=`<div class="panel" style="max-width:640px">
       ${cotSecHead('mail','Conta de e-mail (envio + leitura)','SMTP dispara as cotações; IMAP lê as respostas — mesma conta/senha (fica só no servidor)','<span class="dchip" style="background:'+(cfg.configurada?'var(--ok)':'var(--pend)')+'">'+(cfg.configurada?'configurada ✓':'falta a senha')+'</span>')}
       <div style="display:grid;grid-template-columns:1fr 100px 110px;gap:10px">${cotFld('Servidor','<input id="ceHost" value="'+esc(cfg.host||'')+'" style="width:100%">')}${cotFld('Porta SMTP','<input id="cePort" type="number" value="'+esc(cfg.port||465)+'" style="width:100%">')}${cotFld('Porta IMAP','<input id="ceImapPort" type="number" value="'+esc(cfg.imap_port||993)+'" style="width:100%" title="leitura das respostas (Fase 4)">')}</div>
@@ -5075,7 +5084,12 @@ async function cfgEmailLoad(){ const w=document.getElementById('cfgEmailWrap'); 
       <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">${cotSecHead('outbox','Enviar um teste (SMTP)','manda um e-mail de teste pra você conferir se o envio funciona','')}
         <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap"><div style="flex:1;min-width:220px">${cotFld('Para (seu e-mail)','<input id="ceTeste" placeholder="voce@email.com" style="width:100%">')}</div>
         <button class="btn-prim" onclick="cfgEmailTeste()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar teste</button></div></div>
-      <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">${cotSecHead('mark_email_unread','Testar leitura (IMAP)','conecta na caixa e conta as mensagens — não lê conteúdo nem usa IA','<button class="btn-ghost" onclick="cfgImapTeste()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">sync</span> Testar leitura</button>')}<div id="ceImapRes" class="dmini" style="margin-top:2px"></div></div>
+      <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">${cotSecHead('mark_email_unread','Testar leitura (IMAP)','conecta na caixa e conta as mensagens (incl. Spam/Lixo) — não lê conteúdo nem usa IA','<button class="btn-ghost" onclick="cfgImapTeste()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">sync</span> Testar leitura</button>')}<div id="ceImapRes" class="dmini" style="margin-top:2px"></div></div>
+      ${cronUrl?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">${cotSecHead('schedule','Varredura automática (cron)','o servidor busca respostas sozinho — configure UMA vez no cPanel','')}
+        <div class="dmini">No cPanel › <b>Cron Jobs</b>, adicione uma tarefa <b>a cada 1 hora</b> com este comando:</div>
+        <div id="cronCmd" style="margin-top:5px;background:#f4f7f5;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11px;word-break:break-all;font-family:monospace">wget -q -O /dev/null "${esc(cronUrl)}"</div>
+        <div style="margin-top:6px"><button class="btn-ghost" style="padding:4px 10px" onclick="navigator.clipboard.writeText(document.getElementById('cronCmd').textContent).then(()=>toast('Comando copiado')).catch(()=>toast('Copie manualmente'))"><span class="material-icons" style="font-size:14px;vertical-align:-3px">content_copy</span> Copiar comando</button></div>
+        <div class="dmini" style="margin-top:6px;color:var(--muted)">É um link secreto (token) — não compartilhe. Enquanto o cron não roda, a busca também dispara sozinha ao abrir o módulo Cotações.</div></div>`:''}
     </div>`;
   }catch(e){ w.innerHTML='<div class="panel"><div class="empty">Falha ao carregar.</div></div>'; } }
 async function cfgEmailSalvar(){ const g=id=>((document.getElementById(id)||{}).value||'');

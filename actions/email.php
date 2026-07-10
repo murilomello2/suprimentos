@@ -32,11 +32,14 @@ try {
     // ---- CONFIG da conta de envio (a SENHA nunca é devolvida) ----
     if (isset($_GET['config'])) {
         $cfg = email_cfg();
+        $isAdmin = !empty($perms['perm_admin']);
+        // token do cron da varredura automática (Fase 4) — gera na 1ª visita do admin e guarda server-side
+        if ($isAdmin && empty($cfg['cron_token'])) { $cfg['cron_token'] = bin2hex(random_bytes(16)); @file_put_contents(EMAIL_CFG_FILE, json_encode($cfg)); @chmod(EMAIL_CFG_FILE, 0600); }
         echo json_encode(['ok' => true, 'configurada' => !empty($cfg['senha']),
             'host' => $cfg['host'] ?? 'mail.capremconstrutora.com.br', 'port' => (int)($cfg['port'] ?? 465),
             'imap_port' => (int)($cfg['imap_port'] ?? 993),
             'user' => $cfg['user'] ?? 'suprimentos@capremconstrutora.com.br', 'from' => $cfg['from'] ?? ($cfg['user'] ?? 'suprimentos@capremconstrutora.com.br'),
-            'is_admin' => !empty($perms['perm_admin'])], JSON_UNESCAPED_UNICODE); exit;
+            'is_admin' => $isAdmin, 'cron_token' => $isAdmin ? ($cfg['cron_token'] ?? '') : ''], JSON_UNESCAPED_UNICODE); exit;
     }
 
     // ---- POST: salvar config (admin) / enviar ----

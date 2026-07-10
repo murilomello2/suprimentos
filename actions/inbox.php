@@ -192,6 +192,18 @@ function inbox_extrair_draft($pdo, $cfg, $cid, $anexoIds, $corpo) {
 }
 
 // ================== O SYNC ==================
+// pastas a varrer: INBOX + qualquer Junk/Spam/Lixo — resposta de fornecedor (Gmail) cai no spam do domínio com frequência
+function inbox_folders($mbox, $cfg) {
+    $folders = ['INBOX'];
+    $ref = '{' . trim((string)($cfg['host'] ?? 'mail.capremconstrutora.com.br')) . ':' . (int)($cfg['imap_port'] ?? 993) . '/imap/ssl/novalidate-cert}';
+    $list = @imap_list($mbox, $ref, '*'); imap_errors();
+    if (is_array($list)) foreach ($list as $mb) {
+        $name = str_replace($ref, '', (string)$mb);
+        if ($name !== '' && strcasecmp($name, 'INBOX') !== 0 && preg_match('/(junk|spam|lixo|bulk)/i', $name)) $folders[] = $name;
+    }
+    return array_values(array_unique($folders));
+}
+
 function inbox_sync($pdo, $me, $perms) {
     $cfg = inbox_email_cfg();
     if (empty($cfg['senha'])) return ['error' => 'Conta de e-mail não configurada — o admin precisa cadastrar a senha em Configurações › E-mail.'];
@@ -202,89 +214,92 @@ function inbox_sync($pdo, $me, $perms) {
     meta_set($pdo, 'inbox_last_run_ts', $agora);
 
     $oracleCfg = oracle_cfg();
-    [$mbox, $err] = inbox_conectar($cfg);
+    [$mbox, $err] = inbox_conectar($cfg, 'INBOX');
     if (!$mbox) return ['error' => 'IMAP: ' . $err];
-    $out = ['ok' => true, 'lidas' => 0, 'novas' => 0, 'casadas' => 0, 'sem_match' => 0, 'cotacoes' => 0, 'duvidas' => 0, 'rascunhos' => 0, 'avisos' => []];
+    $out = ['ok' => true, 'lidas' => 0, 'novas' => 0, 'casadas' => 0, 'sem_match' => 0, 'cotacoes' => 0, 'duvidas' => 0, 'rascunhos' => 0, 'pastas' => [], 'avisos' => []];
+    $existe = $pdo->prepare("SELECT id FROM cotacao_email_in WHERE dedup_key=? LIMIT 1");
     try {
-        $uidv = inbox_uidvalidity($mbox, $cfg);
-        if (!$uidv) $uidv = (int)(meta_get($pdo, 'inbox_uidvalidity') ?: 0);           // fallback transitório (imap_status falhou): não duplica msgs sem Message-ID
-        $storedUidv = (int)(meta_get($pdo, 'inbox_uidvalidity') ?: 0);
-        $lastUid = ($storedUidv && $storedUidv === $uidv) ? (int)(meta_get($pdo, 'inbox_last_uid') ?: 0) : 0;   // uidvalidity mudou -> refaz por data
-        $lastSync = meta_get($pdo, 'inbox_last_sync');
-        $desde = $lastSync ? date('Y-m-d', strtotime($lastSync . ' -2 days')) : date('Y-m-d', strtotime('-14 days'));
-        [$uids, $total] = inbox_buscar_novos($mbox, $desde, $lastUid, INBOX_MAX_MSGS);
-        $out['lidas'] = $total;
-        if ($total > count($uids)) { $out['restantes'] = $total - count($uids);
-            $out['avisos'][] = 'Havia ' . $total . ' mensagens nesta janela; processei as ' . count($uids) . ' mais antigas — clique em "Buscar respostas" de novo para continuar.'; }
-        $existe = $pdo->prepare("SELECT id FROM cotacao_email_in WHERE dedup_key=? LIMIT 1");
-        // dedup por HASH (md5 fixo, sem colisão por truncamento; msgs sem Message-ID caem no uid+uidvalidity)
-        $dkey = fn($mid, $uid) => ((string)$mid !== '') ? ('mid:' . md5((string)$mid)) : ('uid:' . $uidv . ':' . (int)$uid);
-        $maxUid = $lastUid;
-        foreach ($uids as $uid) {
-            $maxUid = max($maxUid, (int)$uid);   // avança o high-water até nesta iteração — mensagem-veneno não trava a caixa
-            try {
-                // pré-check barato por Message-ID (evita re-baixar anexos/re-rodar IA de msgs já processadas)
-                $rawh = @imap_fetchheader($mbox, $uid, FT_UID); imap_errors();
-                $premid = ''; if (preg_match('/^Message-ID:\s*(<[^>]+>)/im', (string)$rawh, $mm)) $premid = trim($mm[1]);
-                if ($premid !== '') { $existe->execute([$dkey($premid, $uid)]); if ($existe->fetchColumn()) continue; }
+        foreach (inbox_folders($mbox, $cfg) as $folder) {
+            if (strcasecmp($folder, 'INBOX') !== 0 && !@imap_reopen($mbox, inbox_mailbox_str($cfg, $folder))) { imap_errors(); continue; }
+            imap_errors();
+            $uidv = inbox_uidvalidity($mbox, $cfg, $folder);
+            if (!$uidv) $uidv = (int)(meta_get($pdo, "inbox_uidvalidity::$folder") ?: 0);          // fallback transitório
+            $storedUidv = (int)(meta_get($pdo, "inbox_uidvalidity::$folder") ?: 0);
+            $lastUid = ($storedUidv && $storedUidv === $uidv) ? (int)(meta_get($pdo, "inbox_last_uid::$folder") ?: 0) : 0;   // uidvalidity mudou -> refaz por data
+            $lastSync = meta_get($pdo, "inbox_last_sync::$folder");
+            $desde = $lastSync ? date('Y-m-d', strtotime($lastSync . ' -2 days')) : date('Y-m-d', strtotime('-14 days'));
+            [$uids, $total] = inbox_buscar_novos($mbox, $desde, $lastUid, INBOX_MAX_MSGS);
+            $out['lidas'] += $total; $out['pastas'][$folder] = count($uids);
+            if ($total > count($uids)) $out['avisos'][] = 'Pasta "' . $folder . '": ' . $total . ' msgs na janela, processei ' . count($uids) . ' — rode de novo p/ continuar.';
+            // dedup por HASH (md5 fixo). Msgs sem Message-ID caem em uid+pasta+uidvalidity (UID é por pasta)
+            $dkey = fn($mid, $uid) => ((string)$mid !== '') ? ('mid:' . md5((string)$mid)) : ('uid:' . $folder . ':' . $uidv . ':' . (int)$uid);
+            $maxUid = $lastUid;
+            foreach ($uids as $uid) {
+                $maxUid = max($maxUid, (int)$uid);   // avança o high-water até nesta iteração — mensagem-veneno não trava a caixa
+                try {
+                    // pré-check barato por Message-ID (evita re-baixar anexos/re-rodar IA de msgs já processadas)
+                    $rawh = @imap_fetchheader($mbox, $uid, FT_UID); imap_errors();
+                    $premid = ''; if (preg_match('/^Message-ID:\s*(<[^>]+>)/im', (string)$rawh, $mm)) $premid = trim($mm[1]);
+                    if ($premid !== '') { $existe->execute([$dkey($premid, $uid)]); if ($existe->fetchColumn()) continue; }
 
-                $p = inbox_parse_msg($mbox, $uid, INBOX_MAX_BODY);
-                $mid = (string)$p['message_id'];
-                $dedup = $dkey($mid, $uid);
-                $existe->execute([$dedup]); if ($existe->fetchColumn()) continue;
+                    $p = inbox_parse_msg($mbox, $uid, INBOX_MAX_BODY);
+                    $mid = (string)$p['message_id'];
+                    $dedup = $dkey($mid, $uid);
+                    $existe->execute([$dedup]); if ($existe->fetchColumn()) continue;
 
-                [$cid, $cfid, $fid, $fnome, $metodo, $conf] = inbox_match($pdo, $p);
+                    [$cid, $cfid, $fid, $fnome, $metodo, $conf] = inbox_match($pdo, $p);
 
-                // INSERT-EARLY: grava a linha de dedup ANTES de salvar anexos / chamar IA. Assim, se algo falhar depois,
-                // a mensagem NÃO é reprocessada (nem re-salva anexos) na próxima varredura. Campos truncados p/ a largura da coluna.
-                $ins = $pdo->prepare("INSERT INTO cotacao_email_in (cotacao_id,cotacao_fornecedor_id,fornecedor_id,fornecedor_nome,imap_uid,uidvalidity,dedup_key,message_id,in_reply_to,from_email,from_nome,assunto,data_email,match_metodo,match_confianca,tipo,resumo,tem_proposta,precisa_humano,ia_confianca,tem_anexo,ia_modelo,anexos_ids,draft_json,corpo_preview,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-                $ins->execute([$cid ?: null, $cfid ?: null, $fid ?: null, substr((string)$fnome, 0, 255), (int)$p['uid'], $uidv, $dedup,
-                    substr($mid, 0, 191) ?: null, substr((string)$p['in_reply_to'], 0, 191) ?: null, substr((string)$p['from_email'], 0, 191), substr((string)$p['from_nome'], 0, 255),
-                    substr((string)$p['subject'], 0, 250), $p['recebido_em'], $metodo, $conf,
-                    'indefinido', '', 0, 1, '', 0, '', null, null, substr(trim((string)$p['corpo']), 0, 4000), $cid ? 'novo' : 'nao_vinculado', date('c')]);
-                $inId = (int)$pdo->lastInsertId();
-                $out['novas']++;
-                if ($cid) $out['casadas']++; else $out['sem_match']++;
+                    // INSERT-EARLY: grava a linha de dedup ANTES de salvar anexos / chamar IA. Se algo falhar depois,
+                    // a mensagem NÃO é reprocessada (nem re-salva anexos) na próxima varredura. Campos truncados p/ a largura da coluna.
+                    $ins = $pdo->prepare("INSERT INTO cotacao_email_in (cotacao_id,cotacao_fornecedor_id,fornecedor_id,fornecedor_nome,imap_uid,uidvalidity,dedup_key,message_id,in_reply_to,from_email,from_nome,assunto,data_email,match_metodo,match_confianca,tipo,resumo,tem_proposta,precisa_humano,ia_confianca,tem_anexo,ia_modelo,anexos_ids,draft_json,corpo_preview,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                    $ins->execute([$cid ?: null, $cfid ?: null, $fid ?: null, substr((string)$fnome, 0, 255), (int)$p['uid'], $uidv, $dedup,
+                        substr($mid, 0, 191) ?: null, substr((string)$p['in_reply_to'], 0, 191) ?: null, substr((string)$p['from_email'], 0, 191), substr((string)$p['from_nome'], 0, 255),
+                        substr((string)$p['subject'], 0, 250), $p['recebido_em'], $metodo, $conf,
+                        'indefinido', '', 0, 1, '', 0, '', null, null, substr(trim((string)$p['corpo']), 0, 4000), $cid ? 'novo' : 'nao_vinculado', date('c')]);
+                    $inId = (int)$pdo->lastInsertId();
+                    $out['novas']++;
+                    if ($cid) $out['casadas']++; else $out['sem_match']++;
 
-                // anexos (só salvamos quando casou numa cotação; senão ficam pendentes de vínculo manual)
-                $anexoIds = []; $anexoNomes = [];
-                foreach (($p['anexos'] ?? []) as $ax) {
-                    $anexoNomes[] = $ax['nome'];
-                    if ($cid) { $aid = inbox_salvar_anexo($pdo, $cid, $fid, $fnome ?: $p['from_nome'], $ax['bytes'], $ax['nome']); if ($aid) $anexoIds[] = $aid; }
+                    // anexos (só salvamos quando casou numa cotação; senão ficam pendentes de vínculo manual)
+                    $anexoIds = []; $anexoNomes = [];
+                    foreach (($p['anexos'] ?? []) as $ax) {
+                        $anexoNomes[] = $ax['nome'];
+                        if ($cid) { $aid = inbox_salvar_anexo($pdo, $cid, $fid, $fnome ?: $p['from_nome'], $ax['bytes'], $ax['nome']); if ($aid) $anexoIds[] = $aid; }
+                    }
+                    $temAnexo = count($p['anexos'] ?? []) > 0 ? 1 : 0;
+
+                    // classificação (passo 1). Sem chave da IA: fica como 'indefinido' com um trecho do corpo.
+                    $cl = inbox_classificar($oracleCfg, $p['subject'], $p['corpo'], $anexoNomes);
+                    if (!$cl || isset($cl['_erro'])) {
+                        $modeloTmp = is_array($cl) ? ($cl['modelo'] ?? '') : '';
+                        $cl = ['tipo' => 'indefinido', 'resumo' => substr(trim(preg_replace('/\s+/', ' ', (string)$p['corpo'])), 0, 300),
+                               'tem_proposta' => 0, 'precisa_humano' => 1, 'confianca' => 'baixa', 'modelo' => $modeloTmp];
+                        if (!($oracleCfg['key'] ?? '') && !in_array('IA não configurada — mensagens registradas sem classificação.', $out['avisos'], true)) $out['avisos'][] = 'IA não configurada — mensagens registradas sem classificação.';
+                    }
+                    if ($cl['tipo'] === 'cotacao') $out['cotacoes']++;
+                    if ($cl['tipo'] === 'duvida') $out['duvidas']++;
+
+                    // rascunho (passo 2) — SÓ quando é cotação E casou numa cotação com itens. Dúvida NUNCA gera rascunho.
+                    $draft = null;
+                    if ($cl['tipo'] === 'cotacao' && $cid) { $draft = inbox_extrair_draft($pdo, $oracleCfg, $cid, $anexoIds, $p['corpo']); if ($draft) $out['rascunhos']++; }
+
+                    // UPDATE-LATE: preenche a classificação/anexos/rascunho na linha já gravada
+                    $pdo->prepare("UPDATE cotacao_email_in SET tipo=?, resumo=?, tem_proposta=?, precisa_humano=?, ia_confianca=?, tem_anexo=?, ia_modelo=?, anexos_ids=?, draft_json=? WHERE id=?")
+                        ->execute([$cl['tipo'], substr((string)$cl['resumo'], 0, 500), (int)$cl['tem_proposta'], (int)$cl['precisa_humano'], $cl['confianca'],
+                            $temAnexo, substr((string)($cl['modelo'] ?? ''), 0, 60), $anexoIds ? implode(',', $anexoIds) : null,
+                            $draft ? json_encode($draft, JSON_UNESCAPED_UNICODE) : null, $inId]);
+
+                    // marca o card do convidado na Concorrência (respondeu + tipo + resumo)
+                    if ($cfid) $pdo->prepare("UPDATE cotacao_fornecedor SET inbound_em=?, inbound_tipo=?, inbound_resumo=? WHERE id=?")
+                        ->execute([$p['recebido_em'], $cl['tipo'], substr((string)$cl['resumo'], 0, 500), $cfid]);
+                } catch (Throwable $e) {
+                    $out['avisos'][] = 'msg ' . $folder . '/UID ' . $uid . ' pulada: ' . $e->getMessage();   // uma msg ruim não aborta o lote
                 }
-                $temAnexo = count($p['anexos'] ?? []) > 0 ? 1 : 0;
-
-                // classificação (passo 1). Sem chave da IA: fica como 'indefinido' com um trecho do corpo.
-                $cl = inbox_classificar($oracleCfg, $p['subject'], $p['corpo'], $anexoNomes);
-                if (!$cl || isset($cl['_erro'])) {
-                    $modeloTmp = is_array($cl) ? ($cl['modelo'] ?? '') : '';
-                    $cl = ['tipo' => 'indefinido', 'resumo' => substr(trim(preg_replace('/\s+/', ' ', (string)$p['corpo'])), 0, 300),
-                           'tem_proposta' => 0, 'precisa_humano' => 1, 'confianca' => 'baixa', 'modelo' => $modeloTmp];
-                    if (!($oracleCfg['key'] ?? '') && !in_array('IA não configurada — mensagens registradas sem classificação.', $out['avisos'], true)) $out['avisos'][] = 'IA não configurada — mensagens registradas sem classificação.';
-                }
-                if ($cl['tipo'] === 'cotacao') $out['cotacoes']++;
-                if ($cl['tipo'] === 'duvida') $out['duvidas']++;
-
-                // rascunho (passo 2) — SÓ quando é cotação E casou numa cotação com itens. Dúvida NUNCA gera rascunho.
-                $draft = null;
-                if ($cl['tipo'] === 'cotacao' && $cid) { $draft = inbox_extrair_draft($pdo, $oracleCfg, $cid, $anexoIds, $p['corpo']); if ($draft) $out['rascunhos']++; }
-
-                // UPDATE-LATE: preenche a classificação/anexos/rascunho na linha já gravada
-                $pdo->prepare("UPDATE cotacao_email_in SET tipo=?, resumo=?, tem_proposta=?, precisa_humano=?, ia_confianca=?, tem_anexo=?, ia_modelo=?, anexos_ids=?, draft_json=? WHERE id=?")
-                    ->execute([$cl['tipo'], substr((string)$cl['resumo'], 0, 500), (int)$cl['tem_proposta'], (int)$cl['precisa_humano'], $cl['confianca'],
-                        $temAnexo, substr((string)($cl['modelo'] ?? ''), 0, 60), $anexoIds ? implode(',', $anexoIds) : null,
-                        $draft ? json_encode($draft, JSON_UNESCAPED_UNICODE) : null, $inId]);
-
-                // marca o card do convidado na Concorrência (respondeu + tipo + resumo)
-                if ($cfid) $pdo->prepare("UPDATE cotacao_fornecedor SET inbound_em=?, inbound_tipo=?, inbound_resumo=? WHERE id=?")
-                    ->execute([$p['recebido_em'], $cl['tipo'], substr((string)$cl['resumo'], 0, 500), $cfid]);
-            } catch (Throwable $e) {
-                $out['avisos'][] = 'msg UID ' . $uid . ' pulada: ' . $e->getMessage();   // uma msg ruim não aborta o lote
             }
+            if ($maxUid > $lastUid) meta_set($pdo, "inbox_last_uid::$folder", $maxUid);
+            if ($uidv) meta_set($pdo, "inbox_uidvalidity::$folder", $uidv);
+            meta_set($pdo, "inbox_last_sync::$folder", date('Y-m-d'));
         }
-        if ($maxUid > $lastUid) meta_set($pdo, 'inbox_last_uid', $maxUid);
-        if ($uidv) meta_set($pdo, 'inbox_uidvalidity', $uidv);
-        meta_set($pdo, 'inbox_last_sync', date('Y-m-d'));
     } catch (Throwable $e) {
         $out['avisos'][] = 'erro durante a varredura: ' . $e->getMessage();
     }
@@ -295,6 +310,12 @@ function inbox_sync($pdo, $me, $perms) {
 // ================== ENDPOINT ==================
 try {
     $pdo = db();
+    // ----- CRON (varredura AUTOMÁTICA): gatilho por token server-side, sem login. Ex.: cPanel cron de hora em hora batendo esta URL. -----
+    if (isset($_GET['cron'])) {
+        $cfg = inbox_email_cfg(); $tok = (string)($cfg['cron_token'] ?? '');
+        if ($tok === '' || !hash_equals($tok, (string)$_GET['cron'])) { http_response_code(403); echo json_encode(['error' => 'token inválido']); exit; }
+        echo json_encode(inbox_sync($pdo, '__cron__', ['autorizado' => 1, 'perm_admin' => 1]), JSON_UNESCAPED_UNICODE); exit;
+    }
     $method = $_SERVER['REQUEST_METHOD'];
     $in = $method === 'POST' ? (json_decode(file_get_contents('php://input'), true) ?: []) : [];
     $me = $method === 'POST' ? ($in['me'] ?? null) : ($_GET['me'] ?? null);
@@ -324,11 +345,11 @@ try {
                     'tem_token' => (bool)preg_match('/<cot-\d+-\d+-[a-f0-9]+@/', $irt . ' ' . $refs), 'in_reply_to' => substr($irt, 0, 120)];
             }
         }
+        $pastas = inbox_folders($mbox, $cfg);
         inbox_fechar($mbox);
         echo json_encode(['ok' => true, 'conectou' => true, 'mensagens' => (int)$n, 'uidvalidity' => $uidv,
-            'host' => $cfg['host'] ?? '', 'porta' => (int)($cfg['imap_port'] ?? 993),
-            'ptr_last_uid' => (int)(meta_get($pdo, 'inbox_last_uid') ?: 0), 'ptr_last_sync' => meta_get($pdo, 'inbox_last_sync'),
-            'ptr_uidvalidity' => (int)(meta_get($pdo, 'inbox_uidvalidity') ?: 0), 'cabecalhos' => $msgs], JSON_UNESCAPED_UNICODE); exit;
+            'host' => $cfg['host'] ?? '', 'porta' => (int)($cfg['imap_port'] ?? 993), 'pastas_varridas' => $pastas,
+            'cabecalhos' => $msgs], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'varrer') {
@@ -344,8 +365,11 @@ try {
             $pdo->exec("UPDATE cotacao_fornecedor SET inbound_em=NULL, inbound_tipo=NULL, inbound_resumo=NULL WHERE inbound_em IS NOT NULL");
             $pdo->exec("DELETE FROM cotacao_email_in");
         }
-        // reset (admin): limpa o ponteiro p/ re-escanear a janela toda (repesca mensagens que ficaram pra trás)
-        if ((!empty($_GET['reset']) || !empty($_GET['purge'])) && !empty($perms['perm_admin'])) { meta_set($pdo, 'inbox_last_uid', '0'); meta_set($pdo, 'inbox_last_sync', ''); meta_set($pdo, 'inbox_last_run_ts', '0'); }
+        // reset (admin): limpa os ponteiros de TODAS as pastas p/ re-escanear a janela toda (repesca o que ficou pra trás)
+        if ((!empty($_GET['reset']) || !empty($_GET['purge'])) && !empty($perms['perm_admin'])) {
+            $pdo->exec("DELETE FROM meta WHERE k LIKE 'inbox_last_uid%' OR k LIKE 'inbox_last_sync%' OR k LIKE 'inbox_uidvalidity%'");
+            meta_set($pdo, 'inbox_last_run_ts', '0');
+        }
         echo json_encode(inbox_sync($pdo, $me, $perms), JSON_UNESCAPED_UNICODE); exit;
     }
 

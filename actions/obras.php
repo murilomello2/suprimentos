@@ -83,6 +83,20 @@ try {
         echo json_encode(['ok' => true, 'depara' => $dp], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    if ($acao === 'cronograma') {   // snapshot do cronograma (% físico + datas), casando por NOME (obra_cronogramas tem RLS)
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores.']); exit; }
+        $lista = $in['itens'] ?? []; $now = date('c'); $atualizadas = 0; $nao = [];
+        $upd = $pdo->prepare("UPDATE obra_ficha SET pct_fisico=?, crono_inicio=?, crono_fim=?, crono_medicao=?, cronograma_nome=?, cronograma_at=?, updated_at=? WHERE slug=?");
+        foreach ($lista as $it) {
+            $slug = ob_norm((string)($it['obra'] ?? '')); if ($slug === '') continue;
+            $upd->execute([($it['pct_fisico'] ?? null) !== null ? (float)$it['pct_fisico'] : null,
+                (string)($it['inicio'] ?? ''), (string)($it['fim'] ?? ''), (string)($it['medicao'] ?? ''),
+                (string)($it['cronograma_nome'] ?? ''), $now, $now, $slug]);
+            if ($upd->rowCount() > 0) $atualizadas++; else $nao[] = (string)($it['obra'] ?? $slug);
+        }
+        echo json_encode(['ok' => true, 'atualizadas' => $atualizadas, 'nao_casaram' => $nao], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($acao === 'salvar') {   // edita a ficha (características + de-para confirmado)
         $f = $in['ficha'] ?? []; $id = (int)($f['id'] ?? 0);
         $now = date('c');

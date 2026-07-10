@@ -25,6 +25,22 @@ try {
     $perms = user_perms($pdo, $_GET['me'] ?? null);
     if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }
 
+    if (isset($_GET['diag'])) {   // feasibilidade do módulo de e-mail no servidor do app (admin)
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Só admin.']); exit; }
+        $exts = ['openssl'=>extension_loaded('openssl'), 'imap'=>extension_loaded('imap'), 'mbstring'=>extension_loaded('mbstring'),
+                 'curl'=>extension_loaded('curl'), 'gd'=>extension_loaded('gd'), 'zip'=>class_exists('ZipArchive')];
+        $probe = function($hostport) { $e=null; $err=''; $t=microtime(true);
+            $fp = @stream_socket_client($hostport, $en, $es, 6, STREAM_CLIENT_CONNECT, stream_context_create(['ssl'=>['verify_peer'=>false,'verify_peer_name'=>false]]));
+            if (!$fp) return ['ok'=>false, 'erro'=>$es.' '.$en];
+            $banner = @fgets($fp, 256); @fclose($fp);
+            return ['ok'=>true, 'ms'=>round((microtime(true)-$t)*1000), 'banner'=>trim((string)$banner)];
+        };
+        echo json_encode(['ok'=>true, 'extensoes'=>$exts,
+            'smtp_465'=>$probe('ssl://mail.capremconstrutora.com.br:465'),
+            'imap_993'=>$probe('ssl://mail.capremconstrutora.com.br:993'),
+            'allow_url_fopen'=>(bool)ini_get('allow_url_fopen')], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if (isset($_GET['compor'])) {
         $cid = (int)$_GET['compor'];
         $c = $pdo->prepare("SELECT c.*, o.nome AS obra_nome, s.nome AS servico_nome FROM cotacao c LEFT JOIN obra o ON o.id=c.obra_id LEFT JOIN servico s ON s.id=c.servico_id WHERE c.id=?");

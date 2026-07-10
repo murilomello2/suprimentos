@@ -13,12 +13,12 @@ try {
     if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }
 
     if (isset($_GET['numero'])) {
-        $p = pedido_por_numero($_GET['numero']);
+        $p = pedido_por_numero($_GET['numero'], $_GET['coligada_cod'] ?? null);   // coligada desambigua (nº de PC não é único entre coligadas)
         echo json_encode($p ? ['ok' => true, 'pedido' => $p] : ['error' => 'Pedido não encontrado na base do TOTVS.'], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    if (isset($_GET['solicitacao'])) {   // pedidos que nasceram de uma solicitação (vínculo exato SC→PC)
-        $peds = pedidos_por_solicitacao($_GET['solicitacao'], $_GET['coligada'] ?? null);
+    if (isset($_GET['solicitacao'])) {   // pedidos que nasceram de uma solicitação (vínculo EXATO por colidmov)
+        $peds = pedidos_por_solicitacao($_GET['solicitacao'], $_GET['coligada'] ?? null, $_GET['colidmov'] ?? null);
         echo json_encode(['ok' => true, 'pedidos' => $peds], JSON_UNESCAPED_UNICODE);
         exit;
     }

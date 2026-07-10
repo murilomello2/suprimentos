@@ -3925,19 +3925,25 @@ function cotRenderDetalhe(){
   if(c.num_solicitacao) cotDetectarPedido(c);   // nasceu de solicitação → detecta/autopreenche o PC pelo vínculo exato (solic_numeros)
   cotInboxLoad(c.id);                            // Fase 4: carrega as respostas de e-mail desta cotação (se houver)
 }
-// detecta os pedidos de compra que nasceram desta solicitação (SC→PC exato) e autopreenche o nº do PC
+// detecta os pedidos de compra que nasceram desta solicitação (vínculo EXATO por colidmov, que embute a coligada)
 async function cotDetectarPedido(c){
   const host=document.getElementById('cotPedDetect'); if(!host||!c||!c.num_solicitacao)return;
-  try{ const r=await (await fetch('actions/pedidos.php?solicitacao='+encodeURIComponent(c.num_solicitacao)+'&coligada='+encodeURIComponent(c.solic_coligada||'')+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
-    const peds=(r&&r.pedidos)||[]; if(!peds.length)return;
+  try{ const r=await (await fetch('actions/pedidos.php?solicitacao='+encodeURIComponent(c.num_solicitacao)+'&coligada='+encodeURIComponent(c.solic_coligada||'')+'&colidmov='+encodeURIComponent(c.solic_colidmov||'')+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    const peds=(r&&r.pedidos)||[];
+    const salvo=(c.num_pedido&&String(c.num_pedido).trim())?String(c.num_pedido).trim():'';
+    if(!peds.length){
+      // sem PC vinculado (a SC ainda está em aberto). Se há um PC salvo, é provavelmente o vínculo ANTIGO errado (outra coligada) → avisa, não apaga.
+      host.innerHTML = salvo ? `<span class="dchip" style="background:#fff3e0;color:#a15c00;font-weight:700" title="O nº de PC salvo não corresponde a esta solicitação/coligada. A SC provavelmente ainda está em aberto (sem pedido). Confira e, se for o caso, limpe o campo Pedido.">⚠ PC salvo (${esc(salvo)}) não confere com esta solicitação — a SC parece estar em aberto</span>` : '';
+      return;
+    }
     const nums=peds.map(p=>p.pedido_numero);
-    // autopreenche o campo PC se ainda estiver vazio (vínculo exato pela solicitação)
-    if(CAN_EDIT && !(c.num_pedido&&String(c.num_pedido).trim())){
+    // autopreenche o campo PC só se estiver vazio (agora o vínculo é seguro por colidmov)
+    if(CAN_EDIT && !salvo){
       const joined=nums.join(', '); c.num_pedido=joined; const inp=document.getElementById('cotDetPC'); if(inp)inp.value=joined;
       try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'numeros_salvar',me:EU&&EU.bitrix_id,cotacao_id:c.id,num_solicitacao:c.num_solicitacao,num_pedido:joined})}); }catch(e){}
       toast(nums.length>1?(nums.length+' pedidos vinculados pela solicitação'):('Pedido '+nums[0].replace(/^0+/,'')+' vinculado pela solicitação'));
     }
-    host.innerHTML='<span class="muted" style="font-size:11px;font-weight:700">Pedido(s) desta solicitação:</span> '+peds.map(p=>`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-weight:700;cursor:pointer;margin-right:5px" onclick="cotPedidoVer('${esc(p.pedido_numero)}')" title="${p.n_itens} item(ns) desta solicitação · ver detalhes">PC ${esc(String(p.pedido_numero).replace(/^0+/,''))}${p.status?' · '+esc(p.status):''} <span class="material-icons" style="font-size:12px;vertical-align:-2px">visibility</span></span>`).join('');
+    host.innerHTML='<span class="muted" style="font-size:11px;font-weight:700">Pedido(s) desta solicitação:</span> '+peds.map(p=>`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-weight:700;cursor:pointer;margin-right:5px" onclick="cotPedidoVer('${esc(p.pedido_numero)}','${esc(p.coligada_cod||'')}')" title="${p.n_itens} item(ns)${p.coligada?' · '+esc(p.coligada):''} · ver detalhes">PC ${esc(String(p.pedido_numero).replace(/^0+/,''))}${p.status?' · '+esc(p.status):''} <span class="material-icons" style="font-size:12px;vertical-align:-2px">visibility</span></span>`).join('');
   }catch(e){}
 }
 /* ===== E-MAIL FASE 4 — ler respostas (inbound): buscar na caixa, listar, usar rascunho, marcar lido ===== */
@@ -4219,13 +4225,13 @@ async function cotNumerosSalvar(){ const c=COT.cur.cotacao;
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r&&r.error){toast(r.error);return;} c.num_solicitacao=val('cotDetSC'); c.num_pedido=val('cotDetPC'); toast('Números salvos'); }catch(e){toast('Falha: '+e.message);} }
 /* "Fotinha" do pedido de compra (dados do TOTVS via Supabase): fornecedor(es), itens, preços unit e total */
-async function cotPedidoVer(numero){
+async function cotPedidoVer(numero,coligadaCod){
   numero=String(numero||'').split(',')[0].trim(); if(!numero){toast('Sem nº de pedido');return;}
   let ov=document.getElementById('pedOverlay'); if(!ov){ ov=document.createElement('div'); ov.id='pedOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }
   ov.onclick=()=>ov.remove();
   const shell=b=>`<div style="background:#fff;border-radius:14px;padding:18px;max-width:740px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">${b}</div>`;
   ov.innerHTML=shell(`<div class="dempty">Buscando o pedido ${esc(numero)} no TOTVS…</div>`);
-  try{ const r=await (await fetch('actions/pedidos.php?numero='+encodeURIComponent(numero)+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+  try{ const r=await (await fetch('actions/pedidos.php?numero='+encodeURIComponent(numero)+(coligadaCod?'&coligada_cod='+encodeURIComponent(coligadaCod):'')+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
     const close=`<span class="material-icons" onclick="document.getElementById('pedOverlay').remove()" style="cursor:pointer;color:var(--muted)">close</span>`;
     if(r.error){ ov.innerHTML=shell(`<div style="display:flex;justify-content:space-between;align-items:center"><b>Pedido ${esc(numero)}</b>${close}</div><div class="empty" style="margin-top:10px">${esc(r.error)}</div>`); return; }
     const p=r.pedido, forn=(p.fornecedores||[]).join(', ')||'—';

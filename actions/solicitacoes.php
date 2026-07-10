@@ -140,9 +140,10 @@ try {
         $nomeObra = $so['nome_comercial'] ?? sol_nome_default($col, $obraCod);
         $obraId = $so['radar_obra_id'] ?? null;
         $titulo = 'SC ' . $num . ' · ' . $nomeObra;
+        $colidmov = trim((string)($rows[0]['colidmov'] ?? ''));   // ex.: "27-20628" (27 = coligada Legacy) — casa o PC CERTO (nº de SC não é único entre coligadas)
         $pdo->beginTransaction();
-        $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, descricao, num_solicitacao, solic_coligada, solic_obra_cod, status, aprovacao, criado_por, criado_nome, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'aberta','aguardando', ?,?,?,?)")
-            ->execute([$obraId ?: null, null, $titulo, '', '', null, 'Solicitação de compra nº '.$num.' — '.$col.($obraCod?(' (centro de custo '.$obraCod.')'):''), $num, $col, $obraCod, $me, $perms['nome'] ?? null, $now, $now]);
+        $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, descricao, num_solicitacao, solic_coligada, solic_obra_cod, solic_colidmov, status, aprovacao, criado_por, criado_nome, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'aberta','aguardando', ?,?,?,?)")
+            ->execute([$obraId ?: null, null, $titulo, '', '', null, 'Solicitação de compra nº '.$num.' — '.$col.($obraCod?(' (centro de custo '.$obraCod.')'):''), $num, $col, $obraCod, $colidmov ?: null, $me, $perms['nome'] ?? null, $now, $now]);
         $cid = (int)$pdo->lastInsertId();
         $insI = $pdo->prepare("INSERT INTO cotacao_item (cotacao_id, descricao, unidade, quantidade, observacao, ordem) VALUES (?,?,?,?,?,?)");
         $o = 0; foreach ($rows as $r) $insI->execute([$cid, trim((string)($r['produto'] ?? '')), trim((string)($r['und'] ?? '')), ($r['qtd'] ?? null) !== null ? (float)$r['qtd'] : null, trim((string)($r['observacao'] ?? '')), $o++]);

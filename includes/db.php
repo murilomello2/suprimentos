@@ -267,6 +267,7 @@ function db_schema_mysql($pdo) {
         // origem solicitação: guarda coligada+centro de custo p/ a carta de cotação (material) resolver CNPJ/comprador via solic_obra
         if ($cc && !isset($cc['solic_coligada'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_coligada VARCHAR(255)");
         if ($cc && !isset($cc['solic_obra_cod'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_obra_cod VARCHAR(20)");
+        if ($cc && !isset($cc['solic_colidmov'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_colidmov VARCHAR(40)");   // colidmov da SC (embute a coligada) p/ casar o PC certo
         $pc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cotacao_proposta'") as $c) $pc[$c['COLUMN_NAME']] = true;
         if ($pc && !isset($pc['equaliza'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN equaliza TEXT");
         // solic_obra.cnpj (CNPJ da obra p/ a carta de cotação) — self-heal p/ tabela já existente
@@ -476,6 +477,7 @@ function db_schema($pdo) {
     if (!isset($ccols['num_pedido'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_pedido TEXT");
     if (!isset($ccols['solic_coligada'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_coligada TEXT");
     if (!isset($ccols['solic_obra_cod'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_obra_cod TEXT");
+    if (!isset($ccols['solic_colidmov'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_colidmov TEXT");
     $scols = []; foreach ($pdo->query("PRAGMA table_info(solic_obra)") as $c) $scols[$c['name']] = true;
     if (!isset($scols['cnpj'])) $pdo->exec("ALTER TABLE solic_obra ADD COLUMN cnpj TEXT");
     if (!isset($scols['endereco'])) $pdo->exec("ALTER TABLE solic_obra ADD COLUMN endereco TEXT");

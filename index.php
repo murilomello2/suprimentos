@@ -5177,7 +5177,7 @@ function applyMenus(){
   document.querySelectorAll('.nav a[data-menu]').forEach(a=>{
     const m=a.getAttribute('data-menu');
     let show;
-    if(m==='oraculo'||m==='solicitacoes') show = auth;                     // Radar IA + Solicitações p/ todo autorizado
+    if(m==='oraculo'||m==='solicitacoes'||m==='obras') show = auth;        // Radar IA + Solicitações + Obras (referência) p/ todo autorizado
     else if(m==='config') show = IS_ADMIN||allow.includes('config')||CAN_RESP;  // Config nunca some p/ admin
     else if(adminSel) show = allow.includes(m);                            // admin escolheu → mostra só o marcado
     else show = IS_ADMIN||allow.includes(m);

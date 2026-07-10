@@ -47,7 +47,7 @@ try {
         header('Content-Type: application/json; charset=utf-8');
         $perms = user_perms($pdo, $_GET['me'] ?? null);
         if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error'=>'sem acesso']); exit; }
-        $q = $pdo->prepare("SELECT id, cotacao_id, proposta_id, fornecedor_id, fornecedor_nome, nome, tamanho, mime, created_at FROM cotacao_anexo WHERE cotacao_id=? ORDER BY id");
+        $q = $pdo->prepare("SELECT id, cotacao_id, proposta_id, fornecedor_id, fornecedor_nome, nome, tamanho, mime, created_at FROM cotacao_anexo WHERE cotacao_id=? AND (fornecedor_nome IS NULL OR fornecedor_nome<>'__CARTA__') ORDER BY id");
         $q->execute([(int)$_GET['cotacao']]);
         echo json_encode(['anexos' => $q->fetchAll()], JSON_UNESCAPED_UNICODE); exit;
     }
@@ -88,6 +88,12 @@ try {
     $cid = (int)($_POST['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
     [$perms, $obra] = anexo_can($pdo, $_POST['me'] ?? null, $cid);
     if (!$perms || !can_edit_obra($perms, $obra)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+    // a carta em PDF (__CARTA__) é ÚNICA por cotação — ao re-salvar, remove a anterior (não conta p/ o limite nem polui)
+    if (trim((string)($_POST['fornecedor_nome'] ?? '')) === '__CARTA__') {
+        $old = $pdo->prepare("SELECT arquivo FROM cotacao_anexo WHERE cotacao_id=? AND fornecedor_nome='__CARTA__'"); $old->execute([$cid]);
+        foreach ($old->fetchAll() as $o) { $op = ANEXO_DIR . '/' . basename((string)$o['arquivo']); if (is_file($op)) @unlink($op); }
+        $pdo->prepare("DELETE FROM cotacao_anexo WHERE cotacao_id=? AND fornecedor_nome='__CARTA__'")->execute([$cid]);
+    }
     if (empty($_FILES['arquivo']) || ($_FILES['arquivo']['error'] ?? 1) !== UPLOAD_ERR_OK) {
         $err = $_FILES['arquivo']['error'] ?? 'sem arquivo';
         throw new Exception($err === UPLOAD_ERR_INI_SIZE || $err === UPLOAD_ERR_FORM_SIZE ? 'arquivo maior que o limite do servidor' : 'falha no upload (' . $err . ')');

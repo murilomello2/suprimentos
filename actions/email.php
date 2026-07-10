@@ -68,11 +68,20 @@ try {
             if ($cid) { $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
                 if (!can_edit_obra($perms, max(1, $obra))) { http_response_code(403); echo json_encode(['error' => 'Sem permissão de edição.']); exit; } }
 
+            // carta em PDF (anexo __CARTA__, gerado no cliente ao "Salvar na cotação") — vai anexada em todo e-mail desta cotação
+            $anexos = [];
+            if ($cid) {
+                $ca = $pdo->prepare("SELECT nome, arquivo, mime FROM cotacao_anexo WHERE cotacao_id=? AND fornecedor_nome='__CARTA__' ORDER BY id DESC LIMIT 1");
+                $ca->execute([$cid]); $ca = $ca->fetch();
+                if ($ca) { $p = __DIR__ . '/../data/anexos/' . basename((string)$ca['arquivo']);
+                    if (is_file($p)) $anexos[] = ['nome' => 'Carta de cotacao.pdf', 'mime' => ($ca['mime'] ?: 'application/pdf'), 'conteudo' => file_get_contents($p)]; }
+            }
+
             // ENVIO-TESTE: manda só para um endereço (o próprio comprador)
             $teste = trim((string)($in['teste'] ?? ''));
             if ($teste !== '') {
-                [$ok, $msg] = smtp_send($cfg, $teste, '[TESTE] ' . $assunto, $corpo);
-                echo json_encode($ok ? ['ok' => true, 'msg' => 'E-mail de teste enviado para ' . $teste] : ['error' => 'Falha: ' . $msg], JSON_UNESCAPED_UNICODE); exit;
+                [$ok, $msg] = smtp_send($cfg, $teste, '[TESTE] ' . $assunto, $corpo, $anexos);
+                echo json_encode($ok ? ['ok' => true, 'msg' => 'E-mail de teste enviado para ' . $teste . ($anexos ? ' (com a carta em PDF)' : '')] : ['error' => 'Falha: ' . $msg], JSON_UNESCAPED_UNICODE); exit;
             }
 
             // DISPARO real: individual por fornecedor convidado com e-mail
@@ -85,7 +94,7 @@ try {
             foreach ($conv as $c) {
                 $em = ($c['f_email'] ?? '') !== '' ? $c['f_email'] : ($c['s_email'] ?? '');
                 if (!filter_var($em, FILTER_VALIDATE_EMAIL)) { $falhas[] = $c['fornecedor_nome'] . ' (sem e-mail)'; continue; }
-                [$ok, $msg] = smtp_send($cfg, $em, $assunto, $corpo);
+                [$ok, $msg] = smtp_send($cfg, $em, $assunto, $corpo, $anexos);
                 if ($ok) { $upd->execute([$now, $me, (int)$c['id']]); $enviados++; }
                 else $falhas[] = $c['fornecedor_nome'] . ': ' . $msg;
             }
@@ -130,7 +139,8 @@ try {
             $em = ($r['f_email'] ?? '') !== '' ? $r['f_email'] : ($r['s_email'] ?? '');
             $dest[] = ['fornecedor_nome' => $r['fornecedor_nome'], 'email' => $em, 'tem_email' => $em !== ''];
         }
-        $temCarta = (int)$pdo->query("SELECT COUNT(*) FROM carta_gerada WHERE cotacao_id=" . $cid)->fetchColumn() > 0;
+        // tem_carta ⟺ existe o PDF __CARTA__ que será REALMENTE anexado (senão o corpo cita os itens, sem prometer anexo inexistente)
+        $temCarta = (int)$pdo->query("SELECT COUNT(*) FROM cotacao_anexo WHERE cotacao_id=" . $cid . " AND fornecedor_nome='__CARTA__'")->fetchColumn() > 0;
         $isRadar = !empty($cot['servico_id']);
         $titulo = $cot['servico_nome'] ?: $cot['titulo'];
         $remNome = $perms['nome'] ?? ''; $remFone = email_fone($remNome);
@@ -144,6 +154,7 @@ try {
         } else {
             $L[] = 'A Caprem Construtora solicita a sua cotação para os itens abaixo' . ($obraNome ? (' — obra ' . $obraNome) : '') . ':'; $L[] = '';
             foreach ($itens as $it) $L[] = ' • ' . email_qtd($it['quantidade']) . ' ' . $it['unidade'] . ' — ' . $it['descricao'] . ($it['observacao'] ? (' (' . $it['observacao'] . ')') : '');
+            if ($temCarta) { $L[] = ''; $L[] = 'Segue em anexo a carta de cotação com os dados da obra e demais informações.'; }
         }
         $L[] = ''; $L[] = 'Por gentileza, informe: preço unitário por item, prazo de entrega, condição de pagamento e validade da proposta.';
         $L[] = 'Qualquer dúvida, estou à disposição por e-mail ou WhatsApp.';

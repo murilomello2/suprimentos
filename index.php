@@ -4295,18 +4295,18 @@ async function cotEmailAbrir(cid){
       <div style="font-size:11px;font-weight:700;color:var(--muted)">DESTINATÁRIOS ${semEmail?`<span style="color:var(--pend)">· ${semEmail} sem e-mail (preencha na Concorrência)</span>`:'✓'}</div>
       <div style="margin:5px 0 10px">${dchips}</div>
       ${cotFld('Assunto','<input id="emAssunto" value="'+esc(g.assunto)+'" style="width:100%">')}
-      ${cotFld('Corpo do e-mail (edite à vontade antes de disparar)','<textarea id="emCorpo" rows="14" style="width:100%;font-size:12.5px;font-family:inherit">'+esc(g.corpo)+'</textarea>','margin-top:8px')}
-      ${g.tem_carta?'<div class="dmini" style="margin-top:6px">📎 (a carta em PDF entra como anexo assim que a geração de PDF estiver ligada)</div>':''}
-      ${cfg.is_admin?`<details style="margin-top:12px;border:1px solid var(--line);border-radius:10px;padding:8px 10px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)"><span class="material-icons" style="font-size:14px;vertical-align:-3px">settings</span> Conta de envio (admin) — ${cfg.configurada?'<b style="color:var(--ok)">configurada ✓</b>':'<b style="color:var(--pend)">falta a senha</b>'}</summary>
+      ${cotFld('Corpo do e-mail (edite à vontade antes de disparar)','<textarea id="emCorpo" rows="9" style="width:100%;font-size:12.5px;font-family:inherit">'+esc(g.corpo)+'</textarea>','margin-top:8px')}
+      ${g.tem_carta?'<div class="dmini" style="margin-top:6px">📎 A carta de cotação vai anexada em PDF.</div>':''}
+      <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap;margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+        <div style="flex:1;min-width:190px">${cotFld('Enviar um TESTE para (só você recebe)','<input id="emTeste" value="'+esc((EU&&EU.email)||'')+'" placeholder="seu@email.com" style="width:100%">')}</div>
+        <button class="btn-ghost" style="padding:7px 13px" onclick="cotEmailTeste()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">outbox</span> Enviar teste</button>
+        <button class="btn-prim" style="padding:7px 15px;font-weight:700" onclick="cotEmailDisparar()" ${g.configurada?'':'disabled style=\"opacity:.5\" title=\"configure a conta em Configurações › E-mail\"'}><span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Disparar p/ ${(g.destinatarios||[]).filter(d=>d.tem_email).length} fornecedor(es)</button>
+      </div>
+      <div class="dmini" style="margin-top:6px">Cada fornecedor recebe individualmente (sem cópia). Faça o teste pra você antes de disparar.</div>
+      ${cfg.is_admin?`<details style="margin-top:14px;border:1px solid var(--line);border-radius:10px;padding:8px 10px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)"><span class="material-icons" style="font-size:14px;vertical-align:-3px">settings</span> Conta de envio (admin) — ${cfg.configurada?'<b style="color:var(--ok)">configurada ✓</b>':'<b style="color:var(--pend)">falta a senha</b>'} <span class="muted">· também em Configurações › E-mail</span></summary>
         <div style="display:grid;grid-template-columns:1fr 90px;gap:8px;margin-top:8px">${cotFld('Servidor SMTP','<input id="emHost" value="'+esc(cfg.host||'')+'" style="width:100%">')}${cotFld('Porta','<input id="emPort" type="number" value="'+esc(cfg.port||465)+'" style="width:100%">')}</div>
         <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-top:6px">${cotFld('Usuário (e-mail)','<input id="emUser" value="'+esc(cfg.user||'')+'" style="width:100%">')}${cotFld('Senha (fica só no servidor; vazio mantém a atual)','<input id="emSenha" type="password" autocomplete="new-password" placeholder="••••••••" style="width:100%">')}</div>
-        <div style="margin-top:8px"><button class="btn-prim" style="padding:5px 12px" onclick="cotEmailConfigSalvar()">Salvar conta</button></div></div></details>`:''}
-      <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap;margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
-        <div style="flex:1;min-width:200px">${cotFld('Enviar um TESTE para (só você recebe)','<input id="emTeste" value="'+esc(EU&&EU.email||'')+'" placeholder="seu@email.com" style="width:100%">')}</div>
-        <button class="btn-ghost" style="padding:7px 13px" onclick="cotEmailTeste()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">outbox</span> Enviar teste</button>
-        <button class="btn-prim" style="padding:7px 13px" onclick="cotEmailDisparar()" ${g.configurada?'':'disabled style=\"opacity:.5\" title=\"configure a conta primeiro\"'}><span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Disparar p/ fornecedores</button>
-      </div>
-      <div class="dmini" style="margin-top:6px">Cada fornecedor recebe individualmente (sem cópia). Faça o teste pra você antes de disparar.</div>`);
+        <div style="margin-top:8px"><button class="btn-prim" style="padding:5px 12px" onclick="cotEmailConfigSalvar()">Salvar conta</button></div></div></details>`:''}`);
   }catch(e){ ov.innerHTML=shell('<div class="empty">Falha ao montar o e-mail.</div>'); }
 }
 function cotEmailBody(){ return {cotacao_id:(COT.cur&&COT.cur.cotacao&&COT.cur.cotacao.id)||0, assunto:(document.getElementById('emAssunto')||{}).value||'', corpo:(document.getElementById('emCorpo')||{}).value||''}; }
@@ -4635,12 +4635,31 @@ function cartaWord(){
   a.download=(isMat?'Carta_Cotacao_':'Carta_Convite_')+((CART.gen.cotacao.servico_nome||CART.gen.cotacao.titulo||(isMat?'cotacao':'servico')).replace(/[^\w]+/g,'_').slice(0,40))+'.doc';
   document.body.appendChild(a); a.click(); a.remove();
 }
+// jsPDF + html2canvas carregados SOB DEMANDA (CDN) — só quando gera o PDF da carta
+let _pdfLibs=null;
+function cotLoadPdfLibs(){ if(_pdfLibs)return _pdfLibs; _pdfLibs=new Promise((res,rej)=>{ let n=0; const done=()=>{ if(++n===2)res(true); };
+  const a=document.createElement('script'); a.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'; a.onload=done; a.onerror=()=>rej(new Error('html2canvas não carregou'));
+  const b=document.createElement('script'); b.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'; b.onload=done; b.onerror=()=>rej(new Error('jspdf não carregou'));
+  document.head.appendChild(a); document.head.appendChild(b); }); return _pdfLibs; }
+async function cotCartaPDFBlob(el){ await cotLoadPdfLibs();
+  const canvas=await html2canvas(el,{scale:2,useCORS:true,backgroundColor:'#ffffff'});
+  const jsPDF=(window.jspdf||{}).jsPDF; const pdf=new jsPDF('p','mm','a4');
+  const pw=210, ph=297, iw=pw, ih=canvas.height*pw/canvas.width, img=canvas.toDataURL('image/jpeg',0.92);
+  let left=ih, pos=0; pdf.addImage(img,'JPEG',0,pos,iw,ih); left-=ph;
+  while(left>0){ pos=left-ih; pdf.addPage(); pdf.addImage(img,'JPEG',0,pos,iw,ih); left-=ph; }
+  return pdf.output('blob'); }
 async function cartaAnexarGerada(){
   const inner=document.getElementById('cvInner'); if(!inner)return;
   const html=cartaExportHTML();
-  const isMat=CART.gen&&CART.gen.cotacao&&CART.gen.cotacao.tipo==='material';
-  try{ const r=await (await fetch('actions/cartas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_carta',me:EU&&EU.bitrix_id,cotacao_id:CART.gen.cotacao.id,servico_nome:CART.gen.cotacao.servico_nome||'',titulo:(isMat?'Carta de Cotação · ':'Carta Convite · ')+(CART.gen.cotacao.titulo||''),html})})).json();
-    if(r.error){toast(r.error);return;} toast('Carta salva na cotação'); }catch(e){toast('Falha: '+e.message);}
+  const isMat=CART.gen&&CART.gen.cotacao&&CART.gen.cotacao.tipo==='material', cid=CART.gen.cotacao.id;
+  try{ const r=await (await fetch('actions/cartas.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_carta',me:EU&&EU.bitrix_id,cotacao_id:cid,servico_nome:CART.gen.cotacao.servico_nome||'',titulo:(isMat?'Carta de Cotação · ':'Carta Convite · ')+(CART.gen.cotacao.titulo||''),html})})).json();
+    if(r.error){toast(r.error);return;} }catch(e){toast('Falha: '+e.message);return;}
+  toast('Carta salva — gerando o PDF p/ anexo…');
+  try{ const blob=await cotCartaPDFBlob(inner);
+    const fd=new FormData(); fd.append('arquivo',new File([blob],'Carta de cotacao.pdf',{type:'application/pdf'})); fd.append('cotacao_id',cid); fd.append('fornecedor_nome','__CARTA__'); fd.append('me',(EU&&EU.bitrix_id)||'');
+    const rr=await (await fetch('actions/cotacao_anexo.php',{method:'POST',body:fd})).json();
+    toast(rr&&rr.id?'Carta salva + PDF pronto para o e-mail ✓':('Carta salva (o PDF do anexo falhou: '+((rr&&rr.error)||'?')+')'));
+  }catch(e){ toast('Carta salva (não gerou o PDF: '+e.message+')'); }
 }
 /* ---------- Preços Tabelados (sub-aba) ---------- */
 const PREC={tabelas:[],mode:'home',busca:'',grupos:[],cur:null,itens:[],insumos:[]};

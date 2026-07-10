@@ -533,7 +533,9 @@
       <button class="btn-ghost" id="cfgtab-users" onclick="cfgTab('users')" style="padding:6px 14px">👥 Usuários &amp; Permissões</button>
       <button class="btn-ghost" id="cfgtab-resp" onclick="cfgTab('resp')" style="padding:6px 14px">🛒 Responsáveis</button>
       <button class="btn-ghost" id="cfgtab-receitas" onclick="cfgTab('receitas')" style="padding:6px 14px">📚 Aprendizado (receitas)</button>
+      <button class="btn-ghost" id="cfgtab-email" onclick="cfgTab('email')" style="padding:6px 14px">📧 E-mail (disparo)</button>
     </div>
+    <div id="cfg-email" style="display:none"><div class="wrap" id="cfgEmailWrap"></div></div>
     <div id="cfg-users">
       <div class="panel">
         <h3>O que cada papel faz</h3>
@@ -3815,10 +3817,8 @@ function cotItensPanel(d){
       <button class="btn-ghost" style="margin-top:6px" onclick="cotItAdd()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar item</button></div>`;
   }
   const rows=itens.map(it=>`<tr><td style="text-align:left"><b>${esc(it.descricao)}</b>${it.observacao?`<div class="muted" style="font-size:11px;margin-top:1px">${esc(it.observacao)}</div>`:''}</td><td style="text-align:right;white-space:nowrap">${cotNum(it.quantidade)} ${esc(it.unidade||'')}</td></tr>`).join('');
-  return `<div class="panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-      <b style="font-size:13px">Itens a cotar <span class="muted" style="font-weight:400;font-size:11px">(${itens.length})</span></b>
-      ${podeGerir?`<button class="btn-ghost" style="padding:4px 11px" onclick="cotEditItens()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit</span> Editar itens</button>`:''}</div>
-    ${itens.length?`<div class="wrap" style="margin-top:6px"><table><thead><tr><th>Item</th><th style="text-align:right;width:110px">Qtde</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="dmini" style="margin-top:6px">Nenhum item. Clique em “Editar itens” para adicionar.</div>'}</div>`;
+  return `<div class="panel" style="margin-bottom:10px">${cotSecHead('list_alt','Itens a cotar','('+itens.length+')',podeGerir?`<button class="btn-ghost" style="padding:4px 11px" onclick="cotEditItens()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit</span> Editar itens</button>`:'')}
+    ${itens.length?`<div class="wrap"><table><thead><tr><th>Item</th><th style="text-align:right;width:110px">Qtde</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="dmini">Nenhum item. Clique em “Editar itens” para adicionar.</div>'}</div>`;
 }
 function cotEditItens(){ COT.itensEdit=(COT.cur.itens||[]).map(it=>({id:it.id,descricao:it.descricao||'',unidade:it.unidade||'',quantidade:it.quantidade!=null?it.quantidade:'',observacao:it.observacao||''})); if(!COT.itensEdit.length) COT.itensEdit=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; COT.editItens=true; cotRenderDetalhe(); cotItRenderEd(); }
 function cotItRenderEd(){ const box=document.getElementById('cotItEd'); if(!box)return;
@@ -3836,16 +3836,20 @@ async function cotItensSalvar(){ const itens=COT.itensEdit.filter(it=>(it.descri
 async function cotExcluir(){ const c=COT.cur.cotacao; if(!confirm('Excluir a cotação "'+(c.titulo||'')+'"?\nIsso apaga o mapa, propostas, convidados e itens. Não dá pra desfazer.'))return;
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',me:EU&&EU.bitrix_id,cotacao_id:c.id})})).json();
     if(r&&r.error){toast(r.error);return;} toast('Cotação excluída'); COT.mode='list'; cotLoad(); }catch(e){toast('Falha: '+e.message);} }
+/* Cabeçalho de SEÇÃO — padrão visual do sistema: ícone + título fonte maior + subtítulo + ações à direita */
+function cotSecHead(icon,title,sub,actions){ return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:11px">
+  <div style="display:flex;align-items:center;gap:8px;min-width:0"><span class="material-icons" style="font-size:20px;color:var(--verde)">${icon}</span><b style="font-size:15.5px;letter-spacing:.2px">${title}</b>${sub?`<span class="muted" style="font-size:11.5px;font-weight:400">${sub}</span>`:''}</div>
+  ${actions?`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${actions}</div>`:''}</div>`; }
 function cotRenderDetalhe(){
   const d=COT.cur,c=d.cotacao,itens=d.itens||[],props=d.propostas||[],m=d.mapa||{},best=m.melhor_por_item||{},w=document.getElementById('cotwrap');
   const podeGerir=!!(IS_ADMIN||CAN_EDIT||(c.criado_por&&EU&&String(c.criado_por)===String(EU.bitrix_id)));   // admin, edita a obra, ou criador
-  let html=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <button class="btn-ghost" onclick="cotLoad()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button>
-      <b style="font-size:16px">${esc(c.titulo)}</b> ${cotStChip(c.status)}
-      <span class="muted" style="font-size:12px">${esc(c.obra_nome||'sem obra')}${c.categoria?' · '+esc(c.categoria):''}${c.tipo_servico?' · '+esc(c.tipo_servico):''}</span>
-      <span style="margin-left:auto;display:flex;gap:6px">
+  let html=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap">
+      <button class="btn-ghost" onclick="cotLoad()" style="margin-top:2px"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button>
+      <div style="min-width:0"><div style="font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted)">Descrição da cotação</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px"><b style="font-size:18px">${esc(c.titulo)}</b> ${cotStChip(c.status)}<span class="muted" style="font-size:12px">${esc(c.obra_nome||'sem obra')}${c.categoria?' · '+esc(c.categoria):''}${c.tipo_servico?' · '+esc(c.tipo_servico):''}</span></div></div>
+      <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cartaGerar(${c.id})" title="${(c.num_solicitacao&&!c.servico_id)?'Carta de cotação (material) desta cotação':'Carta convite desta cotação'} — PDF / Word"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> ${(d.cartas_geradas&&d.cartas_geradas.length)?'Ver/editar carta':'Gerar carta'}</button>${(d.cartas_geradas&&d.cartas_geradas.length)?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="carta salva em ${D(String(d.cartas_geradas[0].created_at).slice(0,10))}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">description</span> carta salva</span>`:''}`:''}
-        <button class="btn-ghost" style="padding:6px 12px" onclick="cotUmaPagina()" title="Resumo de uma página, pronto pra imprimir/PDF"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Uma página</button>
+        <button class="btn-ghost" style="padding:6px 12px" onclick="cotUmaPagina()" title="Resumo do mapa em uma página, pronto pra imprimir/PDF"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Mapa em uma página</button>
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotEmailAbrir(${c.id})" title="montar o e-mail de cotação para os fornecedores convidados"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> E-mail</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px;color:var(--verde-d)" onclick="cotPropIAAbrir()" title="a IA lê um PDF/print de proposta, identifica o fornecedor e preenche os preços"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Proposta via IA</button>`:''}
         ${CAN_EDIT?`<button class="btn-prim" style="padding:6px 12px" onclick="cotProposta()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Cadastrar proposta</button>`:''}
@@ -3871,9 +3875,7 @@ function cotRenderDetalhe(){
   const anxNorm=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
   const anexosDoForn=cf=>anx.filter(a=>((a.fornecedor_id&&cf.fornecedor_id&&String(a.fornecedor_id)===String(cf.fornecedor_id))||(a.fornecedor_nome&&anxNorm(a.fornecedor_nome)===anxNorm(cf.fornecedor_nome))));
   const anexoChip=a=>`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-weight:600;display:inline-flex;align-items:center;gap:4px;max-width:190px"><span class="material-icons" style="font-size:13px">${cotAnexoIcon(a.mime,a.nome)}</span><a href="actions/cotacao_anexo.php?download=${a.id}&me=${encodeURIComponent(meB)}" target="_blank" rel="noopener" style="color:var(--verde-d);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(a.nome)}">${esc(a.nome)}</a>${CAN_EDIT?` <span onclick="cotDelAnexo(${a.id})" style="cursor:pointer;color:var(--pend)" title="excluir anexo">×</span>`:''}</span>`;
-  html+=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <b style="font-size:13px">Concorrência — fornecedores convidados</b>
-      <span class="dchip" style="background:${conv.length&&conv.every(x=>x.respondeu)?'var(--ok)':'var(--dourado)'}">${conv.filter(x=>x.respondeu).length} de ${conv.length} responderam</span></div>`;
+  html+=`<div class="panel" style="margin-bottom:10px">${cotSecHead('groups','Concorrência','fornecedores convidados','<span class="dchip" style="background:'+(conv.length&&conv.every(x=>x.respondeu)?'var(--ok)':'var(--dourado)')+'">'+conv.filter(x=>x.respondeu).length+' de '+conv.length+' responderam</span>')}`;
   if(conv.length) html+='<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">'+conv.map((cf,ci)=>{ const ax=anexosDoForn(cf);
     return `<div style="border:1px solid var(--line);border-radius:10px;padding:9px 11px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -3884,6 +3886,7 @@ function cotRenderDetalhe(){
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotAnexarAbrir(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="anexar PDF, Excel ou print — arraste, cole (Ctrl+V) ou clique"><span class="material-icons" style="font-size:14px;vertical-align:-2px">attach_file</span> anexar${ax.length?` (${ax.length})`:''}</button>`:''}
         ${CAN_EDIT&&ax.length?`<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotIAPreencher(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="a IA lê os anexos e preenche a proposta (rascunho para você conferir)"><span class="material-icons" style="font-size:14px;vertical-align:-2px">auto_awesome</span> preencher com IA</button>`:''}
         ${CAN_EDIT&&!cf.respondeu?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotPropostaDe(${ci})">Lançar proposta</button>`:''}
+        ${CAN_EDIT&&cf.respondeu&&cf.proposta_id?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotProposta(${cf.proposta_id})" title="editar a proposta"><span class="material-icons" style="font-size:13px;vertical-align:-2px">edit</span> editar</button><button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="cotExcluirProposta(${cf.proposta_id})" title="excluir a proposta">excluir</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="cotDesconvidar(${cf.id})" title="tirar da concorrência">×</button>`:''}
       </div>
       ${cotConvContatos(cf)}
@@ -3895,7 +3898,7 @@ function cotRenderDetalhe(){
   html+=cotEqualizaPanel(d);
   if(!props.length){ html+='<div class="panel"><div class="empty">Nenhuma proposta ainda. Clique em "Cadastrar proposta" ou "Lançar proposta" de um convidado para montar o mapa.</div></div>'; }
   else{
-    html+='<div class="panel" style="overflow-x:auto;padding:0"><table class="mtable" style="border:none"><thead><tr><th class="svc-h" style="text-align:left">Item</th>';
+    html+='<div class="panel">'+cotSecHead('table_view','Mapa de cotações','comparativo · melhor preço por item','<button class="btn-ghost" style="padding:4px 10px" onclick="cotUmaPagina()" title="ver este mapa em uma página"><span class="material-icons" style="font-size:14px;vertical-align:-3px">description</span> uma página</button>')+'<div style="overflow-x:auto"><table class="mtable" style="border:none"><thead><tr><th class="svc-h" style="text-align:left">Item</th>';
     props.forEach(p=>{ html+=`<th style="min-width:120px">${esc(p.fornecedor_nome)}${p.prazo?`<div class="muted" style="font-size:9.5px;font-weight:400">${esc(p.prazo)}</div>`:''}</th>`; });
     html+='<th style="min-width:140px;color:var(--verde-d)">🏆 Melhor Compra</th></tr></thead><tbody>';
     itens.forEach(it=>{ const b=best[it.id];
@@ -3906,13 +3909,7 @@ function cotRenderDetalhe(){
     });
     html+='<tr style="background:#f7faf8"><td class="svc-c" style="text-align:left;font-weight:800">TOTAL</td>';
     props.forEach(p=>{ const isBS=m.fornecedor_destaque===p.fornecedor_nome; html+=`<td style="text-align:center;font-weight:800;${isBS?'color:var(--verde-d)':''}">${p.total!=null?BRL(p.total):'—'}</td>`; });
-    html+=`<td style="text-align:center;font-weight:800;background:#eafaf0;color:var(--verde-d)">${m.melhor_total?BRL(m.melhor_total):'—'}</td></tr></tbody></table></div>`;
-    html+='<div class="panel" style="margin-top:10px"><b style="font-size:13px">Propostas recebidas</b><span class="muted" style="font-size:11px"> — os anexos ficam na Concorrência, por fornecedor</span><div style="margin-top:8px">';
-    props.forEach(p=>{
-      html+=`<div class="drow" style="border-bottom:1px solid #f1f3f2;padding:7px 0"><span class="dgm" style="background:${m.fornecedor_destaque===p.fornecedor_nome?'var(--ok)':'#8a9299'}"></span><span style="flex:1"><b>${esc(p.fornecedor_nome)}</b>${p.prazo?` <span class="muted">· ${esc(p.prazo)}</span>`:''}</span><b style="min-width:90px;text-align:right">${p.total!=null?BRL(p.total):'—'}</b>
-          ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 8px" onclick="cotProposta(${p.id})">Editar</button><button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="cotExcluirProposta(${p.id})">Excluir</button>`:''}</div>`; });
-    if(!props.length) html+='<div class="dmini">—</div>';
-    html+='</div></div>';
+    html+=`<td style="text-align:center;font-weight:800;background:#eafaf0;color:var(--verde-d)">${m.melhor_total?BRL(m.melhor_total):'—'}</td></tr></tbody></table></div></div>`;
   }
   w.innerHTML=html;
   if(c.num_solicitacao) cotDetectarPedido(c);   // nasceu de solicitação → detecta/autopreenche o PC pelo vínculo exato (solic_numeros)
@@ -4042,10 +4039,8 @@ async function cotContatoSalvar(fid,btn){
 }
 function cotEqualizaPanel(d){
   const c=d.cotacao||{}, props=d.propostas||[], pontos=cotEqPontos(c), editV=!!COT.eqEdit;
-  let h=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <b style="font-size:13px">Equalização — pontos a conferir por proposta</b>
-      <span style="display:flex;gap:6px;flex-wrap:wrap">${CAN_EDIT?`<button class="btn-ghost" style="padding:3px 9px" onclick="cotEqualizaEdit()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit_note</span> Editar pontos</button>`:''}
-      ${(CAN_EDIT&&props.length&&pontos.length)?(editV?`<button class="btn-prim" style="padding:3px 10px" onclick="cotEqValoresSave()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">check</span> Salvar valores</button><button class="btn-ghost" style="padding:3px 9px" onclick="cotEqValoresCancel()">Cancelar</button>`:`<button class="btn-ghost" style="padding:3px 9px" onclick="cotEqValoresEdit()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit</span> Editar valores</button>`):''}</span></div>
+  const eqActions=`${CAN_EDIT?`<button class="btn-ghost" style="padding:3px 9px" onclick="cotEqualizaEdit()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit_note</span> Editar pontos</button>`:''}${(CAN_EDIT&&props.length&&pontos.length)?(editV?`<button class="btn-prim" style="padding:3px 10px" onclick="cotEqValoresSave()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">check</span> Salvar valores</button><button class="btn-ghost" style="padding:3px 9px" onclick="cotEqValoresCancel()">Cancelar</button>`:`<button class="btn-ghost" style="padding:3px 9px" onclick="cotEqValoresEdit()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit</span> Editar valores</button>`):''}`;
+  let h=`<div class="panel" style="margin-bottom:10px">${cotSecHead('rule','Equalização','pontos a conferir por proposta',eqActions)}
     <div id="cotEqEdit" style="display:none;margin-top:8px"><textarea id="cotEqPontos" rows="6" style="width:100%;font-size:12.5px" placeholder="Um ponto por linha…">${esc(pontos.join('\n'))}</textarea>
       <div style="margin-top:6px"><button class="btn-prim" style="padding:5px 12px" onclick="cotEqualizaPontosSave()">Salvar pontos</button> <button class="btn-ghost" style="padding:5px 12px" onclick="document.getElementById('cotEqEdit').style.display='none'">Cancelar</button></div></div>`;
   if(!props.length){ h+='<ul style="margin:8px 0 0 18px;padding:0">'+pontos.map(p=>`<li style="font-size:12.5px;margin-bottom:3px">${esc(p)}</li>`).join('')+'</ul><div class="dmini" style="margin-top:6px">Cadastre propostas para preencher cada ponto por fornecedor.</div></div>'; return h; }
@@ -4135,6 +4130,8 @@ async function cotSalvarProposta(){
   const body={acao:'proposta',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:COT.prop.id||undefined,fornecedor_nome:forn,prazo:val('prP'),observacoes:val('prO'),itens};
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error);return;}
+    // garante que o fornecedor da proposta esteja na Concorrência (p/ editar/excluir a proposta ali)
+    try{ const nz=s=>String(s||'').trim().toLowerCase(); if(!((COT.cur&&COT.cur.convidados)||[]).some(cv=>nz(cv.fornecedor_nome)===nz(forn))) await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'convidar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,convidados:[{nome:forn}]})}); }catch(e){}
     // aplica a equalização pré-preenchida pela IA nesta proposta (mescla com o que já houver, sem apagar valores manuais)
     if(COT.prop.eqIA && Object.keys(COT.prop.eqIA).length && r.proposta_id){
       const src=(COT.cur.propostas||[]).find(p=>p.id===r.proposta_id), base=(src&&src.equaliza)?Object.assign({},src.equaliza):{};
@@ -4986,16 +4983,41 @@ function cfgTab(t){
   document.getElementById('cfgtab-users').style.display = IS_ADMIN?'':'none';
   document.getElementById('cfgtab-receitas').style.display = IS_ADMIN?'':'none';
   document.getElementById('cfgtab-resp').style.display = canR?'':'none';
-  const permitida={users:IS_ADMIN, receitas:IS_ADMIN, resp:canR};
+  const eb=document.getElementById('cfgtab-email'); if(eb) eb.style.display = IS_ADMIN?'':'none';
+  const permitida={users:IS_ADMIN, receitas:IS_ADMIN, resp:canR, email:IS_ADMIN};
   if(!permitida[t]) t = IS_ADMIN?'users':(canR?'resp':'users');
   document.getElementById('cfg-users').style.display = t==='users'?'':'none';
   document.getElementById('cfg-receitas').style.display = t==='receitas'?'':'none';
   document.getElementById('cfg-resp').style.display = t==='resp'?'':'none';
+  const ce=document.getElementById('cfg-email'); if(ce) ce.style.display = t==='email'?'':'none';
   const ab=document.getElementById('cfgAddBtn'); if(ab) ab.style.display = (t==='users'&&IS_ADMIN)?'':'none';
-  ['users','resp','receitas'].forEach(x=>{ const b=document.getElementById('cfgtab-'+x); if(b){ b.style.background = x===t?'var(--verde)':''; b.style.color = x===t?'#fff':''; } });
+  ['users','resp','receitas','email'].forEach(x=>{ const b=document.getElementById('cfgtab-'+x); if(b){ b.style.background = x===t?'var(--verde)':''; b.style.color = x===t?'#fff':''; } });
   if(t==='receitas') renderReceitas();
   if(t==='resp') renderRespLote();
+  if(t==='email') cfgEmailLoad();
 }
+/* ===== Configurações › E-mail (disparo): conta SMTP + envio-teste ===== */
+async function cfgEmailLoad(){ const w=document.getElementById('cfgEmailWrap'); if(!w)return; w.innerHTML='<div class="dempty">Carregando…</div>';
+  try{ const cfg=await (await fetch('actions/email.php?config=1&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    if(cfg.error){ w.innerHTML='<div class="panel"><div class="empty">'+esc(cfg.error)+'</div></div>'; return; }
+    w.innerHTML=`<div class="panel" style="max-width:640px">
+      ${cotSecHead('mail','Conta de envio (SMTP)','a senha fica só no servidor — nunca aparece aqui','<span class="dchip" style="background:'+(cfg.configurada?'var(--ok)':'var(--pend)')+'">'+(cfg.configurada?'configurada ✓':'falta a senha')+'</span>')}
+      <div style="display:grid;grid-template-columns:1fr 100px;gap:10px">${cotFld('Servidor SMTP','<input id="ceHost" value="'+esc(cfg.host||'')+'" style="width:100%">')}${cotFld('Porta','<input id="cePort" type="number" value="'+esc(cfg.port||465)+'" style="width:100%">')}</div>
+      <div style="margin-top:8px">${cotFld('Usuário (e-mail remetente)','<input id="ceUser" value="'+esc(cfg.user||'')+'" style="width:100%">')}</div>
+      <div style="margin-top:8px">${cotFld('Senha (vazio mantém a atual)','<input id="ceSenha" type="password" autocomplete="new-password" placeholder="••••••••" style="width:100%">')}</div>
+      <div style="margin-top:10px"><button class="btn-prim" onclick="cfgEmailSalvar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar conta</button></div>
+      <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">${cotSecHead('outbox','Enviar um teste','manda um e-mail de teste pra você conferir se o envio funciona','')}
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap"><div style="flex:1;min-width:220px">${cotFld('Para (seu e-mail)','<input id="ceTeste" placeholder="voce@email.com" style="width:100%">')}</div>
+        <button class="btn-prim" onclick="cfgEmailTeste()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar teste</button></div></div>
+    </div>`;
+  }catch(e){ w.innerHTML='<div class="panel"><div class="empty">Falha ao carregar.</div></div>'; } }
+async function cfgEmailSalvar(){ const g=id=>((document.getElementById(id)||{}).value||'');
+  try{ const r=await (await fetch('actions/email.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'config',me:EU&&EU.bitrix_id,host:g('ceHost'),port:Number(g('cePort'))||465,user:g('ceUser'),senha:g('ceSenha')})})).json();
+    if(r.error){toast(r.error);return;} toast('Conta salva'); cfgEmailLoad(); }catch(e){toast('Falha: '+e.message);} }
+async function cfgEmailTeste(){ const to=((document.getElementById('ceTeste')||{}).value||'').trim(); if(!to){toast('Informe seu e-mail');return;}
+  toast('Enviando teste…');
+  try{ const r=await (await fetch('actions/email.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'enviar',me:EU&&EU.bitrix_id,teste:to,cotacao_id:0,assunto:'Teste de envio — Cockpit de Suprimentos',corpo:'Este é um e-mail de teste do disparo de cotações. Se você recebeu, o envio por SMTP está funcionando.\n\nCockpit de Suprimentos — Caprem'})})).json();
+    if(r.error){toast(r.error);return;} toast(r.msg||'Teste enviado'); }catch(e){toast('Falha: '+e.message);} }
 
 /* ===== Responsáveis EM LOTE (Configurações) — atribui comprador por obra/grupo/seleção ===== */
 let RL={obras:[], itens:[], sel:new Set()};

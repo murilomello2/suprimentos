@@ -300,6 +300,25 @@ function oracle_tools() {
 }
 
 // Permite carregar só as funções (testes/CLI) sem executar o endpoint.
+// Prompt PADRÃO do motor de extração de propostas (IA lê PDF/Excel/imagem) — editável pelo admin (cfg['prompt_extracao']).
+function oracle_extracao_default_prompt() {
+    return "Você é um assistente de suprimentos da construtora Caprem. Recebe a PROPOSTA de um fornecedor "
+        . "(pode vir como PDF, planilha Excel, ou FOTO/PRINT de tela — muitas vezes bagunçada, manuscrita ou informal, "
+        . "tirada do WhatsApp) e a LISTA DE ITENS que estamos cotando.\n"
+        . "Tarefa: extrair o PREÇO UNITÁRIO de cada item, casando a proposta do fornecedor com os itens da nossa lista "
+        . "pela descrição, unidade e contexto. Seja tolerante a diferenças de redação, abreviações e ordem.\n"
+        . "REGRAS:\n"
+        . "- Para cada item da nossa lista, devolva o preço unitário que encontrar; se não achar, use null.\n"
+        . "- Números em formato brasileiro: '1.234,56' vale 1234.56. Devolva SEMPRE número com ponto decimal "
+        . "(ex.: 1234.56), sem 'R\$' e sem separador de milhar.\n"
+        . "- Custos que o fornecedor cobrou mas que NÃO têm item na nossa lista (FRETE, IMPOSTO, taxas, mobilização, etc.) "
+        . "vão em 'extras' — não invente item na lista.\n"
+        . "- Condição específica de um item (marca, prazo, quantidade mínima) vai na 'observacao' daquele item.\n"
+        . "- Capture também prazo de entrega, condição de pagamento e validade da proposta, se aparecerem.\n"
+        . "- NUNCA invente preços. Na dúvida, use null e explique em observacao_geral.\n"
+        . "Responda SOMENTE com um JSON válido no formato pedido.";
+}
+
 if (defined('ORACLE_LIB_ONLY')) return;
 
 try {
@@ -310,7 +329,11 @@ try {
         echo json_encode(['configurado'=>!empty($cfg['key']), 'modelo'=>$cfg['model'] ?? 'gpt-4o',
             'limite_dia'=>(int)($cfg['limit_dia'] ?? 2),
             'prompt'=>oracle_persona($cfg), 'prompt_custom'=>trim((string)($cfg['prompt'] ?? '')) !== '',
-            'prompt_padrao'=>oracle_default_prompt()], JSON_UNESCAPED_UNICODE); exit;
+            'prompt_padrao'=>oracle_default_prompt(),
+            'modelo_extracao'=>trim((string)($cfg['model_extracao'] ?? '')) ?: 'gpt-4o',
+            'prompt_extracao'=>trim((string)($cfg['prompt_extracao'] ?? '')),
+            'prompt_extracao_custom'=>trim((string)($cfg['prompt_extracao'] ?? '')) !== '',
+            'prompt_extracao_padrao'=>oracle_extracao_default_prompt()], JSON_UNESCAPED_UNICODE); exit;
     }
 
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
@@ -324,6 +347,8 @@ try {
         if (isset($in['key'])   && trim((string)$in['key'])   !== '') $cfg['key']   = trim((string)$in['key']);
         if (isset($in['model']) && trim((string)$in['model']) !== '') $cfg['model'] = trim((string)$in['model']);
         if (array_key_exists('prompt', $in))    { $p = trim((string)$in['prompt']); if ($p === '') unset($cfg['prompt']); else $cfg['prompt'] = $p; } // vazio = volta ao padrão
+        if (array_key_exists('prompt_extracao', $in)) { $pe = trim((string)$in['prompt_extracao']); if ($pe === '') unset($cfg['prompt_extracao']); else $cfg['prompt_extracao'] = $pe; } // prompt do motor de IA (lê anexo)
+        if (isset($in['model_extracao']) && trim((string)$in['model_extracao']) !== '') $cfg['model_extracao'] = trim((string)$in['model_extracao']);
         if (array_key_exists('limit_dia', $in)) $cfg['limit_dia'] = max(0, (int)$in['limit_dia']);
         @file_put_contents(ORACLE_CFG_FILE, json_encode($cfg));
         @chmod(ORACLE_CFG_FILE, 0600);

@@ -928,8 +928,11 @@ function oracRender(){
         ${cotFld('Perguntas/dia','<input id="oracLimite" type="number" min="0" style="width:100%" title="0 = ilimitado; admins não contam" value="'+((cfg.limite_dia!=null)?cfg.limite_dia:2)+'">')}
       </div>
       ${cotFld('Prompt-base do oráculo — ensina o sistema à IA (vazio volta ao padrão)','<textarea id="oracPrompt" rows="10" style="width:100%;font-size:12px;font-family:ui-monospace,Consolas,monospace">'+esc(cfg.prompt_custom?(cfg.prompt||''):'')+'</textarea>','margin-top:8px')}
-      <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn-prim" style="padding:6px 12px" onclick="oracSalvarCfg()">Salvar configuração</button>
-        <button class="btn-ghost" style="padding:6px 12px" onclick="oracVerPadrao()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">download</span> Carregar prompt padrão no campo</button></div>
+      ${cotFld('Prompt do MOTOR DE IA — lê o anexo (PDF/Excel/print) e preenche a proposta (vazio volta ao padrão)','<textarea id="oracPromptEx" rows="8" style="width:100%;font-size:12px;font-family:ui-monospace,Consolas,monospace">'+esc(cfg.prompt_extracao_custom?(cfg.prompt_extracao||''):'')+'</textarea>','margin-top:10px')}
+      <div class="dmini" style="margin-top:3px">O motor de extração usa o modelo <b>${esc(cfg.modelo_extracao||'gpt-4o')}</b> (com visão, p/ ler imagem e PDF). ${cfg.prompt_extracao_custom?'Usando <b>prompt personalizado</b>.':'Usando o <b>prompt padrão</b>.'}</div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn-prim" style="padding:6px 12px" onclick="oracSalvarCfg()">Salvar configuração</button>
+        <button class="btn-ghost" style="padding:6px 12px" onclick="oracVerPadrao()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">download</span> Prompt padrão do oráculo</button>
+        <button class="btn-ghost" style="padding:6px 12px" onclick="oracVerPadraoEx()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">download</span> Prompt padrão do motor de IA</button></div>
     </div></details>`; }
   const chat=ORAC.msgs.map(m=>m.role==='user'
     ? `<div style="display:flex;justify-content:flex-end;margin:8px 0"><div style="background:var(--verde);color:#fff;padding:8px 12px;border-radius:12px 12px 3px 12px;max-width:78%;font-size:13px;white-space:pre-wrap">${esc(m.content)}</div></div>`
@@ -970,13 +973,14 @@ async function oracPergunta(q){
 }
 async function oracSalvarCfg(){
   const g=id=>{const e=document.getElementById(id);return e?e.value:'';};
-  const body={acao:'set_key',me:EU&&EU.bitrix_id,key:g('oracKey'),model:g('oracModel'),prompt:g('oracPrompt')};
+  const body={acao:'set_key',me:EU&&EU.bitrix_id,key:g('oracKey'),model:g('oracModel'),prompt:g('oracPrompt'),prompt_extracao:g('oracPromptEx')};
   const lim=g('oracLimite'); if(lim!==''&&lim!=null) body.limit_dia=Number(lim);
   try{ const r=await (await fetch('actions/oracle.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error);return;} ORAC.cfg=null; await oracInit(); toast('Configuração do Radar IA salva');
   }catch(e){ toast('Falha: '+e.message); }
 }
 function oracVerPadrao(){ const t=document.getElementById('oracPrompt'); if(t&&ORAC.cfg){ t.value=ORAC.cfg.prompt_padrao||''; toast('Prompt padrão carregado no campo — edite e salve, ou salve como está'); } }
+function oracVerPadraoEx(){ const t=document.getElementById('oracPromptEx'); if(t&&ORAC.cfg){ t.value=ORAC.cfg.prompt_extracao_padrao||''; toast('Prompt padrão do motor de IA carregado — edite e salve, ou salve como está'); } }
 
 /* ===== Oportunidades (Curva ABC) — grandes itens do orçamento fora do radar ===== */
 let OPP={obra:null, gaps:[], resumo:{}, sel:new Set()};
@@ -3859,6 +3863,7 @@ function cotRenderDetalhe(){
         <span style="flex:1;min-width:130px;font-weight:600">${esc(cf.fornecedor_nome)}${cf.categoria?` <span class="muted" style="font-size:11px;font-weight:400">· ${esc(cf.categoria)}</span>`:''}</span>
         <span class="dchip" style="background:${cf.respondeu?'var(--ok)':'#8a9299'}">${cf.respondeu?('respondeu · '+BRL(cf.proposta_total)):'aguardando'}</span>
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotAnexarAbrir(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="anexar PDF, Excel ou print — arraste, cole (Ctrl+V) ou clique"><span class="material-icons" style="font-size:14px;vertical-align:-2px">attach_file</span> anexar${ax.length?` (${ax.length})`:''}</button>`:''}
+        ${CAN_EDIT&&ax.length?`<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotIAPreencher(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="a IA lê os anexos e preenche a proposta (rascunho para você conferir)"><span class="material-icons" style="font-size:14px;vertical-align:-2px">auto_awesome</span> preencher com IA</button>`:''}
         ${CAN_EDIT&&!cf.respondeu?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotPropostaDe(${ci})">Lançar proposta</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="cotDesconvidar(${cf.id})" title="tirar da concorrência">×</button>`:''}
       </div>
@@ -4122,12 +4127,14 @@ function cotAnexarRender(){ const a=COT.anexo, ov=document.getElementById('anexO
     <div style="margin-top:10px">${a.files.length?a.files.map((f,i)=>`<div style="display:flex;align-items:center;gap:7px;padding:4px 0"><span class="material-icons" style="font-size:16px;color:var(--muted)">${cotAnexoIcon(f.type,f.name)}</span><span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span><span class="muted" style="font-size:10.5px">${(f.size/1024).toFixed(0)} KB</span><span onclick="COT.anexo.files.splice(${i},1);cotAnexarRender()" class="material-icons" style="cursor:pointer;color:var(--pend);font-size:16px">close</span></div>`).join(''):'<div class="dmini">Nenhum arquivo ainda.</div>'}</div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
       <button class="btn-ghost" onclick="cotAnexarFechar()">Cancelar</button>
-      <button class="btn-prim" onclick="cotAnexarEnviar()" ${a.files.length?'':'disabled style=\"opacity:.5\"'}><span class="material-icons" style="font-size:15px;vertical-align:-3px">attach_file</span> Anexar${a.files.length?' '+a.files.length:''}</button>
+      <button class="btn-ghost" onclick="cotAnexarEnviar(true)" ${a.files.length?'':'disabled style=\"opacity:.5\"'} title="anexa e já manda a IA preencher a proposta"><span class="material-icons" style="font-size:14px;vertical-align:-3px;color:var(--verde-d)">auto_awesome</span> Anexar + IA</button>
+      <button class="btn-prim" onclick="cotAnexarEnviar(false)" ${a.files.length?'':'disabled style=\"opacity:.5\"'}><span class="material-icons" style="font-size:15px;vertical-align:-3px">attach_file</span> Anexar${a.files.length?' '+a.files.length:''}</button>
     </div></div>`; }
-async function cotAnexarEnviar(){ const a=COT.anexo; if(!a||!a.files.length)return; const files=a.files.slice();
+async function cotAnexarEnviar(runIA){ const a=COT.anexo; if(!a||!a.files.length)return; const files=a.files.slice(), fornId=a.fornId, fornNome=a.fornNome;
   toast('Enviando '+files.length+' arquivo(s)…'); let ok=0,fail=0;
-  for(const f of files){ if(await cotUploadAnexoFile(f,a.fornId,a.fornNome))ok++; else fail++; }
-  cotAnexarFechar(); toast(ok+' anexado(s)'+(fail?' · '+fail+' falharam':'')); if(ok)cotOpen(COT.cur.cotacao.id); }
+  for(const f of files){ if(await cotUploadAnexoFile(f,fornId,fornNome))ok++; else fail++; }
+  cotAnexarFechar(); toast(ok+' anexado(s)'+(fail?' · '+fail+' falharam':''));
+  if(ok){ await cotOpen(COT.cur.cotacao.id); if(runIA) cotIAPreencher(fornId,fornNome); } }
 async function cotUploadAnexoFile(file,fornId,fornNome,propostaId){
   if(file.size>25*1024*1024){ toast('"'+file.name+'": máx 25 MB'); return false; }
   const fd=new FormData(); fd.append('arquivo',file); fd.append('cotacao_id',COT.cur.cotacao.id);
@@ -4135,6 +4142,50 @@ async function cotUploadAnexoFile(file,fornId,fornNome,propostaId){
   fd.append('me',(EU&&EU.bitrix_id)||'');
   try{ const r=await (await fetch('actions/cotacao_anexo.php',{method:'POST',body:fd})).json(); if(r.error){ toast(file.name+': '+r.error); return false; } return true; }
   catch(e){ toast('Falha: '+e.message); return false; } }
+/* --- Motor de IA: lê os anexos do fornecedor e preenche a proposta (RASCUNHO p/ validação humana) --- */
+function cotIAForn(fornId,fornNome){ const d=COT.cur||{}, nz=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+  return (d.anexos||[]).filter(a=>((a.fornecedor_id&&fornId&&String(a.fornecedor_id)===String(fornId))||(a.fornecedor_nome&&nz(a.fornecedor_nome)===nz(fornNome)))); }
+function cotIAPreencher(fornId,fornNome){ fornId=(fornId&&fornId!=='null')?fornId:null;
+  const ax=cotIAForn(fornId,fornNome); if(!ax.length){ toast('Anexe um PDF, Excel ou print desse fornecedor primeiro'); return; }
+  COT.ia={fornId,fornNome,sel:ax.map(a=>a.id),anexos:ax,busy:false}; cotIARender(); }
+function cotIAFechar(){ const ov=document.getElementById('iaOverlay'); if(ov)ov.remove(); COT.ia=null; }
+function cotIAToggle(id,on){ const s=COT.ia; if(!s)return; s.sel=on?[...new Set([...s.sel,id])]:s.sel.filter(x=>x!==id); cotIARender(); }
+function cotIARender(){ const s=COT.ia; if(!s)return; let ov=document.getElementById('iaOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='iaOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }
+  ov.onclick=()=>{ if(!s.busy)cotIAFechar(); };
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:18px;box-shadow:0 12px 44px rgba(0,0,0,.22);width:100%;max-width:470px" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:14px"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--verde-d)">auto_awesome</span> Preencher proposta com IA</b><span onclick="cotIAFechar()" class="material-icons" style="cursor:pointer;color:var(--muted)">close</span></div>
+    <div class="muted" style="font-size:11.5px;margin-bottom:10px">${esc(s.fornNome)||'fornecedor'} — escolha o(s) anexo(s) que a IA vai ler:</div>
+    <div style="display:flex;flex-direction:column;gap:4px;max-height:230px;overflow:auto">${s.anexos.map(a=>`<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;padding:4px 2px"><input type="checkbox" ${s.sel.includes(a.id)?'checked':''} onchange="cotIAToggle(${a.id},this.checked)"><span class="material-icons" style="font-size:16px;color:var(--muted)">${cotAnexoIcon(a.mime,a.nome)}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.nome)}</span></label>`).join('')}</div>
+    <div style="background:#fbf7e8;border:1px solid #eadfb0;border-radius:8px;padding:7px 10px;margin-top:10px;font-size:11px;color:#6b5a1e">A IA gera um <b>rascunho</b> — você confere e ajusta os valores antes de salvar.</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">${s.busy?'<span class="muted" style="font-size:12px;align-self:center">🧠 lendo os anexos…</span>':`<button class="btn-ghost" onclick="cotIAFechar()">Cancelar</button><button class="btn-prim" onclick="cotIAExecutar()" ${s.sel.length?'':'disabled style=\"opacity:.5\"'}><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Preencher</button>`}</div>
+  </div>`; }
+async function cotIAExecutar(){ const s=COT.ia; if(!s||!s.sel.length||s.busy)return; s.busy=true; cotIARender();
+  try{ const r=await (await fetch('actions/cotacao_ia.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'preencher',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,fornecedor_id:s.fornId,fornecedor_nome:s.fornNome,anexo_ids:s.sel})})).json();
+    if(r.error){ toast(r.error); s.busy=false; cotIARender(); return; }
+    const fn=s.fornNome; cotIAFechar(); cotIAAplicar(fn,r.draft,r);
+  }catch(e){ toast('Falha: '+e.message); s.busy=false; cotIARender(); } }
+function cotIAAplicar(fornNome,draft,meta){ const d=COT.cur; draft=draft||{}; const nz=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+  const ex=(d.propostas||[]).find(p=>nz(p.fornecedor_nome)===nz(fornNome));   // já tem proposta? edita; senão cria
+  COT.prop={id:ex?ex.id:0, precos:{}};
+  (d.itens||[]).forEach(it=>{ COT.prop.precos[it.id]={preco_unit:'',preco_total:''}; });
+  const byId={}; (draft.itens||[]).forEach(x=>{ if(x&&x.item_id!=null)byId[x.item_id]=x; });
+  let preench=0;
+  (d.itens||[]).forEach(it=>{ const x=byId[it.id]; if(x&&x.preco_unit!=null&&x.preco_unit!==''){ const u=Number(x.preco_unit);
+    if(!isNaN(u)){ COT.prop.precos[it.id].preco_unit=u; const q=it.quantidade?Number(it.quantidade):null; if(q)COT.prop.precos[it.id].preco_total=+(u*q).toFixed(2); preench++; } } });
+  COT.prop.fornecedor_nome=fornNome; COT.prop.prazo=draft.prazo_entrega||'';
+  const partes=[];
+  if(Array.isArray(draft.extras)&&draft.extras.length) partes.push('Custos adicionais: '+draft.extras.map(e=>`${e.descricao||'extra'}${(e.valor!=null&&e.valor!=='')?' '+BRL(Number(e.valor)):''}`).join('; '));
+  if(draft.condicao_pagamento) partes.push('Pagamento: '+draft.condicao_pagamento);
+  if(draft.validade) partes.push('Validade: '+draft.validade);
+  const itObs=(draft.itens||[]).filter(x=>x&&x.observacao&&x.item_id!=null).map(x=>{ const it=(d.itens||[]).find(i=>String(i.id)===String(x.item_id)); return '• '+((it&&it.descricao?it.descricao.slice(0,32)+': ':''))+x.observacao; });
+  if(itObs.length) partes.push('Observações por item:\n'+itObs.join('\n'));
+  if(draft.observacao_geral) partes.push(draft.observacao_geral);
+  let obs='⚠ Rascunho gerado por IA'+(meta&&meta.usados&&meta.usados.length?' (fonte: '+meta.usados.join(', ')+')':'')+' — confira os valores antes de salvar.';
+  if(partes.length) obs+='\n\n'+partes.join('\n');
+  COT.prop.observacoes=obs;
+  COT.mode='proposta'; cotRenderProposta(); cotFornDatalist(((COT.cur||{}).cotacao||{}).categoria);
+  toast(preench+' item(ns) preenchido(s) pela IA'+((meta&&meta.avisos&&meta.avisos.length)?' · '+meta.avisos.length+' aviso(s)':'')); }
 async function cotDelAnexo(id){ if(!confirm('Excluir este anexo?'))return;
   try{ await fetch('actions/cotacao_anexo.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
 /* --- Concorrência: convidar / desconvidar / lançar proposta de um convidado --- */

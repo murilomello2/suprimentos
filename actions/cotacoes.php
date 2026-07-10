@@ -92,7 +92,7 @@ function cot_get_full($pdo, $id) {
             $p['equaliza'] = !empty($p['equaliza'] ?? '') ? (json_decode($p['equaliza'], true) ?: []) : []; }
         unset($p);
     }
-    $anx = $pdo->prepare("SELECT id, proposta_id, nome, tamanho FROM cotacao_anexo WHERE cotacao_id=? ORDER BY id"); $anx->execute([$id]);
+    $anx = $pdo->prepare("SELECT id, proposta_id, fornecedor_id, fornecedor_nome, nome, tamanho, mime FROM cotacao_anexo WHERE cotacao_id=? ORDER BY id"); $anx->execute([$id]);
     // fornecedores CONVIDADOS (concorrência) + status respondeu (deriva de proposta com mesmo fornecedor)
     $cf = $pdo->prepare("SELECT * FROM cotacao_fornecedor WHERE cotacao_id=? ORDER BY fornecedor_nome"); $cf->execute([$id]);
     $convidados = $cf->fetchAll();

@@ -142,7 +142,7 @@ function db_schema_mysql($pdo) {
         PRIMARY KEY (id), KEY idx_propi_prop (proposta_id)
     ) $E");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (
-        id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, proposta_id INT, nome VARCHAR(255),
+        id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, proposta_id INT, fornecedor_id INT, fornecedor_nome VARCHAR(191), nome VARCHAR(255),
         arquivo VARCHAR(255), tamanho INT, mime VARCHAR(100), criado_por VARCHAR(64), created_at VARCHAR(40),
         PRIMARY KEY (id), KEY idx_anexo_cot (cotacao_id), KEY idx_anexo_prop (proposta_id)
     ) $E");
@@ -252,6 +252,10 @@ function db_schema_mysql($pdo) {
         $sc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='solic_obra'") as $c) $sc[$c['COLUMN_NAME']] = true;
         if ($sc && !isset($sc['cnpj'])) $pdo->exec("ALTER TABLE solic_obra ADD COLUMN cnpj VARCHAR(24)");
         if ($sc && !isset($sc['endereco'])) $pdo->exec("ALTER TABLE solic_obra ADD COLUMN endereco VARCHAR(255)");
+        // anexo por fornecedor convidado (attach antes de existir proposta)
+        $ac = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cotacao_anexo'") as $c) $ac[$c['COLUMN_NAME']] = true;
+        if ($ac && !isset($ac['fornecedor_id'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN fornecedor_id INT");
+        if ($ac && !isset($ac['fornecedor_nome'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN fornecedor_nome VARCHAR(191)");
     } catch (Throwable $e) {}
 }
 
@@ -412,7 +416,7 @@ function db_schema($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_item (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, quantidade REAL, observacao TEXT, ordem INTEGER)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, prazo TEXT, observacoes TEXT, equaliza TEXT, data_resposta TEXT, total REAL, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta_item (id INTEGER PRIMARY KEY AUTOINCREMENT, proposta_id INTEGER NOT NULL, cotacao_item_id INTEGER NOT NULL, preco_unit REAL, preco_total REAL, observacao TEXT)");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, proposta_id INTEGER, nome TEXT, arquivo TEXT, tamanho INTEGER, mime TEXT, criado_por TEXT, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, proposta_id INTEGER, fornecedor_id INTEGER, fornecedor_nome TEXT, nome TEXT, arquivo TEXT, tamanho INTEGER, mime TEXT, criado_por TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cot_dicionario (id INTEGER PRIMARY KEY AUTOINCREMENT, servico_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, ordem INTEGER, nota TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_fornecedor (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, categoria TEXT, contato TEXT, email TEXT, telefone TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS carta_modelo (id INTEGER PRIMARY KEY AUTOINCREMENT, servico_id INTEGER, servico_nome TEXT, tipo TEXT, objeto TEXT, norma_referencia TEXT, pes_ref TEXT, escopo TEXT, criterios_medicao TEXT, equalizacao_campos TEXT, quantitativos_modelo TEXT, observacoes TEXT, versao INTEGER DEFAULT 1, is_padrao INTEGER DEFAULT 1, origem TEXT DEFAULT 'seed', criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
@@ -438,6 +442,9 @@ function db_schema($pdo) {
     $scols = []; foreach ($pdo->query("PRAGMA table_info(solic_obra)") as $c) $scols[$c['name']] = true;
     if (!isset($scols['cnpj'])) $pdo->exec("ALTER TABLE solic_obra ADD COLUMN cnpj TEXT");
     if (!isset($scols['endereco'])) $pdo->exec("ALTER TABLE solic_obra ADD COLUMN endereco TEXT");
+    $acols = []; foreach ($pdo->query("PRAGMA table_info(cotacao_anexo)") as $c) $acols[$c['name']] = true;
+    if (!isset($acols['fornecedor_id'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN fornecedor_id INTEGER");
+    if (!isset($acols['fornecedor_nome'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN fornecedor_nome TEXT");
     $pcols = []; foreach ($pdo->query("PRAGMA table_info(cotacao_proposta)") as $c) $pcols[$c['name']] = true;
     if (!isset($pcols['equaliza'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN equaliza TEXT");
 

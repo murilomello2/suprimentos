@@ -32,9 +32,11 @@ try {
         if (!$a) { http_response_code(404); header('Content-Type: text/plain'); echo 'não encontrado'; exit; }
         $path = ANEXO_DIR . '/' . basename((string)$a['arquivo']);   // basename: nunca sai da pasta
         if (!is_file($path)) { http_response_code(404); header('Content-Type: text/plain'); echo 'arquivo ausente'; exit; }
-        $nome = preg_replace('/[^A-Za-z0-9 ._-]/', '_', (string)($a['nome'] ?: 'anexo.pdf'));
-        header('Content-Type: application/pdf');
-        header('Content-Disposition: inline; filename="' . $nome . '"');
+        $nome = preg_replace('/[^A-Za-z0-9 ._-]/', '_', (string)($a['nome'] ?: 'anexo'));
+        $mime = (string)($a['mime'] ?: 'application/octet-stream');
+        $inline = in_array($mime, ['application/pdf', 'image/png', 'image/jpeg'], true);   // PDF/imagem abrem inline; Excel baixa
+        header('Content-Type: ' . $mime);
+        header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="' . $nome . '"');
         header('Content-Length: ' . filesize($path));
         header('X-Content-Type-Options: nosniff');
         readfile($path); exit;
@@ -45,7 +47,7 @@ try {
         header('Content-Type: application/json; charset=utf-8');
         $perms = user_perms($pdo, $_GET['me'] ?? null);
         if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error'=>'sem acesso']); exit; }
-        $q = $pdo->prepare("SELECT id, cotacao_id, proposta_id, nome, tamanho, created_at FROM cotacao_anexo WHERE cotacao_id=? ORDER BY id");
+        $q = $pdo->prepare("SELECT id, cotacao_id, proposta_id, fornecedor_id, fornecedor_nome, nome, tamanho, mime, created_at FROM cotacao_anexo WHERE cotacao_id=? ORDER BY id");
         $q->execute([(int)$_GET['cotacao']]);
         echo json_encode(['anexos' => $q->fetchAll()], JSON_UNESCAPED_UNICODE); exit;
     }
@@ -82,18 +84,26 @@ try {
     $f = $_FILES['arquivo'];
     if ($f['size'] > ANEXO_MAX) throw new Exception('máximo 25 MB por arquivo');
     if ($f['size'] <= 0) throw new Exception('arquivo vazio');
-    // valida PDF por MAGIC BYTES (não confia no mime/extensão do cliente)
-    $fh = fopen($f['tmp_name'], 'rb'); $head = $fh ? fread($fh, 5) : ''; if ($fh) fclose($fh);
-    if (strncmp($head, '%PDF-', 5) !== 0) throw new Exception('somente arquivos PDF são aceitos');
+    // detecta o TIPO por MAGIC BYTES (não confia no mime/extensão do cliente): PDF, Excel (xlsx/xls) e imagem (PNG/JPG)
+    $fh = fopen($f['tmp_name'], 'rb'); $head = $fh ? fread($fh, 8) : ''; if ($fh) fclose($fh);
+    $ext = null; $mime = null;
+    if (strncmp($head, '%PDF-', 5) === 0) { $ext = 'pdf'; $mime = 'application/pdf'; }
+    elseif (strncmp($head, "\x89PNG\x0d\x0a\x1a\x0a", 8) === 0) { $ext = 'png'; $mime = 'image/png'; }
+    elseif (strncmp($head, "\xFF\xD8\xFF", 3) === 0) { $ext = 'jpg'; $mime = 'image/jpeg'; }
+    elseif (strncmp($head, "PK\x03\x04", 4) === 0) { $ext = 'xlsx'; $mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'; } // xlsx (zip); validação leve
+    elseif (strncmp($head, "\xD0\xCF\x11\xE0\xA1\xB1\x1a\xE1", 8) === 0) { $ext = 'xls'; $mime = 'application/vnd.ms-excel'; } // OLE (xls antigo)
+    else throw new Exception('formato não aceito — envie PDF, Excel (xlsx/xls) ou imagem (PNG/JPG)');
     if (!is_dir(ANEXO_DIR)) @mkdir(ANEXO_DIR, 0775, true);
     $rand = bin2hex(random_bytes(10));
-    $stored = 'anx_' . $cid . '_' . $rand . '.pdf';                  // nome no disco = SEMPRE gerado (nunca o do cliente)
+    $stored = 'anx_' . $cid . '_' . $rand . '.' . $ext;             // nome no disco = SEMPRE gerado (nunca o do cliente)
     if (!move_uploaded_file($f['tmp_name'], ANEXO_DIR . '/' . $stored)) throw new Exception('não foi possível salvar');
-    $nome = trim((string)$f['name']); if ($nome === '') $nome = 'anexo.pdf';
+    $nome = trim((string)$f['name']); if ($nome === '') $nome = 'anexo.' . $ext;
     if (strlen($nome) > 240) $nome = substr($nome, -240);
-    $pdo->prepare("INSERT INTO cotacao_anexo (cotacao_id, proposta_id, nome, arquivo, tamanho, mime, criado_por, created_at) VALUES (?,?,?,?,?,?,?,?)")
-        ->execute([$cid, $pid ?: null, $nome, $stored, (int)$f['size'], 'application/pdf', $_POST['me'] ?? null, date('c')]);
-    echo json_encode(['ok'=>true, 'id'=>(int)$pdo->lastInsertId(), 'nome'=>$nome, 'tamanho'=>(int)$f['size']], JSON_UNESCAPED_UNICODE); exit;
+    $fornId = (int)($_POST['fornecedor_id'] ?? 0) ?: null;
+    $fornNome = trim((string)($_POST['fornecedor_nome'] ?? '')); if ($fornNome === '') $fornNome = null; elseif (strlen($fornNome) > 180) $fornNome = substr($fornNome, 0, 180);
+    $pdo->prepare("INSERT INTO cotacao_anexo (cotacao_id, proposta_id, fornecedor_id, fornecedor_nome, nome, arquivo, tamanho, mime, criado_por, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+        ->execute([$cid, $pid ?: null, $fornId, $fornNome, $nome, $stored, (int)$f['size'], $mime, $_POST['me'] ?? null, date('c')]);
+    echo json_encode(['ok'=>true, 'id'=>(int)$pdo->lastInsertId(), 'nome'=>$nome, 'tamanho'=>(int)$f['size'], 'mime'=>$mime], JSON_UNESCAPED_UNICODE); exit;
 
 } catch (Throwable $e) {
     http_response_code(400);

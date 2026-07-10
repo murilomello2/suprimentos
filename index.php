@@ -3844,17 +3844,28 @@ function cotRenderDetalhe(){
       ${!c.servico_id?`<span class="dchip" style="background:#8a9299;font-size:10px" title="cotação criada do zero, sem vínculo ao radar de aquisições">avulsa</span>`:'<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="cotação vinculada a um item do radar">do radar</span>'}
     </div></div>`;
   html+=cotItensPanel(d);
-  // ---- Concorrência (fornecedores convidados) ----
-  const conv=d.convidados||[];
+  // ---- Concorrência (fornecedores convidados) + anexos POR fornecedor (anexar antes de cadastrar proposta) ----
+  const conv=d.convidados||[], anx=d.anexos||[], meB=(EU&&EU.bitrix_id)||'';
+  const anxNorm=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+  const anexosDoForn=cf=>anx.filter(a=>((a.fornecedor_id&&cf.fornecedor_id&&String(a.fornecedor_id)===String(cf.fornecedor_id))||(a.fornecedor_nome&&anxNorm(a.fornecedor_nome)===anxNorm(cf.fornecedor_nome))));
+  const anexoChip=a=>`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-weight:600;display:inline-flex;align-items:center;gap:4px;max-width:190px"><span class="material-icons" style="font-size:13px">${cotAnexoIcon(a.mime,a.nome)}</span><a href="actions/cotacao_anexo.php?download=${a.id}&me=${encodeURIComponent(meB)}" target="_blank" rel="noopener" style="color:var(--verde-d);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(a.nome)}">${esc(a.nome)}</a>${CAN_EDIT?` <span onclick="cotDelAnexo(${a.id})" style="cursor:pointer;color:var(--pend)" title="excluir anexo">×</span>`:''}</span>`;
   html+=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <b style="font-size:13px">Concorrência — fornecedores convidados</b>
       <span class="dchip" style="background:${conv.length&&conv.every(x=>x.respondeu)?'var(--ok)':'var(--dourado)'}">${conv.filter(x=>x.respondeu).length} de ${conv.length} responderam</span></div>`;
-  if(conv.length) html+='<div style="margin-top:8px">'+conv.map((cf,ci)=>`<div class="drow"><span class="dgm" style="background:${cf.respondeu?'var(--ok)':'#cfd6da'}"></span><span style="flex:1">${esc(cf.fornecedor_nome)}${cf.categoria?` <span class="muted" style="font-size:11px">· ${esc(cf.categoria)}</span>`:''}</span>
-      <span class="dchip" style="background:${cf.respondeu?'var(--ok)':'#8a9299'}">${cf.respondeu?('respondeu · '+BRL(cf.proposta_total)):'aguardando'}</span>
-      ${CAN_EDIT&&!cf.respondeu?`<button class="btn-ghost" style="padding:2px 8px" onclick="cotPropostaDe(${ci})">Lançar proposta</button>`:''}
-      ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="cotDesconvidar(${cf.id})" title="tirar da concorrência">×</button>`:''}</div>`).join('')+'</div>';
+  if(conv.length) html+='<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">'+conv.map((cf,ci)=>{ const ax=anexosDoForn(cf);
+    return `<div style="border:1px solid var(--line);border-radius:10px;padding:9px 11px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="dgm" style="background:${cf.respondeu?'var(--ok)':'#cfd6da'}"></span>
+        <span style="flex:1;min-width:130px;font-weight:600">${esc(cf.fornecedor_nome)}${cf.categoria?` <span class="muted" style="font-size:11px;font-weight:400">· ${esc(cf.categoria)}</span>`:''}</span>
+        <span class="dchip" style="background:${cf.respondeu?'var(--ok)':'#8a9299'}">${cf.respondeu?('respondeu · '+BRL(cf.proposta_total)):'aguardando'}</span>
+        ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotAnexarAbrir(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="anexar PDF, Excel ou print — arraste, cole (Ctrl+V) ou clique"><span class="material-icons" style="font-size:14px;vertical-align:-2px">attach_file</span> anexar${ax.length?` (${ax.length})`:''}</button>`:''}
+        ${CAN_EDIT&&!cf.respondeu?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotPropostaDe(${ci})">Lançar proposta</button>`:''}
+        ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="cotDesconvidar(${cf.id})" title="tirar da concorrência">×</button>`:''}
+      </div>
+      ${ax.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;padding-left:16px">${ax.map(anexoChip).join('')}</div>`:''}
+    </div>`; }).join('')+'</div>';
   else html+='<div class="dmini" style="margin-top:6px">Nenhum fornecedor convidado ainda — convide abaixo.</div>';
-  if(CAN_EDIT) html+=`<div style="margin-top:8px"><button class="btn-ghost" style="padding:5px 12px" onclick="cotFornPickerOpen('convite')"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">group_add</span> Convidar fornecedores</button></div>`;
+  if(CAN_EDIT) html+=`<div style="margin-top:10px"><button class="btn-ghost" style="padding:5px 12px" onclick="cotFornPickerOpen('convite')"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">group_add</span> Convidar fornecedores</button></div>`;
   html+='</div>';
   html+=cotEqualizaPanel(d);
   if(!props.length){ html+='<div class="panel"><div class="empty">Nenhuma proposta ainda. Clique em "Cadastrar proposta" ou "Lançar proposta" de um convidado para montar o mapa.</div></div>'; }
@@ -3871,16 +3882,10 @@ function cotRenderDetalhe(){
     html+='<tr style="background:#f7faf8"><td class="svc-c" style="text-align:left;font-weight:800">TOTAL</td>';
     props.forEach(p=>{ const isBS=m.fornecedor_destaque===p.fornecedor_nome; html+=`<td style="text-align:center;font-weight:800;${isBS?'color:var(--verde-d)':''}">${p.total!=null?BRL(p.total):'—'}</td>`; });
     html+=`<td style="text-align:center;font-weight:800;background:#eafaf0;color:var(--verde-d)">${m.melhor_total?BRL(m.melhor_total):'—'}</td></tr></tbody></table></div>`;
-    const anexos=d.anexos||[], meB=(EU&&EU.bitrix_id)||'';
-    html+='<div class="panel" style="margin-top:10px"><b style="font-size:13px">Propostas & anexos (PDF)</b><div style="margin-top:8px">';
-    props.forEach(p=>{ const ax=anexos.filter(a=>a.proposta_id===p.id);
-      html+=`<div style="border-bottom:1px solid #f1f3f2;padding:7px 0">
-        <div class="drow" style="padding:0"><span class="dgm" style="background:${m.fornecedor_destaque===p.fornecedor_nome?'var(--ok)':'#8a9299'}"></span><span style="flex:1"><b>${esc(p.fornecedor_nome)}</b>${p.prazo?` <span class="muted">· ${esc(p.prazo)}</span>`:''}</span><b style="min-width:90px;text-align:right">${p.total!=null?BRL(p.total):'—'}</b>
-          ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 8px" onclick="cotProposta(${p.id})">Editar</button><button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="cotExcluirProposta(${p.id})">Excluir</button>`:''}</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:5px 0 0 18px">
-          ${ax.map(a=>`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-weight:600;display:inline-flex;align-items:center;gap:4px"><span class="material-icons" style="font-size:13px">picture_as_pdf</span><a href="actions/cotacao_anexo.php?download=${a.id}&me=${encodeURIComponent(meB)}" target="_blank" rel="noopener" style="color:var(--verde-d);text-decoration:none">${esc(a.nome)}</a>${CAN_EDIT?` <span onclick="cotDelAnexo(${a.id})" style="cursor:pointer;color:var(--pend)" title="excluir anexo">×</span>`:''}</span>`).join('')||'<span class="dmini">sem anexo</span>'}
-          ${CAN_EDIT?`<label class="btn-ghost" style="padding:2px 9px;font-size:11px;cursor:pointer"><span class="material-icons" style="font-size:13px;vertical-align:-2px">attach_file</span> anexar PDF<input type="file" accept="application/pdf" style="display:none" onchange="cotUploadAnexo(${p.id},this)"></label>`:''}
-        </div></div>`; });
+    html+='<div class="panel" style="margin-top:10px"><b style="font-size:13px">Propostas recebidas</b><span class="muted" style="font-size:11px"> — os anexos ficam na Concorrência, por fornecedor</span><div style="margin-top:8px">';
+    props.forEach(p=>{
+      html+=`<div class="drow" style="border-bottom:1px solid #f1f3f2;padding:7px 0"><span class="dgm" style="background:${m.fornecedor_destaque===p.fornecedor_nome?'var(--ok)':'#8a9299'}"></span><span style="flex:1"><b>${esc(p.fornecedor_nome)}</b>${p.prazo?` <span class="muted">· ${esc(p.prazo)}</span>`:''}</span><b style="min-width:90px;text-align:right">${p.total!=null?BRL(p.total):'—'}</b>
+          ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 8px" onclick="cotProposta(${p.id})">Editar</button><button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="cotExcluirProposta(${p.id})">Excluir</button>`:''}</div>`; });
     if(!props.length) html+='<div class="dmini">—</div>';
     html+='</div></div>';
   }
@@ -4092,16 +4097,44 @@ async function cotNumerosSalvar(){ const c=COT.cur.cotacao;
     if(r&&r.error){toast(r.error);return;} c.num_solicitacao=val('cotDetSC'); c.num_pedido=val('cotDetPC'); toast('Números salvos'); }catch(e){toast('Falha: '+e.message);} }
 async function cotExcluirProposta(pid){ if(!confirm('Excluir esta proposta?'))return;
   try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir_proposta',me:EU&&EU.bitrix_id,proposta_id:pid})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
-async function cotUploadAnexo(propostaId, input){
-  const file=input.files&&input.files[0]; if(!file){ return; }
-  if(file.type!=='application/pdf' && !/\.pdf$/i.test(file.name)){ toast('Somente PDF'); input.value=''; return; }
-  if(file.size>25*1024*1024){ toast('Máximo 25 MB'); input.value=''; return; }
-  const fd=new FormData(); fd.append('arquivo',file); fd.append('cotacao_id',COT.cur.cotacao.id); if(propostaId)fd.append('proposta_id',propostaId); fd.append('me',(EU&&EU.bitrix_id)||'');
-  toast('Enviando anexo…');
-  try{ const r=await (await fetch('actions/cotacao_anexo.php',{method:'POST',body:fd})).json();
-    if(r.error){ toast(r.error); input.value=''; return; } toast('Anexo salvo'); cotOpen(COT.cur.cotacao.id);
-  }catch(e){ toast('Falha: '+e.message); input.value=''; }
-}
+// ícone por tipo de anexo
+function cotAnexoIcon(mime,nome){ const m=(mime||'')+' '+(nome||'');
+  if(/pdf/i.test(m))return'picture_as_pdf'; if(/png|jpe?g|image/i.test(m))return'image'; if(/sheet|excel|xls/i.test(m))return'table_view'; return'insert_drive_file'; }
+// modal de anexo multi-formato (PDF/Excel/imagem) POR fornecedor — arrastar, colar (Ctrl+V) ou clicar
+function cotAnexarAbrir(fornId,fornNome){ COT.anexo={fornId:(fornId&&fornId!=='null')?fornId:null,fornNome:fornNome||'',files:[]};
+  let ov=document.getElementById('anexOverlay'); if(!ov){ ov=document.createElement('div'); ov.id='anexOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }
+  document.addEventListener('paste',cotAnexarPaste); cotAnexarRender(); }
+function cotAnexarFechar(){ const ov=document.getElementById('anexOverlay'); if(ov)ov.remove(); document.removeEventListener('paste',cotAnexarPaste); COT.anexo=null; }
+function cotAnexarPaste(e){ if(!COT.anexo)return; const items=((e.clipboardData||{}).items)||[]; let n=0;
+  for(const it of items){ if(it.kind==='file'){ const f=it.getAsFile(); if(f){ COT.anexo.files.push(f.name?f:new File([f],'print-'+Date.now()+'.png',{type:f.type||'image/png'})); n++; } } }
+  if(n){ e.preventDefault(); cotAnexarRender(); toast(n+' print colado'); } }
+function cotAnexarDrop(e){ e.preventDefault(); if(!COT.anexo)return; for(const f of (((e.dataTransfer||{}).files)||[]))COT.anexo.files.push(f); cotAnexarRender(); }
+function cotAnexarPick(input){ if(!COT.anexo)return; for(const f of (input.files||[]))COT.anexo.files.push(f); input.value=''; cotAnexarRender(); }
+function cotAnexarRender(){ const a=COT.anexo, ov=document.getElementById('anexOverlay'); if(!a||!ov)return;
+  ov.onclick=cotAnexarFechar;
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:18px;box-shadow:0 12px 44px rgba(0,0,0,.22);width:100%;max-width:470px" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><b style="font-size:14px">Anexar para ${esc(a.fornNome)||'fornecedor'}</b><span onclick="cotAnexarFechar()" class="material-icons" style="cursor:pointer;color:var(--muted)">close</span></div>
+    <label ondragover="event.preventDefault()" ondrop="cotAnexarDrop(event)" style="display:block;border:2px dashed var(--line);border-radius:12px;padding:22px;text-align:center;cursor:pointer;background:#fafbfb">
+      <span class="material-icons" style="font-size:30px;color:var(--verde)">upload_file</span>
+      <div style="font-size:12.5px;margin-top:4px">Arraste, <b>cole (Ctrl+V)</b> ou clique</div>
+      <div class="muted" style="font-size:11px;margin-top:2px">PDF, Excel (xlsx/xls) ou imagem (PNG/JPG) · até 25 MB</div>
+      <input type="file" accept=".pdf,.xlsx,.xls,image/png,image/jpeg,application/pdf" multiple style="display:none" onchange="cotAnexarPick(this)"></label>
+    <div style="margin-top:10px">${a.files.length?a.files.map((f,i)=>`<div style="display:flex;align-items:center;gap:7px;padding:4px 0"><span class="material-icons" style="font-size:16px;color:var(--muted)">${cotAnexoIcon(f.type,f.name)}</span><span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span><span class="muted" style="font-size:10.5px">${(f.size/1024).toFixed(0)} KB</span><span onclick="COT.anexo.files.splice(${i},1);cotAnexarRender()" class="material-icons" style="cursor:pointer;color:var(--pend);font-size:16px">close</span></div>`).join(''):'<div class="dmini">Nenhum arquivo ainda.</div>'}</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn-ghost" onclick="cotAnexarFechar()">Cancelar</button>
+      <button class="btn-prim" onclick="cotAnexarEnviar()" ${a.files.length?'':'disabled style=\"opacity:.5\"'}><span class="material-icons" style="font-size:15px;vertical-align:-3px">attach_file</span> Anexar${a.files.length?' '+a.files.length:''}</button>
+    </div></div>`; }
+async function cotAnexarEnviar(){ const a=COT.anexo; if(!a||!a.files.length)return; const files=a.files.slice();
+  toast('Enviando '+files.length+' arquivo(s)…'); let ok=0,fail=0;
+  for(const f of files){ if(await cotUploadAnexoFile(f,a.fornId,a.fornNome))ok++; else fail++; }
+  cotAnexarFechar(); toast(ok+' anexado(s)'+(fail?' · '+fail+' falharam':'')); if(ok)cotOpen(COT.cur.cotacao.id); }
+async function cotUploadAnexoFile(file,fornId,fornNome,propostaId){
+  if(file.size>25*1024*1024){ toast('"'+file.name+'": máx 25 MB'); return false; }
+  const fd=new FormData(); fd.append('arquivo',file); fd.append('cotacao_id',COT.cur.cotacao.id);
+  if(fornId)fd.append('fornecedor_id',fornId); if(fornNome)fd.append('fornecedor_nome',fornNome); if(propostaId)fd.append('proposta_id',propostaId);
+  fd.append('me',(EU&&EU.bitrix_id)||'');
+  try{ const r=await (await fetch('actions/cotacao_anexo.php',{method:'POST',body:fd})).json(); if(r.error){ toast(file.name+': '+r.error); return false; } return true; }
+  catch(e){ toast('Falha: '+e.message); return false; } }
 async function cotDelAnexo(id){ if(!confirm('Excluir este anexo?'))return;
   try{ await fetch('actions/cotacao_anexo.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
 /* --- Concorrência: convidar / desconvidar / lançar proposta de um convidado --- */

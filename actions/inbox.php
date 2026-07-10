@@ -235,6 +235,7 @@ function inbox_sync($pdo, $me, $perms) {
             $dkey = fn($mid, $uid) => ((string)$mid !== '') ? ('mid:' . md5((string)$mid)) : ('uid:' . $folder . ':' . $uidv . ':' . (int)$uid);
             $maxUid = $lastUid;
             foreach ($uids as $uid) {
+                if (!(int)$uid) continue;            // UID vazia/0 (quirk de pasta) — ignora
                 $maxUid = max($maxUid, (int)$uid);   // avança o high-water até nesta iteração — mensagem-veneno não trava a caixa
                 try {
                     // pré-check barato por Message-ID (evita re-baixar anexos/re-rodar IA de msgs já processadas)

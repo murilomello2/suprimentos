@@ -52,7 +52,7 @@ function inbox_buscar_novos($mbox, $desde, $lastUid = 0, $max = 40) {
     } else {
         $ts = strtotime((string)$desde); if (!$ts) $ts = strtotime('-14 days');
         $uids = @imap_search($mbox, 'SINCE "' . date('j-M-Y', $ts) . '"', SE_UID); imap_errors();   // formato IMAP inglês: 1-Jul-2026
-        $uids = (array)$uids;
+        $uids = array_values(array_filter((array)$uids, fn($u) => (int)$u > 0));   // descarta UIDs vazias/0 (quirk de algumas pastas)
     }
     if (!$uids) return [[], 0];
     sort($uids, SORT_NUMERIC);                                     // ASC: processa do mais antigo (high-water monotônico)

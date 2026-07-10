@@ -84,6 +84,7 @@ function cot_get_full($pdo, $id) {
         $so->execute([$cot['solic_coligada'], (string)($cot['solic_obra_cod'] ?? '')]);
         $nc = (string)$so->fetchColumn(); if ($nc !== '') $cot['obra_nome'] = $nc;
     }
+    if (empty($cot['obra_nome']) && !empty($cot['obra_livre'])) $cot['obra_nome'] = $cot['obra_livre'];   // cotação importada (obra por texto)
     $iq = $pdo->prepare("SELECT * FROM cotacao_item WHERE cotacao_id=? ORDER BY ordem, id"); $iq->execute([$id]);
     $itens = $iq->fetchAll();
     $pq = $pdo->prepare("SELECT * FROM cotacao_proposta WHERE cotacao_id=? ORDER BY (total IS NULL), total, id"); $pq->execute([$id]);
@@ -144,7 +145,7 @@ try {
         if (isset($_GET['obra']) && $_GET['obra'] !== '') { $where = 'WHERE c.obra_id=?'; $args[] = (int)$_GET['obra']; }
         $q = $pdo->prepare("SELECT c.id, c.obra_id, c.servico_id, c.titulo, c.categoria, c.tipo_servico, c.verba,
                                    c.num_solicitacao, c.num_pedido,
-                                   c.status, c.aprovacao, c.criado_nome, c.created_at, o.nome AS obra_nome,
+                                   c.status, c.aprovacao, c.criado_nome, c.created_at, COALESCE(NULLIF(o.nome,''), c.obra_livre) AS obra_nome,
                                    (SELECT COUNT(*) FROM cotacao_item ci WHERE ci.cotacao_id=c.id) AS n_itens,
                                    (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id) AS n_propostas,
                                    (SELECT COUNT(*) FROM cotacao_fornecedor cf WHERE cf.cotacao_id=c.id) AS n_convidados,

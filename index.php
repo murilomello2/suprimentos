@@ -3869,6 +3869,13 @@ function cotSecHead(icon,title,sub,actions){ return `<div style="display:flex;ju
 function cotColapsado(key){ try{ return localStorage.getItem('cotcol_'+key)==='1'; }catch(e){ return false; } }
 function cotToggleSec(key){ try{ localStorage.setItem('cotcol_'+key, cotColapsado(key)?'0':'1'); }catch(e){} cotRenderDetalhe(); }
 function cotChevron(key){ const col=cotColapsado(key); return `<span class="material-icons" style="font-size:20px;cursor:pointer;color:var(--muted)" onclick="cotToggleSec('${key}')" title="${col?'expandir':'recolher'}">${col?'unfold_more':'unfold_less'}</span>`; }
+// popup da OBSERVAÇÃO de um item×fornecedor (o "quadro cinza" do mapa antigo)
+function cotObsShow(el){ const obs=el.getAttribute('data-obs')||'', forn=el.getAttribute('data-forn')||'', item=el.getAttribute('data-item')||'';
+  let ov=document.getElementById('obsOverlay'); if(!ov){ov=document.createElement('div');ov.id='obsOverlay';ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';document.body.appendChild(ov);} ov.onclick=()=>ov.remove();
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;padding:16px 18px;max-width:520px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:14px">${esc(forn)}</b><span class="material-icons" onclick="document.getElementById('obsOverlay').remove()" style="cursor:pointer;color:var(--muted)">close</span></div>
+    <div class="muted" style="font-size:11.5px;margin-bottom:8px">${esc(item)}</div>
+    <div style="background:#f4f7f5;border:1px solid var(--line);border-radius:8px;padding:11px 13px;font-size:13px;white-space:pre-wrap;line-height:1.5">${esc(obs)}</div></div>`; }
 function cotRenderDetalhe(){
   const d=COT.cur,c=d.cotacao,itens=d.itens||[],props=d.propostas||[],m=d.mapa||{},best=m.melhor_por_item||{},w=document.getElementById('cotwrap');
   const podeGerir=!!(IS_ADMIN||CAN_EDIT||(c.criado_por&&EU&&String(c.criado_por)===String(EU.bitrix_id)));   // admin, edita a obra, ou criador
@@ -3938,7 +3945,7 @@ function cotRenderDetalhe(){
     itens.forEach(it=>{ const b=best[it.id];
       html+=`<tr><td class="svc-c" style="text-align:left">${esc(it.descricao)}<small>${cotNum(it.quantidade)} ${esc(it.unidade||'')}${it.observacao?' · '+esc(it.observacao):''}</small></td>`;
       props.forEach(p=>{ const pi=(p.itens||{})[it.id]; const isB=b&&b.proposta_id===p.id;
-        html+=`<td style="text-align:center;padding:6px 8px;${isB?'background:#e7f6ee':''}">${pi&&pi.preco_total!=null?`<b>${BRL(pi.preco_unit)}</b>${isB?' 🏆':''}<div class="muted" style="font-size:10px">${BRL(pi.preco_total)}</div>`:'<span class="muted">—</span>'}</td>`; });
+        html+=`<td style="text-align:center;padding:6px 8px;${isB?'background:#e7f6ee':''}">${pi&&pi.preco_total!=null?`<b>${BRL(pi.preco_unit)}</b>${isB?' 🏆':''}${pi.observacao?` <span class="material-icons" title="${esc(pi.observacao)}" data-obs="${esc(pi.observacao)}" data-forn="${esc(p.fornecedor_nome)}" data-item="${esc(it.descricao)}" style="font-size:13px;color:#5c7b8a;cursor:help;vertical-align:-2px" onclick="event.stopPropagation();cotObsShow(this)">info</span>`:''}<div class="muted" style="font-size:10px">${BRL(pi.preco_total)}</div>`:'<span class="muted">—</span>'}</td>`; });
       html+=`<td style="text-align:center;padding:6px 8px;background:#eafaf0">${b?`<b>${BRL(b.preco_total)}</b><div class="muted" style="font-size:10px">${esc(b.fornecedor)}</div>`:'—'}</td></tr>`;
     });
     html+='<tr style="background:#f7faf8"><td class="svc-c" style="text-align:left;font-weight:800">TOTAL</td>';
@@ -4063,7 +4070,7 @@ function upPrecos(itens,props,m,best,verba){
     itens.forEach(it=>{ const b=best[it.id];
       h+=`<tr><td style="text-align:left">${esc(it.descricao)}</td><td>${cotNum(it.quantidade)}</td><td>${esc(it.unidade||'')}</td>`;
       props.forEach(p=>{ const pi=(p.itens||{})[it.id], isB=b&&b.proposta_id===p.id;
-        h+=`<td style="${isB?'background:#d9f2e3;font-weight:700':''}">${pi&&pi.preco_total!=null?`${BRL(pi.preco_unit)}${isB?' 🏆':''}<div style="font-size:9.5px;color:#889;font-weight:400">${BRL(pi.preco_total)}</div>`:'<span style="color:#bbb">—</span>'}</td>`; });
+        h+=`<td style="${isB?'background:#d9f2e3;font-weight:700':''};vertical-align:top">${pi&&pi.preco_total!=null?`${BRL(pi.preco_unit)}${isB?' 🏆':''}<div style="font-size:9.5px;color:#889;font-weight:400">${BRL(pi.preco_total)}</div>${pi.observacao?`<div style="margin-top:3px;background:#eef1f3;border:1px solid #dde2e6;border-radius:5px;padding:4px 6px;font-size:8.5px;font-weight:400;color:#4a5560;text-align:left;line-height:1.35;white-space:normal">${esc(pi.observacao)}</div>`:''}`:'<span style="color:#bbb">—</span>'}</td>`; });
       h+=`<td style="background:#eafaf0">${b?`<b>${BRL(b.preco_unit)}</b><div style="font-size:9.5px;color:#889">${BRL(b.preco_total)} · ${esc(b.fornecedor)}</div>`:'—'}</td></tr>`; });
     h+=`<tr style="background:#f4f7f5;font-weight:800"><td style="text-align:left">TOTAL GERAL</td><td></td><td></td>`;
     props.forEach(p=>{ const isBS=m.fornecedor_destaque===p.fornecedor_nome; h+=`<td style="${isBS?'color:var(--verde-d)':''}">${p.total!=null?BRL(p.total):'—'}</td>`; });

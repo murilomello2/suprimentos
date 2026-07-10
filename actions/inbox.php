@@ -332,8 +332,20 @@ try {
     }
 
     if ($acao === 'varrer') {
+        // purge (admin, DESTRUTIVO): apaga TODO o inbound (registros + anexos __INBOX__) e zera os inbound_* p/ reprocessar do zero
+        if (!empty($_GET['purge']) && !empty($perms['perm_admin'])) {
+            foreach ($pdo->query("SELECT DISTINCT cotacao_id FROM cotacao_email_in WHERE cotacao_id IS NOT NULL") as $r) {
+                $pcid = (int)$r['cotacao_id'];
+                foreach ($pdo->query("SELECT arquivo FROM cotacao_anexo WHERE cotacao_id=$pcid AND criado_por='__INBOX__'") as $a) {
+                    $pp = INBOX_ANEXO_DIR . '/' . basename((string)$a['arquivo']); if (is_file($pp)) @unlink($pp);
+                }
+                $pdo->exec("DELETE FROM cotacao_anexo WHERE cotacao_id=$pcid AND criado_por='__INBOX__'");
+            }
+            $pdo->exec("UPDATE cotacao_fornecedor SET inbound_em=NULL, inbound_tipo=NULL, inbound_resumo=NULL WHERE inbound_em IS NOT NULL");
+            $pdo->exec("DELETE FROM cotacao_email_in");
+        }
         // reset (admin): limpa o ponteiro p/ re-escanear a janela toda (repesca mensagens que ficaram pra trás)
-        if (!empty($_GET['reset']) && !empty($perms['perm_admin'])) { meta_set($pdo, 'inbox_last_uid', '0'); meta_set($pdo, 'inbox_last_sync', ''); meta_set($pdo, 'inbox_last_run_ts', '0'); }
+        if ((!empty($_GET['reset']) || !empty($_GET['purge'])) && !empty($perms['perm_admin'])) { meta_set($pdo, 'inbox_last_uid', '0'); meta_set($pdo, 'inbox_last_sync', ''); meta_set($pdo, 'inbox_last_run_ts', '0'); }
         echo json_encode(inbox_sync($pdo, $me, $perms), JSON_UNESCAPED_UNICODE); exit;
     }
 

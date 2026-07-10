@@ -1430,7 +1430,7 @@ function respOptions(current){
 function grupoOptions(current){
   const gs=[...new Set(DATA.itens.map(i=>i.grupo).filter(Boolean))];
   if(current && !gs.includes(current)) gs.unshift(current);
-  return gs.map(g=>`<option ${g===current?'selected':''}>${esc(g)}</option>`).join('')
+  return gs.map(g=>`<option value="${esc(g)}" ${g===current?'selected':''}>${esc(g)}</option>`).join('')
        + `<option value="__novo__">➕ Novo grupo…</option>`;
 }
 /* ordenação por coluna (clicável). def = sentido padrão no 1º clique (1=asc, -1=desc) */
@@ -3468,7 +3468,7 @@ function cotRender(){
   let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
      <div class="search" style="min-width:170px"><span class="material-icons" style="color:var(--muted)">search</span><input id="cotListBusca" placeholder="Buscar cotação, nº solicitação ou pedido…" value="${esc(COT.filt.q)}" oninput="COT.filt.q=this.value;cotRender()"></div>
      <label class="muted" style="font-size:12px">Obra <select onchange="COT.obra=this.value;cotLoad()" style="margin-left:4px">${cotObraOpts(COT.obra)}</select></label>
-     <select onchange="COT.filt.categoria=this.value;cotRender()" style="font-size:12px;padding:6px"><option value="">Todas categorias</option>${cats.map(c=>`<option ${c===COT.filt.categoria?'selected':''}>${esc(c)}</option>`).join('')}</select>
+     <select onchange="COT.filt.categoria=this.value;cotRender()" style="font-size:12px;padding:6px"><option value="">Todas categorias</option>${cats.map(c=>`<option value="${esc(c)}" ${c===COT.filt.categoria?'selected':''}>${esc(c)}</option>`).join('')}</select>
      <select onchange="COT.filt.status=this.value;cotRender()" style="font-size:12px;padding:6px"><option value="">Todos status</option>${sts.map(s=>`<option value="${esc(s)}" ${s===COT.filt.status?'selected':''}>${esc(cotStLabel(s))}</option>`).join('')}</select>
      <span class="muted" style="font-size:11.5px">${rows.length} de ${all.length}</span>
      ${CAN_EDIT?'<button class="btn-prim" style="margin-left:auto;padding:7px 14px" onclick="cotNovo()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">add</span> Nova cotação</button>':''}
@@ -4492,8 +4492,8 @@ function solRenderLista(){
   rows.sort((a,b)=>(b.dias||0)-(a.dias||0));
   let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
      <div class="search" style="min-width:180px"><span class="material-icons" style="color:var(--muted)">search</span><input id="solBusca" placeholder="Buscar nº ou item…" value="${esc(f.busca)}" oninput="SOL.filt.busca=this.value;solRenderLista()"></div>
-     <select onchange="SOL.filt.obra=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todas as obras</option>${obras.map(o=>`<option ${o===f.obra?'selected':''}>${esc(o)}</option>`).join('')}</select>
-     <select onchange="SOL.filt.comprador=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todos compradores</option>${comps.map(c=>`<option ${c===f.comprador?'selected':''}>${esc(c)}</option>`).join('')}</select>
+     <select onchange="SOL.filt.obra=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todas as obras</option>${obras.map(o=>`<option value="${esc(o)}" ${o===f.obra?'selected':''}>${esc(o)}</option>`).join('')}</select>
+     <select onchange="SOL.filt.comprador=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todos compradores</option>${comps.map(c=>`<option value="${esc(c)}" ${c===f.comprador?'selected':''}>${esc(c)}</option>`).join('')}</select>
      <select onchange="SOL.filt.bucket=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todos prazos</option><option value="r" ${f.bucket==='r'?'selected':''}>No prazo (0-7)</option><option value="a" ${f.bucket==='a'?'selected':''}>Atenção (8-14)</option><option value="l" ${f.bucket==='l'?'selected':''}>Atrasado (15-30)</option><option value="c" ${f.bucket==='c'?'selected':''}>Crítico (+30)</option></select>
      <select onchange="SOL.filt.status=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todos status</option>${Object.entries(SOL_ST).map(([k,v])=>`<option value="${k}" ${f.status===k?'selected':''}>${v[1]}</option>`).join('')}</select>
      <span class="muted" style="font-size:11.5px">${rows.length} de ${all.length}</span>
@@ -4573,14 +4573,14 @@ async function fornLoad(){
   }catch(e){ w.innerHTML='<div class="dempty">Falha: '+esc(e.message)+'</div>'; }
 }
 let _fornT; function fornDeb(){ clearTimeout(_fornT); _fornT=setTimeout(fornLoad,350); }
-function fornCatOpts(sel){ return '<option value="">Todas as categorias</option>'+FORN.cats.map(c=>`<option ${c.nome===sel?'selected':''}>${esc(c.nome)}</option>`).join(''); }
+function fornCatOpts(sel){ return '<option value="">Todas as categorias</option>'+FORN.cats.map(c=>`<option value="${esc(c.nome)}" ${c.nome===sel?'selected':''}>${esc(c.nome)}</option>`).join(''); }
 function fornRender(){
   if(FORN.edit) return fornRenderEdit();
   const w=document.getElementById('cotwrap');
   let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
     <div class="search" style="min-width:150px"><span class="material-icons" style="color:var(--muted)">search</span><input placeholder="Buscar nome…" value="${esc(FORN.f.nome)}" oninput="FORN.f.nome=this.value;fornDeb()"></div>
     <select onchange="FORN.f.categoria=this.value;fornLoad()">${fornCatOpts(FORN.f.categoria)}</select>
-    <select onchange="FORN.f.tipo=this.value;fornLoad()"><option value="">Todos os tipos</option>${FORN.tipos.map(t=>`<option ${t===FORN.f.tipo?'selected':''}>${esc(t)}</option>`).join('')}</select>
+    <select onchange="FORN.f.tipo=this.value;fornLoad()"><option value="">Todos os tipos</option>${FORN.tipos.map(t=>`<option value="${esc(t)}" ${t===FORN.f.tipo?'selected':''}>${esc(t)}</option>`).join('')}</select>
     <input placeholder="Filtrar por itens…" value="${esc(FORN.f.itens)}" oninput="FORN.f.itens=this.value;fornDeb()" style="min-width:130px">
     <span class="muted" style="font-size:12px">${FORN.total} fornecedor(es)</span>
     ${CAN_EDIT?'<button class="btn-prim" style="margin-left:auto;padding:7px 12px" onclick="fornNovo()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Novo</button>':''}

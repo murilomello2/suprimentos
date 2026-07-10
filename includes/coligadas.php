@@ -65,6 +65,30 @@ function coligadas_map() {
 }
 function coligada_nome($cod) { $m = coligadas_map(); $c = (int)$cod; return isset($m[$c]) ? $m[$c]['nome'] : ''; }
 function coligada_fantasia($cod) { $m = coligadas_map(); $c = (int)$cod; return isset($m[$c]) ? $m[$c]['fantasia'] : ''; }
+function coligada_cnpj($cod) { $m = coligadas_map(); $c = (int)$cod; return isset($m[$c]) ? $m[$c]['cnpj'] : ''; }
+// normaliza p/ casar (sem acento, byte-based — o prod não tem mbstring)
+function ob_norm($s) {
+    $s = strtolower(trim((string)$s));
+    $s = strtr($s, ['á'=>'a','à'=>'a','ã'=>'a','â'=>'a','ä'=>'a','é'=>'e','ê'=>'e','è'=>'e','í'=>'i','ï'=>'i','ó'=>'o','õ'=>'o','ô'=>'o','ö'=>'o','ú'=>'u','ü'=>'u','ç'=>'c']);
+    $s = preg_replace('/[^a-z0-9 ]/', ' ', $s); return trim(preg_replace('/\s+/', ' ', $s));
+}
+// casa o NOME de uma obra (ex.: "Diamond") com a coligada do TOTVS pelo nome/fantasia (a fantasia costuma ter o codinome:
+// "PEDRA AZUL - DIAMOND", "CPR4 ... ADARA - ROMI", "LEGACY(KOELLE) RESIDENCE"...). -> {cod,nome,fantasia,cnpj,score} | null
+function coligada_match_obra($nome) {
+    static $STOP = ['empreendimento','empreendimentos','imobiliario','imobiliaria','spe','ltda','residence','residencial','condominio','consorcio','construcao','loteamento','emp','imob','encerrada','de','do','da',
+        'rio','claro','americana','santa','barbara','oeste','campinas','mogi','mirim','sao','jose','preto','itu','aracatuba','cordeiropolis','ipeuna','morro','grande','jaguariuna','gertrudes','guacu'];
+    $n = ob_norm($nome); if ($n === '') return null;
+    $toks = array_values(array_filter(explode(' ', $n), fn($t) => strlen($t) >= 3 && !in_array($t, $STOP, true)));
+    $best = null; $bestScore = 0;
+    foreach (coligadas_map() as $cod => $d) {
+        $hay = ob_norm($d['nome'] . ' ' . $d['fantasia']);
+        $score = 0;
+        foreach ($toks as $t) if (strpos(' ' . $hay . ' ', ' ' . $t . ' ') !== false) $score++;
+        if ($n !== '' && strpos($hay, $n) !== false) $score += 3;   // nome inteiro da obra aparece → forte
+        if ($score > $bestScore) { $bestScore = $score; $best = array_merge(['cod' => $cod], $d, ['score' => $score]); }
+    }
+    return ($bestScore >= 2) ? $best : null;   // >=2 evita falso positivo por 1 token fraco (ex.: "vista")
+}
 // código da coligada a partir do NOME (legal ou fantasia), normalizado; 0 se não achar
 function coligada_cod_de_nome($nome) { $n = strtolower(trim((string)$nome)); if ($n==='') return 0;
     foreach (coligadas_map() as $cod=>$d) { if (strtolower($d['nome'])===$n || strtolower($d['fantasia'])===$n) return $cod; }

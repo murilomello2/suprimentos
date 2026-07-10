@@ -321,6 +321,7 @@
       <a id="nav-matriz" data-menu="matriz" title="Matriz" onclick="showView('matriz')"><span class="material-icons">grid_on</span> <span class="navtxt">Matriz</span></a>
       <a id="nav-cotacoes" data-menu="cotacoes" title="Cotações" onclick="showView('cotacoes')"><span class="material-icons">request_quote</span> <span class="navtxt">Cotações</span></a>
       <a id="nav-solicitacoes" data-menu="solicitacoes" title="Solicitações de Compra" onclick="showView('solicitacoes')"><span class="material-icons">inbox</span> <span class="navtxt">Solicitações</span></a>
+      <a id="nav-obras" data-menu="obras" title="Obras — ficha, características e de-para" onclick="showView('obras')"><span class="material-icons">apartment</span> <span class="navtxt">Obras</span></a>
       <a id="nav-oraculo" data-menu="oraculo" title="Radar IA — oráculo de suprimentos" onclick="showView('oraculo')"><span class="material-icons">auto_awesome</span> <span class="navtxt">Radar IA</span></a>
     </nav>
     <div class="navlabel">Administração</div>
@@ -500,6 +501,13 @@
       <button class="dtab" id="stab-obras" onclick="solTab('obras')"><span class="material-icons">apartment</span> Obras &amp; compradores</button>
     </div>
     <div id="solwrap"><div class="dempty">Carregando…</div></div>
+   </section>
+   <section id="view-obras" style="display:none">
+    <div class="top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div><h1 class="h1"><span class="material-icons" style="color:var(--dourado)">apartment</span> Obras</h1>
+        <div class="muted" style="font-size:12.5px;margin-top:-4px">Ficha das obras — características, endereço, comprador e o de-para entre os sistemas (radar · TOTVS · solicitações).</div></div>
+    </div>
+    <div id="obrasWrap"><div class="dempty">Carregando…</div></div>
    </section>
    <section id="view-cotacoes" style="display:none">
     <div class="top">
@@ -868,10 +876,11 @@ async function loadMatriz(force){
 
 /* ---------- view switch ---------- */
 function showView(v){
-  ['radar','matriz','oportunidades','dashboards','cotacoes','solicitacoes','oraculo','config','audit','updates'].forEach(x=>{
+  ['radar','matriz','oportunidades','dashboards','cotacoes','solicitacoes','obras','oraculo','config','audit','updates'].forEach(x=>{
     const el=document.getElementById('view-'+x); if(el) el.style.display=v===x?'':'none';
     const nav=document.getElementById('nav-'+x); if(nav) nav.classList.toggle('active',v===x);
   });
+  if(v==='obras') obrasInit();
   if(v==='cotacoes') cotInit();
   if(v==='solicitacoes') solInit();
   if(v==='oraculo') oracInit();
@@ -4056,7 +4065,7 @@ function upPrecos(itens,props,m,best,verba){
     ranked.forEach((p,idx)=>{ const win=p.total!=null&&p.total===cheapest;
       h+=`<tr style="${win?'background:#eafaf0':''}"><td style="font-weight:700;text-align:center">${win?'🏆':(idx+1)}</td><td style="text-align:left;font-weight:${win?'800':'600'}">${esc(p.fornecedor_nome)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}</td>`;
       itens.forEach(it=>{ const pi=(p.itens||{})[it.id], bb=best[it.id], isBI=bb&&bb.proposta_id===p.id;
-        h+=`<td style="${isBI?'background:#d9f2e3;font-weight:700':''}">${pi&&pi.preco_unit!=null?BRL(pi.preco_unit):'<span style="color:#bbb">—</span>'}</td>`; });
+        h+=`<td style="${isBI?'background:#d9f2e3;font-weight:700':''};vertical-align:top">${pi&&pi.preco_unit!=null?`${BRL(pi.preco_unit)}${pi.observacao?`<div style="margin-top:3px;background:#eef1f3;border:1px solid #dde2e6;border-radius:5px;padding:4px 6px;font-size:8.5px;font-weight:400;color:#4a5560;text-align:left;line-height:1.35;white-space:normal">${esc(pi.observacao)}</div>`:''}`:'<span style="color:#bbb">—</span>'}</td>`; });
       const vv=(verba>0&&p.total!=null)?verba-p.total:null;
       h+=`<td style="font-weight:800">${p.total!=null?BRL(p.total):'—'}</td>${verba>0?`<td style="font-size:10.5px;color:${vv==null?'#889':(vv>=0?'var(--ok)':'var(--pend)')}">${vv==null?'—':(vv>=0?'+':'')+BRL(vv)}</td>`:''}</tr>`; });
     if(itens.length>1){ h+=`<tr style="background:#f4f7f5;font-weight:800"><td style="text-align:center">★</td><td style="text-align:left">Melhor por item</td>`;
@@ -5040,7 +5049,87 @@ async function fornExcluir(id){ if(!confirm('Excluir este fornecedor?'))return;
 
 /* ===== Configuração / Permissões (Bloco 2) ===== */
 let CFG={usuarios:[],obras:[]}, NUSER=null;
-const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['solicitacoes','Solicitações'],['oportunidades','Oportunidades'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações']];
+/* ===================== MÓDULO OBRAS — ficha das obras + de-para entre sistemas ===================== */
+let OBRAS_M={tab:'ficha', list:[], is_admin:false, filt:'', fstatus:''};
+function obrasInit(){ if(OBRAS_M.list.length){obrasRender();} else obrasLoad(); }
+async function obrasLoad(){ const w=document.getElementById('obrasWrap'); if(!w)return; w.innerHTML='<div class="dempty">Carregando obras…</div>';
+  try{ const r=await (await fetch('actions/obras.php?lista=1&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    if(r.error){w.innerHTML='<div class="dempty">'+esc(r.error)+'</div>';return;}
+    OBRAS_M.list=r.obras||[]; OBRAS_M.is_admin=!!r.is_admin; obrasRender();
+  }catch(e){w.innerHTML='<div class="dempty">Falha: '+esc(e.message)+'</div>';}
+}
+function obrStatusChip(s){ const c={'Em Andamento':'var(--verde)','Iniciando':'var(--dourado)','Finalizada':'#8a9299'}[s]||'#8a9299'; return s?`<span class="dchip" style="background:${c}">${esc(s)}</span>`:''; }
+function obrCarResumo(o){ const p=[]; if(+o.torres)p.push(o.torres+(+o.torres===1?' torre':' torres')); if(+o.pavimentos)p.push(o.pavimentos+' pav'); if(+o.unidades)p.push(o.unidades+' un'); return p.join(' · '); }
+function obrasRender(){ const w=document.getElementById('obrasWrap'); if(!w)return;
+  const tab=(t,lbl,ic)=>`<button class="btn-ghost" style="padding:7px 14px;border-radius:9px 9px 0 0;${OBRAS_M.tab===t?'background:#fff;border-bottom:2px solid var(--verde);font-weight:700;color:var(--verde-d)':'color:var(--muted)'}" onclick="OBRAS_M.tab='${t}';obrasRender()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">${ic}</span> ${lbl}</button>`;
+  w.innerHTML=`<div style="display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px">${tab('ficha','Ficha das Obras','apartment')}${tab('depara','De-para & Configuração','link')}</div>`+(OBRAS_M.tab==='ficha'?obrasTabFicha():obrasTabDepara());
+}
+function obrasTabFicha(){
+  const qn=opNorm(OBRAS_M.filt||''); const sts=[...new Set(OBRAS_M.list.map(o=>o.status).filter(Boolean))];
+  const rows=OBRAS_M.list.filter(o=>(!qn||opNorm((o.nome||'')+' '+(o.cidade||'')+' '+(o.coligada_nome||'')+' '+(o.comprador_nome||'')+' '+(o.solic_nome||'')).includes(qn))&&(!OBRAS_M.fstatus||o.status===OBRAS_M.fstatus));
+  let h=`<div class="panel"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
+    <div class="search" style="min-width:200px"><span class="material-icons" style="color:var(--muted)">search</span><input placeholder="Buscar obra, cidade, coligada, comprador…" value="${esc(OBRAS_M.filt)}" oninput="OBRAS_M.filt=this.value;obrasRender()"></div>
+    <select onchange="OBRAS_M.fstatus=this.value;obrasRender()" style="font-size:12px;padding:6px"><option value="">Todos status</option>${sts.map(s=>`<option value="${esc(s)}" ${s===OBRAS_M.fstatus?'selected':''}>${esc(s)}</option>`).join('')}</select>
+    <span class="muted" style="font-size:11.5px">${rows.length} de ${OBRAS_M.list.length} obras</span>
+    ${CAN_EDIT?'<button class="btn-prim" style="margin-left:auto;padding:7px 13px" onclick="obrasFichaAbrir(0)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Nova obra</button>':''}
+  </div></div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:10px;margin-top:2px">`;
+  h+=rows.map(o=>{ const car=obrCarResumo(o);
+    return `<div class="panel" style="margin:0;cursor:pointer;padding:0;overflow:hidden" onclick="obrasFichaAbrir(${o.id})">
+      <div style="padding:11px 14px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#f7faf8,#fff)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><b style="font-size:15px">${esc(o.nome)}</b>${obrStatusChip(o.status)}</div>
+        <div class="muted" style="font-size:11.5px;margin-top:2px"><span class="material-icons" style="font-size:12px;vertical-align:-2px">place</span> ${esc(o.cidade||'—')}${o.comprador_nome?' · '+esc(o.comprador_nome):''}</div>
+      </div>
+      <div style="padding:9px 14px">
+        <div style="font-size:12px;color:var(--verde-d);font-weight:600;min-height:16px">${car||'<span class="muted" style="font-weight:400">características a preencher</span>'}</div>
+        <div class="muted" style="font-size:11px;margin-top:6px">${o.coligada_cod?('Coligada '+o.coligada_cod+(o.coligada_nome?' · '+esc(String(o.coligada_nome).slice(0,28)):'')):'<span style="color:var(--pend)">sem coligada — confira o de-para</span>'}${o.solic_nome&&opNorm(o.solic_nome)!==opNorm(o.nome)?' · <span title="nome diferente nas solicitações">≈ '+esc(o.solic_nome)+'</span>':''}</div>
+      </div>
+    </div>`; }).join('')||'<div class="dmini" style="padding:10px">Nenhuma obra ainda. Clique em "Nova obra" ou peça ao assistente pra semear do conector.</div>';
+  return h+'</div>';
+}
+function obrasTabDepara(){
+  let h=`<div class="panel">${cotSecHead('link','De-para entre sistemas','conector ↔ TOTVS/coligada ↔ solicitações ↔ radar','')}
+    <div class="dmini" style="margin-bottom:8px">Casamento automático pelo nome (a razão fantasia do TOTVS traz o codinome, ex.: "PEDRA AZUL - DIAMOND"). Confira; clique na linha p/ ajustar e marcar "conferido".</div>
+    <div style="overflow-x:auto"><table class="mtable"><thead><tr><th style="text-align:left">Obra (conector)</th><th>Coligada</th><th style="text-align:left">Razão social (TOTVS)</th><th>CNPJ</th><th>CODLOC</th><th style="text-align:left">Nome nas solicitações</th><th>OK</th></tr></thead><tbody>`;
+  h+=OBRAS_M.list.map(o=>`<tr style="cursor:pointer" onclick="obrasFichaAbrir(${o.id})">
+    <td style="text-align:left"><b>${esc(o.nome)}</b></td>
+    <td style="text-align:center">${o.coligada_cod?('<b>'+o.coligada_cod+'</b>'):'<span style="color:var(--pend)">?</span>'}</td>
+    <td style="text-align:left;font-size:11px">${esc(String(o.coligada_nome||'').slice(0,40))||'—'}</td>
+    <td style="font-size:11px;white-space:nowrap">${esc(o.cnpj||'—')}</td>
+    <td>${esc(o.solic_obra_cod||'—')}</td>
+    <td style="text-align:left;font-size:11px">${o.solic_nome?esc(o.solic_nome):'<span class="muted">—</span>'}${o.solic_nome&&opNorm(o.solic_nome)!==opNorm(o.nome)?' <span class="dchip" style="background:#fff3e0;color:#a15c00" title="nome diferente do conector">≠</span>':''}</td>
+    <td style="text-align:center">${+o.de_para_ok?'<span class="dchip" style="background:var(--ok)">✓</span>':(CAN_EDIT?`<button class="btn-ghost" style="padding:2px 8px" onclick="event.stopPropagation();obrasReresolver(${o.id})" title="refazer o casamento automático">↻</button>`:'—')}</td>
+  </tr>`).join('');
+  return h+'</tbody></table></div></div>';
+}
+function obrasFichaAbrir(id){
+  const o=id?(OBRAS_M.list.find(x=>x.id===id)||{id:0}):{id:0}; const ed=CAN_EDIT;
+  let ov=document.getElementById('obraOverlay'); if(!ov){ov=document.createElement('div');ov.id='obraOverlay';ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';document.body.appendChild(ov);} ov.onclick=()=>ov.remove();
+  const fld=(lbl,i2,val,tipo,ph)=>`<label style="display:block"><span style="font-size:10px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:var(--muted)">${lbl}</span>${ed?`<input id="${i2}" value="${esc(val==null?'':val)}" ${tipo==='num'?'type="number"':''} placeholder="${esc(ph||'')}" style="width:100%;margin-top:2px;padding:5px 8px;font-size:13px;box-sizing:border-box">`:`<div style="font-size:13.5px;margin-top:2px">${esc(val==null||val===''?'—':val)}</div>`}</label>`;
+  const area=(lbl,i2,val,ph)=>`<label style="display:block"><span style="font-size:10px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:var(--muted)">${lbl}</span>${ed?`<textarea id="${i2}" rows="2" placeholder="${esc(ph||'')}" style="width:100%;margin-top:2px;padding:5px 8px;font-size:13px;font-family:inherit;box-sizing:border-box">${esc(val||'')}</textarea>`:`<div style="font-size:13px;margin-top:2px;white-space:pre-wrap">${esc(val||'—')}</div>`}</label>`;
+  const bloco=(ic,tit,inner)=>`<div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:10px"><div style="display:flex;align-items:center;gap:6px;margin-bottom:9px"><span class="material-icons" style="font-size:17px;color:var(--verde)">${ic}</span><b style="font-size:13.5px">${tit}</b></div>${inner}</div>`;
+  const g=(cols,inner)=>`<div style="display:grid;grid-template-columns:${cols};gap:9px">${inner}</div>`;
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:720px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+      <div>${ed?`<input id="obf_nome" value="${esc(o.nome||'')}" placeholder="Nome da obra" style="font-size:18px;font-weight:800;border:none;border-bottom:1px solid var(--line);padding:2px 0;max-width:340px;width:100%">`:`<b style="font-size:18px">${esc(o.nome||'')}</b>`} ${obrStatusChip(o.status)}</div>
+      <span class="material-icons" onclick="document.getElementById('obraOverlay').remove()" style="cursor:pointer;color:var(--muted)">close</span></div>
+    ${bloco('badge','Identificação',g('1fr 80px',fld('Cidade','obf_cidade',o.cidade)+fld('UF','obf_estado',o.estado))+`<div style="margin-top:9px">${fld('Endereço','obf_endereco',o.endereco)}</div>`+g('1fr 1fr',`<div style="margin-top:9px">${fld('Comprador responsável','obf_comprador_nome',o.comprador_nome)}</div><div style="margin-top:9px">${fld('Status','obf_status',o.status)}</div>`))}
+    ${bloco('link','De-para (sistemas)',g('80px 1fr 130px',fld('Coligada','obf_coligada_cod',o.coligada_cod,'num')+fld('Razão social (TOTVS)','obf_coligada_nome',o.coligada_nome)+fld('CNPJ','obf_cnpj',o.cnpj))+g('1fr 110px 90px',`<div style="margin-top:9px">${fld('Nome nas solicitações','obf_solic_nome',o.solic_nome)}</div><div style="margin-top:9px">${fld('CODLOC','obf_solic_obra_cod',o.solic_obra_cod)}</div><div style="margin-top:9px">${fld('Radar id','obf_radar_obra_id',o.radar_obra_id,'num')}</div>`)+(ed?`<label style="display:flex;align-items:center;gap:6px;margin-top:11px;font-size:12px"><input type="checkbox" id="obf_de_para_ok" ${+o.de_para_ok?'checked':''}> de-para conferido ✓ ${o.id?`<button class="btn-ghost" style="padding:2px 8px;margin-left:6px" onclick="obrasReresolver(${o.id})">↻ re-resolver automático</button>`:''}</label>`:''))}
+    ${bloco('foundation','Características do empreendimento',g('1fr 1fr 1fr 1fr',fld('Torres','obf_torres',o.torres,'num')+fld('Pavimentos','obf_pavimentos',o.pavimentos,'num')+fld('Subsolos','obf_subsolos',o.subsolos,'num')+fld('Unidades','obf_unidades',o.unidades,'num'))+`<div style="margin-top:9px">${area('Tipologias / metragens','obf_tipologias',o.tipologias,'ex.: 2 e 3 dorms · 55–78 m²')}</div>`+g('1fr 1fr',`<div style="margin-top:9px">${fld('Padrão','obf_padrao',o.padrao,'text','alto / médio / econômico')}</div><div></div>`)+`<div style="margin-top:9px">${area('Método construtivo','obf_metodo_construtivo',o.metodo_construtivo,'ex.: alvenaria estrutural, concreto armado…')}</div><div style="margin-top:9px">${area('Itens de áreas comuns','obf_areas_comuns',o.areas_comuns,'ex.: piscina, salão de festas, academia, playground…')}</div>`)}
+    ${bloco('description','Links & observações',g('1fr 1fr',fld('Link do cronograma','obf_link_cronograma',o.link_cronograma)+fld('Pasta de projetos','obf_link_projetos',o.link_projetos))+`<div style="margin-top:9px">${fld('Localização (maps)','obf_link_local',o.link_local)}</div><div style="margin-top:9px">${area('Observações','obf_observacoes',o.observacoes)}</div>`)}
+    ${ed?`<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn-ghost" onclick="document.getElementById('obraOverlay').remove()">Cancelar</button><button class="btn-prim" onclick="obrasSalvar(${o.id||0})"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar ficha</button></div>`:''}
+  </div>`;
+}
+async function obrasSalvar(id){ const v=i=>{const e=document.getElementById(i);return e?(e.type==='checkbox'?(e.checked?1:0):e.value):undefined;};
+  const ficha={id}; ['nome','cidade','estado','status','coligada_cod','coligada_nome','cnpj','solic_nome','solic_obra_cod','radar_obra_id','endereco','comprador_nome','torres','pavimentos','subsolos','unidades','tipologias','metodo_construtivo','areas_comuns','padrao','observacoes','link_cronograma','link_projetos','link_local','de_para_ok'].forEach(k=>{const val=v('obf_'+k);if(val!==undefined)ficha[k]=val;});
+  if(!(ficha.nome||'').trim()){toast('Informe o nome da obra');return;}
+  try{ const r=await (await fetch('actions/obras.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar',me:EU&&EU.bitrix_id,ficha})})).json();
+    if(r.error){toast(r.error);return;} toast('Ficha salva'); const ov=document.getElementById('obraOverlay');if(ov)ov.remove(); obrasLoad();
+  }catch(e){toast('Falha: '+e.message);} }
+async function obrasReresolver(id){ try{ const r=await (await fetch('actions/obras.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'reresolver',me:EU&&EU.bitrix_id,id})})).json();
+  if(r.error){toast(r.error);return;} toast('De-para refeito automaticamente'); const ov=document.getElementById('obraOverlay');if(ov)ov.remove(); obrasLoad();
+  }catch(e){toast('Falha: '+e.message);} }
+const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['solicitacoes','Solicitações'],['obras','Obras'],['oportunidades','Oportunidades'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações']];
 const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',comprador:'Suprimentos',coordenador:'Coordenador',personalizado:'Personalizado'};
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},

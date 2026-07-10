@@ -225,6 +225,18 @@ function db_schema_mysql($pdo) {
         cnpj VARCHAR(24), endereco VARCHAR(255), comprador_id VARCHAR(64), comprador_nome VARCHAR(191), radar_obra_id INT, created_at VARCHAR(40), updated_at VARCHAR(40),
         PRIMARY KEY (id), KEY idx_sobra_col (obra_cod)
     ) $E");
+    // FICHA DAS OBRAS (módulo Obras) — de-para entre sistemas (conector/radar/TOTVS/solicitações) + características curadas
+    $pdo->exec("CREATE TABLE IF NOT EXISTS obra_ficha (
+        id INT NOT NULL AUTO_INCREMENT, slug VARCHAR(191), nome VARCHAR(255) NOT NULL, cidade VARCHAR(120), estado VARCHAR(8), status VARCHAR(60),
+        conector_obra_id VARCHAR(64), radar_obra_id INT,
+        coligada_cod INT, coligada_nome VARCHAR(255), cnpj VARCHAR(24),
+        solic_nome VARCHAR(191), solic_coligada VARCHAR(255), solic_obra_cod VARCHAR(20), endereco VARCHAR(255), comprador_nome VARCHAR(191),
+        torres INT, pavimentos INT, subsolos INT, unidades INT,
+        tipologias TEXT, metodo_construtivo TEXT, areas_comuns TEXT, padrao VARCHAR(120),
+        observacoes TEXT, link_cronograma VARCHAR(500), link_projetos VARCHAR(500), link_local VARCHAR(500),
+        de_para_ok INT DEFAULT 0, created_at VARCHAR(40), updated_at VARCHAR(40), updated_by VARCHAR(64),
+        PRIMARY KEY (id), UNIQUE KEY uq_obraf_slug (slug)
+    ) $E");
     $pdo->exec("CREATE TABLE IF NOT EXISTS solic_overlay (
         id INT NOT NULL AUTO_INCREMENT, coligada VARCHAR(255), numero VARCHAR(40), status VARCHAR(40),
         observacoes TEXT, fornecedores TEXT, orcamento_recebido TINYINT DEFAULT 0, cotacao_id INT,
@@ -462,6 +474,7 @@ function db_schema($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS preco_item (id INTEGER PRIMARY KEY AUTOINCREMENT, tabela_id INTEGER NOT NULL, insumo_id INTEGER, descricao_original TEXT, unidade TEXT, preco REAL, frete_incluso INTEGER DEFAULT 0, observacao TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS solic_obra (id INTEGER PRIMARY KEY AUTOINCREMENT, coligada TEXT, obra_cod TEXT, nome_comercial TEXT, cnpj TEXT, endereco TEXT, comprador_id TEXT, comprador_nome TEXT, radar_obra_id INTEGER, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS solic_overlay (id INTEGER PRIMARY KEY AUTOINCREMENT, coligada TEXT, numero TEXT, status TEXT, observacoes TEXT, fornecedores TEXT, orcamento_recebido INTEGER DEFAULT 0, cotacao_id INTEGER, updated_by TEXT, updated_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS obra_ficha (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT UNIQUE, nome TEXT NOT NULL, cidade TEXT, estado TEXT, status TEXT, conector_obra_id TEXT, radar_obra_id INTEGER, coligada_cod INTEGER, coligada_nome TEXT, cnpj TEXT, solic_nome TEXT, solic_coligada TEXT, solic_obra_cod TEXT, endereco TEXT, comprador_nome TEXT, torres INTEGER, pavimentos INTEGER, subsolos INTEGER, unidades INTEGER, tipologias TEXT, metodo_construtivo TEXT, areas_comuns TEXT, padrao TEXT, observacoes TEXT, link_cronograma TEXT, link_projetos TEXT, link_local TEXT, de_para_ok INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT, updated_by TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS oracle_uso (bitrix_id TEXT NOT NULL, dia TEXT NOT NULL, n INTEGER DEFAULT 0, PRIMARY KEY (bitrix_id, dia))");
     // E-MAIL FASE 4 — enviados/recebidos (espelho do MySQL)
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_email_out (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, cotacao_fornecedor_id INTEGER, fornecedor_id INTEGER, fornecedor_nome TEXT, email TEXT, message_id TEXT, token TEXT, assunto TEXT, enviado_em TEXT)");

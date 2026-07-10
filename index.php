@@ -4305,7 +4305,7 @@ async function cotPropIALer(){ const s=COT.propIA; if(!s||!s.files.length||s.bus
     const rr=await (await fetch('actions/cotacao_ia.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'preencher',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,anexo_ids:ids})})).json();
     if(rr.error){ toast(rr.error); s.busy=false; cotPropIARender(); return; }
     document.removeEventListener('paste',cotPropIAPaste); COT.propIA=null;
-    cotPropIAForn(rr.fornecedor||{}, rr.draft||{}, ids, rr);
+    cotPropIAForn((rr.draft&&rr.draft.fornecedor)||rr.fornecedor||{}, rr.draft||{}, ids, rr);   // o fornecedor vem DENTRO do draft
   }catch(e){ toast('Falha: '+e.message); s.busy=false; cotPropIARender(); } }
 const _dig=s=>String(s||'').replace(/\D/g,'');
 async function cotPropIAForn(fornData, draft, anexoIds, meta){

@@ -74,9 +74,12 @@ function inbox_hdr_decode($raw) {
 
 function inbox_to_utf8($s, $charset) {
     $charset = strtolower(trim((string)$charset));
-    if ($s === '' || in_array($charset, ['utf-8', 'us-ascii', 'ascii', ''], true)) return $s;
-    if (function_exists('iconv')) { $r = @iconv($charset, 'UTF-8//TRANSLIT', $s); if ($r !== false) return $r; }
-    $r = @imap_utf8($s);                                            // cobre iso-8859-1/latin1 (o caso BR)
+    if ($s === '' || in_array($charset, ['utf-8', 'utf8', 'us-ascii', 'ascii', ''], true)) return $s;
+    // CRÍTICO: se já é UTF-8 válido, o charset declarado está errado (Gmail às vezes rotula iso-8859-1 mas manda UTF-8).
+    // Converter iso-8859-1->UTF-8 aqui DUPLICA a codificação (ç -> Ã§). Então: já-UTF-8 => devolve como está.
+    if (preg_match('//u', $s)) return $s;
+    if (function_exists('iconv')) { $r = @iconv($charset, 'UTF-8//TRANSLIT', $s); if ($r !== false && $r !== '') return $r; }
+    $r = @imap_utf8($s);                                            // cobre iso-8859-1/latin1 (o caso BR) quando NÃO é UTF-8
     return ($r !== false && $r !== '') ? $r : $s;
 }
 

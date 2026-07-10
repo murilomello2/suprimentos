@@ -17,7 +17,12 @@ try {
         echo json_encode($p ? ['ok' => true, 'pedido' => $p] : ['error' => 'Pedido não encontrado na base do TOTVS.'], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    echo json_encode(['error' => 'informe o número do pedido'], JSON_UNESCAPED_UNICODE);
+    if (isset($_GET['solicitacao'])) {   // pedidos que nasceram de uma solicitação (vínculo exato SC→PC)
+        $peds = pedidos_por_solicitacao($_GET['solicitacao'], $_GET['coligada'] ?? null);
+        echo json_encode(['ok' => true, 'pedidos' => $peds], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    echo json_encode(['error' => 'informe o número do pedido ou da solicitação'], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     http_response_code(500);
     echo json_encode(['error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);

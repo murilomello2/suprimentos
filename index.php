@@ -3847,7 +3847,7 @@ function cotRenderDetalhe(){
       ${CAN_EDIT?`<button class="btn-ghost" style="padding:4px 11px" onclick="cotNumerosSalvar()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">save</span> Salvar nºs</button>`:''}
       ${c.num_pedido?`<button class="btn-ghost" style="padding:4px 11px;color:var(--verde-d)" onclick="cotPedidoVer('${esc(String(c.num_pedido)).replace(/'/g,'')}')" title="ver o pedido no TOTVS: fornecedor, itens, preços e total"><span class="material-icons" style="font-size:14px;vertical-align:-3px">receipt_long</span> Ver pedido</button>`:''}
       ${!c.servico_id?`<span class="dchip" style="background:#8a9299;font-size:10px" title="cotação criada do zero, sem vínculo ao radar de aquisições">avulsa</span>`:'<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="cotação vinculada a um item do radar">do radar</span>'}
-    </div></div>`;
+    </div><div id="cotPedDetect" style="margin-top:8px"></div></div>`;
   html+=cotItensPanel(d);
   // ---- Concorrência (fornecedores convidados) + anexos POR fornecedor (anexar antes de cadastrar proposta) ----
   const conv=d.convidados||[], anx=d.anexos||[], meB=(EU&&EU.bitrix_id)||'';
@@ -3896,8 +3896,23 @@ function cotRenderDetalhe(){
     html+='</div></div>';
   }
   w.innerHTML=html;
+  if(c.num_solicitacao) cotDetectarPedido(c);   // nasceu de solicitação → detecta/autopreenche o PC pelo vínculo exato (solic_numeros)
 }
-// ---- MAPA EM UMA PÁGINA: resumo compacto e imprimível (obra/data/verba + comparativo de preços + equalização) ----
+// detecta os pedidos de compra que nasceram desta solicitação (SC→PC exato) e autopreenche o nº do PC
+async function cotDetectarPedido(c){
+  const host=document.getElementById('cotPedDetect'); if(!host||!c||!c.num_solicitacao)return;
+  try{ const r=await (await fetch('actions/pedidos.php?solicitacao='+encodeURIComponent(c.num_solicitacao)+'&coligada='+encodeURIComponent(c.solic_coligada||'')+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    const peds=(r&&r.pedidos)||[]; if(!peds.length)return;
+    const nums=peds.map(p=>p.pedido_numero);
+    // autopreenche o campo PC se ainda estiver vazio (vínculo exato pela solicitação)
+    if(CAN_EDIT && !(c.num_pedido&&String(c.num_pedido).trim())){
+      const joined=nums.join(', '); c.num_pedido=joined; const inp=document.getElementById('cotDetPC'); if(inp)inp.value=joined;
+      try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'numeros_salvar',me:EU&&EU.bitrix_id,cotacao_id:c.id,num_solicitacao:c.num_solicitacao,num_pedido:joined})}); }catch(e){}
+      toast(nums.length>1?(nums.length+' pedidos vinculados pela solicitação'):('Pedido '+nums[0].replace(/^0+/,'')+' vinculado pela solicitação'));
+    }
+    host.innerHTML='<span class="muted" style="font-size:11px;font-weight:700">Pedido(s) desta solicitação:</span> '+peds.map(p=>`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-weight:700;cursor:pointer;margin-right:5px" onclick="cotPedidoVer('${esc(p.pedido_numero)}')" title="${p.n_itens} item(ns) desta solicitação · ver detalhes">PC ${esc(String(p.pedido_numero).replace(/^0+/,''))}${p.status?' · '+esc(p.status):''} <span class="material-icons" style="font-size:12px;vertical-align:-2px">visibility</span></span>`).join('');
+  }catch(e){}
+}
 function upCard(label,val,sub,color){ return `<div style="border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:#fff">
   <div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#889;font-weight:700">${esc(label)}</div>
   <div style="font-size:17px;font-weight:800;color:${color};margin-top:3px">${val}</div>
@@ -4116,6 +4131,7 @@ async function cotNumerosSalvar(){ const c=COT.cur.cotacao;
     if(r&&r.error){toast(r.error);return;} c.num_solicitacao=val('cotDetSC'); c.num_pedido=val('cotDetPC'); toast('Números salvos'); }catch(e){toast('Falha: '+e.message);} }
 /* "Fotinha" do pedido de compra (dados do TOTVS via Supabase): fornecedor(es), itens, preços unit e total */
 async function cotPedidoVer(numero){
+  numero=String(numero||'').split(',')[0].trim(); if(!numero){toast('Sem nº de pedido');return;}
   let ov=document.getElementById('pedOverlay'); if(!ov){ ov=document.createElement('div'); ov.id='pedOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }
   ov.onclick=()=>ov.remove();
   const shell=b=>`<div style="background:#fff;border-radius:14px;padding:18px;max-width:740px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">${b}</div>`;

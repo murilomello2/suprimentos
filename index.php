@@ -3879,6 +3879,7 @@ function cotRenderDetalhe(){
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span class="dgm" style="background:${cf.respondeu?'var(--ok)':'#cfd6da'}"></span>
         <span style="flex:1;min-width:130px;font-weight:600">${esc(cf.fornecedor_nome)}${cf.categoria?` <span class="muted" style="font-size:11px;font-weight:400">· ${esc(cf.categoria)}</span>`:''}</span>
+        ${cf.enviado_em?`<span class="dchip" style="background:var(--verde-d);color:#fff" title="e-mail enviado em ${D(String(cf.enviado_em).slice(0,10))}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">outbox</span> enviado</span>`:''}
         <span class="dchip" style="background:${cf.respondeu?'var(--ok)':'#8a9299'}">${cf.respondeu?('respondeu · '+BRL(cf.proposta_total)):'aguardando'}</span>
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotAnexarAbrir(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="anexar PDF, Excel ou print — arraste, cole (Ctrl+V) ou clique"><span class="material-icons" style="font-size:14px;vertical-align:-2px">attach_file</span> anexar${ax.length?` (${ax.length})`:''}</button>`:''}
         ${CAN_EDIT&&ax.length?`<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotIAPreencher(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="a IA lê os anexos e preenche a proposta (rascunho para você conferir)"><span class="material-icons" style="font-size:14px;vertical-align:-2px">auto_awesome</span> preencher com IA</button>`:''}
@@ -4286,7 +4287,8 @@ async function cotEmailAbrir(cid){
   ov.onclick=()=>ov.remove();
   const shell=b=>`<div style="background:#fff;border-radius:14px;padding:18px;max-width:720px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">${b}</div>`;
   ov.innerHTML=shell('<div class="dempty">Montando o e-mail…</div>');
-  try{ const g=await (await fetch('actions/email.php?compor='+cid+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+  try{ const meq=encodeURIComponent((EU&&EU.bitrix_id)||'');
+    const [g,cfg]=await Promise.all([ (await fetch('actions/email.php?compor='+cid+'&me='+meq)).json(), (await fetch('actions/email.php?config=1&me='+meq)).json() ]);
     const close=`<span class="material-icons" onclick="document.getElementById('emailOverlay').remove()" style="cursor:pointer;color:var(--muted)">close</span>`;
     if(g.error){ ov.innerHTML=shell(`<div style="display:flex;justify-content:space-between"><b>E-mail de cotação</b>${close}</div><div class="empty" style="margin-top:10px">${esc(g.error)}</div>`); return; }
     const semEmail=(g.destinatarios||[]).filter(d=>!d.tem_email).length;
@@ -4297,12 +4299,39 @@ async function cotEmailAbrir(cid){
       <div style="margin:5px 0 10px">${dchips}</div>
       ${cotFld('Assunto','<input id="emAssunto" value="'+esc(g.assunto)+'" style="width:100%">')}
       ${cotFld('Corpo do e-mail (edite à vontade antes de disparar)','<textarea id="emCorpo" rows="14" style="width:100%;font-size:12.5px;font-family:inherit">'+esc(g.corpo)+'</textarea>','margin-top:8px')}
-      ${g.tem_carta?'<div class="dmini" style="margin-top:6px">📎 A carta de cotação vinculada entra como anexo.</div>':''}
-      <div style="background:#fbf7e8;border:1px solid #eadfb0;border-radius:8px;padding:8px 11px;margin-top:12px;font-size:11.5px;color:#6b5a1e"><b>Disparo:</b> ${g.configurada?'a conta está configurada.':'ainda falta configurar a senha do e-mail no servidor (admin).'} O envio real (individual por fornecedor, via ${'Bitrix/SMTP'}) entra na próxima fase — com um <b>envio-teste pra você</b> antes de sair pros fornecedores.</div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn-ghost" onclick="document.getElementById('emailOverlay').remove()">Fechar</button>
-        <button class="btn-prim" disabled style="opacity:.5" title="disponível na próxima fase, após configurar a conta"><span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Disparar (em breve)</button></div>`);
+      ${g.tem_carta?'<div class="dmini" style="margin-top:6px">📎 (a carta em PDF entra como anexo assim que a geração de PDF estiver ligada)</div>':''}
+      ${cfg.is_admin?`<details style="margin-top:12px;border:1px solid var(--line);border-radius:10px;padding:8px 10px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)"><span class="material-icons" style="font-size:14px;vertical-align:-3px">settings</span> Conta de envio (admin) — ${cfg.configurada?'<b style="color:var(--ok)">configurada ✓</b>':'<b style="color:var(--pend)">falta a senha</b>'}</summary>
+        <div style="display:grid;grid-template-columns:1fr 90px;gap:8px;margin-top:8px">${cotFld('Servidor SMTP','<input id="emHost" value="'+esc(cfg.host||'')+'" style="width:100%">')}${cotFld('Porta','<input id="emPort" type="number" value="'+esc(cfg.port||465)+'" style="width:100%">')}</div>
+        <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-top:6px">${cotFld('Usuário (e-mail)','<input id="emUser" value="'+esc(cfg.user||'')+'" style="width:100%">')}${cotFld('Senha (fica só no servidor; vazio mantém a atual)','<input id="emSenha" type="password" autocomplete="new-password" placeholder="••••••••" style="width:100%">')}</div>
+        <div style="margin-top:8px"><button class="btn-prim" style="padding:5px 12px" onclick="cotEmailConfigSalvar()">Salvar conta</button></div></div></details>`:''}
+      <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap;margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+        <div style="flex:1;min-width:200px">${cotFld('Enviar um TESTE para (só você recebe)','<input id="emTeste" value="'+esc(EU&&EU.email||'')+'" placeholder="seu@email.com" style="width:100%">')}</div>
+        <button class="btn-ghost" style="padding:7px 13px" onclick="cotEmailTeste()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">outbox</span> Enviar teste</button>
+        <button class="btn-prim" style="padding:7px 13px" onclick="cotEmailDisparar()" ${g.configurada?'':'disabled style=\"opacity:.5\" title=\"configure a conta primeiro\"'}><span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Disparar p/ fornecedores</button>
+      </div>
+      <div class="dmini" style="margin-top:6px">Cada fornecedor recebe individualmente (sem cópia). Faça o teste pra você antes de disparar.</div>`);
   }catch(e){ ov.innerHTML=shell('<div class="empty">Falha ao montar o e-mail.</div>'); }
 }
+function cotEmailBody(){ return {cotacao_id:(COT.cur&&COT.cur.cotacao&&COT.cur.cotacao.id)||0, assunto:(document.getElementById('emAssunto')||{}).value||'', corpo:(document.getElementById('emCorpo')||{}).value||''}; }
+async function cotEmailConfigSalvar(){ const g=id=>((document.getElementById(id)||{}).value||'');
+  try{ const r=await (await fetch('actions/email.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'config',me:EU&&EU.bitrix_id,host:g('emHost'),port:Number(g('emPort'))||465,user:g('emUser'),senha:g('emSenha')})})).json();
+    if(r.error){toast(r.error);return;} toast('Conta salva'); cotEmailAbrir((COT.cur&&COT.cur.cotacao&&COT.cur.cotacao.id)); }catch(e){toast('Falha: '+e.message);} }
+async function cotEmailTeste(){ const to=((document.getElementById('emTeste')||{}).value||'').trim(); if(!to){toast('Informe um e-mail para o teste');return;}
+  const b=cotEmailBody(); toast('Enviando teste…');
+  try{ const r=await (await fetch('actions/email.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({acao:'enviar',me:EU&&EU.bitrix_id,teste:to},b))})).json();
+    if(r.error){toast(r.error);return;} toast(r.msg||'Teste enviado'); }catch(e){toast('Falha: '+e.message);} }
+async function cotEmailDisparar(){ const b=cotEmailBody();
+  const conv=(COT.cur&&COT.cur.convidados)||[]; const comEmail=conv.filter(c=>c.email&&String(c.email).trim()).length;
+  if(!comEmail){ toast('Nenhum fornecedor com e-mail preenchido'); return; }
+  if(!confirm('Disparar este e-mail INDIVIDUALMENTE para '+comEmail+' fornecedor(es)?\nCada um recebe a sua própria cópia. Isso envia de verdade.')) return;
+  toast('Disparando…');
+  try{ const r=await (await fetch('actions/email.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({acao:'enviar',me:EU&&EU.bitrix_id},b))})).json();
+    if(r.error){toast(r.error);return;}
+    const ov=document.getElementById('emailOverlay'); if(ov)ov.remove();
+    toast(r.enviados+' enviado(s)'+((r.falhas&&r.falhas.length)?' · '+r.falhas.length+' falha(s)':''));
+    if(r.falhas&&r.falhas.length) setTimeout(()=>alert('Falhas:\n'+r.falhas.join('\n')),300);
+    cotOpen(b.cotacao_id);
+  }catch(e){toast('Falha: '+e.message);} }
 /* ===== ITEM B: cadastrar proposta a partir de um PDF/print SEM escolher fornecedor — IA lê, IDENTIFICA o fornecedor e preenche ===== */
 function cotPropIAAbrir(){ COT.propIA={files:[],busy:false}; let ov=document.getElementById('propiaOverlay');
   if(!ov){ ov=document.createElement('div'); ov.id='propiaOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }

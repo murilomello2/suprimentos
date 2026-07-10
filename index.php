@@ -50,6 +50,8 @@
   .kpi .v{font-size:21px;font-weight:800;color:var(--verde-d)}
   .kpi .v.alert{color:var(--pend)} .kpi .v.gold{color:var(--dourado)}
   .kpi .l{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .kpi-fill{background:#5c7b8a;border-color:#5c7b8a;box-shadow:0 1px 3px rgba(40,60,70,.18)}
+  .kpi-fill .v{color:#fff} .kpi-fill .l{color:#d9e6ec}
   .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;margin:12px 26px}
   .panel h3{font-size:13px;margin:0;padding:13px 16px 0;color:var(--verde-d)}
   .panel .hint{font-size:12px;color:var(--muted);padding:2px 16px 0}
@@ -3454,6 +3456,16 @@ function cotInboxSweepAuto(){ const now=Date.now(); if(now-INBOX_SWEEP_TS<600000
     if(r&&r.novas){ toast('📨 '+r.novas+' nova(s) resposta(s) na caixa'+(r.casadas?' · '+r.casadas+' casada(s)':'')); if(COT.cur&&COT.cur.cotacao&&COT.mode==='detalhe')cotOpen(COT.cur.cotacao.id); }
   }).catch(()=>{});
 }
+// botão manual da LISTA de cotações (enquanto o cron horário não roda) — varre a caixa e recarrega os contadores
+async function cotBuscarRespostasLista(btn){ if(btn)btn.disabled=true; toast('Buscando respostas na caixa…');
+  try{ const r=await (await fetch('actions/inbox.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'varrer',me:EU&&EU.bitrix_id})})).json();
+    INBOX_SWEEP_TS=Date.now();
+    if(r.error){toast(r.error);}
+    else if(r.throttled){toast(r.msg||'Verifiquei agora há pouco.');}
+    else{ const p=[]; if(r.novas)p.push(r.novas+' nova(s)'); if(r.casadas)p.push(r.casadas+' casada(s)'); if(r.cotacoes)p.push(r.cotacoes+' cotação'); if(r.duvidas)p.push(r.duvidas+' dúvida(s)'); toast(p.length?('Caixa: '+p.join(' · ')):'Nada novo'); if(r.avisos&&r.avisos.length)setTimeout(()=>toast(r.avisos[0]),1500); }
+    cotLoad();   // recarrega a lista → atualiza os contadores 📨 por cotação (e o total)
+  }catch(e){toast('Falha: '+e.message);}
+}
 function cotRender(){
   if(COT.mode==='novo') return cotRenderNovo();
   if(COT.mode==='detalhe') return cotRenderDetalhe();
@@ -3461,6 +3473,7 @@ function cotRender(){
   const w=document.getElementById('cotwrap');
   COT.filt=COT.filt||{q:'',categoria:'',status:''}; COT.sort=COT.sort||{col:'created_at',dir:-1};
   const all=COT.list||[];
+  const inboxNovoTotal=all.reduce((s,c)=>s+(+c.n_inbound_novo||0),0);   // e-mails de fornecedor ainda não processados (global)
   const cats=[...new Set(all.map(c=>c.categoria).filter(Boolean))].sort();
   const sts=[...new Set(all.map(c=>c.status).filter(Boolean))];
   // filtro que não existe mais nesta obra → limpa (evita lista vazia enganosa com o dropdown mostrando "Todas")
@@ -3485,10 +3498,14 @@ function cotRender(){
      <select onchange="COT.filt.categoria=this.value;cotRender()" style="font-size:12px;padding:6px"><option value="">Todas categorias</option>${cats.map(c=>`<option value="${esc(c)}" ${c===COT.filt.categoria?'selected':''}>${esc(c)}</option>`).join('')}</select>
      <select onchange="COT.filt.status=this.value;cotRender()" style="font-size:12px;padding:6px"><option value="">Todos status</option>${sts.map(s=>`<option value="${esc(s)}" ${s===COT.filt.status?'selected':''}>${esc(cotStLabel(s))}</option>`).join('')}</select>
      <span class="muted" style="font-size:11.5px">${rows.length} de ${all.length}</span>
-     ${CAN_EDIT?'<button class="btn-prim" style="margin-left:auto;padding:7px 14px" onclick="cotNovo()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">add</span> Nova cotação</button>':''}
+     <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+       ${inboxNovoTotal?`<span class="dchip" style="background:var(--pend);color:#fff" title="e-mails de fornecedores ainda não processados — clique em Buscar respostas">📨 ${inboxNovoTotal} não processada(s)</span>`:''}
+       ${CAN_EDIT?`<button class="btn-ghost" style="padding:7px 12px" onclick="cotBuscarRespostasLista(this)" title="ler a caixa suprimentos@ agora (enquanto o cron de hora em hora não roda)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mark_email_unread</span> Buscar respostas</button>`:''}
+       ${CAN_EDIT?`<button class="btn-prim" style="padding:7px 14px" onclick="cotNovo()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">add</span> Nova cotação</button>`:''}
+     </span>
    </div></div><div class="wrap"><table><thead><tr>${th('Cotação','titulo')}${th('Obra','obra_nome')}${th('Categoria','categoria')}<th>Tipo</th><th title="Nº da solicitação de compra / nº do pedido de compra">SC / Pedido</th>${th('Itens','n_itens','style="text-align:center"')}${th('Propostas','n_propostas','style="text-align:center" title="recebidas / convidados"')}${th('Melhor oferta','melhor_oferta','style="text-align:right"')}${th('Criada em','created_at')}${th('Status','status')}<th></th></tr></thead><tbody>`;
   for(const c of rows){
-    html+=`<tr style="cursor:pointer" onclick="cotOpen(${c.id})"><td><b>${esc(c.titulo)}</b></td><td>${esc(c.obra_nome||'—')}</td><td class="muted">${esc(c.categoria||'')}</td><td class="muted">${esc(c.tipo_servico||'')}</td>
+    html+=`<tr style="cursor:pointer" onclick="cotOpen(${c.id})"><td><b>${esc(c.titulo)}</b>${(+c.n_inbound_novo)?` <span class="dchip" style="background:var(--pend);color:#fff" title="${c.n_inbound_novo} e-mail(s) de fornecedor não processado(s) nesta cotação">📨 ${c.n_inbound_novo}</span>`:''}</td><td>${esc(c.obra_nome||'—')}</td><td class="muted">${esc(c.categoria||'')}</td><td class="muted">${esc(c.tipo_servico||'')}</td>
       <td class="muted" style="font-size:11px;white-space:nowrap;line-height:1.35">${c.num_solicitacao?('SC '+esc(c.num_solicitacao)):''}${c.num_solicitacao&&c.num_pedido?'<br>':''}${c.num_pedido?('<b style="color:var(--verde-d)">PC '+esc(c.num_pedido)+'</b>'):''}${!c.num_solicitacao&&!c.num_pedido?'—':''}</td>
       <td style="text-align:center">${c.n_itens}</td><td style="text-align:center" title="${c.n_propostas} recebida(s) de ${c.n_convidados||0} convidado(s)"><b>${c.n_propostas}</b><span class="muted">/${c.n_convidados||0}</span></td><td style="text-align:right">${c.melhor_oferta?BRL(c.melhor_oferta):'—'}</td><td class="muted" style="font-size:11.5px;white-space:nowrap">${cotFmtDT(c.created_at)}</td><td>${cotStChip(c.status)}</td>
       <td><span class="material-icons" style="color:var(--muted)">chevron_right</span></td></tr>`;
@@ -3848,6 +3865,10 @@ async function cotExcluir(){ const c=COT.cur.cotacao; if(!confirm('Excluir a cot
 function cotSecHead(icon,title,sub,actions){ return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:11px">
   <div style="display:flex;align-items:center;gap:8px;min-width:0"><span class="material-icons" style="font-size:20px;color:var(--verde)">${icon}</span><b style="font-size:15.5px;letter-spacing:.2px">${title}</b>${sub?`<span class="muted" style="font-size:11.5px;font-weight:400">${sub}</span>`:''}</div>
   ${actions?`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${actions}</div>`:''}</div>`; }
+/* Seções recolhíveis (o Murilo tem ~40 fornecedores) — estado por-cotação em localStorage; recolhido mostra só um resuminho */
+function cotColapsado(key){ try{ return localStorage.getItem('cotcol_'+key)==='1'; }catch(e){ return false; } }
+function cotToggleSec(key){ try{ localStorage.setItem('cotcol_'+key, cotColapsado(key)?'0':'1'); }catch(e){} cotRenderDetalhe(); }
+function cotChevron(key){ const col=cotColapsado(key); return `<span class="material-icons" style="font-size:20px;cursor:pointer;color:var(--muted)" onclick="cotToggleSec('${key}')" title="${col?'expandir':'recolher'}">${col?'unfold_more':'unfold_less'}</span>`; }
 function cotRenderDetalhe(){
   const d=COT.cur,c=d.cotacao,itens=d.itens||[],props=d.propostas||[],m=d.mapa||{},best=m.melhor_por_item||{},w=document.getElementById('cotwrap');
   const podeGerir=!!(IS_ADMIN||CAN_EDIT||(c.criado_por&&EU&&String(c.criado_por)===String(EU.bitrix_id)));   // admin, edita a obra, ou criador
@@ -3864,10 +3885,10 @@ function cotRenderDetalhe(){
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotFinalizar()">${c.status==='finalizada'?'Reabrir':'Finalizar'}</button>`:''}
         ${podeGerir?`<button class="btn-ghost" style="padding:6px 12px;color:var(--pend)" onclick="cotExcluir()" title="Excluir esta cotação (admin ou quem criou)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">delete</span> Excluir</button>`:''}
       </span></div>
-    <div class="kpis" style="padding:10px 0 0">
-      <div class="kpi"><div class="v">${props.length}</div><div class="l">propostas recebidas</div></div>
-      <div class="kpi"><div class="v gold">${m.melhor_oferta?BRL(m.melhor_oferta):'—'}</div><div class="l">melhor fornecedor único${m.fornecedor_destaque?' · '+esc(m.fornecedor_destaque):''}</div></div>
-      <div class="kpi"><div class="v" style="color:var(--ok)">${m.melhor_total?BRL(m.melhor_total):'—'}</div><div class="l">melhor compra (menor por item)</div></div>
+    <div class="kpis" style="padding:12px 0 0">
+      <div class="kpi kpi-fill"><div class="v">${props.length}/${(d.convidados||[]).length}</div><div class="l">propostas recebidas</div></div>
+      <div class="kpi kpi-fill"><div class="v">${m.melhor_oferta?BRL(m.melhor_oferta):'—'}</div><div class="l">melhor fornecedor único${m.fornecedor_destaque?' · '+esc(m.fornecedor_destaque):''}</div></div>
+      <div class="kpi kpi-fill"><div class="v">${m.melhor_total?BRL(m.melhor_total):'—'}</div><div class="l">melhor compra (menor por item)</div></div>
       <div class="kpi"><div class="v">${c.verba?BRL(c.verba):'—'} ${cotVerbaInfoBtn(c)} ${CAN_EDIT?`<span class="material-icons" onclick="cotVerbaEditar()" title="editar / puxar a verba" style="font-size:14px;cursor:pointer;color:var(--muted);vertical-align:-2px">edit</span>`:''}</div><div class="l">verba prevista${c.verba_origem?' · '+esc({curada:'curada ✓',auto:'auto 🤖',definida:'definida'}[c.verba_origem]||c.verba_origem):''}</div></div>
     </div>
     <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:10px;padding-top:9px;border-top:1px solid var(--line)">
@@ -3883,7 +3904,10 @@ function cotRenderDetalhe(){
   const anxNorm=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
   const anexosDoForn=cf=>anx.filter(a=>((a.fornecedor_id&&cf.fornecedor_id&&String(a.fornecedor_id)===String(cf.fornecedor_id))||(a.fornecedor_nome&&anxNorm(a.fornecedor_nome)===anxNorm(cf.fornecedor_nome))));
   const anexoChip=a=>`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-weight:600;display:inline-flex;align-items:center;gap:4px;max-width:190px"><span class="material-icons" style="font-size:13px">${cotAnexoIcon(a.mime,a.nome)}</span><a href="actions/cotacao_anexo.php?download=${a.id}&me=${encodeURIComponent(meB)}" target="_blank" rel="noopener" style="color:var(--verde-d);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(a.nome)}">${esc(a.nome)}</a>${CAN_EDIT?` <span onclick="cotDelAnexo(${a.id})" style="cursor:pointer;color:var(--pend)" title="excluir anexo">×</span>`:''}</span>`;
-  html+=`<div class="panel" style="margin-bottom:10px">${cotSecHead('groups','Concorrência','fornecedores convidados',(CAN_EDIT?'<button class="btn-ghost" style="padding:3px 10px" onclick="cotInboxBuscar()" title="ler as respostas dos fornecedores na caixa suprimentos@ (IMAP)"><span class="material-icons" style="font-size:14px;vertical-align:-3px">mark_email_unread</span> Buscar respostas</button> ':'')+'<span class="dchip" style="background:'+(conv.length&&conv.every(x=>x.respondeu)?'var(--ok)':'var(--dourado)')+'">'+conv.filter(x=>x.respondeu).length+' de '+conv.length+' responderam</span>')}`;
+  const respN=conv.filter(x=>x.respondeu||x.inbound_em).length, enviadoN=conv.filter(x=>x.enviado_em).length, concCol=cotColapsado('conc');
+  html+=`<div class="panel" style="margin-bottom:10px">${cotSecHead('groups','Concorrência','fornecedores convidados',(CAN_EDIT?'<button class="btn-ghost" style="padding:3px 10px" onclick="cotInboxBuscar()" title="ler as respostas dos fornecedores na caixa suprimentos@ (IMAP)"><span class="material-icons" style="font-size:14px;vertical-align:-3px">mark_email_unread</span> Buscar respostas</button> ':'')+'<span class="dchip" style="background:'+(conv.length&&conv.every(x=>x.respondeu)?'var(--ok)':'var(--dourado)')+'">'+conv.filter(x=>x.respondeu).length+' de '+conv.length+' responderam</span> '+cotChevron('conc'))}`;
+  if(concCol){ html+=`<div style="font-size:12.5px;color:var(--muted)"><b>${conv.length}</b> fornecedor(es) · <b style="color:var(--verde-d)">${respN}</b> responderam · ${enviadoN} com e-mail enviado${(conv.length-respN)>0?` · ${conv.length-respN} aguardando`:''}</div></div>`; }
+  else { html+=(conv.length?'':'');
   if(conv.length) html+='<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">'+conv.map((cf,ci)=>{ const ax=anexosDoForn(cf);
     return `<div style="border:1px solid var(--line);border-radius:10px;padding:9px 11px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -3903,7 +3927,7 @@ function cotRenderDetalhe(){
     </div>`; }).join('')+'</div>';
   else html+='<div class="dmini" style="margin-top:6px">Nenhum fornecedor convidado ainda — convide abaixo.</div>';
   if(CAN_EDIT) html+=`<div style="margin-top:10px"><button class="btn-ghost" style="padding:5px 12px" onclick="cotFornPickerOpen('convite')"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">group_add</span> Convidar fornecedores</button></div>`;
-  html+='</div>';
+  html+='</div>'; }
   html+='<div id="cotInboxPanel"></div>';   // Fase 4: respostas recebidas por e-mail (preenchido async por cotInboxLoad)
   html+=cotEqualizaPanel(d);
   if(!props.length){ html+='<div class="panel"><div class="empty">Nenhuma proposta ainda. Clique em "Cadastrar proposta" ou "Lançar proposta" de um convidado para montar o mapa.</div></div>'; }
@@ -3965,29 +3989,45 @@ async function cotInboxLoad(cid){
     if((((COT.cur||{}).cotacao||{}).id)!=cid) return;   // o usuário já trocou de cotação — não sobrescreve o painel/estado da atual
     const its=(r&&r.itens)||[]; if(!its.length){ host.innerHTML=''; return; }
     COT.inbox=its; const meB=(EU&&EU.bitrix_id)||'';
+    const novos=its.filter(m=>m.status==='novo').length, col=cotColapsado('inbox');
+    const head=cotSecHead('inbox','Respostas por e-mail','a IA leu a caixa e classificou — valide antes de usar',(novos?`<span class="dchip" style="background:var(--pend);color:#fff">${novos} não processada(s)</span> `:'')+cotChevron('inbox'));
+    if(col){ host.innerHTML=`<div class="panel" style="margin-bottom:10px">${head}<div style="font-size:12.5px;color:var(--muted)"><b>${its.length}</b> e-mail(s)${novos?` · <b style="color:var(--pend)">${novos}</b> não processada(s) — expanda p/ ver e incluir no mapa`:' · todas tratadas'}</div></div>`; return; }
     const tipoChip=t=>t==='cotacao'?'<span class="dchip" style="background:#1f7a44;color:#fff">COTAÇÃO</span>':(t==='duvida'?'<span class="dchip" style="background:var(--pend);color:#fff">DÚVIDA</span>':(t==='fora_de_escopo'?'<span class="dchip" style="background:#8a9299;color:#fff">FORA DE ESCOPO</span>':'<span class="dchip" style="background:#5b6b7a;color:#fff">'+esc(String(t||'?').toUpperCase())+'</span>'));
-    const rows=its.map((m,i)=>{ const anx=String(m.anexos_ids||'').split(',').filter(Boolean); const lido=(m.status==='lido'||m.status==='convertido'||m.status==='ignorado');
-      return `<div style="border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#fff;${lido?'opacity:.6;':''}">
+    // 1 e-mail = 1 card; AGRUPADOS por fornecedor (sequência), mais recente primeiro
+    const rowOf=(m,i)=>{ const anx=String(m.anexos_ids||'').split(',').filter(Boolean); const done=(m.status==='lido'||m.status==='convertido'||m.status==='ignorado');
+      return `<div style="${done?'opacity:.6;':''}">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           ${tipoChip(m.tipo)}
-          <span style="flex:1;min-width:140px;font-weight:600">${esc(m.fornecedor_nome||m.from_nome||m.from_email||'—')}</span>
-          <span class="muted" style="font-size:11px">${esc(m.from_email||'')}${m.data_email?' · '+D(String(m.data_email).slice(0,10)):''}</span>
-          ${m.match_metodo==='heuristica'?`<span class="dchip" style="background:#fff3e0;color:#a15c00" title="vínculo deduzido por remetente/assunto — confira">vínculo ${esc(m.match_confianca||'')}</span>`:''}
+          <span class="muted" style="font-size:11px;flex:1;min-width:80px">${m.data_email?D(String(m.data_email).slice(0,10)):''}${m.match_metodo==='heuristica'?' · vínculo '+esc(m.match_confianca||''):''}</span>
           ${m.tem_anexo?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d)"><span class="material-icons" style="font-size:11px;vertical-align:-2px">attach_file</span> ${anx.length||1}</span>`:''}
+          ${done?`<span class="dchip" style="background:#8a9299;color:#fff">✓ ${esc(m.status)}</span>`:''}
         </div>
-        ${m.resumo?`<div style="font-size:12.5px;margin-top:5px">${esc(m.resumo)}</div>`:''}
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">
-          ${m.tem_rascunho&&CAN_EDIT?`<button class="btn-prim" style="padding:3px 11px" onclick="cotInboxUsarRascunho(${i})" title="abre a proposta pré-preenchida pela IA (rascunho — confira e salve)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">auto_awesome</span> Usar rascunho</button>`:''}
+        ${m.resumo?`<div style="font-size:12.5px;margin-top:4px">${esc(m.resumo)}</div>`:''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+          ${m.tem_rascunho&&CAN_EDIT?`<button class="${done?'btn-ghost':'btn-prim'}" style="padding:3px 11px" onclick="cotInboxUsarRascunho(${i})" title="abre a proposta pré-preenchida pela IA (rascunho — confira e salve)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">auto_awesome</span> ${done?'usar de novo':'Usar rascunho'}</button>`:''}
           ${anx.map(id=>`<a class="btn-ghost" style="padding:3px 9px;text-decoration:none" href="actions/cotacao_anexo.php?download=${id}&me=${encodeURIComponent(meB)}" target="_blank" rel="noopener"><span class="material-icons" style="font-size:13px;vertical-align:-2px">description</span> anexo</a>`).join('')}
           ${m.corpo_preview?`<button class="btn-ghost" style="padding:3px 9px" onclick="cotInboxVerCorpo(${i})">ver e-mail</button>`:''}
-          ${!lido?`<button class="btn-ghost" style="padding:3px 9px;color:var(--muted)" onclick="cotInboxMarcar(${m.id},'marcar_lido')">marcar lido</button>`:'<span class="muted" style="font-size:11px;align-self:center">✓ '+esc(m.status)+'</span>'}
-        </div></div>`;
-    }).join('');
-    host.innerHTML=`<div class="panel" style="margin-bottom:10px">${cotSecHead('inbox','Respostas por e-mail','a IA leu a caixa e classificou — valide antes de usar','')}<div style="display:flex;flex-direction:column;gap:8px">${rows}</div>
+          ${!done?`<button class="btn-ghost" style="padding:3px 9px;color:var(--muted)" onclick="cotInboxMarcar(${m.id},'marcar_lido')">marcar lido</button>`:''}
+        </div></div>`; };
+    const groups={}, order=[];
+    its.forEach((m,i)=>{ const k=(m.fornecedor_nome||m.from_email||'—'); if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push({m,i}); });
+    const groupsHtml=order.map(k=>{ const arr=groups[k].slice().sort((a,b)=>String(b.m.data_email||'').localeCompare(String(a.m.data_email||''))); const latest=arr[0].m, nn=arr.filter(x=>x.m.status==='novo').length;
+      return `<div style="border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:#f6f9f7;border-bottom:1px solid var(--line)">
+          <span class="dgm" style="background:${latest.tipo==='cotacao'?'#1f7a44':(latest.tipo==='duvida'?'var(--pend)':'#8a9299')}"></span>
+          <b style="flex:1;min-width:120px">${esc(k)}</b>
+          <span class="muted" style="font-size:11px">${arr.length} e-mail(s)</span>
+          ${nn?`<span class="dchip" style="background:var(--pend);color:#fff">${nn} nova(s)</span>`:''}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;padding:9px 11px">${arr.map(x=>rowOf(x.m,x.i)).join('')}</div>
+      </div>`; }).join('');
+    host.innerHTML=`<div class="panel" style="margin-bottom:10px">${head}<div style="display:flex;flex-direction:column;gap:9px">${groupsHtml}</div>
       <div class="dmini" style="margin-top:7px">⚠ Vínculo e classificação são sugestões da IA sobre e-mails (conteúdo não confiável). Confira antes de gerar a proposta; dúvidas nunca viram rascunho.</div></div>`;
   }catch(e){ host.innerHTML=''; }
 }
-function cotInboxUsarRascunho(i){ const m=(COT.inbox||[])[i]; if(!m||!m.draft){toast('Sem rascunho neste e-mail');return;} cotIAAplicar(m.fornecedor_nome||'', m.draft, {}); }
+function cotInboxUsarRascunho(i){ const m=(COT.inbox||[])[i]; if(!m||!m.draft){toast('Sem rascunho neste e-mail');return;}
+  if(m.id) fetch('actions/inbox.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'converter',me:EU&&EU.bitrix_id,id:m.id})}).catch(()=>{});   // usei o rascunho → marca tratado
+  m.status='convertido'; cotIAAplicar(m.fornecedor_nome||'', m.draft, {}); }
 function cotInboxVerCorpo(i){ const m=(COT.inbox||[])[i]; if(!m)return; alert('De: '+(m.from_nome||'')+' <'+(m.from_email||'')+'>\nAssunto: '+(m.assunto||'')+'\n\n'+(m.corpo_preview||'(sem corpo)')); }
 async function cotInboxMarcar(id,acao){ try{ const r=await (await fetch('actions/inbox.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao,me:EU&&EU.bitrix_id,id})})).json(); if(r&&r.error){toast(r.error);return;} const c=(COT.cur||{}).cotacao; if(c)cotInboxLoad(c.id); }catch(e){toast('Falha: '+e.message);} }
 function upCard(label,val,sub,color){ return `<div style="border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:#fff">

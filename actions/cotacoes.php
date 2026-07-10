@@ -148,7 +148,8 @@ try {
                                    (SELECT COUNT(*) FROM cotacao_item ci WHERE ci.cotacao_id=c.id) AS n_itens,
                                    (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id) AS n_propostas,
                                    (SELECT COUNT(*) FROM cotacao_fornecedor cf WHERE cf.cotacao_id=c.id) AS n_convidados,
-                                   (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND cp.total>0) AS melhor_oferta
+                                   (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND cp.total>0) AS melhor_oferta,
+                                   (SELECT COUNT(*) FROM cotacao_email_in ei WHERE ei.cotacao_id=c.id AND ei.status='novo') AS n_inbound_novo
                             FROM cotacao c LEFT JOIN obra o ON o.id=c.obra_id
                             $where ORDER BY c.id DESC LIMIT 500");
         $q->execute($args);

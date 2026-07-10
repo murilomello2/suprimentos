@@ -406,14 +406,14 @@ try {
         echo json_encode(['ok' => true, 'novo' => $novo, 'cotacoes' => $cot, 'duvidas' => $duv, 'nao_vinculado' => $nv], JSON_UNESCAPED_UNICODE); exit;
     }
 
-    if ($acao === 'marcar_lido' || $acao === 'ignorar') {
+    if ($acao === 'marcar_lido' || $acao === 'ignorar' || $acao === 'converter') {
         $id = (int)($in['id'] ?? 0); if (!$id) throw new Exception('id obrigatório');
         $r = $pdo->prepare("SELECT cotacao_id FROM cotacao_email_in WHERE id=?"); $r->execute([$id]); $row = $r->fetch();
         if (!$row) { echo json_encode(['ok' => true]); exit; }
         if ($row['cotacao_id']) { $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . (int)$row['cotacao_id'])->fetchColumn();
             if (!can_edit_obra($perms, max(1, $obra)) && empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Sem permissão.']); exit; } }
         else if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores.']); exit; }   // não vinculado = só admin (espelha o ?listar)
-        $st = $acao === 'ignorar' ? 'ignorado' : 'lido';
+        $st = ['ignorar' => 'ignorado', 'converter' => 'convertido', 'marcar_lido' => 'lido'][$acao] ?? 'lido';
         $pdo->prepare("UPDATE cotacao_email_in SET status=?, lido_por=?, lido_em=? WHERE id=?")->execute([$st, (string)$me, date('c'), $id]);
         echo json_encode(['ok' => true], JSON_UNESCAPED_UNICODE); exit;
     }

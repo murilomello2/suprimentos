@@ -5072,9 +5072,10 @@ async function cfgEmailLoad(){ const w=document.getElementById('cfgEmailWrap'); 
       <div style="margin-top:8px">${cotFld('Usuário (e-mail remetente)','<input id="ceUser" value="'+esc(cfg.user||'')+'" style="width:100%">')}</div>
       <div style="margin-top:8px">${cotFld('Senha (vazio mantém a atual)','<input id="ceSenha" type="password" autocomplete="new-password" placeholder="••••••••" style="width:100%">')}</div>
       <div style="margin-top:10px"><button class="btn-prim" onclick="cfgEmailSalvar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar conta</button></div>
-      <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">${cotSecHead('outbox','Enviar um teste','manda um e-mail de teste pra você conferir se o envio funciona','')}
+      <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">${cotSecHead('outbox','Enviar um teste (SMTP)','manda um e-mail de teste pra você conferir se o envio funciona','')}
         <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap"><div style="flex:1;min-width:220px">${cotFld('Para (seu e-mail)','<input id="ceTeste" placeholder="voce@email.com" style="width:100%">')}</div>
         <button class="btn-prim" onclick="cfgEmailTeste()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar teste</button></div></div>
+      <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">${cotSecHead('mark_email_unread','Testar leitura (IMAP)','conecta na caixa e conta as mensagens — não lê conteúdo nem usa IA','<button class="btn-ghost" onclick="cfgImapTeste()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">sync</span> Testar leitura</button>')}<div id="ceImapRes" class="dmini" style="margin-top:2px"></div></div>
     </div>`;
   }catch(e){ w.innerHTML='<div class="panel"><div class="empty">Falha ao carregar.</div></div>'; } }
 async function cfgEmailSalvar(){ const g=id=>((document.getElementById(id)||{}).value||'');
@@ -5084,6 +5085,11 @@ async function cfgEmailTeste(){ const to=((document.getElementById('ceTeste')||{
   toast('Enviando teste…');
   try{ const r=await (await fetch('actions/email.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'enviar',me:EU&&EU.bitrix_id,teste:to,cotacao_id:0,assunto:'Teste de envio — Cockpit de Suprimentos',corpo:'Este é um e-mail de teste do disparo de cotações. Se você recebeu, o envio por SMTP está funcionando.\n\nCockpit de Suprimentos — Caprem'})})).json();
     if(r.error){toast(r.error);return;} toast(r.msg||'Teste enviado'); }catch(e){toast('Falha: '+e.message);} }
+async function cfgImapTeste(){ const el=document.getElementById('ceImapRes'); if(el){el.textContent='Conectando…';el.style.color='var(--muted)';}
+  try{ const r=await (await fetch('actions/inbox.php?probe=1&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    if(r.error){ if(el){el.textContent='❌ '+r.error;el.style.color='var(--pend)';} return; }
+    if(el){ el.textContent='✅ Conectou em '+(r.host||'')+':'+(r.porta||993)+' — '+r.mensagens+' mensagem(ns) na caixa.'; el.style.color='var(--verde-d)'; } }
+  catch(e){ if(el){el.textContent='Falha: '+e.message;el.style.color='var(--pend)';} } }
 
 /* ===== Responsáveis EM LOTE (Configurações) — atribui comprador por obra/grupo/seleção ===== */
 let RL={obras:[], itens:[], sel:new Set()};

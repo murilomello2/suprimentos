@@ -301,9 +301,41 @@ try {
     $perms = user_perms($pdo, $me);
     if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }
 
-    $acao = $method === 'POST' ? ($in['acao'] ?? '') : (isset($_GET['sync']) ? 'varrer' : (isset($_GET['listar']) ? 'listar' : (isset($_GET['resumo']) ? 'resumo' : '')));
+    $acao = $method === 'POST' ? ($in['acao'] ?? '') : (isset($_GET['sync']) ? 'varrer' : (isset($_GET['probe']) ? 'probe' : (isset($_GET['listar']) ? 'listar' : (isset($_GET['resumo']) ? 'resumo' : ''))));
 
-    if ($acao === 'varrer') { echo json_encode(inbox_sync($pdo, $me, $perms), JSON_UNESCAPED_UNICODE); exit; }
+    if ($acao === 'probe') {   // testa só a CONEXÃO/LOGIN IMAP — não lê conteúdo nem chama IA (admin)
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores.']); exit; }
+        $cfg = inbox_email_cfg();
+        if (empty($cfg['senha'])) { echo json_encode(['error' => 'Conta não configurada — falta a senha em Configurações › E-mail.']); exit; }
+        if (!inbox_ext_ok()) { echo json_encode(['error' => 'A extensão imap do PHP não está disponível neste servidor.']); exit; }
+        [$mbox, $err] = inbox_conectar($cfg);
+        if (!$mbox) { echo json_encode(['error' => 'IMAP: ' . $err]); exit; }
+        $n = @imap_num_msg($mbox); imap_errors(); $uidv = inbox_uidvalidity($mbox, $cfg);
+        $msgs = [];
+        if (isset($_GET['headers'])) {   // diagnóstico: cabeçalhos das últimas msgs (SEM corpo, SEM IA) p/ entender o casamento
+            $uids = @imap_search($mbox, 'ALL', SE_UID); imap_errors(); if (!$uids) $uids = [];
+            rsort($uids, SORT_NUMERIC);
+            foreach (array_slice($uids, 0, 20) as $u) {
+                $rawh = @imap_fetchheader($mbox, $u, FT_UID); imap_errors();
+                $h = @imap_rfc822_parse_headers($rawh);
+                $fe = ''; if ($h && !empty($h->from) && is_array($h->from)) { $a = $h->from[0]; $fe = strtolower(trim(((string)($a->mailbox ?? '')) . '@' . ((string)($a->host ?? '')))); }
+                $irt = trim((string)($h->in_reply_to ?? '')); $refs = trim((string)($h->references ?? ''));
+                $msgs[] = ['uid' => (int)$u, 'from' => $fe, 'assunto' => inbox_hdr_decode($h->subject ?? ''), 'data' => (string)($h->date ?? ''),
+                    'tem_token' => (bool)preg_match('/<cot-\d+-\d+-[a-f0-9]+@/', $irt . ' ' . $refs), 'in_reply_to' => substr($irt, 0, 120)];
+            }
+        }
+        inbox_fechar($mbox);
+        echo json_encode(['ok' => true, 'conectou' => true, 'mensagens' => (int)$n, 'uidvalidity' => $uidv,
+            'host' => $cfg['host'] ?? '', 'porta' => (int)($cfg['imap_port'] ?? 993),
+            'ptr_last_uid' => (int)(meta_get($pdo, 'inbox_last_uid') ?: 0), 'ptr_last_sync' => meta_get($pdo, 'inbox_last_sync'),
+            'ptr_uidvalidity' => (int)(meta_get($pdo, 'inbox_uidvalidity') ?: 0), 'cabecalhos' => $msgs], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'varrer') {
+        // reset (admin): limpa o ponteiro p/ re-escanear a janela toda (repesca mensagens que ficaram pra trás)
+        if (!empty($_GET['reset']) && !empty($perms['perm_admin'])) { meta_set($pdo, 'inbox_last_uid', '0'); meta_set($pdo, 'inbox_last_sync', ''); meta_set($pdo, 'inbox_last_run_ts', '0'); }
+        echo json_encode(inbox_sync($pdo, $me, $perms), JSON_UNESCAPED_UNICODE); exit;
+    }
 
     if ($acao === 'listar') {
         $cid = (int)($_GET['cotacao'] ?? ($in['cotacao'] ?? 0));

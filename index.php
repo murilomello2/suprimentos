@@ -3541,7 +3541,7 @@ function cotRenderNovo(){
       ${cotFld('Nº Solicitação de compra','<input id="cotSC" value="'+esc(pre.num_solicitacao||'')+'" placeholder="opcional — se nasceu de uma SC">')}
     </div>
     ${cotFld('Descrição / escopo (vai na carta ao fornecedor)','<textarea id="cotD" rows="5" style="width:100%" placeholder="Escopo / informações gerais da cotação">'+esc(pre.descricao||'')+'</textarea>','margin-top:8px')}
-    ${cotFld('Pontos a conferir por proposta — equalização (1 por linha)','<textarea id="cotEq" rows="8" style="width:100%" placeholder="Ex.: Diesel incluso? · Faturamento mínimo diário · Mobilização/desmobilização · Retenção · ISS · ART">'+esc(pre.equalizacao||'')+'</textarea>','margin-top:8px')}
+    ${cotFld('Pontos a conferir por proposta — equalização (1 por linha)','<textarea id="cotEq" rows="8" style="width:100%" placeholder="Ex.: Diesel incluso? · Faturamento mínimo diário · Mobilização/desmobilização · Retenção · ISS · ART">'+esc(pre.equalizacao||DEFAULT_EQ.join('\n'))+'</textarea>','margin-top:8px')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:6px"><b style="font-size:13px">Itens a cotar *</b>
       <span style="display:flex;gap:6px">${vinc?`<button class="btn-ghost" style="padding:4px 10px" onclick="cotSalvarDicionario()" title="Grava estes itens como padrão do serviço — as próximas cotações deste serviço já vêm com eles"><span class="material-icons" style="font-size:15px;vertical-align:-3px">menu_book</span> Salvar como padrão do serviço</button>`:''}
       <button class="btn-ghost" style="padding:4px 10px" onclick="cotImportarTexto()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">content_paste</span> Importar via texto</button></span></div>
@@ -3785,7 +3785,7 @@ async function cotOpen(id){
   const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Abrindo mapa…</div>';
   try{ const d=await (await fetch('actions/cotacoes.php?id='+id+'&_='+Date.now())).json();
     if(d.error){w.innerHTML='<div class="dempty">'+esc(d.error)+'</div>';return;}
-    COT.cur=d; COT.mode='detalhe'; COT.editItens=false; cotRenderDetalhe();
+    COT.cur=d; COT.mode='detalhe'; COT.editItens=false; COT.eqEdit=false; cotRenderDetalhe();
   }catch(e){w.innerHTML='<div class="dempty">Falha: '+esc(e.message)+'</div>';}
 }
 function cotNum(x){ return x!=null&&x!==''?Number(x).toLocaleString('pt-BR'):''; }
@@ -3985,24 +3985,35 @@ function cotUmaPagina(){
   w.innerHTML=h; window.scrollTo(0,0);
 }
 // EQUALIZAÇÃO — pontos a conferir por proposta (diesel? faturamento mín., mobilização, retenção, ISS, ART…)
-function cotEqPontos(c){ return ((c&&c.equalizacao)||'').split(/\r?\n|\|/).map(s=>s.trim()).filter(Boolean); }
+const DEFAULT_EQ=['Frete','Condição de pagamento','Descarregamento'];   // pontos padrão em TODA cotação (em branco até preencher)
+function cotEqPontos(c){ const p=((c&&c.equalizacao)||'').split(/\r?\n|\|/).map(s=>s.trim()).filter(Boolean); return p.length?p:DEFAULT_EQ.slice(); }
 function cotEqualizaPanel(d){
-  const c=d.cotacao||{}, props=d.propostas||[], pontos=cotEqPontos(c);
+  const c=d.cotacao||{}, props=d.propostas||[], pontos=cotEqPontos(c), editV=!!COT.eqEdit;
   let h=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <b style="font-size:13px">Equalização — pontos a conferir por proposta</b>
-      ${CAN_EDIT?`<button class="btn-ghost" style="padding:3px 9px" onclick="cotEqualizaEdit()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit_note</span> Editar pontos</button>`:''}</div>
-    <div id="cotEqEdit" style="display:none;margin-top:8px"><textarea id="cotEqPontos" rows="6" style="width:100%;font-size:12.5px" placeholder="Um ponto por linha…">${esc(c.equalizacao||'')}</textarea>
+      <span style="display:flex;gap:6px;flex-wrap:wrap">${CAN_EDIT?`<button class="btn-ghost" style="padding:3px 9px" onclick="cotEqualizaEdit()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit_note</span> Editar pontos</button>`:''}
+      ${(CAN_EDIT&&props.length&&pontos.length)?(editV?`<button class="btn-prim" style="padding:3px 10px" onclick="cotEqValoresSave()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">check</span> Salvar valores</button><button class="btn-ghost" style="padding:3px 9px" onclick="cotEqValoresCancel()">Cancelar</button>`:`<button class="btn-ghost" style="padding:3px 9px" onclick="cotEqValoresEdit()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit</span> Editar valores</button>`):''}</span></div>
+    <div id="cotEqEdit" style="display:none;margin-top:8px"><textarea id="cotEqPontos" rows="6" style="width:100%;font-size:12.5px" placeholder="Um ponto por linha…">${esc(pontos.join('\n'))}</textarea>
       <div style="margin-top:6px"><button class="btn-prim" style="padding:5px 12px" onclick="cotEqualizaPontosSave()">Salvar pontos</button> <button class="btn-ghost" style="padding:5px 12px" onclick="document.getElementById('cotEqEdit').style.display='none'">Cancelar</button></div></div>`;
-  if(!pontos.length){ h+=`<div class="dmini" style="margin-top:6px">Sem pontos de equalização.${CAN_EDIT?' Clique em “Editar pontos”, ou vincule a cotação a um item do radar com “variáveis a cotar”.':''}</div></div>`; return h; }
   if(!props.length){ h+='<ul style="margin:8px 0 0 18px;padding:0">'+pontos.map(p=>`<li style="font-size:12.5px;margin-bottom:3px">${esc(p)}</li>`).join('')+'</ul><div class="dmini" style="margin-top:6px">Cadastre propostas para preencher cada ponto por fornecedor.</div></div>'; return h; }
-  h+='<div style="overflow-x:auto;margin-top:8px"><table class="mtable" style="border:none"><thead><tr><th class="svc-h" style="text-align:left;min-width:200px">Ponto a conferir</th>';
+  h+=(editV?'<div class="dmini" style="margin-top:8px;color:var(--verde-d)">Modo edição — ajuste os valores e clique <b>Salvar valores</b>.</div>':'')+'<div style="overflow-x:auto;margin-top:8px"><table class="mtable" style="border:none"><thead><tr><th class="svc-h" style="text-align:left;min-width:200px">Ponto a conferir</th>';
   props.forEach(p=>{ h+=`<th style="min-width:140px">${esc(p.fornecedor_nome)}</th>`; });
   h+='</tr></thead><tbody>';
   pontos.forEach(pt=>{ h+=`<tr><td class="svc-c" style="text-align:left;font-size:12px">${esc(pt)}</td>`;
-    props.forEach(p=>{ const v=((p.equaliza||{})[pt])||''; h+=`<td style="padding:4px 6px">${CAN_EDIT?`<input data-eqpid="${p.id}" data-eqpt="${esc(pt)}" value="${esc(v)}" onchange="cotEqualizaCell(${p.id})" style="width:100%;font-size:11.5px;padding:3px 5px;border:1px solid var(--line);border-radius:5px" placeholder="—">`:`<span style="font-size:11.5px">${esc(v||'—')}</span>`}</td>`; });
+    props.forEach(p=>{ const v=((p.equaliza||{})[pt])||''; h+=`<td style="padding:4px 6px">${editV?`<input data-eqpid="${p.id}" data-eqpt="${esc(pt)}" value="${esc(v)}" style="width:100%;font-size:11.5px;padding:3px 5px;border:1px solid var(--line);border-radius:5px" placeholder="—">`:`<span style="font-size:11.5px">${esc(v||'—')}</span>`}</td>`; });
     h+='</tr>'; });
   h+='</tbody></table></div></div>';
   return h;
+}
+function cotEqValoresEdit(){ COT.eqEdit=true; cotRenderDetalhe(); }
+function cotEqValoresCancel(){ COT.eqEdit=false; cotRenderDetalhe(); }
+async function cotEqValoresSave(){
+  const props=(COT.cur&&COT.cur.propostas)||[]; let n=0;
+  for(const p of props){ const map={}; document.querySelectorAll('input[data-eqpid="'+p.id+'"]').forEach(inp=>{ const val=inp.value.trim(); if(val) map[inp.getAttribute('data-eqpt')]=val; });
+    p.equaliza=map;
+    try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'equaliza_salvar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:p.id,equaliza:map})}); n++; }catch(e){}
+  }
+  COT.eqEdit=false; cotRenderDetalhe(); toast('Equalização salva ('+n+' proposta(s))');
 }
 function cotEqualizaEdit(){ const e=document.getElementById('cotEqEdit'); if(e) e.style.display=(e.style.display==='none'?'block':'none'); }
 async function cotEqualizaPontosSave(){
@@ -4024,11 +4035,6 @@ async function cotEqualizaPontosSave(){
     }
     cotRenderDetalhe(); toast('Pontos de equalização salvos');
   }catch(e){ toast('Falha ao salvar'); }
-}
-function cotEqualizaCell(pid){
-  const map={}; document.querySelectorAll('input[data-eqpid="'+pid+'"]').forEach(inp=>{ map[inp.getAttribute('data-eqpt')]=inp.value; });
-  const p=(COT.cur.propostas||[]).find(x=>x.id===pid); if(p) p.equaliza=map;   // mantém local p/ não perder ao re-render
-  fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'equaliza_salvar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:pid,equaliza:map})}).then(r=>r.json()).then(r=>{ if(r&&r.error) toast(r.error); }).catch(()=>{});
 }
 function cotProposta(pid){
   const d=COT.cur; let ex=null; if(pid) ex=(d.propostas||[]).find(p=>p.id===pid);

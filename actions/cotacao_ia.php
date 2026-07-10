@@ -55,6 +55,37 @@ function ia_xlsx_text($path) {
 
 try {
     $pdo = db();
+
+    // ===== ITEM A: extrair a LISTA DE ITENS de um orçamento (PDF/Excel/imagem) enviado no cadastro (multipart, sem cotação) =====
+    if (!empty($_FILES['arquivo'])) {
+        $perms = user_perms($pdo, $_POST['me'] ?? null);
+        if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }
+        $cfg = oracle_cfg(); $key = $cfg['key'] ?? '';
+        if (!$key) { echo json_encode(['error' => 'IA não configurada — o admin precisa cadastrar a chave da OpenAI em Radar IA.']); exit; }
+        $model = trim((string)($cfg['model_extracao'] ?? '')) ?: 'gpt-4o';
+        $f = $_FILES['arquivo'];
+        if (($f['error'] ?? 1) !== UPLOAD_ERR_OK) throw new Exception('falha no upload do arquivo');
+        if (($f['size'] ?? 0) > 25 * 1024 * 1024) throw new Exception('máximo 25 MB');
+        $bytes = file_get_contents($f['tmp_name']); if ($bytes === false || $bytes === '') throw new Exception('arquivo vazio');
+        $head = substr($bytes, 0, 8); $part = null;
+        if (strncmp($head, '%PDF-', 5) === 0) $part = ['type' => 'file', 'file' => ['filename' => 'orcamento.pdf', 'file_data' => 'data:application/pdf;base64,' . base64_encode($bytes)]];
+        elseif (strncmp($head, "\x89PNG\x0d\x0a\x1a\x0a", 8) === 0) $part = ['type' => 'image_url', 'image_url' => ['url' => 'data:image/png;base64,' . base64_encode($bytes)]];
+        elseif (strncmp($head, "\xFF\xD8\xFF", 3) === 0) $part = ['type' => 'image_url', 'image_url' => ['url' => 'data:image/jpeg;base64,' . base64_encode($bytes)]];
+        elseif (strncmp($head, "PK\x03\x04", 4) === 0) { $txt = ia_xlsx_text($f['tmp_name']); if ($txt === '') throw new Exception('planilha não pôde ser lida — tente PDF/imagem'); $part = ['type' => 'text', 'text' => "PLANILHA:\n" . $txt]; }
+        else throw new Exception('formato não aceito — envie PDF, Excel (xlsx) ou imagem (PNG/JPG)');
+        $prompt = trim((string)($cfg['prompt_itens'] ?? '')) ?: oracle_itens_default_prompt();
+        $instr = $prompt . "\n\nFORMATO DA RESPOSTA (JSON): {\"itens\":[{\"descricao\":\"<texto>\",\"unidade\":\"<UN/KG/...>\",\"quantidade\":<numero|null>,\"observacao\":\"<detalhe>\"}]}";
+        $payload = ['model' => $model, 'temperature' => 0.1, 'max_tokens' => 3000, 'response_format' => ['type' => 'json_object'],
+            'messages' => [['role' => 'user', 'content' => [['type' => 'text', 'text' => $instr], $part]]]];
+        [$code, $res, $err] = oracle_post('https://api.openai.com/v1/chat/completions', $key, $payload);
+        if ($err) throw new Exception('falha de conexão com a IA: ' . $err);
+        $j = json_decode((string)$res, true);
+        if ($code >= 400 || !$j) throw new Exception('IA: ' . ($j['error']['message'] ?? ('HTTP ' . $code)));
+        $d = json_decode($j['choices'][0]['message']['content'] ?? '', true);
+        $itens = (is_array($d) && isset($d['itens']) && is_array($d['itens'])) ? $d['itens'] : [];
+        echo json_encode(['ok' => true, 'itens' => $itens, 'modelo' => $model], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
     $me = $in['me'] ?? null; $perms = user_perms($pdo, $me);
     if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }

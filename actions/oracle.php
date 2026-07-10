@@ -320,6 +320,16 @@ function oracle_extracao_default_prompt() {
         . "Responda SOMENTE com um JSON válido no formato pedido.";
 }
 
+// Prompt PADRÃO para EXTRAIR A LISTA DE ITENS de um orçamento (PDF/Excel/imagem) ao criar uma cotação do zero (item A).
+function oracle_itens_default_prompt() {
+    return "Você é um assistente de suprimentos da Caprem. Recebe um ORÇAMENTO / lista de materiais ou serviços "
+        . "(PDF, planilha Excel ou imagem) e deve extrair os ITENS a cotar.\n"
+        . "Para CADA item devolva: descricao (clara e completa), unidade (ex.: UN, KG, M², VB), quantidade (número; null se não houver) "
+        . "e observacao (marca, especificação, local, ou qualquer detalhe relevante do item).\n"
+        . "REGRAS: não invente itens; ignore cabeçalhos, totais, impostos e PREÇOS (aqui só queremos O QUE cotar, não quanto custa); "
+        . "quantidade em número (1.234,5 → 1234.5); una linhas quebradas do mesmo item. Responda SOMENTE o JSON pedido.";
+}
+
 if (defined('ORACLE_LIB_ONLY')) return;
 
 try {

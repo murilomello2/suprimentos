@@ -3544,6 +3544,7 @@ function cotRenderNovo(){
     ${cotFld('Pontos a conferir por proposta — equalização (1 por linha)','<textarea id="cotEq" rows="8" style="width:100%" placeholder="Ex.: Diesel incluso? · Faturamento mínimo diário · Mobilização/desmobilização · Retenção · ISS · ART">'+esc(pre.equalizacao||DEFAULT_EQ.join('\n'))+'</textarea>','margin-top:8px')}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:6px"><b style="font-size:13px">Itens a cotar *</b>
       <span style="display:flex;gap:6px">${vinc?`<button class="btn-ghost" style="padding:4px 10px" onclick="cotSalvarDicionario()" title="Grava estes itens como padrão do serviço — as próximas cotações deste serviço já vêm com eles"><span class="material-icons" style="font-size:15px;vertical-align:-3px">menu_book</span> Salvar como padrão do serviço</button>`:''}
+      <label class="btn-ghost" style="padding:4px 10px;cursor:pointer;color:var(--verde-d)" title="a IA lê um orçamento (PDF/Excel/imagem) e cria os itens a cotar"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Importar de PDF (IA)<input type="file" accept=".pdf,.xlsx,.xls,image/png,image/jpeg,application/pdf" style="display:none" onchange="cotImportarItensIA(this)"></label>
       <button class="btn-ghost" style="padding:4px 10px" onclick="cotImportarTexto()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">content_paste</span> Importar via texto</button></span></div>
     <div id="cotItens" style="margin-top:8px"></div>
     <button class="btn-ghost" style="margin-top:6px" onclick="cotAddItem()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar item</button>
@@ -3773,6 +3774,20 @@ function cotImportarTexto(){
   t.split('\n').map(l=>l.trim()).filter(Boolean).forEach(l=>{ const p=l.split(/[;\t]/).map(x=>x.trim()); COT.novoItens.push({descricao:p[0]||'',unidade:p[1]||'',quantidade:p[2]||'',observacao:''}); });
   COT.novoItens=COT.novoItens.filter(it=>(it.descricao||'').trim()); if(!COT.novoItens.length)COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; cotRenderItens();
 }
+/* ITEM A: IA lê um orçamento (PDF/Excel/imagem) e cria os itens a cotar (rascunho — confira antes de salvar) */
+async function cotImportarItensIA(input){ const f=input.files&&input.files[0]; if(!f){return;} input.value='';
+  if(f.size>25*1024*1024){toast('Máximo 25 MB');return;}
+  toast('🧠 lendo o orçamento…');
+  const fd=new FormData(); fd.append('arquivo',f); fd.append('acao','extrair_itens'); fd.append('me',(EU&&EU.bitrix_id)||'');
+  try{ const r=await (await fetch('actions/cotacao_ia.php',{method:'POST',body:fd})).json();
+    if(r.error){toast(r.error);return;}
+    const its=(r.itens||[]).filter(x=>x&&(x.descricao||'').trim());
+    if(!its.length){toast('A IA não encontrou itens nesse arquivo');return;}
+    COT.novoItens=(COT.novoItens||[]).filter(x=>(x.descricao||'').trim());   // tira a linha vazia inicial
+    its.forEach(x=>COT.novoItens.push({descricao:x.descricao||'',unidade:x.unidade||'',quantidade:(x.quantidade!=null&&x.quantidade!=='')?x.quantidade:'',observacao:x.observacao||''}));
+    if(!COT.novoItens.length)COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}];
+    cotRenderItens(); toast(its.length+' item(ns) importado(s) pela IA — confira antes de salvar');
+  }catch(e){toast('Falha: '+e.message);} }
 async function cotCriar(){
   const titulo=val('cotT').trim(); if(!titulo){toast('Dê um título à cotação');return;}
   const itens=COT.novoItens.filter(it=>(it.descricao||'').trim()); if(!itens.length){toast('Inclua ao menos um item');return;}

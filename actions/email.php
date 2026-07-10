@@ -9,13 +9,13 @@ require_once __DIR__ . '/../includes/db.php';
 
 // telefone da assinatura por comprador (o Murilo passou; casar pelo nome do usuário logado)
 function email_fone($nome) {
-    $n = mb_strtolower(trim((string)$nome), 'UTF-8');
+    $n = strtolower(trim((string)$nome));   // byte-based (o prod não tem mbstring); as chaves cobrem variantes com/sem acento
     $map = [
         'anselmo' => '(19) 99331-1588', 'gabriel borges' => '(19) 97413-3339', 'gabriel souza' => '(19) 97413-3339',
         'gabriel machado' => '(19) 99688-8181', 'paloma' => '(19) 97118-8464', 'natalia' => '(19) 99816-7057',
         'natália' => '(19) 99816-7057', 'alex' => '(19) 99789-3994', 'joão nogueira' => '(19) 98802-9682', 'joao nogueira' => '(19) 98802-9682',
     ];
-    foreach ($map as $k => $v) if (mb_strpos($n, $k) !== false) return $v;
+    foreach ($map as $k => $v) if (strpos($n, $k) !== false) return $v;
     return '';
 }
 function email_qtd($q) { if ($q === null || $q === '') return ''; return rtrim(rtrim(number_format((float)$q, 2, ',', '.'), '0'), ','); }

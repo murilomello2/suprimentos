@@ -79,6 +79,22 @@ try {
         echo json_encode(['ok'=>true, 'id'=>$id], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    if ($acao === 'contato_salvar') {   // conferência de contatos (email/telefone/whatsapp) — carimba a "última atualização" do campo que mudou
+        $id = (int)($in['id'] ?? 0); if (!$id) throw new Exception('id obrigatório');
+        $cur = $pdo->prepare("SELECT email, telefone, whatsapp, contatos_at FROM cot_fornecedor WHERE id=?"); $cur->execute([$id]); $c = $cur->fetch();
+        if (!$c) throw new Exception('fornecedor não encontrado');
+        $at = json_decode((string)($c['contatos_at'] ?? ''), true); if (!is_array($at)) $at = [];
+        $now = date('c'); $sets = []; $args = [];
+        foreach (['email','telefone','whatsapp'] as $f) {
+            if (array_key_exists($f, $in)) { $v = trim((string)$in[$f]); $sets[] = "$f=?"; $args[] = $v;
+                if ($v !== trim((string)($c[$f] ?? ''))) $at[$f] = $now; }   // carimba só quando o valor muda
+        }
+        if (!$sets) throw new Exception('nada a salvar');
+        $sets[] = 'contatos_at=?'; $args[] = json_encode($at); $args[] = $id;
+        $pdo->prepare("UPDATE cot_fornecedor SET " . implode(',', $sets) . " WHERE id=?")->execute($args);
+        echo json_encode(['ok'=>true, 'contatos_at'=>$at], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($acao === 'fornecedor_excluir') {
         $id = (int)($in['id'] ?? 0); if (!$id) throw new Exception('id obrigatório');
         $pdo->prepare("DELETE FROM cot_fornecedor WHERE id=?")->execute([$id]);

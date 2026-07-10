@@ -100,7 +100,8 @@ function cot_get_full($pdo, $id) {
     }
     $anx = $pdo->prepare("SELECT id, proposta_id, fornecedor_id, fornecedor_nome, nome, tamanho, mime FROM cotacao_anexo WHERE cotacao_id=? ORDER BY id"); $anx->execute([$id]);
     // fornecedores CONVIDADOS (concorrência) + status respondeu (deriva de proposta com mesmo fornecedor)
-    $cf = $pdo->prepare("SELECT * FROM cotacao_fornecedor WHERE cotacao_id=? ORDER BY fornecedor_nome"); $cf->execute([$id]);
+    $cf = $pdo->prepare("SELECT cf.*, f.email AS f_email, f.telefone AS f_telefone, f.whatsapp AS f_whatsapp, f.contatos_at AS f_contatos_at
+                         FROM cotacao_fornecedor cf LEFT JOIN cot_fornecedor f ON f.id=cf.fornecedor_id WHERE cf.cotacao_id=? ORDER BY cf.fornecedor_nome"); $cf->execute([$id]);
     $convidados = $cf->fetchAll();
     foreach ($convidados as &$c) {
         $resp = null; $cn = strtolower(trim((string)$c['fornecedor_nome']));
@@ -109,6 +110,12 @@ function cot_get_full($pdo, $id) {
                 || ($cn !== '' && strtolower(trim((string)$p['fornecedor_nome'])) === $cn)) { $resp = $p; break; }
         }
         $c['respondeu'] = $resp ? 1 : 0; $c['proposta_id'] = $resp['id'] ?? null; $c['proposta_total'] = $resp['total'] ?? null;
+        // contatos p/ a conferência (mestre cot_fornecedor quando há vínculo; senão o snapshot do convite)
+        $c['email'] = ($c['f_email'] ?? '') !== '' ? $c['f_email'] : ($c['email'] ?? '');
+        $c['telefone'] = ($c['f_telefone'] ?? '') !== '' ? $c['f_telefone'] : ($c['telefone'] ?? '');
+        $c['whatsapp'] = $c['f_whatsapp'] ?? '';
+        $c['contatos_at'] = !empty($c['f_contatos_at']) ? (json_decode($c['f_contatos_at'], true) ?: null) : null;
+        unset($c['f_email'], $c['f_telefone'], $c['f_whatsapp'], $c['f_contatos_at']);
     }
     unset($c);
     $ger = $pdo->prepare("SELECT id, titulo, criado_nome, created_at FROM carta_gerada WHERE cotacao_id=? ORDER BY id DESC"); $ger->execute([$id]);

@@ -3883,6 +3883,7 @@ function cotRenderDetalhe(){
         ${CAN_EDIT&&!cf.respondeu?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotPropostaDe(${ci})">Lançar proposta</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="cotDesconvidar(${cf.id})" title="tirar da concorrência">×</button>`:''}
       </div>
+      ${cotConvContatos(cf)}
       ${ax.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;padding-left:16px">${ax.map(anexoChip).join('')}</div>`:''}
     </div>`; }).join('')+'</div>';
   else html+='<div class="dmini" style="margin-top:6px">Nenhum fornecedor convidado ainda — convide abaixo.</div>';
@@ -4018,6 +4019,24 @@ function cotUmaPagina(){
 // EQUALIZAÇÃO — pontos a conferir por proposta (diesel? faturamento mín., mobilização, retenção, ISS, ART…)
 const DEFAULT_EQ=['Frete','Condição de pagamento','Descarregamento'];   // pontos padrão em TODA cotação (em branco até preencher)
 function cotEqPontos(c){ const p=((c&&c.equalizacao)||'').split(/\r?\n|\|/).map(s=>s.trim()).filter(Boolean); return p.length?p:DEFAULT_EQ.slice(); }
+/* CONFERÊNCIA DE CONTATOS do convidado (e-mail/telefone/WhatsApp) — indicador de preenchido + última atualização + edição inline (base p/ o disparo) */
+function cotConvContatos(cf){
+  const at=cf.contatos_at||{}, fid=cf.fornecedor_id, editable=fid&&CAN_EDIT;
+  const fld=(icon,key,val,ph,w)=>{ const v=(val||''), filled=!!String(v).trim(), when=at[key]?` <span class="muted" style="font-size:9.5px" title="última atualização">${D(String(at[key]).slice(0,10))}</span>`:'';
+    return `<div style="display:flex;align-items:center;gap:3px"><span class="material-icons" style="font-size:13px;color:${filled?'var(--ok)':'var(--pend)'}" title="${filled?'preenchido':'faltando'}">${icon}</span>${editable?`<input data-ct="${key}" value="${esc(v)}" placeholder="${ph}" style="font-size:11px;padding:2px 5px;width:${w}px;border:1px solid ${filled?'var(--line)':'var(--pend)'};border-radius:5px">`:`<span style="font-size:11px;${filled?'':'color:var(--pend)'}">${filled?esc(v):'faltando'}</span>`}${when}</div>`; };
+  return `<div class="cotconv-ct" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:7px;padding-left:16px">
+    ${fld('mail','email',cf.email,'email@fornecedor',175)}
+    ${fld('call','telefone',cf.telefone,'(19) 0000-0000',115)}
+    ${fld('chat','whatsapp',cf.whatsapp,'WhatsApp',115)}
+    ${editable?`<button class="btn-ghost" style="padding:2px 8px;font-size:11px" onclick="cotContatoSalvar(${fid},this)"><span class="material-icons" style="font-size:12px;vertical-align:-2px">save</span> salvar contatos</button>`:(!fid?'<span class="dmini" style="font-size:10px">fornecedor manual — sem cadastro p/ editar</span>':'')}</div>`;
+}
+async function cotContatoSalvar(fid,btn){
+  const row=btn.closest('.cotconv-ct'); if(!row)return; const body={acao:'contato_salvar',me:EU&&EU.bitrix_id,id:fid};
+  row.querySelectorAll('input[data-ct]').forEach(inp=>{ body[inp.getAttribute('data-ct')]=inp.value; });
+  try{ const r=await (await fetch('actions/fornecedores.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.error){toast(r.error);return;} toast('Contatos salvos'); cotOpen(COT.cur.cotacao.id);
+  }catch(e){toast('Falha: '+e.message);}
+}
 function cotEqualizaPanel(d){
   const c=d.cotacao||{}, props=d.propostas||[], pontos=cotEqPontos(c), editV=!!COT.eqEdit;
   let h=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">

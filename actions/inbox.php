@@ -208,9 +208,9 @@ function inbox_sync($pdo, $me, $perms) {
     $cfg = inbox_email_cfg();
     if (empty($cfg['senha'])) return ['error' => 'Conta de e-mail não configurada — o admin precisa cadastrar a senha em Configurações › E-mail.'];
     if (!inbox_ext_ok()) return ['error' => 'A extensão imap do PHP não está disponível neste servidor.'];
-    // throttle leve (evita duplo-clique/abuso): no máx. 1 varredura a cada 30s
+    // throttle leve (evita duplo-clique/abuso): no máx. 1 varredura a cada 8s
     $last = (int)(meta_get($pdo, 'inbox_last_run_ts') ?: 0); $agora = time();
-    if ($agora - $last < 30) return ['ok' => true, 'throttled' => true, 'msg' => 'Aguarde alguns segundos entre as buscas.'];
+    if ($agora - $last < 8) return ['ok' => true, 'throttled' => true, 'msg' => 'Verifiquei agora há pouco.'];
     meta_set($pdo, 'inbox_last_run_ts', $agora);
 
     $oracleCfg = oracle_cfg();
@@ -218,35 +218,38 @@ function inbox_sync($pdo, $me, $perms) {
     if (!$mbox) return ['error' => 'IMAP: ' . $err];
     $out = ['ok' => true, 'lidas' => 0, 'novas' => 0, 'casadas' => 0, 'sem_match' => 0, 'cotacoes' => 0, 'duvidas' => 0, 'rascunhos' => 0, 'pastas' => [], 'avisos' => []];
     $existe = $pdo->prepare("SELECT id FROM cotacao_email_in WHERE dedup_key=? LIMIT 1");
+    $desdeTs = strtotime('-21 days');   // janela de segurança p/ e-mails que chegam ATRASADOS (greylisting/roteamento)
     try {
         foreach (inbox_folders($mbox, $cfg) as $folder) {
             if (strcasecmp($folder, 'INBOX') !== 0 && !@imap_reopen($mbox, inbox_mailbox_str($cfg, $folder))) { imap_errors(); continue; }
             imap_errors();
+            $uids = @imap_search($mbox, 'SINCE "' . date('j-M-Y', $desdeTs) . '"', SE_UID); imap_errors();
+            $uids = array_values(array_filter((array)$uids, fn($u) => (int)$u > 0));
+            if (!$uids) { $out['pastas'][$folder] = 0; continue; }
+            sort($uids, SORT_NUMERIC);
+            $out['lidas'] += count($uids);
             $uidv = inbox_uidvalidity($mbox, $cfg, $folder);
-            if (!$uidv) $uidv = (int)(meta_get($pdo, "inbox_uidvalidity::$folder") ?: 0);          // fallback transitório
-            $storedUidv = (int)(meta_get($pdo, "inbox_uidvalidity::$folder") ?: 0);
-            $lastUid = ($storedUidv && $storedUidv === $uidv) ? (int)(meta_get($pdo, "inbox_last_uid::$folder") ?: 0) : 0;   // uidvalidity mudou -> refaz por data
-            $lastSync = meta_get($pdo, "inbox_last_sync::$folder");
-            $desde = $lastSync ? date('Y-m-d', strtotime($lastSync . ' -2 days')) : date('Y-m-d', strtotime('-14 days'));
-            [$uids, $total] = inbox_buscar_novos($mbox, $desde, $lastUid, INBOX_MAX_MSGS);
-            $out['lidas'] += $total; $out['pastas'][$folder] = count($uids);
-            if ($total > count($uids)) $out['avisos'][] = 'Pasta "' . $folder . '": ' . $total . ' msgs na janela, processei ' . count($uids) . ' — rode de novo p/ continuar.';
+            // overview em LOTE (metadados, barato) → Message-ID por uid, p/ filtrar os JÁ processados sem baixar corpo/anexo
+            $mids = [];
+            $ovs = @imap_fetch_overview($mbox, ((int)$uids[0]) . ':' . ((int)end($uids)), FT_UID); imap_errors();
+            if (is_array($ovs)) foreach ($ovs as $o) { $u = (int)($o->uid ?? 0); if ($u) $mids[$u] = trim((string)($o->message_id ?? '')); }
             // dedup por HASH (md5 fixo). Msgs sem Message-ID caem em uid+pasta+uidvalidity (UID é por pasta)
             $dkey = fn($mid, $uid) => ((string)$mid !== '') ? ('mid:' . md5((string)$mid)) : ('uid:' . $folder . ':' . $uidv . ':' . (int)$uid);
-            $maxUid = $lastUid;
+            // FILTRA os NÃO processados ANTES de cortar — SEM ponteiro/high-water (que fazia mensagem atrasada ficar presa atrás dele).
+            // Fonte da verdade = dedup no banco. Re-escaneia a janela toda todo sync (barato: overview + checagem indexada); a IA só roda p/ os novos.
+            $todo = [];
             foreach ($uids as $uid) {
-                if (!(int)$uid) continue;            // UID vazia/0 (quirk de pasta) — ignora
-                $maxUid = max($maxUid, (int)$uid);   // avança o high-water até nesta iteração — mensagem-veneno não trava a caixa
+                $existe->execute([$dkey($mids[$uid] ?? '', $uid)]);
+                if (!$existe->fetchColumn()) $todo[] = (int)$uid;
+            }
+            $out['pastas'][$folder] = count($todo);
+            if (count($todo) > INBOX_MAX_MSGS) { $out['avisos'][] = 'Pasta "' . $folder . '": ' . count($todo) . ' novas — processo ' . INBOX_MAX_MSGS . ' por vez, rode de novo p/ continuar.'; $todo = array_slice($todo, 0, INBOX_MAX_MSGS); }
+            foreach ($todo as $uid) {
                 try {
-                    // pré-check barato por Message-ID (evita re-baixar anexos/re-rodar IA de msgs já processadas)
-                    $rawh = @imap_fetchheader($mbox, $uid, FT_UID); imap_errors();
-                    $premid = ''; if (preg_match('/^Message-ID:\s*(<[^>]+>)/im', (string)$rawh, $mm)) $premid = trim($mm[1]);
-                    if ($premid !== '') { $existe->execute([$dkey($premid, $uid)]); if ($existe->fetchColumn()) continue; }
-
                     $p = inbox_parse_msg($mbox, $uid, INBOX_MAX_BODY);
                     $mid = (string)$p['message_id'];
                     $dedup = $dkey($mid, $uid);
-                    $existe->execute([$dedup]); if ($existe->fetchColumn()) continue;
+                    $existe->execute([$dedup]); if ($existe->fetchColumn()) continue;   // corrida: já entrou
 
                     [$cid, $cfid, $fid, $fnome, $metodo, $conf] = inbox_match($pdo, $p);
 
@@ -297,9 +300,6 @@ function inbox_sync($pdo, $me, $perms) {
                     $out['avisos'][] = 'msg ' . $folder . '/UID ' . $uid . ' pulada: ' . $e->getMessage();   // uma msg ruim não aborta o lote
                 }
             }
-            if ($maxUid > $lastUid) meta_set($pdo, "inbox_last_uid::$folder", $maxUid);
-            if ($uidv) meta_set($pdo, "inbox_uidvalidity::$folder", $uidv);
-            meta_set($pdo, "inbox_last_sync::$folder", date('Y-m-d'));
         }
     } catch (Throwable $e) {
         $out['avisos'][] = 'erro durante a varredura: ' . $e->getMessage();

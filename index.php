@@ -3952,7 +3952,7 @@ async function cotInboxBuscar(){
   toast('Buscando respostas na caixa…');
   try{ const r=await (await fetch('actions/inbox.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'varrer',me:EU&&EU.bitrix_id})})).json();
     if(r.error){toast(r.error);return;}
-    if(r.throttled){toast(r.msg||'Aguarde um instante entre as buscas.');return;}
+    if(r.throttled){toast(r.msg||'Verifiquei agora há pouco.'); if(c)cotOpen(c.id); return;}
     const parts=[]; if(r.novas)parts.push(r.novas+' nova(s)'); if(r.casadas)parts.push(r.casadas+' casada(s)'); if(r.cotacoes)parts.push(r.cotacoes+' cotação'); if(r.duvidas)parts.push(r.duvidas+' dúvida(s)'); if(r.sem_match)parts.push(r.sem_match+' sem vínculo');
     toast((r.lidas!=null?('Caixa: '+r.lidas+' lida(s)'):'Busca concluída')+(parts.length?' · '+parts.join(' · '):(r.novas?'':' · nada novo')));
     if(r.avisos&&r.avisos.length) setTimeout(()=>toast(r.avisos[0]),1500);

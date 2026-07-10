@@ -39,6 +39,7 @@ try {
         $pdo->exec("DELETE FROM cotacao_proposta WHERE cotacao_id=" . $jaId);
         $pdo->exec("DELETE FROM cotacao_fornecedor WHERE cotacao_id=" . $jaId);
         $pdo->exec("DELETE FROM cotacao_item WHERE cotacao_id=" . $jaId);
+        $pdo->exec("DELETE FROM cotacao_anexo WHERE cotacao_id=" . $jaId . " AND criado_por='__IMPORT__'");
         $pdo->exec("DELETE FROM cotacao WHERE id=" . $jaId);
     }
     $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, verba_origem, descricao, status, aprovacao, criado_por, criado_nome, obra_livre, import_origem, created_at, updated_at) VALUES (NULL,NULL,?,?,?,?, 'definida', ?,?, 'aguardando', ?,?,?,?,?,?)")
@@ -63,7 +64,8 @@ try {
     $insConv = $pdo->prepare("INSERT INTO cotacao_fornecedor (cotacao_id, fornecedor_id, fornecedor_nome, categoria, contato, email, telefone, created_at) VALUES (?,?,?,?,?,?,?,?)");
     $insProp = $pdo->prepare("INSERT INTO cotacao_proposta (cotacao_id, fornecedor_id, fornecedor_nome, observacoes, total, data_resposta, created_at) VALUES (?,?,?,?,?,?,?)");
     $insPI   = $pdo->prepare("INSERT INTO cotacao_proposta_item (proposta_id, cotacao_item_id, preco_unit, preco_total, observacao) VALUES (?,?,?,?,?)");
-    $nForn = 0; $nProp = 0; $nObs = 0;
+    $insAnx  = $pdo->prepare("INSERT INTO cotacao_anexo (cotacao_id, fornecedor_id, fornecedor_nome, nome, arquivo, url, tamanho, mime, criado_por, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)");
+    $nForn = 0; $nProp = 0; $nObs = 0; $nAnx = 0;
     foreach ($propostas as $p) {
         $fnome = trim((string)($p['fornecedor_nome'] ?? '')); if ($fnome === '') continue;
         $findF->execute([$fnome]); $fid = (int)($findF->fetchColumn() ?: 0);
@@ -82,10 +84,16 @@ try {
             $insPI->execute([$pid, $ciid, ($pi['preco_unit'] ?? null) !== null ? (float)$pi['preco_unit'] : null,
                 ($pi['preco_total'] ?? null) !== null ? (float)$pi['preco_total'] : null, $obs]);
         }
+        // anexos da proposta (PDF por LINK — do storage antigo). 1 registro por PDF único do fornecedor.
+        foreach (($p['anexos'] ?? []) as $ax) {
+            $url = trim((string)($ax['url'] ?? '')); if ($url === '') continue;
+            $insAnx->execute([$cid, $fid, $fnome, (string)($ax['nome'] ?? 'anexo.pdf'), '', $url, (int)($ax['tamanho'] ?? 0), (string)($ax['mime'] ?? 'application/pdf'), '__IMPORT__', $created]);
+            $nAnx++;
+        }
     }
     $pdo->commit();
     echo json_encode(['ok' => true, 'cotacao_id' => $cid, 'itens' => count($itemMap), 'fornecedores_novos' => $nForn,
-        'propostas' => $nProp, 'observacoes' => $nObs, 'created_at' => $created, 'substituiu' => $jaId ?: null], JSON_UNESCAPED_UNICODE);
+        'propostas' => $nProp, 'observacoes' => $nObs, 'anexos' => $nAnx, 'created_at' => $created, 'substituiu' => $jaId ?: null], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
     http_response_code(500); echo json_encode(['error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);

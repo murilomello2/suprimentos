@@ -280,6 +280,7 @@ function db_schema_mysql($pdo) {
         $ac = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cotacao_anexo'") as $c) $ac[$c['COLUMN_NAME']] = true;
         if ($ac && !isset($ac['fornecedor_id'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN fornecedor_id INT");
         if ($ac && !isset($ac['fornecedor_nome'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN fornecedor_nome VARCHAR(191)");
+        if ($ac && !isset($ac['url'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN url VARCHAR(500)");   // anexo por LINK (ex.: PDF importado do storage antigo) — sem arquivo local
         $fc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cot_fornecedor'") as $c) $fc[$c['COLUMN_NAME']] = true;
         if ($fc && !isset($fc['contatos_at'])) $pdo->exec("ALTER TABLE cot_fornecedor ADD COLUMN contatos_at TEXT");
         $cfc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cotacao_fornecedor'") as $c) $cfc[$c['COLUMN_NAME']] = true;
@@ -488,6 +489,7 @@ function db_schema($pdo) {
     $acols = []; foreach ($pdo->query("PRAGMA table_info(cotacao_anexo)") as $c) $acols[$c['name']] = true;
     if (!isset($acols['fornecedor_id'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN fornecedor_id INTEGER");
     if (!isset($acols['fornecedor_nome'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN fornecedor_nome TEXT");
+    if (!isset($acols['url'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN url TEXT");
     $fcols = []; foreach ($pdo->query("PRAGMA table_info(cot_fornecedor)") as $c) $fcols[$c['name']] = true;
     if (!isset($fcols['contatos_at'])) $pdo->exec("ALTER TABLE cot_fornecedor ADD COLUMN contatos_at TEXT");
     $cfcols = []; foreach ($pdo->query("PRAGMA table_info(cotacao_fornecedor)") as $c) $cfcols[$c['name']] = true;

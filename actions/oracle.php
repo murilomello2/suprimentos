@@ -315,6 +315,7 @@ function oracle_extracao_default_prompt() {
         . "vão em 'extras' — não invente item na lista.\n"
         . "- Condição específica de um item (marca, prazo, quantidade mínima) vai na 'observacao' daquele item.\n"
         . "- Capture também prazo de entrega, condição de pagamento e validade da proposta, se aparecerem.\n"
+        . "- Preencha os PONTOS DE EQUALIZAÇÃO (condições comerciais a comparar): SEMPRE 'Frete', 'Condição de pagamento' e 'Descarregamento'; e CRIE pontos NOVOS quando o fornecedor destacar algo relevante (ex.: Imposto/ICMS, Mobilização, Garantia, Prazo de faturamento). Devolva em 'equalizacao' como {ponto, valor} — valor curto e objetivo (ex.: 'incluso', 'CIF', '30 dias', 'ICMS 12%'). Se não achar, deixe valor vazio.\n"
         . "- NUNCA invente preços. Na dúvida, use null e explique em observacao_geral.\n"
         . "Responda SOMENTE com um JSON válido no formato pedido.";
 }

@@ -4081,7 +4081,14 @@ async function cotSalvarProposta(){
   const itens=Object.entries(COT.prop.precos).map(([iid,p])=>({cotacao_item_id:Number(iid),preco_unit:p.preco_unit!==''?Number(p.preco_unit):'',preco_total:p.preco_total!==''?Number(p.preco_total):''}));
   const body={acao:'proposta',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:COT.prop.id||undefined,fornecedor_nome:forn,prazo:val('prP'),observacoes:val('prO'),itens};
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
-    if(r.error){toast(r.error);return;} toast('Proposta salva'); cotOpen(COT.cur.cotacao.id);
+    if(r.error){toast(r.error);return;}
+    // aplica a equalização pré-preenchida pela IA nesta proposta (mescla com o que já houver, sem apagar valores manuais)
+    if(COT.prop.eqIA && Object.keys(COT.prop.eqIA).length && r.proposta_id){
+      const src=(COT.cur.propostas||[]).find(p=>p.id===r.proposta_id), base=(src&&src.equaliza)?Object.assign({},src.equaliza):{};
+      const merged=Object.assign(base,COT.prop.eqIA);
+      try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'equaliza_salvar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:r.proposta_id,equaliza:merged})}); }catch(e){}
+    }
+    toast('Proposta salva'); cotOpen(COT.cur.cotacao.id);
   }catch(e){toast('Falha: '+e.message);}
 }
 async function cotFinalizar(){ const c=COT.cur.cotacao, novo=c.status==='finalizada'?'aguardando':'finalizada';
@@ -4171,7 +4178,7 @@ async function cotIAExecutar(){ const s=COT.ia; if(!s||!s.sel.length||s.busy)ret
     if(r.error){ toast(r.error); s.busy=false; cotIARender(); return; }
     const fn=s.fornNome; cotIAFechar(); cotIAAplicar(fn,r.draft,r);
   }catch(e){ toast('Falha: '+e.message); s.busy=false; cotIARender(); } }
-function cotIAAplicar(fornNome,draft,meta){ const d=COT.cur; draft=draft||{}; const nz=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+async function cotIAAplicar(fornNome,draft,meta){ const d=COT.cur; draft=draft||{}; const nz=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
   const ex=(d.propostas||[]).find(p=>nz(p.fornecedor_nome)===nz(fornNome));   // já tem proposta? edita; senão cria
   COT.prop={id:ex?ex.id:0, precos:{}};
   (d.itens||[]).forEach(it=>{ COT.prop.precos[it.id]={preco_unit:'',preco_total:''}; });
@@ -4190,8 +4197,17 @@ function cotIAAplicar(fornNome,draft,meta){ const d=COT.cur; draft=draft||{}; co
   let obs='⚠ Rascunho gerado por IA'+(meta&&meta.usados&&meta.usados.length?' (fonte: '+meta.usados.join(', ')+')':'')+' — confira os valores antes de salvar.';
   if(partes.length) obs+='\n\n'+partes.join('\n');
   COT.prop.observacoes=obs;
+  // EQUALIZAÇÃO da IA: cria pontos novos na cotação (ex.: Imposto) + guarda os valores p/ aplicar quando a proposta for salva
+  COT.prop.eqIA={}; let novos=0;
+  if(Array.isArray(draft.equalizacao)){ const pts=cotEqPontos(d.cotacao), znz=s=>String(s||'').trim().toLowerCase(), add=[];
+    draft.equalizacao.forEach(e=>{ if(!e||!e.ponto)return; const ponto=String(e.ponto).trim(), valor=(e.valor==null?'':String(e.valor).trim()); if(!ponto)return;
+      if(valor) COT.prop.eqIA[ponto]=valor;
+      if(!pts.some(p=>znz(p)===znz(ponto)) && !add.some(p=>znz(p)===znz(ponto))) add.push(ponto); });
+    if(add.length){ d.cotacao.equalizacao=[...pts,...add].join('\n'); novos=add.length;
+      try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'equaliza_salvar',me:EU&&EU.bitrix_id,cotacao_id:d.cotacao.id,equalizacao:d.cotacao.equalizacao})}); }catch(e){} }
+  }
   COT.mode='proposta'; cotRenderProposta(); cotFornDatalist(((COT.cur||{}).cotacao||{}).categoria);
-  toast(preench+' item(ns) preenchido(s) pela IA'+((meta&&meta.avisos&&meta.avisos.length)?' · '+meta.avisos.length+' aviso(s)':'')); }
+  toast(preench+' item(ns) preenchido(s) pela IA'+(novos?' · '+novos+' ponto(s) de equalização novo(s)':'')+((meta&&meta.avisos&&meta.avisos.length)?' · '+meta.avisos.length+' aviso(s)':'')); }
 async function cotDelAnexo(id){ if(!confirm('Excluir este anexo?'))return;
   try{ await fetch('actions/cotacao_anexo.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
 /* --- Concorrência: convidar / desconvidar / lançar proposta de um convidado --- */

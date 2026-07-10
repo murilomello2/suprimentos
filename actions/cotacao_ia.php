@@ -117,7 +117,7 @@ try {
     // conteúdo multimodal para a OpenAI
     $instr = $prompt . "\n\nITENS QUE ESTAMOS COTANDO (use o item_id na resposta):\n" . json_encode($itensLista, JSON_UNESCAPED_UNICODE)
         . "\n\nFORMATO DA RESPOSTA (JSON):\n"
-        . '{"itens":[{"item_id":<id>,"preco_unit":<numero|null>,"observacao":"<texto>"}],"extras":[{"descricao":"<frete/imposto/etc>","valor":<numero|null>}],"equalizacao":[{"ponto":"<Frete|Condição de pagamento|Descarregamento|Imposto|...>","valor":"<texto curto>"}],"prazo_entrega":"<texto>","condicao_pagamento":"<texto>","validade":"<texto>","observacao_geral":"<texto>","confianca":"<alta|media|baixa>"}';
+        . '{"itens":[{"item_id":<id>,"preco_unit":<numero|null>,"observacao":"<texto>"}],"extras":[{"descricao":"<frete/imposto/etc>","valor":<numero|null>}],"equalizacao":[{"ponto":"<Frete|Condição de pagamento|Descarregamento|Imposto|...>","valor":"<texto curto>"}],"fornecedor":{"nome":"<razão social>","cnpj":"<00.000.000/0000-00>","telefone":"<texto>","email":"<texto>"},"prazo_entrega":"<texto>","condicao_pagamento":"<texto>","validade":"<texto>","observacao_geral":"<texto>","confianca":"<alta|media|baixa>"}';
     $content = [['type' => 'text', 'text' => $instr]];
     $usados = []; $avisos = [];
     foreach ($anexos as $a) {

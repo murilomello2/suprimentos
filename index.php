@@ -3846,6 +3846,7 @@ function cotRenderDetalhe(){
       <span style="margin-left:auto;display:flex;gap:6px">
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cartaGerar(${c.id})" title="${(c.num_solicitacao&&!c.servico_id)?'Carta de cotação (material) desta cotação':'Carta convite desta cotação'} — PDF / Word"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> ${(d.cartas_geradas&&d.cartas_geradas.length)?'Ver/editar carta':'Gerar carta'}</button>${(d.cartas_geradas&&d.cartas_geradas.length)?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="carta salva em ${D(String(d.cartas_geradas[0].created_at).slice(0,10))}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">description</span> carta salva</span>`:''}`:''}
         <button class="btn-ghost" style="padding:6px 12px" onclick="cotUmaPagina()" title="Resumo de uma página, pronto pra imprimir/PDF"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Uma página</button>
+        ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px;color:var(--verde-d)" onclick="cotPropIAAbrir()" title="a IA lê um PDF/print de proposta, identifica o fornecedor e preenche os preços"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Proposta via IA</button>`:''}
         ${CAN_EDIT?`<button class="btn-prim" style="padding:6px 12px" onclick="cotProposta()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Cadastrar proposta</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotFinalizar()">${c.status==='finalizada'?'Reabrir':'Finalizar'}</button>`:''}
         ${podeGerir?`<button class="btn-ghost" style="padding:6px 12px;color:var(--pend)" onclick="cotExcluir()" title="Excluir esta cotação (admin ou quem criou)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">delete</span> Excluir</button>`:''}
@@ -4223,8 +4224,8 @@ async function cotUploadAnexoFile(file,fornId,fornNome,propostaId){
   const fd=new FormData(); fd.append('arquivo',file); fd.append('cotacao_id',COT.cur.cotacao.id);
   if(fornId)fd.append('fornecedor_id',fornId); if(fornNome)fd.append('fornecedor_nome',fornNome); if(propostaId)fd.append('proposta_id',propostaId);
   fd.append('me',(EU&&EU.bitrix_id)||'');
-  try{ const r=await (await fetch('actions/cotacao_anexo.php',{method:'POST',body:fd})).json(); if(r.error){ toast(file.name+': '+r.error); return false; } return true; }
-  catch(e){ toast('Falha: '+e.message); return false; } }
+  try{ const r=await (await fetch('actions/cotacao_anexo.php',{method:'POST',body:fd})).json(); if(r.error){ toast(file.name+': '+r.error); return null; } return r; }
+  catch(e){ toast('Falha: '+e.message); return null; } }
 /* --- Motor de IA: lê os anexos do fornecedor e preenche a proposta (RASCUNHO p/ validação humana) --- */
 function cotIAForn(fornId,fornNome){ const d=COT.cur||{}, nz=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
   return (d.anexos||[]).filter(a=>((a.fornecedor_id&&fornId&&String(a.fornecedor_id)===String(fornId))||(a.fornecedor_nome&&nz(a.fornecedor_nome)===nz(fornNome)))); }
@@ -4278,6 +4279,74 @@ async function cotIAAplicar(fornNome,draft,meta){ const d=COT.cur; draft=draft||
   }
   COT.mode='proposta'; cotRenderProposta(); cotFornDatalist(((COT.cur||{}).cotacao||{}).categoria);
   toast(preench+' item(ns) preenchido(s) pela IA'+(novos?' · '+novos+' ponto(s) de equalização novo(s)':'')+((meta&&meta.avisos&&meta.avisos.length)?' · '+meta.avisos.length+' aviso(s)':'')); }
+/* ===== ITEM B: cadastrar proposta a partir de um PDF/print SEM escolher fornecedor — IA lê, IDENTIFICA o fornecedor e preenche ===== */
+function cotPropIAAbrir(){ COT.propIA={files:[],busy:false}; let ov=document.getElementById('propiaOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='propiaOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }
+  document.addEventListener('paste',cotPropIAPaste); cotPropIARender(); }
+function cotPropIAFechar(){ const ov=document.getElementById('propiaOverlay'); if(ov)ov.remove(); document.removeEventListener('paste',cotPropIAPaste); COT.propIA=null; COT.propIAres=null; }
+function cotPropIAPaste(e){ if(!COT.propIA)return; const items=((e.clipboardData||{}).items)||[]; let n=0; for(const it of items){ if(it.kind==='file'){ const f=it.getAsFile(); if(f){ COT.propIA.files.push(f.name?f:new File([f],'print-'+Date.now()+'.png',{type:f.type||'image/png'})); n++; } } } if(n){ e.preventDefault(); cotPropIARender(); } }
+function cotPropIADrop(e){ e.preventDefault(); if(!COT.propIA)return; for(const f of (((e.dataTransfer||{}).files)||[]))COT.propIA.files.push(f); cotPropIARender(); }
+function cotPropIAPick(input){ if(!COT.propIA)return; for(const f of (input.files||[]))COT.propIA.files.push(f); input.value=''; cotPropIARender(); }
+function cotPropIARender(){ const s=COT.propIA, ov=document.getElementById('propiaOverlay'); if(!s||!ov)return; ov.onclick=()=>{ if(!s.busy)cotPropIAFechar(); };
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:18px;box-shadow:0 12px 44px rgba(0,0,0,.22);width:100%;max-width:480px" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:14px"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--verde-d)">auto_awesome</span> Cadastrar proposta com IA</b><span onclick="cotPropIAFechar()" class="material-icons" style="cursor:pointer;color:var(--muted)">close</span></div>
+    <div class="muted" style="font-size:11.5px;margin-bottom:10px">Anexe o PDF/print da proposta — a IA lê, <b>identifica o fornecedor</b> e preenche os preços (rascunho p/ conferir). Não precisa ter convidado o fornecedor.</div>
+    ${s.busy?'<div class="dempty">🧠 lendo a proposta e identificando o fornecedor…</div>':`
+    <label ondragover="event.preventDefault()" ondrop="cotPropIADrop(event)" style="display:block;border:2px dashed var(--line);border-radius:12px;padding:20px;text-align:center;cursor:pointer;background:#fafbfb">
+      <span class="material-icons" style="font-size:28px;color:var(--verde)">upload_file</span>
+      <div style="font-size:12.5px;margin-top:4px">Arraste, <b>cole (Ctrl+V)</b> ou clique — PDF, Excel ou imagem</div>
+      <input type="file" accept=".pdf,.xlsx,.xls,image/png,image/jpeg,application/pdf" multiple style="display:none" onchange="cotPropIAPick(this)"></label>
+    <div style="margin-top:10px">${s.files.length?s.files.map((f,i)=>`<div style="display:flex;align-items:center;gap:7px;padding:3px 0;font-size:12px"><span class="material-icons" style="font-size:15px;color:var(--muted)">${cotAnexoIcon(f.type,f.name)}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span><span onclick="COT.propIA.files.splice(${i},1);cotPropIARender()" class="material-icons" style="cursor:pointer;color:var(--pend);font-size:15px">close</span></div>`).join(''):'<div class="dmini">Nenhum arquivo ainda.</div>'}</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn-ghost" onclick="cotPropIAFechar()">Cancelar</button><button class="btn-prim" onclick="cotPropIALer()" ${s.files.length?'':'disabled style=\"opacity:.5\"'}><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Ler com IA</button></div>`}
+  </div>`; }
+async function cotPropIALer(){ const s=COT.propIA; if(!s||!s.files.length||s.busy)return; s.busy=true; cotPropIARender();
+  try{ const ids=[]; for(const f of s.files){ const r=await cotUploadAnexoFile(f,null,''); if(r&&r.id)ids.push(r.id); }
+    if(!ids.length){ toast('Falha ao anexar'); s.busy=false; cotPropIARender(); return; }
+    const rr=await (await fetch('actions/cotacao_ia.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'preencher',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,anexo_ids:ids})})).json();
+    if(rr.error){ toast(rr.error); s.busy=false; cotPropIARender(); return; }
+    document.removeEventListener('paste',cotPropIAPaste); COT.propIA=null;
+    cotPropIAForn(rr.fornecedor||{}, rr.draft||{}, ids, rr);
+  }catch(e){ toast('Falha: '+e.message); s.busy=false; cotPropIARender(); } }
+const _dig=s=>String(s||'').replace(/\D/g,'');
+async function cotPropIAForn(fornData, draft, anexoIds, meta){
+  const cnpj=_dig(fornData.cnpj), nome=(fornData.nome||'').trim(); const cands=[], seen={};
+  const push=arr=>(arr||[]).forEach(f=>{ if(!seen[f.id]){ seen[f.id]=1; cands.push(f); } });
+  try{ if(cnpj.length>=8){ const r=await (await fetch('actions/fornecedores.php?q='+encodeURIComponent(cnpj)+'&limit=8')).json(); push((r.fornecedores||[]).filter(f=>_dig(f.cnpj)===cnpj)); } }catch(e){}
+  try{ if(nome){ const r=await (await fetch('actions/fornecedores.php?q='+encodeURIComponent(nome)+'&limit=8')).json(); push(r.fornecedores||[]); } }catch(e){}
+  COT.propIAres={fornData,draft,anexoIds,meta,cands,sel:undefined}; cotPropIAResRender();
+}
+function cotPropIAResRender(){ const R=COT.propIAres; if(!R)return; let ov=document.getElementById('propiaOverlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='propiaOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }
+  ov.onclick=()=>ov.remove();
+  const fd=R.fornData, cnpjD=_dig(fd.cnpj), exact=R.cands.find(c=>_dig(c.cnpj)===cnpjD && cnpjD.length>=8);
+  if(R.sel===undefined) R.sel = exact?('id:'+exact.id):(R.cands.length?('id:'+R.cands[0].id):'novo');
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:18px;box-shadow:0 12px 44px rgba(0,0,0,.22);width:100%;max-width:520px;max-height:85vh;overflow:auto" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><b style="font-size:14px">Qual é o fornecedor desta proposta?</b><span onclick="document.getElementById('propiaOverlay').remove()" class="material-icons" style="cursor:pointer;color:var(--muted)">close</span></div>
+    <div class="muted" style="font-size:11.5px;margin-bottom:10px">A IA leu: <b>${esc(fd.nome||'—')}</b>${fd.cnpj?' · CNPJ '+esc(fd.cnpj):''}${fd.telefone?' · '+esc(fd.telefone):''}${fd.email?' · '+esc(fd.email):''}</div>
+    ${R.cands.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px">FORNECEDORES PARECIDOS NA BASE</div>${R.cands.map(c=>`<label style="display:flex;align-items:center;gap:8px;padding:5px 2px;font-size:12.5px;cursor:pointer"><input type="radio" name="piaf" ${R.sel==='id:'+c.id?'checked':''} onchange="COT.propIAres.sel='id:${c.id}';cotPropIAResRender()"><span style="flex:1">${esc(c.nome)}${c.cnpj?` <span class="muted">· ${esc(c.cnpj)}</span>`:''}${(_dig(c.cnpj)===cnpjD&&cnpjD.length>=8)?' <span class="dchip" style="background:var(--ok)">CNPJ igual</span>':''}</span></label>`).join('')}`:'<div class="dmini">Nenhum fornecedor parecido na base.</div>'}
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:12.5px;cursor:pointer;border-top:1px solid var(--line);margin-top:6px"><input type="radio" name="piaf" ${R.sel==='novo'?'checked':''} onchange="COT.propIAres.sel='novo';cotPropIAResRender()"><b style="color:var(--verde-d)">➕ Cadastrar novo fornecedor</b></label>
+    ${R.sel==='novo'?`<div style="background:#fafbfb;border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      ${cotFld('Nome / razão social *','<input id="piaN" value="'+esc(fd.nome||'')+'" style="width:100%">','grid-column:1/3')}
+      ${cotFld('CNPJ','<input id="piaC" value="'+esc(fd.cnpj||'')+'" style="width:100%">')}
+      ${cotFld('Categoria','<input id="piaCat" value="'+esc((COT.cur.cotacao||{}).categoria||'')+'" style="width:100%">')}
+      ${cotFld('Telefone','<input id="piaT" value="'+esc(fd.telefone||'')+'" style="width:100%">')}
+      ${cotFld('E-mail','<input id="piaE" value="'+esc(fd.email||'')+'" style="width:100%">')}</div>`:''}
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn-ghost" onclick="document.getElementById('propiaOverlay').remove()">Cancelar</button><button class="btn-prim" onclick="cotPropIAResConfirm()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">check</span> Continuar</button></div>
+  </div>`; }
+async function cotPropIAResConfirm(){ const R=COT.propIAres; if(!R)return; let fid=null, fnome='';
+  if(R.sel==='novo'){ const g=id=>((document.getElementById(id)||{}).value||'').trim(); fnome=g('piaN'); if(!fnome){toast('Informe o nome do fornecedor');return;}
+    try{ const r=await (await fetch('actions/fornecedores.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'fornecedor_salvar',me:EU&&EU.bitrix_id,nome:fnome,cnpj:g('piaC'),categoria:g('piaCat'),telefone:g('piaT'),email:g('piaE')})})).json();
+      if(r.error){toast(r.error);return;} fid=r.id; toast('Fornecedor cadastrado'); }catch(e){toast('Falha ao cadastrar: '+e.message);return;}
+  } else { const id=Number(String(R.sel).split(':')[1]); const c=R.cands.find(x=>x.id===id); if(!c){toast('Selecione o fornecedor');return;} fid=c.id; fnome=c.nome; }
+  try{
+    const jaConv=(COT.cur.convidados||[]).some(cv=>String(cv.fornecedor_id)===String(fid)||(cv.fornecedor_nome||'').trim().toLowerCase()===fnome.trim().toLowerCase());
+    if(!jaConv) await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'convidar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,convidados:[{id:fid,nome:fnome}]})});
+    if(R.anexoIds&&R.anexoIds.length) await fetch('actions/cotacao_anexo.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'set_fornecedor',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,ids:R.anexoIds,fornecedor_id:fid,fornecedor_nome:fnome})});
+    const draft=R.draft, meta=R.meta; cotPropIAFechar();
+    await cotOpen(COT.cur.cotacao.id);
+    cotIAAplicar(fnome, draft, meta);
+  }catch(e){ toast('Falha: '+e.message); }
+}
 async function cotDelAnexo(id){ if(!confirm('Excluir este anexo?'))return;
   try{ await fetch('actions/cotacao_anexo.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
 /* --- Concorrência: convidar / desconvidar / lançar proposta de um convidado --- */

@@ -41,8 +41,8 @@ try {
         // a categoria da cotação, então categoria NUNCA deve zerar uma busca por nome.
         if (trim((string)($_GET['q'] ?? '')) !== '') {
             $t = '%'.trim($_GET['q']).'%';
-            $w[] = '(nome LIKE ? OR itens LIKE ? OR categoria LIKE ? OR cidade LIKE ?)';
-            array_push($a, $t, $t, $t, $t);
+            $w[] = '(nome LIKE ? OR itens LIKE ? OR categoria LIKE ? OR cidade LIKE ? OR cnpj LIKE ?)';
+            array_push($a, $t, $t, $t, $t, $t);
         }
         if (($_GET['nome'] ?? '') !== '')      { $w[] = 'nome LIKE ?';      $a[] = '%'.$_GET['nome'].'%'; }
         if (($_GET['categoria'] ?? '') !== '') { $w[] = 'categoria = ?';    $a[] = $_GET['categoria']; }

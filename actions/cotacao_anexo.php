@@ -52,6 +52,21 @@ try {
         echo json_encode(['anexos' => $q->fetchAll()], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    // ---------- SET FORNECEDOR (JSON) — vincula anexos avulsos ao fornecedor identificado pela IA (item B) ----------
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_FILES) && (json_decode(file_get_contents('php://input'), true)['acao'] ?? '') === 'set_fornecedor') {
+        header('Content-Type: application/json; charset=utf-8');
+        $in = json_decode(file_get_contents('php://input'), true) ?: [];
+        $ids = array_values(array_filter(array_map('intval', (array)($in['ids'] ?? []))));
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$ids || !$cid) throw new Exception('ids e cotacao_id obrigatórios');
+        [$perms, $obra] = anexo_can($pdo, $in['me'] ?? null, $cid);
+        if (!$perms || !can_edit_obra($perms, $obra)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão.']); exit; }
+        $fid = (int)($in['fornecedor_id'] ?? 0) ?: null; $fnome = trim((string)($in['fornecedor_nome'] ?? '')) ?: null;
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $pdo->prepare("UPDATE cotacao_anexo SET fornecedor_id=?, fornecedor_nome=? WHERE cotacao_id=? AND id IN ($ph)")
+            ->execute(array_merge([$fid, $fnome, $cid], $ids));
+        echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     // ---------- EXCLUIR (JSON) ----------
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_FILES)) {
         header('Content-Type: application/json; charset=utf-8');

@@ -87,7 +87,8 @@ function obras_aplicar_crono($pdo, &$obras) {
     }
 }
 
-/** Lê a EAP (árvore) do cronograma p/ extrair características: devolve [textoDaÁrvore, pavimentoMáximo, nTarefas]. */
+/** Lê a EAP (árvore) do cronograma p/ extrair características.
+ *  Devolve [textoDaÁrvore, maxPav, nTarefas, torresRegex, subsolosRegex]. */
 function obras_crono_tasks_resumo($headerId) {
     require_once __DIR__ . '/../includes/supabase.php';
     $base = 'obra_cronograma_tarefas?cronograma_id=eq.' . rawurlencode($headerId);
@@ -95,9 +96,16 @@ function obras_crono_tasks_resumo($headerId) {
     $pav = []; try { $pav = sb_get($base . '&nome=ilike.*pav*&select=nome&limit=5000'); } catch (Throwable $e) {}
     $maxPav = 0;   // tolerante a bytes: entre o número e "PAV" pode haver "º " (bytes UTF-8), pontos, traços…
     foreach ((array)$pav as $p) { if (preg_match('/(\d{1,3})[^0-9A-Za-z]{0,4}(pav|pavimento)/i', (string)($p['nome'] ?? ''), $mm)) { $n = (int)$mm[1]; if ($n > $maxPav && $n <= 80) $maxPav = $n; } }
-    $lines = [];
-    foreach ((array)$tree as $t) { $lines[] = str_repeat('  ', (int)($t['outline_level'] ?? 0)) . (!empty($t['wbs']) ? $t['wbs'] . ' ' : '') . (string)($t['nome'] ?? ''); }
-    return [implode("\n", $lines), $maxPav, count((array)$tree)];
+    // contagens determinísticas (cross-check da IA), sobre TODA a árvore-resumo
+    $torres = []; $subs = []; $lines = [];
+    foreach ((array)$tree as $t) {
+        $nm = (string)($t['nome'] ?? '');
+        $lines[] = str_repeat('  ', (int)($t['outline_level'] ?? 0)) . (!empty($t['wbs']) ? $t['wbs'] . ' ' : '') . $nm;
+        if (preg_match('/\btorre\s*0*(\d{1,2})\b/i', $nm, $mt)) $torres[(int)$mt[1]] = true;
+        if (preg_match('/(\d{1,2})[^0-9A-Za-z]{0,4}subsolo/i', $nm, $ms)) $subs[(int)$ms[1]] = true;
+        elseif (preg_match('/\bsubsolo\b/i', $nm) && !$subs) $subs[1] = true;
+    }
+    return [implode("\n", $lines), $maxPav, count((array)$tree), count($torres), count($subs)];
 }
 
 // resolve o DE-PARA de uma obra pelo nome: coligada (TOTVS) + compra/centro de custo (CAPRETZ) + solic_obra (endereço/comprador) + radar
@@ -210,8 +218,9 @@ try {
         if ($oid === '' || !isset($crBy[$oid])) { $m = obras_crono_match((string)$of['nome'], $crBy); if ($m) $oid = $m; }
         $header = ($oid !== '' && isset($crBy[$oid])) ? (string)($crBy[$oid]['id'] ?? '') : '';
         if ($header === '') { echo json_encode(['error' => 'Obra sem cronograma vinculado — ligue o cronograma antes de extrair.']); exit; }
-        [$treeTxt, $maxPav, $nTasks] = obras_crono_tasks_resumo($header);
+        [$treeTxt, $maxPav, $nTasks, $torresRx, $subsRx] = obras_crono_tasks_resumo($header);
         if (trim($treeTxt) === '') { echo json_encode(['error' => 'Cronograma sem tarefas legíveis.']); exit; }
+        $cronoNome = (string)($crBy[$oid]['project_name'] ?? ($crBy[$oid]['nome'] ?? ''));
         define('ORACLE_LIB_ONLY', 1); require_once __DIR__ . '/oracle.php';
         $cfg = oracle_cfg(); $key = $cfg['key'] ?? '';
         if (!$key) { echo json_encode(['error' => 'IA não configurada (admin cadastra a chave da OpenAI em Radar IA).']); exit; }
@@ -235,7 +244,9 @@ try {
         if ($code >= 400 || !$j) throw new Exception('IA: ' . ($j['error']['message'] ?? ('HTTP ' . $code)));
         $d = json_decode($j['choices'][0]['message']['content'] ?? '', true);
         if (!is_array($d)) throw new Exception('IA devolveu resposta ilegível');
-        echo json_encode(['ok' => true, 'draft' => $d, 'modelo' => $model, 'n_tarefas' => $nTasks, 'max_pav' => $maxPav, 'cronograma_header' => $header], JSON_UNESCAPED_UNICODE); exit;
+        echo json_encode(['ok' => true, 'draft' => $d, 'modelo' => $model, 'n_tarefas' => $nTasks,
+            'regex' => ['torres' => $torresRx, 'subsolos' => $subsRx, 'pavimentos' => $maxPav],
+            'max_pav' => $maxPav, 'cronograma_nome' => $cronoNome, 'obra_nome' => (string)$of['nome'], 'cronograma_header' => $header], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'cronograma') {   // snapshot do cronograma (% físico + datas), casando por NOME (obra_cronogramas tem RLS)

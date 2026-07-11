@@ -291,6 +291,8 @@ function db_schema_mysql($pdo) {
         if ($ofc && !isset($ofc['cronograma_nome'])) $pdo->exec("ALTER TABLE obra_ficha ADD COLUMN cronograma_nome VARCHAR(255)");
         if ($ofc && !isset($ofc['cronograma_at'])) $pdo->exec("ALTER TABLE obra_ficha ADD COLUMN cronograma_at VARCHAR(40)");
         if ($ofc && !isset($ofc['crono_obra_id'])) $pdo->exec("ALTER TABLE obra_ficha ADD COLUMN crono_obra_id VARCHAR(48)");   // obra_id no Supabase do Planejamento (junta o cronograma AO VIVO)
+        if ($ofc && !isset($ofc['compra_coligada_cod'])) $pdo->exec("ALTER TABLE obra_ficha ADD COLUMN compra_coligada_cod INT");   // coligada que EMITE a compra (SC/PC) — CAPRETZ(1) p/ Cajá/Espazo/Prades/Piamonte/Licel; senão = própria
+        if ($ofc && !isset($ofc['centro_custo'])) $pdo->exec("ALTER TABLE obra_ficha ADD COLUMN centro_custo VARCHAR(10)");         // centro de custo nas solicitações (campo 'obra': 001 padrão; 040/041/042/036/032 nas CAPRETZ)
         $pc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cotacao_proposta'") as $c) $pc[$c['COLUMN_NAME']] = true;
         if ($pc && !isset($pc['equaliza'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN equaliza TEXT");
         // solic_obra.cnpj (CNPJ da obra p/ a carta de cotação) — self-heal p/ tabela já existente
@@ -506,7 +508,7 @@ function db_schema($pdo) {
     if (!isset($ccols['import_origem'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN import_origem TEXT");
     if (!isset($ccols['obra_livre'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN obra_livre TEXT");
     $ofcols = []; foreach ($pdo->query("PRAGMA table_info(obra_ficha)") as $c) $ofcols[$c['name']] = true;
-    foreach (['pct_fisico'=>'REAL','crono_inicio'=>'TEXT','crono_fim'=>'TEXT','crono_medicao'=>'TEXT','cronograma_nome'=>'TEXT','cronograma_at'=>'TEXT','crono_obra_id'=>'TEXT'] as $col=>$ty) if (!isset($ofcols[$col])) $pdo->exec("ALTER TABLE obra_ficha ADD COLUMN $col $ty");
+    foreach (['pct_fisico'=>'REAL','crono_inicio'=>'TEXT','crono_fim'=>'TEXT','crono_medicao'=>'TEXT','cronograma_nome'=>'TEXT','cronograma_at'=>'TEXT','crono_obra_id'=>'TEXT','compra_coligada_cod'=>'INTEGER','centro_custo'=>'TEXT'] as $col=>$ty) if (!isset($ofcols[$col])) $pdo->exec("ALTER TABLE obra_ficha ADD COLUMN $col $ty");
     $scols = []; foreach ($pdo->query("PRAGMA table_info(solic_obra)") as $c) $scols[$c['name']] = true;
     if (!isset($scols['cnpj'])) $pdo->exec("ALTER TABLE solic_obra ADD COLUMN cnpj TEXT");
     if (!isset($scols['endereco'])) $pdo->exec("ALTER TABLE solic_obra ADD COLUMN endereco TEXT");

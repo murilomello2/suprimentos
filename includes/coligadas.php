@@ -66,6 +66,17 @@ function coligadas_map() {
 function coligada_nome($cod) { $m = coligadas_map(); $c = (int)$cod; return isset($m[$c]) ? $m[$c]['nome'] : ''; }
 function coligada_fantasia($cod) { $m = coligadas_map(); $c = (int)$cod; return isset($m[$c]) ? $m[$c]['fantasia'] : ''; }
 function coligada_cnpj($cod) { $m = coligadas_map(); $c = (int)$cod; return isset($m[$c]) ? $m[$c]['cnpj'] : ''; }
+/** Lista das coligadas p/ dropdown (ordenada pela fantasia). */
+function coligadas_list() { $out = []; foreach (coligadas_map() as $cod => $c) $out[] = ['cod' => $cod, 'nome' => $c['nome'], 'fantasia' => $c['fantasia'], 'cnpj' => $c['cnpj']]; usort($out, fn($a, $b) => strcasecmp($a['fantasia'], $b['fantasia'])); return $out; }
+/** Centros de custo da CAPRETZ (a compra "guarda-chuva": a obra tem coligada própria, mas as SC/PC saem pela CAPRETZ+ccusto). */
+function capretz_cc_map() { return ['001'=>'Comercial Americana','010'=>'Sede','015'=>'MKT','020'=>'SAT','032'=>'Licel','033'=>'Obras SAT','036'=>'Piamonte','039'=>'Contrap. Piamonte','040'=>'Cajá','041'=>'Espazo','042'=>'Prades']; }
+/** Se a obra compra pela CAPRETZ, devolve o código do centro de custo (só as que são OBRAS de fato). Senão null. */
+function capretz_cc_por_obra($nome) {
+    $n = ob_norm($nome); if ($n === '') return null;
+    $obras = ['032'=>'licel','036'=>'piamonte','040'=>'caja','041'=>'espazo','042'=>'prades'];   // ccusto => token da obra
+    foreach ($obras as $cod => $tok) { if (strpos(' ' . $n . ' ', ' ' . $tok . ' ') !== false) return $cod; }
+    return null;
+}
 // normaliza p/ casar (sem acento, byte-based — o prod não tem mbstring)
 function ob_norm($s) {
     $s = strtolower(trim((string)$s));

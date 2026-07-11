@@ -93,8 +93,8 @@ function obras_crono_tasks_resumo($headerId) {
     $base = 'obra_cronograma_tarefas?cronograma_id=eq.' . rawurlencode($headerId);
     $tree = sb_get($base . '&outline_level=lte.3&select=nome,wbs,outline_level&order=ordem&limit=1400');
     $pav = []; try { $pav = sb_get($base . '&nome=ilike.*pav*&select=nome&limit=5000'); } catch (Throwable $e) {}
-    $maxPav = 0;
-    foreach ((array)$pav as $p) { if (preg_match('/(\d{1,3})\s*[ºo°]?\s*(pav|pavimento)/i', (string)($p['nome'] ?? ''), $mm)) { $n = (int)$mm[1]; if ($n > $maxPav && $n <= 80) $maxPav = $n; } }
+    $maxPav = 0;   // tolerante a bytes: entre o número e "PAV" pode haver "º " (bytes UTF-8), pontos, traços…
+    foreach ((array)$pav as $p) { if (preg_match('/(\d{1,3})[^0-9A-Za-z]{0,4}(pav|pavimento)/i', (string)($p['nome'] ?? ''), $mm)) { $n = (int)$mm[1]; if ($n > $maxPav && $n <= 80) $maxPav = $n; } }
     $lines = [];
     foreach ((array)$tree as $t) { $lines[] = str_repeat('  ', (int)($t['outline_level'] ?? 0)) . (!empty($t['wbs']) ? $t['wbs'] . ' ' : '') . (string)($t['nome'] ?? ''); }
     return [implode("\n", $lines), $maxPav, count((array)$tree)];
@@ -219,7 +219,7 @@ try {
         $instr = "Você é um engenheiro civil lendo a EAP (estrutura analítica do projeto) de um cronograma de obra residencial. "
             . "Extraia as CARACTERÍSTICAS FÍSICAS do empreendimento SOMENTE a partir da árvore abaixo — não invente nada.\n"
             . "- torres: quantos blocos/TORRES existem (conte 'TORRE 01', 'TORRE 02'...; se só houver 1 torre implícita, use 1).\n"
-            . "- pavimentos: número de PAVIMENTOS TIPO (repetitivos). Dica: o maior 'Nº PAV TIPO' detectado foi " . (int)$maxPav . " (use-o se fizer sentido).\n"
+            . "- pavimentos: número de PAVIMENTOS TIPO (repetitivos). O maior 'Nº PAV TIPO' detectado na obra foi " . (int)$maxPav . " — se for > 0, use esse número como pavimentos (salvo evidência clara em contrário).\n"
             . "- subsolos: quantos SUBSOLOS ('1º SUBSOLO', '2º SUBSOLO'...).\n"
             . "- areas_comuns: liste itens de lazer/áreas comuns que aparecerem (piscina, salão, academia, playground, quadra, núcleo de lazer...), separados por vírgula.\n"
             . "- metodo_construtivo: só se a árvore indicar explicitamente (ex.: 'alvenaria estrutural', 'concreto armado'); senão null.\n"

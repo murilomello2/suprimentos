@@ -12,6 +12,70 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/coligadas.php';
 
+// ---- CRONOGRAMA AO VIVO (Supabase do Planejamento) --------------------------
+// O app já lê o Supabase autenticado como usuário de serviço (sb_get passa pela RLS),
+// então não precisa de snapshot: puxamos obra_cronogramas ao vivo (cache 30 min).
+define('CRONO_OBRAS_TTL', 1800);
+define('CRONO_OBRAS_CACHE', __DIR__ . '/../data/.crono_obras.json');
+
+/** Mapa obra_id(Planejamento) -> cronograma ativo. Retorna [ $byId, $fresh(bool) ]. */
+function obras_crono_live() {
+    if (is_file(CRONO_OBRAS_CACHE) && (time() - filemtime(CRONO_OBRAS_CACHE)) < CRONO_OBRAS_TTL) {
+        $d = json_decode(@file_get_contents(CRONO_OBRAS_CACHE), true);
+        if (is_array($d)) return [$d, false];
+    }
+    $byId = [];
+    try {
+        require_once __DIR__ . '/../includes/supabase.php';
+        $rows = sb_get('obra_cronogramas?is_active=eq.true&select=obra_id,project_name,nome,percent_complete,project_start,project_finish,status_date,total_tasks,updated_at&order=updated_at.desc');
+        foreach ((array)$rows as $r) {
+            $oid = (string)($r['obra_id'] ?? ''); if ($oid === '') continue;
+            if (!isset($byId[$oid])) $byId[$oid] = $r;   // 1º = mais recente (order desc)
+        }
+        if ($byId) @file_put_contents(CRONO_OBRAS_CACHE, json_encode($byId));
+    } catch (Throwable $e) {
+        return [[], false];   // Supabase fora do ar: cai no snapshot já gravado no banco
+    }
+    return [$byId, true];
+}
+
+/** Casa o NOME de uma obra ao project_name do cronograma por tokens distintivos (>=4 letras). -> obra_id | null */
+function obras_crono_match($obraNome, $byId) {
+    $toks = array_values(array_filter(explode(' ', ob_norm($obraNome)), fn($t) => strlen($t) >= 4 && !ctype_digit($t)));
+    if (!$toks) return null;
+    $best = null; $bestScore = 0;
+    foreach ($byId as $oid => $r) {
+        $ptext = ' ' . ob_norm(((string)($r['project_name'] ?? '')) . ' ' . ((string)($r['nome'] ?? ''))) . ' ';
+        $score = 0; foreach ($toks as $t) if (strpos($ptext, ' ' . $t . ' ') !== false) $score++;
+        if ($score > 0 && $score > $bestScore) { $bestScore = $score; $best = $oid; }
+    }
+    return $best;
+}
+
+/** Preenche % físico + datas AO VIVO em cada ficha (com fallback no snapshot do banco). */
+function obras_aplicar_crono($pdo, &$obras) {
+    [$crBy, $fresh] = obras_crono_live();
+    if (!$crBy) { foreach ($obras as &$o) { $o['crono_live'] = false; } return; }
+    foreach ($obras as &$o) {
+        $cr = null; $oid = (string)($o['crono_obra_id'] ?? '');
+        if ($oid !== '' && isset($crBy[$oid])) $cr = $crBy[$oid];
+        elseif (($m = obras_crono_match((string)($o['nome'] ?? ''), $crBy))) { $oid = $m; $cr = $crBy[$m]; }
+        if (!$cr) { $o['crono_live'] = false; continue; }
+        $o['pct_fisico']      = $cr['percent_complete'] !== null ? (float)$cr['percent_complete'] : ($o['pct_fisico'] ?? null);
+        $o['crono_inicio']    = (string)($cr['project_start']  ?? ($o['crono_inicio']  ?? ''));
+        $o['crono_fim']       = (string)($cr['project_finish'] ?? ($o['crono_fim']     ?? ''));
+        $o['crono_medicao']   = (string)($cr['status_date']    ?? ($o['crono_medicao'] ?? ''));
+        $o['cronograma_nome'] = (string)($cr['project_name']   ?? ($cr['nome'] ?? ($o['cronograma_nome'] ?? '')));
+        $o['crono_obra_id']   = $oid;
+        $o['crono_live']      = true;
+        $o['crono_updated']   = (string)($cr['updated_at'] ?? '');
+        if ($fresh) {   // grava o snapshot (fallback fica fresco) + o vínculo por ID — 1x a cada 30 min
+            try { $pdo->prepare("UPDATE obra_ficha SET pct_fisico=?, crono_inicio=?, crono_fim=?, crono_medicao=?, cronograma_nome=?, cronograma_at=?, crono_obra_id=? WHERE id=?")
+                ->execute([$o['pct_fisico'], $o['crono_inicio'], $o['crono_fim'], $o['crono_medicao'], $o['cronograma_nome'], date('c'), $oid, (int)$o['id']]); } catch (Throwable $e) {}
+        }
+    }
+}
+
 // resolve o DE-PARA de uma obra pelo nome: coligada (TOTVS) + solic_obra (endereço/comprador) + radar
 function obra_resolver_depara($pdo, $nome) {
     $out = ['coligada_cod' => null, 'coligada_nome' => '', 'cnpj' => '', 'solic_nome' => '', 'solic_coligada' => '', 'solic_obra_cod' => '', 'endereco' => '', 'comprador_nome' => '', 'radar_obra_id' => null];
@@ -46,10 +110,21 @@ try {
     $perms = user_perms($pdo, $me);
     if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }
 
+    if ($method === 'GET' && isset($_GET['cronogramas'])) {   // lista os cronogramas ativos p/ o admin ligar na mão os ambíguos (VS2/VS4/...)
+        [$crBy, ] = obras_crono_live();
+        $out = [];
+        foreach ($crBy as $oid => $r) $out[] = ['obra_id' => $oid, 'nome' => (string)($r['project_name'] ?? ($r['nome'] ?? '')),
+            'pct' => $r['percent_complete'], 'fim' => (string)($r['project_finish'] ?? ''), 'medicao' => (string)($r['status_date'] ?? '')];
+        usort($out, fn($a, $b) => strcasecmp($a['nome'], $b['nome']));
+        echo json_encode(['ok' => true, 'cronogramas' => $out], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($method === 'GET' && isset($_GET['lista'])) {
         $obras = $pdo->query("SELECT * FROM obra_ficha ORDER BY (status='Finalizada'), nome")->fetchAll();
         // resolve o nome da coligada p/ exibição quando só há o código
         foreach ($obras as &$o) { if (empty($o['coligada_nome']) && !empty($o['coligada_cod'])) $o['coligada_nome'] = coligada_nome($o['coligada_cod']); }
+        unset($o);
+        obras_aplicar_crono($pdo, $obras);   // % físico + datas AO VIVO (Supabase do Planejamento)
         echo json_encode(['ok' => true, 'obras' => $obras, 'is_admin' => !empty($perms['perm_admin'])], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -101,7 +176,7 @@ try {
         $f = $in['ficha'] ?? []; $id = (int)($f['id'] ?? 0);
         $now = date('c');
         $campos = ['nome','cidade','estado','status','coligada_cod','coligada_nome','cnpj','solic_nome','solic_coligada','solic_obra_cod','endereco','comprador_nome',
-                   'torres','pavimentos','subsolos','unidades','tipologias','metodo_construtivo','areas_comuns','padrao','observacoes','link_cronograma','link_projetos','link_local','de_para_ok','radar_obra_id'];
+                   'torres','pavimentos','subsolos','unidades','tipologias','metodo_construtivo','areas_comuns','padrao','observacoes','link_cronograma','link_projetos','link_local','de_para_ok','radar_obra_id','crono_obra_id'];
         $intCampos = ['coligada_cod','torres','pavimentos','subsolos','unidades','de_para_ok','radar_obra_id'];
         $set = []; $vals = [];
         foreach ($campos as $k) { if (array_key_exists($k, $f)) { $set[] = "$k=?"; $v = $f[$k];

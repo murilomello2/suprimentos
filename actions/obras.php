@@ -244,7 +244,23 @@ try {
         if ($code >= 400 || !$j) throw new Exception('IA: ' . ($j['error']['message'] ?? ('HTTP ' . $code)));
         $d = json_decode($j['choices'][0]['message']['content'] ?? '', true);
         if (!is_array($d)) throw new Exception('IA devolveu resposta ilegível');
-        echo json_encode(['ok' => true, 'draft' => $d, 'modelo' => $model, 'n_tarefas' => $nTasks,
+        // consolida IA × regex: contagem = regex se > 0 (chão de verdade), senão IA (fallback p/ torre única/EAP sem rótulo)
+        $iaT = isset($d['torres']) ? (int)$d['torres'] : 0; $iaS = isset($d['subsolos']) ? (int)$d['subsolos'] : 0; $iaP = isset($d['pavimentos']) ? (int)$d['pavimentos'] : 0;
+        $torresF = $torresRx > 0 ? $torresRx : $iaT; $subsF = $subsRx > 0 ? $subsRx : $iaS; $pavF = $maxPav > 0 ? $maxPav : $iaP;
+        $saved = null;
+        if (!empty($in['salvar'])) {   // grava a consolidação direto na ficha (sem round-trip de acento pelo cliente)
+            $set = []; $vals = [];
+            if ($torresF > 0) { $set[] = 'torres=?'; $vals[] = $torresF; }
+            if ($pavF > 0) { $set[] = 'pavimentos=?'; $vals[] = $pavF; }
+            $set[] = 'subsolos=?'; $vals[] = $subsF;   // 0 é válido (obra sem subsolo)
+            $areas = trim((string)($d['areas_comuns'] ?? '')); if ($areas !== '') { $set[] = 'areas_comuns=?'; $vals[] = $areas; }
+            $metodo = trim((string)($d['metodo_construtivo'] ?? '')); if ($metodo !== '') { $set[] = 'metodo_construtivo=?'; $vals[] = $metodo; }
+            $tip = trim((string)($d['tipologias'] ?? '')); if ($tip !== '') { $set[] = 'tipologias=?'; $vals[] = $tip; }
+            if ($set) { $vals[] = date('c'); $vals[] = (string)$me; $vals[] = $id;
+                $pdo->prepare("UPDATE obra_ficha SET " . implode(',', $set) . ", updated_at=?, updated_by=? WHERE id=?")->execute($vals); }
+            $saved = ['torres' => $torresF, 'pavimentos' => $pavF, 'subsolos' => $subsF, 'areas_comuns' => ($areas ?? ''), 'metodo_construtivo' => ($metodo ?? '')];
+        }
+        echo json_encode(['ok' => true, 'draft' => $d, 'consolidado' => ['torres' => $torresF, 'pavimentos' => $pavF, 'subsolos' => $subsF], 'saved' => $saved, 'modelo' => $model, 'n_tarefas' => $nTasks,
             'regex' => ['torres' => $torresRx, 'subsolos' => $subsRx, 'pavimentos' => $maxPav],
             'max_pav' => $maxPav, 'cronograma_nome' => $cronoNome, 'obra_nome' => (string)$of['nome'], 'cronograma_header' => $header], JSON_UNESCAPED_UNICODE); exit;
     }

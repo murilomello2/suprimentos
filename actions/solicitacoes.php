@@ -11,6 +11,7 @@
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/solic.php';
+require_once __DIR__ . '/../includes/obra_registry.php';   // cadastro único: resolve obra da solicitação
 
 function sol_dias($emissao) { if (!$emissao) return null; $d = (int)(new DateTime(substr($emissao,0,10)))->diff(new DateTime('today'))->format('%r%a'); return $d; }
 // nomes de centro de custo da CAPRETZ (do sistema antigo) — pré-preenche o nome comercial
@@ -138,7 +139,9 @@ try {
         $obraCod = $rows[0]['obra'] ?? '';
         $q = $pdo->prepare("SELECT nome_comercial, comprador_id, radar_obra_id FROM solic_obra WHERE coligada=? AND obra_cod=?"); $q->execute([$col,$obraCod]); $so = $q->fetch();
         $nomeObra = $so['nome_comercial'] ?? sol_nome_default($col, $obraCod);
-        $obraId = $so['radar_obra_id'] ?? null;
+        // OBRA pelo CADASTRO ÚNICO (coligada + centro de custo → obra_ficha → promove ao radar); fallback no vínculo antigo
+        $obraId = obra_radar_de_solicitacao($pdo, $col, $obraCod);
+        if (!$obraId) $obraId = $so['radar_obra_id'] ?? null;
         $titulo = 'SC ' . $num . ' · ' . $nomeObra;
         $colidmov = trim((string)($rows[0]['colidmov'] ?? ''));   // ex.: "27-20628" (27 = coligada Legacy) — casa o PC CERTO (nº de SC não é único entre coligadas)
         $pdo->beginTransaction();

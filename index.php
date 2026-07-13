@@ -3524,6 +3524,7 @@ function cotRender(){
      <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
        ${inboxNovoTotal?`<span class="dchip" style="background:var(--pend);color:#fff" title="e-mails de fornecedores ainda não processados — clique em Buscar respostas">📨 ${inboxNovoTotal} não processada(s)</span>`:''}
        ${CAN_EDIT?`<button class="btn-ghost" style="padding:7px 12px" onclick="cotBuscarRespostasLista(this)" title="ler a caixa suprimentos@ agora (enquanto o cron de hora em hora não roda)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mark_email_unread</span> Buscar respostas</button>`:''}
+       ${IS_ADMIN?`<button class="btn-ghost" style="padding:7px 12px" onclick="cotReprocessarObras()" title="preencher a obra das cotações sem obra, pela solicitação vinculada (cadastro único)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_fix_high</span> Reprocessar obras</button>`:''}
        ${CAN_EDIT?`<button class="btn-prim" style="padding:7px 14px" onclick="cotNovo()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">add</span> Nova cotação</button>`:''}
      </span>
    </div></div><div class="wrap"><table><thead><tr>${th('Cotação','titulo')}${th('Obra','obra_nome')}${th('Categoria','categoria')}<th>Tipo</th><th title="Nº da solicitação de compra / nº do pedido de compra">SC / Pedido</th>${th('Itens','n_itens','style="text-align:center"')}${th('Propostas','n_propostas','style="text-align:center" title="recebidas / convidados"')}${th('Melhor oferta','melhor_oferta','style="text-align:right"')}${th('Criada em','created_at')}${th('Status','status')}<th></th></tr></thead><tbody>`;
@@ -3847,6 +3848,15 @@ async function cotCriar(){
     if(r.error){toast(r.error);return;} toast('Cotação criada'); cotOpen(r.id);
   }catch(e){toast('Falha: '+e.message);}
 }
+function cotObraLabel(c,podeGerir){ return `${esc(c.obra_nome||'sem obra')}${podeGerir?` <span class="material-icons" onclick="event.stopPropagation();cotObraPick(${c.id})" title="mudar a obra desta cotação" style="font-size:13px;cursor:pointer;vertical-align:-2px;color:var(--verde)">edit</span>`:''}`; }
+async function cotObraPick(cid){ await obrasUniEnsure(); const c=((COT.cur||{}).cotacao)||{}; const w=document.getElementById('cotObraWrap'); if(!w)return;
+  w.innerHTML=`<select onchange="cotSetObra(${cid},this.value)" style="font-size:12px;padding:2px 4px;max-width:220px">${obrasUniOpts(obrasUniFichaDoRadar(c.obra_id),'— sem obra —')}</select> <span onclick="cotOpen(${cid})" style="cursor:pointer;color:var(--muted)" title="cancelar">✕</span>`; }
+async function cotSetObra(cid,fichaId){ try{ const b={acao:'set_obra',me:EU&&EU.bitrix_id,cotacao_id:cid}; if(fichaId) b.obra_ficha_id=Number(fichaId); else b.obra_id=0;
+  const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json();
+  if(r.error){toast(r.error);return;} toast('Obra da cotação atualizada'); cotOpen(cid); }catch(e){toast('Falha: '+e.message);} }
+async function cotReprocessarObras(){ if(!confirm('Tentar preencher a obra das cotações que estão sem obra, pela solicitação vinculada?'))return;
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'reprocessar_obras',me:EU&&EU.bitrix_id})})).json();
+  if(r.error){toast(r.error);return;} toast(`Obras resolvidas: ${r.resolvidas} de ${r.total} (${r.nao_resolvidas} sem par)`); cotLoad(); }catch(e){toast('Falha: '+e.message);} }
 async function cotOpen(id){
   const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Abrindo mapa…</div>';
   try{ const d=await (await fetch('actions/cotacoes.php?id='+id+'&_='+Date.now())).json();
@@ -3906,7 +3916,7 @@ function cotRenderDetalhe(){
   let html=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap">
       <button class="btn-ghost" onclick="cotLoad()" style="margin-top:2px"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button>
       <div style="min-width:0"><div style="font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted)">Descrição da cotação</div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px"><b style="font-size:18px">${esc(c.titulo)}</b> ${cotStChip(c.status)}<span class="muted" style="font-size:12px">${esc(c.obra_nome||'sem obra')}${c.categoria?' · '+esc(c.categoria):''}${c.tipo_servico?' · '+esc(c.tipo_servico):''}</span></div></div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px"><b style="font-size:18px">${esc(c.titulo)}</b> ${cotStChip(c.status)}<span class="muted" style="font-size:12px"><span id="cotObraWrap">${cotObraLabel(c,podeGerir)}</span>${c.categoria?' · '+esc(c.categoria):''}${c.tipo_servico?' · '+esc(c.tipo_servico):''}</span></div></div>
       <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cartaGerar(${c.id})" title="${(c.num_solicitacao&&!c.servico_id)?'Carta de cotação (material) desta cotação':'Carta convite desta cotação'} — PDF / Word"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> ${(d.cartas_geradas&&d.cartas_geradas.length)?'Ver/editar carta':'Gerar carta'}</button>${(d.cartas_geradas&&d.cartas_geradas.length)?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="carta salva em ${D(String(d.cartas_geradas[0].created_at).slice(0,10))}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">description</span> carta salva</span>`:''}`:''}
         <button class="btn-ghost" style="padding:6px 12px" onclick="cotUmaPagina()" title="Resumo do mapa em uma página, pronto pra imprimir/PDF"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Mapa em uma página</button>

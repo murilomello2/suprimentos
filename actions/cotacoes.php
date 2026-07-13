@@ -14,6 +14,7 @@
  */
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/obra_registry.php';   // cadastro único: resolver/promover obra
 
 function cot_can_edit($pdo, $me, $obra) {
     $perms = user_perms($pdo, $me);
@@ -193,6 +194,29 @@ try {
         cot_insert_convidados($pdo, $cid, $in['convidados'] ?? []);   // fornecedores convidados p/ a concorrência
         $pdo->commit();
         echo json_encode(['ok'=>true, 'id'=>$cid], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'set_obra') {   // define/corrige a obra de uma cotação (cadastro único: obra_ficha_id → promove)
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só admin ou quem criou a cotação pode mudar a obra.']); exit; }
+        $obra = 0;
+        if (!empty($in['obra_ficha_id'])) $obra = (int)obra_radar_id($pdo, (int)$in['obra_ficha_id']);
+        elseif (isset($in['obra_id'])) $obra = (int)$in['obra_id'];   // 0 = limpar
+        $pdo->prepare("UPDATE cotacao SET obra_id=?, updated_at=? WHERE id=?")->execute([$obra ?: null, date('c'), $cid]);
+        echo json_encode(['ok'=>true, 'cotacao_id'=>$cid, 'obra_id'=>$obra ?: null], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'reprocessar_obras') {   // ADMIN: preenche a obra das cotações antigas sem obra, pela solicitação vinculada
+        $perms = user_perms($pdo, $me);
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
+        $rows = $pdo->query("SELECT id, solic_coligada, solic_obra_cod FROM cotacao WHERE (obra_id IS NULL OR obra_id=0) AND solic_coligada IS NOT NULL AND solic_coligada<>''")->fetchAll();
+        $ok = 0; $skip = 0;
+        foreach ($rows as $r) {
+            $rid = obra_radar_de_solicitacao($pdo, (string)$r['solic_coligada'], (string)$r['solic_obra_cod']);
+            if ($rid) { $pdo->prepare("UPDATE cotacao SET obra_id=?, updated_at=? WHERE id=?")->execute([$rid, date('c'), (int)$r['id']]); $ok++; }
+            else $skip++;
+        }
+        echo json_encode(['ok'=>true, 'resolvidas'=>$ok, 'nao_resolvidas'=>$skip, 'total'=>count($rows)], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'convidar') {   // adiciona fornecedores convidados a uma cotação existente

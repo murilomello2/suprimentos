@@ -23,6 +23,34 @@ function _obra_tokens($nome) {
     return array_values(array_filter(explode(' ', $n), fn($t) => strlen($t) >= 4));
 }
 
+/** Resolve a FICHA (cadastro único) a partir de uma solicitação: coligada (nome legal) + centro de custo.
+ *  CAPRETZ(1)+ccusto → obra pelo mapa (040=Cajá…); coligada própria → pela coligada_cod. -> ficha_id | null */
+function obra_ficha_de_solicitacao($pdo, $coligadaNome, $centroCusto) {
+    $cod = coligada_cod_de_nome($coligadaNome);
+    $ccRaw = trim((string)$centroCusto);
+    $cc3 = $ccRaw !== '' ? str_pad(ltrim($ccRaw, '0') ?: '0', max(3, strlen($ccRaw)), '0', STR_PAD_LEFT) : '';
+    if ($cod === 1) {   // CAPRETZ: o centro de custo identifica a obra
+        $map = capretz_cc_map();
+        $nome = $map[$ccRaw] ?? ($map[$cc3] ?? null);
+        if ($nome) {
+            $n = ob_norm($nome);
+            $q = $pdo->prepare("SELECT id FROM obra_ficha WHERE LOWER(nome) LIKE ? ORDER BY id LIMIT 1");
+            $q->execute(['%' . $n . '%']); $fid = $q->fetchColumn(); if ($fid) return (int)$fid;
+        }
+    } elseif ($cod) {   // coligada própria → obra com essa coligada
+        $q = $pdo->prepare("SELECT id FROM obra_ficha WHERE coligada_cod=? ORDER BY id LIMIT 1");
+        $q->execute([$cod]); $fid = $q->fetchColumn(); if ($fid) return (int)$fid;
+    }
+    // fallback: por nome comercial nas solicitações (solic_nome) casando o nome default da solicitação
+    return null;
+}
+
+/** Atalho: solicitação → obra_id do radar (resolve a ficha e PROMOVE). -> obra_id | null */
+function obra_radar_de_solicitacao($pdo, $coligadaNome, $centroCusto) {
+    $fid = obra_ficha_de_solicitacao($pdo, $coligadaNome, $centroCusto);
+    return $fid ? obra_radar_id($pdo, $fid) : null;
+}
+
 /** Garante que a obra da ficha exista no RADAR (promove se preciso) e devolve o obra_id do radar (ou null). */
 function obra_radar_id($pdo, $fichaId) {
     $fichaId = (int)$fichaId; if (!$fichaId) return null;

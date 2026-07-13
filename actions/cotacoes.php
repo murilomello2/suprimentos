@@ -88,6 +88,13 @@ function cot_get_full($pdo, $id) {
     if (empty($cot['obra_nome']) && !empty($cot['obra_livre'])) $cot['obra_nome'] = $cot['obra_livre'];   // cotação importada (obra por texto)
     $iq = $pdo->prepare("SELECT * FROM cotacao_item WHERE cotacao_id=? ORDER BY ordem, id"); $iq->execute([$id]);
     $itens = $iq->fetchAll();
+    // obra por item (cotação MULTI-OBRA): resolve o nome p/ o front agrupar/rotular no mapa
+    $obraNomes = []; foreach ($pdo->query("SELECT id, nome FROM obra") as $o) $obraNomes[(int)$o['id']] = $o['nome'];
+    $obrasNoItens = [];
+    foreach ($itens as &$it) { $oid = (int)($it['obra_id'] ?? 0); $it['obra_nome'] = $oid ? ($obraNomes[$oid] ?? '') : ''; if ($oid) $obrasNoItens[$oid] = $it['obra_nome']; }
+    unset($it);
+    $cot['multi_obra'] = count($obrasNoItens) > 1;
+    $cot['obras_itens'] = $obrasNoItens;
     $pq = $pdo->prepare("SELECT * FROM cotacao_proposta WHERE cotacao_id=? ORDER BY (total IS NULL), total, id"); $pq->execute([$id]);
     $propostas = $pq->fetchAll();
     if ($propostas) {

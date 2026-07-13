@@ -3848,7 +3848,8 @@ async function cotCriar(){
     if(r.error){toast(r.error);return;} toast('Cotação criada'); cotOpen(r.id);
   }catch(e){toast('Falha: '+e.message);}
 }
-function cotObraLabel(c,podeGerir){ return `${esc(c.obra_nome||'sem obra')}${podeGerir?` <span class="material-icons" onclick="event.stopPropagation();cotObraPick(${c.id})" title="mudar a obra desta cotação" style="font-size:13px;cursor:pointer;vertical-align:-2px;color:var(--verde)">edit</span>`:''}`; }
+function cotObraLabel(c,podeGerir){ if(c.multi_obra){ const os=Object.values(c.obras_itens||{}); return `<span title="cotação com itens de várias obras — a obra vai por item">🏗️ multi-obra: ${esc(os.slice(0,4).join(' · '))}${os.length>4?' +'+(os.length-4):''}</span>`; }
+  return `${esc(c.obra_nome||'sem obra')}${podeGerir?` <span class="material-icons" onclick="event.stopPropagation();cotObraPick(${c.id})" title="mudar a obra desta cotação" style="font-size:13px;cursor:pointer;vertical-align:-2px;color:var(--verde)">edit</span>`:''}`; }
 async function cotObraPick(cid){ await obrasUniEnsure(); const c=((COT.cur||{}).cotacao)||{}; const w=document.getElementById('cotObraWrap'); if(!w)return;
   w.innerHTML=`<select onchange="cotSetObra(${cid},this.value)" style="font-size:12px;padding:2px 4px;max-width:220px">${obrasUniOpts(obrasUniFichaDoRadar(c.obra_id),'— sem obra —')}</select> <span onclick="cotOpen(${cid})" style="cursor:pointer;color:var(--muted)" title="cancelar">✕</span>`; }
 async function cotSetObra(cid,fichaId){ try{ const b={acao:'set_obra',me:EU&&EU.bitrix_id,cotacao_id:cid}; if(fichaId) b.obra_ficha_id=Number(fichaId); else b.obra_id=0;
@@ -3977,7 +3978,7 @@ function cotRenderDetalhe(){
     props.forEach(p=>{ html+=`<th style="min-width:120px">${esc(p.fornecedor_nome)}${p.prazo?`<div class="muted" style="font-size:9.5px;font-weight:400">${esc(p.prazo)}</div>`:''}</th>`; });
     html+='<th style="min-width:140px;color:var(--verde-d)">🏆 Melhor Compra</th></tr></thead><tbody>';
     itens.forEach(it=>{ const b=best[it.id];
-      html+=`<tr><td class="svc-c" style="text-align:left">${esc(it.descricao)}<small>${cotNum(it.quantidade)} ${esc(it.unidade||'')}${it.observacao?' · '+esc(it.observacao):''}</small></td>`;
+      html+=`<tr><td class="svc-c" style="text-align:left">${(c.multi_obra&&it.obra_nome)?`<span class="dchip" style="background:${obraCor(it.obra_id)};color:#fff;font-size:9px;margin-right:4px">${esc(String(it.obra_nome).slice(0,12))}</span>`:''}${esc(it.descricao)}<small>${cotNum(it.quantidade)} ${esc(it.unidade||'')}${it.observacao?' · '+esc(it.observacao):''}</small></td>`;
       props.forEach(p=>{ const pi=(p.itens||{})[it.id]; const isB=b&&b.proposta_id===p.id;
         html+=`<td style="text-align:center;padding:6px 8px;${isB?'background:#e7f6ee':''}">${pi&&pi.preco_total!=null?`<b>${BRL(pi.preco_unit)}</b>${isB?' 🏆':''}${pi.observacao?` <span class="material-icons" title="${esc(pi.observacao)}" data-obs="${esc(pi.observacao)}" data-forn="${esc(p.fornecedor_nome)}" data-item="${esc(it.descricao)}" style="font-size:13px;color:#5c7b8a;cursor:help;vertical-align:-2px" onclick="event.stopPropagation();cotObsShow(this)">info</span>`:''}<div class="muted" style="font-size:10px">${BRL(pi.preco_total)}</div>`:'<span class="muted">—</span>'}</td>`; });
       html+=`<td style="text-align:center;padding:6px 8px;background:#eafaf0">${b?`<b>${BRL(b.preco_total)}</b><div class="muted" style="font-size:10px">${esc(b.fornecedor)}</div>`:'—'}</td></tr>`;
@@ -4954,10 +4955,11 @@ function solRenderLista(){
      <select onchange="SOL.filt.status=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todos status</option>${Object.entries(SOL_ST).map(([k,v])=>`<option value="${k}" ${f.status===k?'selected':''}>${v[1]}</option>`).join('')}</select>
      <span class="muted" style="font-size:11.5px">${rows.length} de ${all.length}</span>
      <button class="btn-ghost" style="margin-left:auto;padding:5px 10px" onclick="SOL.data=null;SOL.filt={obra:'',comprador:'',status:'',bucket:'',busca:''};solLoad()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">refresh</span> Atualizar fila</button>
-   </div></div><div class="wrap"><table><thead><tr><th>Pedido</th><th style="text-align:center">Itens</th><th>Descrição</th><th>Obra</th><th>Emissão</th><th style="text-align:center">Dias</th><th>Status</th><th>Comprador</th><th>Observações</th><th>Ações</th></tr></thead><tbody>`;
+   </div></div><div class="wrap"><table><thead><tr><th style="width:26px;text-align:center"><input type="checkbox" title="selecionar todas do filtro" onchange="solSelAll(this.checked)"></th><th>Pedido</th><th style="text-align:center">Itens</th><th>Descrição</th><th>Obra</th><th>Emissão</th><th style="text-align:center">Dias</th><th>Status</th><th>Comprador</th><th>Observações</th><th>Ações</th></tr></thead><tbody>`;
+  SOL.sel=SOL.sel||{}; SOL._rowsKeys=rows.map(s=>s.coligada+'|'+s.numero);
   for(const s of rows){ const key=s.coligada+'|'+s.numero, ex=SOL.exp[key];
     const st=SOL_ST[s.status]||['var(--neu)','?','var(--neubg)'], obs=s.observacoes||'';
-    html+=`<tr><td><b style="cursor:pointer" onclick="SOL.exp['${esc(key)}']=${ex?'false':'true'};solRenderLista()">${ex?'▾':'▸'} ${esc(String(s.numero).replace(/^0+/,'')||s.numero)}</b></td>
+    html+=`<tr${SOL.sel[key]?' style="background:#eef6f0"':''}><td style="text-align:center"><input type="checkbox" ${SOL.sel[key]?'checked':''} onchange="solSelToggle('${esc(key)}')"></td><td><b style="cursor:pointer" onclick="SOL.exp['${esc(key)}']=${ex?'false':'true'};solRenderLista()">${ex?'▾':'▸'} ${esc(String(s.numero).replace(/^0+/,'')||s.numero)}</b></td>
       <td style="text-align:center">${s.n_itens}</td><td style="max-width:220px"><span title="${esc(s.primeiro)}">${esc((s.primeiro||'').slice(0,40))}</span></td>
       <td class="muted" style="font-size:11.5px">${esc(s.nome_obra)}</td><td class="muted" style="font-size:11.5px;white-space:nowrap">${s.emissao?D(s.emissao):'—'}</td>
       <td style="text-align:center">${solPill(s)}</td>
@@ -4966,13 +4968,45 @@ function solRenderLista(){
       <td>${CAN_EDIT?`<input value="${esc(obs)}" title="${esc(obs)}" oninput="this.title=this.value" onchange="solObs('${esc(key)}',this.value,this)" placeholder="anotação…" style="width:150px;font-size:11px;padding:3px 5px">`:`<span title="${esc(obs)}">${esc(obs.slice(0,32))}${obs.length>32?'…':''}</span>`}</td>
       <td style="white-space:nowrap"><button class="btn-ghost" style="padding:2px 6px" title="Copiar mensagem para orçamento" onclick="solCopiar('${esc(key)}')"><span class="material-icons" style="font-size:15px">content_copy</span></button>
         ${s.cotacao_id?`<button class="btn-ghost" style="padding:2px 6px;color:var(--verde-d)" title="Ver cotação gerada" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${s.cotacao_id}),200)"><span class="material-icons" style="font-size:15px">request_quote</span></button>`:(CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px" title="Gerar cotação desta solicitação" onclick="solGerar('${esc(key)}')"><span class="material-icons" style="font-size:15px;color:var(--verde)">playlist_add</span></button>`:'')}</td></tr>`;
-    if(ex) html+=`<tr><td colspan="10" style="background:#fafbfb;padding:8px 14px"><b style="font-size:11px;color:var(--muted)">ITENS</b>${s.itens.map(it=>`<div style="font-size:12px;padding:2px 0">• ${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</div>`).join('')}</td></tr>`;
+    if(ex) html+=`<tr><td colspan="11" style="background:#fafbfb;padding:8px 14px"><b style="font-size:11px;color:var(--muted)">ITENS</b>${s.itens.map(it=>`<div style="font-size:12px;padding:2px 0">• ${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</div>`).join('')}</td></tr>`;
   }
-  if(!rows.length) html+='<tr><td colspan="10" class="empty">Nenhuma solicitação nesse filtro.</td></tr>';
+  if(!rows.length) html+='<tr><td colspan="11" class="empty">Nenhuma solicitação nesse filtro.</td></tr>';
+  const nSel=Object.keys(SOL.sel).filter(k=>SOL.sel[k]).length;
+  const bar=nSel?`<div style="position:sticky;bottom:0;z-index:5;display:flex;align-items:center;gap:10px;background:var(--verde-d);color:#fff;padding:10px 16px;border-radius:10px;margin-top:8px;box-shadow:0 6px 20px rgba(0,0,0,.18)"><b>${nSel} solicitação(ões) selecionada(s)</b><button class="btn-prim" style="margin-left:auto;background:#fff;color:var(--verde-d)" onclick="solGerarMulti()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">playlist_add</span> Gerar cotação com itens escolhidos</button><button class="btn-ghost" style="color:#fff;border-color:rgba(255,255,255,.5)" onclick="SOL.sel={};solRenderLista()">Limpar</button></div>`:'';
   const foc=document.activeElement, wasB=foc&&foc.id==='solBusca', car=wasB?foc.selectionStart:null;
-  w.innerHTML=html+'</tbody></table></div>';
+  w.innerHTML=html+'</tbody></table></div>'+bar;
   if(wasB){const ni=document.getElementById('solBusca'); if(ni){ni.focus(); try{ni.setSelectionRange(car,car);}catch(e){}}}
 }
+/* ===== Fase 1: seleção múltipla de solicitações → tela de itens → cotação multi-obra ===== */
+function solSelToggle(key){ SOL.sel=SOL.sel||{}; if(SOL.sel[key])delete SOL.sel[key]; else SOL.sel[key]=true; solRenderLista(); }
+function solSelAll(on){ SOL.sel=SOL.sel||{}; (SOL._rowsKeys||[]).forEach(k=>{ if(on)SOL.sel[k]=true; else delete SOL.sel[k]; }); solRenderLista(); }
+function solGerarMulti(){ const keys=Object.keys(SOL.sel||{}).filter(k=>SOL.sel[k]); const sols=(SOL.data.solicitacoes||[]).filter(s=>keys.includes(s.coligada+'|'+s.numero)); if(!sols.length){toast('Selecione ao menos uma solicitação');return;}
+  SOL._pick={}; sols.forEach(s=>{ const k=s.coligada+'|'+s.numero; (s.itens||[]).forEach((it,idx)=>SOL._pick[k+'#'+idx]=true); });
+  let ov=document.getElementById('solPickOv'); if(!ov){ov=document.createElement('div');ov.id='solPickOv';ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';document.body.appendChild(ov);} ov.onclick=e=>{if(e.target===ov)ov.remove();};
+  solPickRender(sols); }
+function solPickRefresh(){ const keys=Object.keys(SOL.sel||{}).filter(k=>SOL.sel[k]); solPickRender((SOL.data.solicitacoes||[]).filter(s=>keys.includes(s.coligada+'|'+s.numero))); }
+function solPickIt(k,idx,on){ SOL._pick[k+'#'+idx]=on; const b=document.getElementById('solPickBtn'); if(b){const n=Object.values(SOL._pick).filter(Boolean).length; b.innerHTML=`<span class="material-icons" style="font-size:15px;vertical-align:-3px">check</span> Criar cotação (${n} itens)`;} }
+function solPickSC(k,on){ const s=(SOL.data.solicitacoes||[]).find(x=>x.coligada+'|'+x.numero===k); if(s)(s.itens||[]).forEach((it,idx)=>SOL._pick[k+'#'+idx]=on); solPickRefresh(); }
+function solPickRender(sols){ const ov=document.getElementById('solPickOv'); if(!ov)return; const titVal=(document.getElementById('solPickTit')||{}).value||''; const nItens=Object.values(SOL._pick).filter(Boolean).length;
+  const body=sols.map(s=>{ const k=s.coligada+'|'+s.numero; const allc=(s.itens||[]).length&&(s.itens||[]).every((it,idx)=>SOL._pick[k+'#'+idx]);
+    return `<div style="border:1px solid var(--line);border-radius:10px;margin-top:10px;overflow:hidden">
+      <div style="background:#f3f7f5;padding:8px 12px;display:flex;align-items:center;gap:8px"><b style="font-size:13px">SC ${esc(String(s.numero).replace(/^0+/,'')||s.numero)}</b><span class="muted" style="font-size:11.5px">${esc(s.nome_obra||'')} · ${esc(String(s.coligada||'').slice(0,28))}</span><label style="margin-left:auto;font-size:11px;cursor:pointer"><input type="checkbox" ${allc?'checked':''} onchange="solPickSC('${esc(k)}',this.checked)"> todos</label></div>
+      <div style="padding:6px 12px">${(s.itens||[]).map((it,idx)=>`<label style="display:flex;gap:8px;align-items:flex-start;padding:3px 0;font-size:12.5px;cursor:pointer"><input type="checkbox" ${SOL._pick[k+'#'+idx]?'checked':''} onchange="solPickIt('${esc(k)}',${idx},this.checked)"><span>${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</span></label>`).join('')}</div></div>`; }).join('');
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:720px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:17px">Montar cotação — escolha os itens</b><span class="material-icons" style="cursor:pointer;color:var(--muted)" onclick="document.getElementById('solPickOv').remove()">close</span></div>
+    <div class="muted" style="font-size:12px;margin-top:2px">${sols.length} solicitação(ões). Desmarque o que não vai (ex.: só o madeirite). A obra de cada item é resolvida pelo cadastro único; se houver mais de uma obra, a cotação fica multi-obra.</div>
+    <label style="display:block;margin-top:10px"><span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Título (opcional)</span><input id="solPickTit" value="${esc(titVal)}" placeholder="em branco = gera automático" style="width:100%;padding:6px 8px;margin-top:2px;box-sizing:border-box"></label>
+    ${body}
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;position:sticky;bottom:-18px;background:#fff;padding:10px 0"><button class="btn-ghost" onclick="document.getElementById('solPickOv').remove()">Cancelar</button><button class="btn-prim" id="solPickBtn" onclick="solMultiCriar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">check</span> Criar cotação (${nItens} itens)</button></div>
+  </div>`; }
+async function solMultiCriar(){ const keys=Object.keys(SOL.sel||{}).filter(k=>SOL.sel[k]); const sols=(SOL.data.solicitacoes||[]).filter(s=>keys.includes(s.coligada+'|'+s.numero));
+  const itens=[]; sols.forEach(s=>{ const k=s.coligada+'|'+s.numero; (s.itens||[]).forEach((it,idx)=>{ if(SOL._pick[k+'#'+idx]) itens.push({coligada:s.coligada,numero:s.numero,obra_cod:s.obra_cod,produto:it.produto,und:it.und,qtd:it.qtd,observacao:it.observacao||''}); }); });
+  if(!itens.length){toast('Escolha ao menos um item');return;}
+  const titulo=(document.getElementById('solPickTit')||{}).value||'';
+  try{ const r=await (await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'gerar_cotacao_multi',me:EU&&EU.bitrix_id,titulo,itens})})).json();
+    if(r.error){toast(r.error);return;} const ov=document.getElementById('solPickOv'); if(ov)ov.remove(); SOL.sel={};
+    toast(`Cotação criada: ${r.itens} itens · ${r.solicitacoes} SC · ${r.obras} obra(s)`); showView('cotacoes'); setTimeout(()=>cotAbrir(r.cotacao_id),250);
+  }catch(e){toast('Falha: '+e.message);} }
 function solFind(key){ return (SOL.data.solicitacoes||[]).find(s=>(s.coligada+'|'+s.numero)===key); }
 async function solStatus(key,v,el){ const s=solFind(key); if(!s)return; const prev=s.status; s.status=v;
   const st=SOL_ST[v]||['var(--neu)','?','var(--neubg)'];

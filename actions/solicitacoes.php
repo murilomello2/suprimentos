@@ -158,6 +158,53 @@ try {
         echo json_encode(['ok'=>true, 'cotacao_id'=>$cid], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    if ($acao === 'gerar_cotacao_multi') {   // cria UMA cotação juntando itens escolhidos de VÁRIAS solicitações (multi-obra)
+        if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error'=>'Não autorizado.']); exit; }
+        $itens = array_values(array_filter((array)($in['itens'] ?? []), fn($i)=>trim((string)($i['produto'] ?? '')) !== ''));
+        if (!$itens) throw new Exception('selecione ao menos um item');
+        $obras = []; $solics = []; $obraCache = []; $cmCache = [];
+        foreach ($itens as &$it) {
+            $col = trim((string)($it['coligada'] ?? '')); $numero = trim((string)($it['numero'] ?? '')); $ocod = trim((string)($it['obra_cod'] ?? '')); $k = $col . '|' . $numero;
+            if (!array_key_exists($col . '|' . $ocod, $obraCache)) $obraCache[$col . '|' . $ocod] = obra_radar_de_solicitacao($pdo, $col, $ocod);
+            $it['_obra_id'] = $obraCache[$col . '|' . $ocod];
+            // colidmov (embute a coligada — casa o PC certo): usa o que veio do front, senão busca na fila
+            $cm = trim((string)($it['colidmov'] ?? ''));
+            if ($cm === '' && $col !== '' && $numero !== '') {
+                if (!array_key_exists($k, $cmCache)) { $fr = solic_rest('select=colidmov&coligada=eq.' . rawurlencode($col) . '&numero=eq.' . rawurlencode($numero) . '&limit=1'); $cmCache[$k] = $fr ? trim((string)($fr[0]['colidmov'] ?? '')) : ''; }
+                $cm = $cmCache[$k];
+            }
+            $it['_colidmov'] = $cm;
+            if ($it['_obra_id']) $obras[$it['_obra_id']] = true;
+            if ($col !== '' && $numero !== '') $solics[$k] = ['coligada'=>$col, 'numero'=>$numero, 'obra_cod'=>$ocod];
+        }
+        unset($it);
+        $obraUnica = count($obras) === 1 ? (int)array_key_first($obras) : null;   // >1 obra = cotação mista (obra por item)
+        $titulo = trim((string)($in['titulo'] ?? ''));
+        if ($titulo === '') {
+            if (count($solics) === 1) { $s0 = reset($solics); $titulo = 'SC ' . $s0['numero'] . ' · ' . sol_nome_default($s0['coligada'], $s0['obra_cod']); }
+            else $titulo = 'Cotação · ' . count($solics) . ' solicitações · ' . max(1, count($obras)) . ' obra(s)';
+        }
+        $descr = 'Cotação de ' . count($solics) . ' solicitação(ões): ' . implode(', ', array_map(fn($s)=>'SC ' . $s['numero'] . ' (' . $s['coligada'] . ')', $solics));
+        $pdo->beginTransaction();
+        $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, descricao, status, aprovacao, criado_por, criado_nome, created_at, updated_at) VALUES (?,?,?,?,?,?,?, 'aberta','aguardando', ?,?,?,?)")
+            ->execute([$obraUnica, null, $titulo, '', '', null, $descr, $me, $perms['nome'] ?? null, $now, $now]);
+        $cid = (int)$pdo->lastInsertId();
+        $insI = $pdo->prepare("INSERT INTO cotacao_item (cotacao_id, descricao, unidade, quantidade, observacao, ordem, obra_id, solic_coligada, solic_numero, solic_colidmov) VALUES (?,?,?,?,?,?,?,?,?,?)");
+        $o = 0;
+        foreach ($itens as $it) {
+            $insI->execute([$cid, trim((string)$it['produto']), trim((string)($it['und'] ?? '')),
+                ($it['qtd'] ?? null) !== null && $it['qtd'] !== '' ? (float)$it['qtd'] : null, trim((string)($it['observacao'] ?? '')), $o++,
+                $it['_obra_id'] ?: null, trim((string)($it['coligada'] ?? '')), trim((string)($it['numero'] ?? '')), $it['_colidmov'] ?: null]);
+        }
+        foreach ($solics as $s) {
+            $ov = $pdo->prepare("SELECT id FROM solic_overlay WHERE coligada=? AND numero=?"); $ov->execute([$s['coligada'], $s['numero']]); $ovid = (int)($ov->fetchColumn() ?: 0);
+            if ($ovid) $pdo->prepare("UPDATE solic_overlay SET cotacao_id=?, status='em_cotacao', updated_by=?, updated_at=? WHERE id=?")->execute([$cid, $me, $now, $ovid]);
+            else $pdo->prepare("INSERT INTO solic_overlay (coligada,numero,status,cotacao_id,updated_by,updated_at) VALUES (?,?, 'em_cotacao', ?,?,?)")->execute([$s['coligada'], $s['numero'], $cid, $me, $now]);
+        }
+        $pdo->commit();
+        echo json_encode(['ok'=>true, 'cotacao_id'=>$cid, 'itens'=>count($itens), 'solicitacoes'=>count($solics), 'obras'=>count($obras)], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     echo json_encode(['error'=>'ação desconhecida'], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     http_response_code(500);

@@ -282,6 +282,12 @@ function db_schema_mysql($pdo) {
         if ($cc && !isset($cc['solic_colidmov'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_colidmov VARCHAR(40)");   // colidmov da SC (embute a coligada) p/ casar o PC certo
         if ($cc && !isset($cc['import_origem'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN import_origem VARCHAR(80)");     // id da cotação no sistema antigo (Mapa de Cotações) — dedup do import
         if ($cc && !isset($cc['obra_livre'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN obra_livre VARCHAR(191)");         // nome da obra em texto (quando não há obra_id do radar — ex.: importadas)
+        // cotacao_item MULTI-OBRA: cada item pode ser de uma obra/solicitação diferente (cotação juntando várias SCs)
+        $cti = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cotacao_item'") as $c) $cti[$c['COLUMN_NAME']] = true;
+        if ($cti && !isset($cti['obra_id'])) $pdo->exec("ALTER TABLE cotacao_item ADD COLUMN obra_id INT");
+        if ($cti && !isset($cti['solic_coligada'])) $pdo->exec("ALTER TABLE cotacao_item ADD COLUMN solic_coligada VARCHAR(255)");
+        if ($cti && !isset($cti['solic_numero'])) $pdo->exec("ALTER TABLE cotacao_item ADD COLUMN solic_numero VARCHAR(40)");
+        if ($cti && !isset($cti['solic_colidmov'])) $pdo->exec("ALTER TABLE cotacao_item ADD COLUMN solic_colidmov VARCHAR(40)");
         // ficha da obra: snapshot do cronograma (% físico + datas) — a tabela obra_cronogramas tem RLS, o app não lê direto
         $ofc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='obra_ficha'") as $c) $ofc[$c['COLUMN_NAME']] = true;
         if ($ofc && !isset($ofc['pct_fisico'])) $pdo->exec("ALTER TABLE obra_ficha ADD COLUMN pct_fisico DOUBLE");
@@ -507,6 +513,8 @@ function db_schema($pdo) {
     if (!isset($ccols['solic_colidmov'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_colidmov TEXT");
     if (!isset($ccols['import_origem'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN import_origem TEXT");
     if (!isset($ccols['obra_livre'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN obra_livre TEXT");
+    $cticols = []; foreach ($pdo->query("PRAGMA table_info(cotacao_item)") as $c) $cticols[$c['name']] = true;
+    foreach (['obra_id'=>'INTEGER','solic_coligada'=>'TEXT','solic_numero'=>'TEXT','solic_colidmov'=>'TEXT'] as $col=>$ty) if (!isset($cticols[$col])) $pdo->exec("ALTER TABLE cotacao_item ADD COLUMN $col $ty");
     $ofcols = []; foreach ($pdo->query("PRAGMA table_info(obra_ficha)") as $c) $ofcols[$c['name']] = true;
     foreach (['pct_fisico'=>'REAL','crono_inicio'=>'TEXT','crono_fim'=>'TEXT','crono_medicao'=>'TEXT','cronograma_nome'=>'TEXT','cronograma_at'=>'TEXT','crono_obra_id'=>'TEXT','compra_coligada_cod'=>'INTEGER','centro_custo'=>'TEXT'] as $col=>$ty) if (!isset($ofcols[$col])) $pdo->exec("ALTER TABLE obra_ficha ADD COLUMN $col $ty");
     $scols = []; foreach ($pdo->query("PRAGMA table_info(solic_obra)") as $c) $scols[$c['name']] = true;

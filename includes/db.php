@@ -681,7 +681,7 @@ function sup_mo_guarda($desc) {
     return false;
 }
 
-function criar_item($pdo, $nome, $grupo, $tipo = '', $curva = '', $copy_from = null) {
+function criar_item($pdo, $nome, $grupo, $tipo = '', $curva = '', $copy_from = null, $obras = null) {
     $nome = trim($nome);
     if ($nome === '') throw new Exception('nome obrigatório');
     $nid = (int)$pdo->query("SELECT COALESCE(MAX(id),0) FROM servico")->fetchColumn();
@@ -709,12 +709,14 @@ function criar_item($pdo, $nome, $grupo, $tipo = '', $curva = '', $copy_from = n
             $curva ?: $g('curva','C'),$g('forma_contratacao'),$g('unidade'),$g('quantitativo'),$g('lead_dias'),
             $g('marco_cronograma'),$g('termos_orcamento'),$g('termos_cronograma'),$g('responsavel_padrao'),
             $g('escopo'),$g('variaveis_cotar'),$g('licoes'),$g('documentos'),$g('verba_linhas')]);
-    // serviço é CATÁLOGO (global) → cria a célula do radar em TODAS as obras existentes;
-    // já nasce com o RESPONSÁVEL PADRÃO do serviço (regra padrão — a célula herda)
+    // o serviço é sempre CATÁLOGO (global). A CÉLULA do radar (radar_item) é criada nas obras-alvo:
+    //   $obras = null  -> TODAS as obras (padrão histórico)
+    //   $obras = [ids] -> só nessas obras (ex.: item "Lago" curva A só numa obra)
     $rpad = trim((string)$g('responsavel_padrao'));
     $ins = $pdo->prepare("INSERT INTO radar_item (obra_id,servico_id,status,responsavel,tipo,updated_at) VALUES (?,?,?,?,?,?)");
-    foreach ($pdo->query("SELECT id FROM obra ORDER BY id")->fetchAll() as $ob)
-        $ins->execute([(int)$ob['id'],$nid,'Não Iniciado',$rpad!==''?$rpad:null,$tipo,date('c')]);
+    if (is_array($obras)) { $alvo = array_values(array_unique(array_map('intval', $obras))); }
+    else { $alvo = array_map(fn($o) => (int)$o['id'], $pdo->query("SELECT id FROM obra ORDER BY id")->fetchAll()); }
+    foreach ($alvo as $oid) { if ($oid > 0) $ins->execute([$oid,$nid,'Não Iniciado',$rpad!==''?$rpad:null,$tipo,date('c')]); }
     return $nid;
 }
 

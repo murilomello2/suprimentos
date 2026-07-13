@@ -164,6 +164,12 @@ try {
 
     if ($acao === 'criar') {
         $obra = (int)($in['obra_id'] ?? 0);
+        // cadastro único: se veio obra_ficha_id, resolve (e PROMOVE ao radar se preciso) o obra_id
+        if (!empty($in['obra_ficha_id'])) {
+            require_once __DIR__ . '/../includes/obra_registry.php';
+            $rid = obra_radar_id($pdo, (int)$in['obra_ficha_id']);
+            if ($rid) $obra = $rid;
+        }
         $perms = cot_can_edit($pdo, $me, $obra ?: 1);
         if (!$perms) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
         $titulo = trim((string)($in['titulo'] ?? '')); if ($titulo === '') throw new Exception('título obrigatório');

@@ -3143,14 +3143,26 @@ async function saveAndReload(campos){
   }catch(e){toast('Falha ao salvar');}
 }
 /* ----- Criar / desdobrar / excluir itens ----- */
-function novoItem(){
+// ---- cadastro ÚNICO de obras (obra_ficha) p/ os seletores de qualquer módulo ----
+let OBRAS_UNI=[], OBRAS_UNI_LOADED=false;
+async function obrasUniEnsure(){ if(OBRAS_UNI_LOADED) return OBRAS_UNI; try{ const r=await (await fetch('actions/obras.php?picker=1&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json(); OBRAS_UNI=r.obras||[]; }catch(e){} OBRAS_UNI_LOADED=true; return OBRAS_UNI; }
+function obrasUniOpts(sel,ph){ return (ph!==false?`<option value="">${esc(ph||'— escolher obra —')}</option>`:'')+OBRAS_UNI.map(o=>`<option value="${o.ficha_id}" ${String(sel)===String(o.ficha_id)?'selected':''}>${esc(o.nome)}${o.cidade?' · '+esc(o.cidade):''}</option>`).join(''); }
+function obrasUniFichaDoRadar(radarId){ const o=OBRAS_UNI.find(x=>String(x.radar_obra_id)===String(radarId)); return o?o.ficha_id:''; }
+function niEscopoToggle(){ const e=document.getElementById('niEscopo'), w=document.getElementById('niObraWrap'); if(e&&w) w.style.display=(e.value==='obra')?'':'none'; }
+async function novoItem(){
+  await obrasUniEnsure();
   const grupos=[...new Set(DATA.itens.map(i=>i.grupo).filter(Boolean))];
   const TIPOS=['Material','Mão de obra','Empreitada','Material + MO','Locação'];
+  const defFicha=obrasUniFichaDoRadar(OBRA_SEL[0]||1);
   document.getElementById('modal').innerHTML=`
     <div class="mhead"><button class="mclose" onclick="closeModal()">×</button>
       <div class="crumb">Radar de Aquisições</div><div class="mt">Novo item</div></div>
     <div class="tabbody">
       <div class="fld"><label>Nome do serviço</label><input id="niNome" placeholder="ex.: Contrapiso"></div>
+      <div class="grid2">
+        <div class="fld"><label>Adicionar em</label><select id="niEscopo" onchange="niEscopoToggle()"><option value="todas">Todas as obras (catálogo padrão)</option><option value="obra">Só uma obra</option></select></div>
+        <div class="fld" id="niObraWrap" style="display:none"><label>Obra</label><select id="niObra">${obrasUniOpts(defFicha)}</select></div>
+      </div>
       <div class="grid2">
         <div class="fld"><label>Grupo</label><select id="niGrupo">${grupos.map(g=>`<option>${esc(g)}</option>`).join('')}<option value="__novo__">➕ Novo grupo…</option></select></div>
         <div class="fld"><label>Tipo</label><select id="niTipo"><option value="">— a classificar —</option>${TIPOS.map(t=>`<option>${t}</option>`).join('')}</select></div>
@@ -3170,8 +3182,10 @@ async function novoItemSalvar(){
   let grupo=val('niGrupo');
   if(grupo==='__novo__'){ grupo=(prompt('Nome do novo grupo')||'').trim(); if(!grupo){toast('Informe o grupo');return;} }
   const resp=val('niResp');
-  const body={acao:'novo', nome:val('niNome'), grupo, tipo:val('niTipo'), curva:val('niCurva'), responsavel:resp, copy_from:val('niCopy')||null, me:EU&&EU.bitrix_id, obra:OBRA_SEL[0]||1};
+  const escopo=val('niEscopo')||'todas';
+  const body={acao:'novo', nome:val('niNome'), grupo, tipo:val('niTipo'), curva:val('niCurva'), responsavel:resp, copy_from:val('niCopy')||null, me:EU&&EU.bitrix_id, obra:OBRA_SEL[0]||1, escopo};
   if(!body.nome){toast('Informe o nome');return;}
+  if(escopo==='obra'){ const fid=val('niObra'); if(!fid){toast('Escolha a obra');return;} body.obra_ficha_id=Number(fid); }
   // responsável NÃO é obrigatório na criação — pode ser atribuído depois (inclusive em massa por grupo/categoria)
   const d=await (await fetch('actions/item_create.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
   if(d.error){toast('Erro: '+d.error);return;}
@@ -3554,6 +3568,7 @@ async function cotAbrir(id){
   await cotOpen(id);
 }
 function cotRenderNovo(){
+  if(!OBRAS_UNI_LOADED){ obrasUniEnsure().then(cotRenderNovo); return; }   // garante o cadastro único antes de montar o dropdown de obra
   const pre=COT.novoPre||{}, vinc=COT.novoServico;
   document.getElementById('cotwrap').innerHTML=`<div class="panel">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="cotLoad()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button><b style="font-size:15px">Nova cotação</b>
@@ -3570,7 +3585,7 @@ function cotRenderNovo(){
         <div id="cotVincSug"></div></div></div>`}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
       ${cotFld('Título *','<input id="cotT" value="'+esc(pre.titulo||'')+'" placeholder="Ex.: MO Forro de Gesso">')}
-      ${cotFld('Obra','<select id="cotO">'+cotObraOpts(pre.obra||'')+'</select>')}
+      ${cotFld('Obra','<select id="cotO">'+obrasUniOpts(pre.obra?obrasUniFichaDoRadar(pre.obra):'')+'</select>')}
       ${cotFld('Categoria','<input id="cotC" value="'+esc(pre.categoria||'')+'" placeholder="Ex.: M.O. Gesso">')}
       ${cotFld('Tipo','<select id="cotTipo"><option>Material</option><option>M.O.</option><option>Material + MO</option><option>Locação</option><option>Serviço</option></select>')}
       ${cotFld('Verba (R$) <span id="cotVerbaChip">'+cotVerbaChip(pre.verba_origem||'')+'</span>','<input id="cotV" type="text" inputmode="decimal" placeholder="0,00" oninput="maskMoneyInput(this)" onblur="moneyBlur(this)" value="'+(pre.verba!=null&&pre.verba!==''?esc(fmtMoney(pre.verba)):'')+'">')}
@@ -3827,7 +3842,7 @@ async function cotImportarItensIA(input){ const f=input.files&&input.files[0]; i
 async function cotCriar(){
   const titulo=val('cotT').trim(); if(!titulo){toast('Dê um título à cotação');return;}
   const itens=COT.novoItens.filter(it=>(it.descricao||'').trim()); if(!itens.length){toast('Inclua ao menos um item');return;}
-  const body={acao:'criar',me:EU&&EU.bitrix_id,obra_id:Number(val('cotO'))||null,servico_id:COT.novoServico||null,titulo,categoria:val('cotC'),tipo_servico:val('cotTipo'),verba:parseBRLInput(val('cotV'))||0,verba_origem:(COT.novoPre&&COT.novoPre.verba_origem)||'',num_solicitacao:val('cotSC'),descricao:val('cotD'),equalizacao:val('cotEq'),itens,convidados:COT.novoConvidados||[]};
+  const body={acao:'criar',me:EU&&EU.bitrix_id,obra_ficha_id:Number(val('cotO'))||null,servico_id:COT.novoServico||null,titulo,categoria:val('cotC'),tipo_servico:val('cotTipo'),verba:parseBRLInput(val('cotV'))||0,verba_origem:(COT.novoPre&&COT.novoPre.verba_origem)||'',num_solicitacao:val('cotSC'),descricao:val('cotD'),equalizacao:val('cotEq'),itens,convidados:COT.novoConvidados||[]};
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error);return;} toast('Cotação criada'); cotOpen(r.id);
   }catch(e){toast('Falha: '+e.message);}

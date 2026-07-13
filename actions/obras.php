@@ -11,6 +11,7 @@
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/coligadas.php';
+require_once __DIR__ . '/../includes/obra_registry.php';
 
 // ---- CRONOGRAMA AO VIVO (Supabase do Planejamento) --------------------------
 // O app já lê o Supabase autenticado como usuário de serviço (sb_get passa pela RLS),
@@ -148,6 +149,16 @@ try {
 
     if ($method === 'GET' && isset($_GET['coligadas'])) {   // lista das coligadas p/ os dropdowns do de-para
         echo json_encode(['ok' => true, 'coligadas' => coligadas_list(), 'capretz_cc' => capretz_cc_map()], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($method === 'GET' && isset($_GET['picker'])) {   // lista unificada de obras (cadastro único) p/ os seletores de qualquer módulo
+        echo json_encode(['ok' => true, 'obras' => obras_picker_list($pdo)], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($method === 'POST' && ($in['acao'] ?? '') === 'promover_radar') {   // garante a obra no radar e devolve o obra_id (promove se preciso)
+        $rid = obra_radar_id($pdo, (int)($in['ficha_id'] ?? 0));
+        if (!$rid) { echo json_encode(['error' => 'obra não encontrada']); exit; }
+        echo json_encode(['ok' => true, 'radar_obra_id' => $rid], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($method === 'GET' && isset($_GET['cronogramas'])) {   // lista os cronogramas ativos p/ o admin ligar na mão os ambíguos (VS2/VS4/...)

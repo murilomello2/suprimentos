@@ -17,7 +17,13 @@ try {
     $in = json_decode(file_get_contents('php://input'), true);
     $acao = $in['acao'] ?? 'novo';
     $me = $in['me'] ?? null;
-    $OBRA = max(1, (int)($in['obra'] ?? 1));   // multi-obra (criação replica p/ todas; responsável/exclusão usam a obra)
+    $OBRA = max(1, (int)($in['obra'] ?? 1));   // multi-obra (responsável/exclusão usam a obra)
+    // cadastro único: se veio obra_ficha_id, resolve (e PROMOVE ao radar se preciso) o obra_id do radar
+    if (!empty($in['obra_ficha_id'])) {
+        require_once __DIR__ . '/../includes/obra_registry.php';
+        $rid = obra_radar_id($pdo, (int)$in['obra_ficha_id']);
+        if ($rid) $OBRA = $rid;
+    }
 
     // ---- PERMISSÃO (servidor): só cria/altera quem tem escopo de edição ----
     $perms = user_perms($pdo, $me);
@@ -120,7 +126,10 @@ try {
     if ($tipo && isset($SUFIXO[$tipo]) && !preg_match('/\((MAT|MO|EMP|MAT \+ MO)\)\s*$/u', $nome)) {
         $nome .= ' ' . $SUFIXO[$tipo];
     }
-    $ordem = criar_item($pdo, $nome, $grupo, $tipo, $curva, $in['copy_from'] ?? null);
+    // escopo: 'obra' = só na obra escolhida; qualquer outro (default 'todas') = catálogo em todas as obras
+    $escopo = (string)($in['escopo'] ?? 'todas');
+    $obrasAlvo = ($escopo === 'obra') ? [$OBRA] : null;
+    $ordem = criar_item($pdo, $nome, $grupo, $tipo, $curva, $in['copy_from'] ?? null, $obrasAlvo);
     $resp = trim($in['responsavel'] ?? '');
     if ($resp !== '') {
         if (stripos($resp, 'camila') !== false) throw new Exception('responsável inválido'); // mesma regra do item_update

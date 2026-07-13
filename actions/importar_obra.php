@@ -106,7 +106,10 @@ try {
         // SÓ as composições de PAREDE (começam com "Alvenaria estrutural com bloco/canaleta…"); exclui a
         // M.O. de laje maciça que menciona "alvenaria estrutural" no nome mas é CONCRETO (já pega no auto-vínculo).
         $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE obra_id=? AND LOWER(descricao) LIKE 'alvenaria estrutural com%'"); $q->execute([$obraId]);
-        foreach ($q->fetchAll() as $c) $COMP[(int)$c['id']] = $c['descricao'];
+        // DEDUP por descrição: o orçamento tem composições duplicadas com a MESMA descrição apontando p/ as MESMAS
+        // linhas — sem dedup o delta contaria a área 2× (dobrava a verba). Fica 1 comp por descrição distinta.
+        $seenD = [];
+        foreach ($q->fetchAll() as $c) { $dl = strtolower(trim((string)$c['descricao'])); if (isset($seenD[$dl])) continue; $seenD[$dl] = 1; $COMP[(int)$c['id']] = $c['descricao']; }
         if (!$COMP) { echo json_encode(['ok'=>true, 'obra'=>$obraId, 'comps_alvenaria'=>0, 'itens'=>[], 'nota'=>'sem composição de parede de alvenaria estrutural nesta obra'], JSON_UNESCAPED_UNICODE); exit; }
         $INS = [];
         $ids = implode(',', array_map('intval', array_keys($COMP)));

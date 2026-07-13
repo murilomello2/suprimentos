@@ -5081,6 +5081,42 @@ function obrasRender(){ const w=document.getElementById('obrasWrap'); if(!w)retu
   const tab=(t,lbl,ic)=>`<button class="btn-ghost" style="padding:7px 14px;border-radius:9px 9px 0 0;${OBRAS_M.tab===t?'background:#fff;border-bottom:2px solid var(--verde);font-weight:700;color:var(--verde-d)':'color:var(--muted)'}" onclick="OBRAS_M.tab='${t}';obrasRender()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">${ic}</span> ${lbl}</button>`;
   w.innerHTML=`<div style="display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px">${tab('ficha','Ficha das Obras','apartment')}${tab('depara','De-para & Configuração','link')}</div>`+(OBRAS_M.tab==='ficha'?obrasTabFicha():obrasTabDepara());
 }
+/* ===== SELO ILUSTRADO DA OBRA (SVG gerado dos dados: torres/pav/subsolos/áreas comuns) ===== */
+function seloAmen(txt){ const t=(txt||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const M=[[/piscina/,'🏊'],[/quadra|beach|poliespor|tenis|squash|society|campo/,'🎾'],[/fitness|academ|crossfit|workout|ginastica/,'💪'],[/biciclet|\bbike\b/,'🚲'],[/\bpet\b/,'🐾'],[/salao|festa/,'🎉'],[/playground|play |brinquedoteca|\bkids\b/,'🛝'],[/cowork/,'💻'],[/\bspa\b|sauna|zen|beaut|massag/,'🧖'],[/jogos|\bgame/,'🎮'],[/churrasq|gourmet|fogo de chao/,'🔥'],[/horta/,'🌱'],[/leitura/,'📚'],[/cinema/,'🎬'],[/lavanderia/,'🧺']];
+  const out=[]; M.forEach(a=>{ if(a[0].test(t)&&out.indexOf(a[1])<0)out.push(a[1]); }); return out; }
+function seloWins(x,y,w,h,cols,rows){ let s='',pad=7,gx=(w-pad*2)/cols,gy=h/rows,ww=Math.min(gx-4,18),wh=Math.min(gy-6,12); for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){s+=`<rect x="${(x+pad+c*gx+(gx-ww)/2).toFixed(1)}" y="${(y+r*gy+3).toFixed(1)}" width="${ww.toFixed(1)}" height="${wh.toFixed(1)}" rx="2"/>`;} return s; }
+function seloTower(cx,topY,groundY,tw,pav){ const x=cx-tw/2,bh=groundY-topY,rows=Math.max(4,Math.min(12,Math.round(bh/18))),cols=tw>84?4:3;
+  return `<rect x="${x-4}" y="${topY-8}" width="${tw+8}" height="10" rx="4" fill="#c3ccca"/><rect x="${x}" y="${topY}" width="${tw}" height="${bh}" fill="#e8edf0"/><g fill="#2f6fb0">${seloWins(x,topY+2,tw,bh-6,cols,rows)}</g>`+(pav?`<rect x="${cx-26}" y="${topY-40}" width="52" height="28" rx="8" fill="#173a4c"/><text x="${cx}" y="${topY-20}" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">${pav}</text><path d="M${cx-6} ${topY-12} h12 l-6 6 z" fill="#173a4c"/>`:''); }
+function seloHouse(cx,baseY,w){ const h=w*0.62,x=cx-w/2,y=baseY-h; return `<rect x="${x}" y="${(y+h*0.42).toFixed(1)}" width="${w}" height="${(h*0.58).toFixed(1)}" fill="#e8edf0"/><path d="M${x-3} ${(y+h*0.42).toFixed(1)} L${cx} ${y} L${x+w+3} ${(y+h*0.42).toFixed(1)} Z" fill="#cf8a4a"/><rect x="${(cx-w*0.12).toFixed(1)}" y="${(y+h*0.62).toFixed(1)}" width="${(w*0.24).toFixed(1)}" height="${(h*0.38).toFixed(1)}" fill="#2f6fb0"/>`; }
+function seloHoriz(o){ return /horizontal|casas/i.test(((o.observacoes||'')+' '+(o.tipologias||''))); }
+function obraSeloFull(o){
+  const T=+o.torres||0,P=+o.pavimentos||0,S=+o.subsolos||0,pct=o.pct_fisico,horiz=seloHoriz(o),ams=seloAmen(o.areas_comuns);
+  if(!(T>0||P>0||horiz||ams.length)) return '';
+  const W=480,groundY=250; let build='';
+  if(horiz){ for(let i=0;i<4;i++) build+=seloHouse(96+i*96,groundY,74); }
+  else { const n=Math.max(1,Math.min(T||1,4)),tw=n>=4?68:(n===3?82:96),span=W-160,step=n>1?span/(n-1):0; for(let i=0;i<n;i++){ const cx=n>1?(80+i*step):W/2; build+=seloTower(cx,72,groundY,tw,P);} if(T>n) build+=`<text x="${W-34}" y="150" font-size="13" font-weight="800" fill="#8a988f" text-anchor="middle">+${T-n}</text>`; }
+  let sub='',sn=Math.min(S,3); for(let i=0;i<sn;i++){ const y=groundY+16+i*24; sub+=`<rect x="104" y="${y}" width="272" height="22" rx="3" fill="${i%2?'#2a2e30':'#33383a'}"/><circle cx="240" cy="${y+11}" r="9" fill="#fff"/><text x="240" y="${y+15}" font-size="11" font-weight="800" fill="#33383a" text-anchor="middle">-${i+1}</text>`; }
+  if(S>3) sub+=`<text x="392" y="${groundY+40}" font-size="11" fill="#8a988f">+${S-3}</text>`;
+  const amsY=groundY+16+sn*24+16; let amc='',cols=['#0f8a8a','#caa32e','#6a5acd','#2f6fb0','#d1495b','#e07a3f','#3a9d5d'],show=ams.slice(0,7);
+  show.forEach((ic,i)=>{ amc+=`<g transform="translate(${30+i*54},${amsY})"><rect width="44" height="44" rx="12" fill="${cols[i%cols.length]}"/><text x="22" y="30" font-size="22" text-anchor="middle">${ic}</text></g>`; });
+  if(ams.length>7) amc+=`<text x="${30+7*54+4}" y="${amsY+28}" font-size="12" font-weight="700" fill="#8a988f">+${ams.length-7}</text>`;
+  const H=amsY+(ams.length?58:0)+8, cap=[T>0?T+(T>1?' torres':' torre'):(horiz?'casas':''),P>0?P+' pav':'',S>0?S+(S>1?' subsolos':' subsolo'):''].filter(Boolean).join(' · ');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;display:block;margin:2px auto" xmlns="http://www.w3.org/2000/svg">
+    <rect x="12" y="8" width="${W-24}" height="${groundY-4}" rx="14" fill="#f3f7f5"/>
+    ${cap?`<text x="30" y="30" font-size="12.5" font-weight="800" fill="#5a6b62">${esc(cap)}</text>`:''}
+    ${pct!=null?`<g transform="translate(${W-150},18)"><rect width="128" height="26" rx="13" fill="var(--verde,#1d9e75)"/><text x="64" y="18" font-size="12" font-weight="800" fill="#fff" text-anchor="middle">🏗️ ${(+pct).toFixed(0)}% executado</text></g>`:''}
+    ${build}<rect x="40" y="${groundY}" width="400" height="16" fill="#cdae7a"/><rect x="104" y="${groundY}" width="272" height="16" fill="#3b3f3d"/>${sub}${amc}</svg>`;
+}
+function obraSeloMini(o){
+  const T=+o.torres||0,horiz=seloHoriz(o),ams=seloAmen(o.areas_comuns);
+  if(!(T>0||horiz||ams.length)) return '';
+  const W=260,H=60,gy=50; let b='';
+  if(horiz){ for(let i=0;i<3;i++) b+=seloHouse(22+i*24,gy,20); }
+  else { const n=Math.max(1,Math.min(T||1,3)); for(let i=0;i<n;i++){ const cx=22+i*26,tw=20; b+=`<rect x="${cx-tw/2}" y="12" width="${tw}" height="${gy-12}" rx="1" fill="#dfe6ea"/><g fill="#2f6fb0">${seloWins(cx-tw/2,14,tw,gy-16,2,4)}</g>`; } }
+  const shown=Math.min(ams.length,5); let am=''; ams.slice(0,5).forEach((ic,i)=>{ am+=`<text x="${W-18-(shown-1-i)*26}" y="32" font-size="18" text-anchor="middle">${ic}</text>`; });
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;display:block" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="${gy}" width="${W}" height="3" fill="#cdae7a"/>${b}${am}</svg>`;
+}
 function obrasTabFicha(){
   const qn=opNorm(OBRAS_M.filt||''); const sts=[...new Set(OBRAS_M.list.map(o=>o.status).filter(Boolean))];
   const rows=OBRAS_M.list.filter(o=>(!qn||opNorm((o.nome||'')+' '+(o.cidade||'')+' '+(o.coligada_nome||'')+' '+(o.comprador_nome||'')+' '+(o.solic_nome||'')).includes(qn))&&(!OBRAS_M.fstatus||o.status===OBRAS_M.fstatus));
@@ -5091,8 +5127,9 @@ function obrasTabFicha(){
     ${CAN_EDIT?'<button class="btn-prim" style="margin-left:auto;padding:7px 13px" onclick="obrasFichaAbrir(0)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Nova obra</button>':''}
   </div></div>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:10px;margin-top:2px">`;
-  h+=rows.map(o=>{ const car=obrCarResumo(o);
+  h+=rows.map(o=>{ const car=obrCarResumo(o); const selo=obraSeloMini(o);
     return `<div class="panel" style="margin:0;cursor:pointer;padding:0;overflow:hidden" onclick="obrasFichaAbrir(${o.id})">
+      ${selo?`<div style="height:62px;padding:6px 12px 0;background:#f3f7f5;border-bottom:1px solid var(--line)">${selo}</div>`:''}
       <div style="padding:11px 14px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#f7faf8,#fff)">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><b style="font-size:15px">${esc(o.nome)}</b>${obrStatusChip(o.status)}</div>
         <div class="muted" style="font-size:11.5px;margin-top:2px"><span class="material-icons" style="font-size:12px;vertical-align:-2px">place</span> ${esc(o.cidade||'—')}${o.comprador_nome?' · '+esc(o.comprador_nome):''}</div>
@@ -5135,6 +5172,7 @@ function obrasFichaAbrir(id){
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
       <div>${ed?`<input id="obf_nome" value="${esc(o.nome||'')}" placeholder="Nome da obra" style="font-size:18px;font-weight:800;border:none;border-bottom:1px solid var(--line);padding:2px 0;max-width:340px;width:100%">`:`<b style="font-size:18px">${esc(o.nome||'')}</b>`} ${obrStatusChip(o.status)}</div>
       <span class="material-icons" onclick="document.getElementById('obraOverlay').remove()" style="cursor:pointer;color:var(--muted)">close</span></div>
+    ${(function(){const s=obraSeloFull(o);return s?`<div style="margin-top:10px;border:1px solid var(--line);border-radius:12px;overflow:hidden">${s}</div>`:'';})()}
     ${bloco('badge','Identificação',g('1fr 80px',fld('Cidade','obf_cidade',o.cidade)+fld('UF','obf_estado',o.estado))+`<div style="margin-top:9px">${fld('Endereço','obf_endereco',o.endereco)}</div>`+g('1fr 1fr',`<div style="margin-top:9px">${fld('Comprador responsável','obf_comprador_nome',o.comprador_nome)}</div><div style="margin-top:9px">${fld('Status','obf_status',o.status)}</div>`))}
     ${(o.pct_fisico!=null||o.crono_fim||(ed&&OBRAS_M.is_admin))?`<div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:10px;background:#f7faf8">
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:9px"><span class="material-icons" style="font-size:17px;color:var(--verde)">timeline</span><b style="font-size:13.5px">Cronograma & avanço físico</b>${o.crono_live?`<span title="lido em tempo real do Supabase do Planejamento" style="margin-left:auto;display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;letter-spacing:.3px;color:var(--verde-d)"><span style="width:7px;height:7px;border-radius:50%;background:var(--verde);box-shadow:0 0 0 2px rgba(74,140,90,.22)"></span>AO VIVO · PLANEJAMENTO</span>`:`<span class="muted" style="font-size:10.5px;margin-left:auto">${o.pct_fisico!=null?('snapshot'+(o.cronograma_at?' · '+D(String(o.cronograma_at).slice(0,10)):'')):'sem cronograma vinculado'}</span>`}</div>

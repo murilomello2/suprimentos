@@ -83,6 +83,64 @@ try {
         echo json_encode(['ok'=>true, 'obra'=>$oid, 'nome'=>$orow['nome'], 'de'=>$orow['cronograma_id'], 'para'=>$cid], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    // DELTA DE ALVENARIA ESTRUTURAL: cria os itens de bloco/argamassa/M.O. (só nesta obra) a partir das
+    // composições de alvenaria estrutural do orçamento, partindo os insumos em Blocos / Demais materiais / M.O.
+    // (+ um item "Graute a conferir" vazio). Entra como SUGERIDO (auto_flags verba=1). {acao:'delta_alvenaria', obra_id, me}
+    if ($acao === 'delta_alvenaria') {
+        $obraId = (int)($in['obra_id'] ?? 0);
+        if ($obraId < 2) throw new Exception('obra_id >= 2');
+        // idempotência: se os itens de alvenaria já existem nesta obra, não recria (seguro p/ re-chamada)
+        $jc = $pdo->prepare("SELECT COUNT(*) FROM radar_item r JOIN servico s ON s.id=r.servico_id WHERE r.obra_id=? AND s.nome LIKE 'Alvenaria Estrutural — %'");
+        $jc->execute([$obraId]);
+        if ((int)$jc->fetchColumn() > 0) { echo json_encode(['ok'=>true, 'ja_criado'=>true, 'obra'=>$obraId], JSON_UNESCAPED_UNICODE); exit; }
+        $LIN = []; $linesByComp = [];
+        $q = $pdo->prepare("SELECT id, descricao, qtde, unidade FROM orcamento_linha WHERE obra_id=? AND folha=1"); $q->execute([$obraId]);
+        foreach ($q->fetchAll() as $l) { $LIN[(int)$l['id']] = $l; $linesByComp[$l['descricao']][] = (int)$l['id']; }
+        $COMP = [];
+        // SÓ as composições de PAREDE (começam com "Alvenaria estrutural com bloco/canaleta…"); exclui a
+        // M.O. de laje maciça que menciona "alvenaria estrutural" no nome mas é CONCRETO (já pega no auto-vínculo).
+        $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE obra_id=? AND LOWER(descricao) LIKE 'alvenaria estrutural com%'"); $q->execute([$obraId]);
+        foreach ($q->fetchAll() as $c) $COMP[(int)$c['id']] = $c['descricao'];
+        if (!$COMP) throw new Exception('nenhuma composição de parede de alvenaria estrutural nesta obra');
+        $INS = [];
+        $ids = implode(',', array_map('intval', array_keys($COMP)));
+        foreach ($pdo->query("SELECT composicao_id, descricao, unidade, coef, rs_unit, tipo FROM composicao_insumo WHERE composicao_id IN ($ids) ORDER BY composicao_id, id") as $r) $INS[(int)$r['composicao_id']][] = $r;
+        $specs = [
+            ['nome'=>'Alvenaria Estrutural — Blocos de Concreto', 'tipo'=>'Material', 'itipo'=>'material', 'inc'=>'/bloco/i', 'exc'=>null],
+            ['nome'=>'Alvenaria Estrutural — Argamassa e Demais Materiais', 'tipo'=>'Material', 'itipo'=>'material', 'inc'=>null, 'exc'=>'/bloco/i'],
+            ['nome'=>'Alvenaria Estrutural — Mão de Obra (Empreitada)', 'tipo'=>'Mão de obra', 'itipo'=>'mo', 'inc'=>null, 'exc'=>null],
+        ];
+        $out = []; $pdo->beginTransaction();
+        foreach ($specs as $sp) {
+            $sel = []; $vtot = 0.0;
+            foreach ($COMP as $cid => $cdesc) {
+                $lines = $linesByComp[$cdesc] ?? []; if (!$lines) continue;
+                $area = 0.0; foreach ($lines as $L) $area += (float)$LIN[$L]['qtde']; if ($area <= 0) continue;
+                foreach (($INS[$cid] ?? []) as $idx => $i) {
+                    if ($i['tipo'] !== $sp['itipo']) continue;
+                    if ($sp['inc'] && !preg_match($sp['inc'], $i['descricao'])) continue;
+                    if ($sp['exc'] && preg_match($sp['exc'], $i['descricao'])) continue;
+                    $custo = $area * (float)$i['coef'] * (float)$i['rs_unit']; $vtot += $custo;
+                    $un = $LIN[$lines[0]]['unidade'] ?? 'm²';
+                    $sel[] = ['cid'=>$cid, 'idx'=>$idx, 'area'=>$area, 'q'=>false, 'desc'=>$i['descricao'], 'tipo'=>$i['tipo'],
+                              'unidade'=>$i['unidade'], 'coef'=>(float)$i['coef'], 'rs_unit'=>(float)$i['rs_unit'],
+                              'locais'=>$lines, 'locais_det'=>[['local'=>$cdesc, 'qtde'=>$area, 'unidade'=>$un]]];
+                }
+            }
+            $sid = criar_item($pdo, $sp['nome'], 'Estrutura', $sp['tipo'], 'A', null, [$obraId]);
+            if ($sel) {
+                $vmat = $sp['itipo'] === 'mo' ? null : $vtot; $vmo = $sp['itipo'] === 'mo' ? $vtot : null;
+                $pdo->prepare("UPDATE radar_item SET composicao_sel=?, verba_metodo='composicao', verba_material=?, verba_mo=?, verba_override=?, verba_curada=0, auto_flags=?, updated_at=? WHERE obra_id=? AND servico_id=?")
+                    ->execute([json_encode($sel, JSON_UNESCAPED_UNICODE), $vmat, $vmo, $vtot, json_encode(['verba'=>1]), date('c'), $obraId, $sid]);
+            }
+            $out[] = ['servico_id'=>$sid, 'nome'=>$sp['nome'], 'insumos'=>count($sel), 'verba'=>round($vtot)];
+        }
+        $sidG = criar_item($pdo, 'Graute (a conferir) — Alvenaria Estrutural', 'Estrutura', 'Material', 'A', null, [$obraId]);
+        $out[] = ['servico_id'=>$sidG, 'nome'=>'Graute (a conferir)', 'insumos'=>0, 'verba'=>0, 'nota'=>'não consta no R10 — conferir/adicionar na curadoria'];
+        $pdo->commit();
+        echo json_encode(['ok'=>true, 'obra'=>$obraId, 'comps_alvenaria'=>count($COMP), 'itens'=>$out], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     $obraId = (int)($in['obra_id'] ?? 0);
     if ($obraId < 2) throw new Exception('obra_id deve ser >= 2 (a 1 é a Trinity, intocável por aqui)');
     $OFF = $obraId * 100000;   // offset de IDs da obra

@@ -161,6 +161,18 @@ try {
         echo json_encode(['ok' => true, 'radar_obra_id' => $rid], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    if ($method === 'POST' && ($in['acao'] ?? '') === 'del_radar_obra') {   // apaga uma obra do radar SÓ se estiver vazia (limpeza de duplicata) — admin
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores.']); exit; }
+        $rid = (int)($in['radar_obra_id'] ?? 0); if (!$rid) throw new Exception('radar_obra_id obrigatório');
+        $ni = (int)$pdo->query("SELECT COUNT(*) FROM radar_item WHERE obra_id=" . $rid)->fetchColumn();
+        $nc = (int)$pdo->query("SELECT COUNT(*) FROM cotacao WHERE obra_id=" . $rid)->fetchColumn();
+        if ($ni > 0 || $nc > 0) { echo json_encode(['error' => "obra $rid tem $ni itens e $nc cotações — não apagada"]); exit; }
+        $pdo->prepare("UPDATE obra_ficha SET radar_obra_id=NULL WHERE radar_obra_id=?")->execute([$rid]);
+        $pdo->prepare("DELETE FROM orcamento_linha WHERE obra_id=?")->execute([$rid]);
+        $pdo->prepare("DELETE FROM obra WHERE id=?")->execute([$rid]);
+        echo json_encode(['ok' => true, 'apagada' => $rid], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($method === 'GET' && isset($_GET['cronogramas'])) {   // lista os cronogramas ativos p/ o admin ligar na mão os ambíguos (VS2/VS4/...)
         [$crBy, ] = obras_crono_live();
         $out = [];

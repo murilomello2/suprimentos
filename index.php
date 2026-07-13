@@ -806,12 +806,16 @@ function matObraTodas(e){ if(e) e.stopPropagation(); MAT_SEL=null; localStorage.
 function matObraLbl(){ const l=document.getElementById('matObraLbl'); if(!l)return; const all=matObraMeta();
   if(!MAT_SEL||!MAT_SEL.length||MAT_SEL.length>=all.length) l.textContent='Todas as obras';
   else l.textContent=MAT_SEL.length===1?MAT_SEL[0]:(MAT_SEL.length+' obras'); }
+let _loadSeq=0;   // versão da requisição: evita que um load() antigo (obra anterior) sobrescreva um mais novo (corrida)
 async function load(){
+  const seq=++_loadSeq;
+  const selNoInicio=OBRA_SEL.slice();   // congela a seleção desta chamada
   try{
     // busca a matriz de CADA obra selecionada em paralelo e mescla (item ganha obra_id/obra_nome)
-    const rs0=await Promise.all(OBRA_SEL.map(async oid=>{
-      const d=await (await fetch('actions/matriz.php'+(oid!==1?('?obra='+oid):''))).json(); return {oid,d};
+    const rs0=await Promise.all(selNoInicio.map(async oid=>{
+      const d=await (await fetch('actions/matriz.php?_='+Date.now()+(oid!==1?('&obra='+oid):''),{cache:'no-store'})).json(); return {oid,d};
     }));
+    if(seq!==_loadSeq) return;   // uma seleção mais NOVA começou a carregar — descarta este resultado obsoleto
     const oks=rs0.filter(x=>x.d && !x.d.error && x.d.itens);
     if(!oks.length){document.getElementById('tb').innerHTML=`<tr><td colspan="12" class="empty">Erro: ${esc((rs0[0]&&rs0[0].d&&rs0[0].d.error)||'sem dados')}</td></tr>`;return;}
     DATA=oks[0].d;

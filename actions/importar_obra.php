@@ -89,10 +89,16 @@ try {
     if ($acao === 'delta_alvenaria') {
         $obraId = (int)($in['obra_id'] ?? 0);
         if ($obraId < 2) throw new Exception('obra_id >= 2');
-        // idempotência: se os itens de alvenaria já existem nesta obra, não recria (seguro p/ re-chamada)
-        $jc = $pdo->prepare("SELECT COUNT(*) FROM radar_item r JOIN servico s ON s.id=r.servico_id WHERE r.obra_id=? AND s.nome LIKE 'Alvenaria Estrutural — %'");
-        $jc->execute([$obraId]);
-        if ((int)$jc->fetchColumn() > 0) { echo json_encode(['ok'=>true, 'ja_criado'=>true, 'obra'=>$obraId], JSON_UNESCAPED_UNICODE); exit; }
+        // NÃO pular se os itens já existem: os serviços de alvenaria viram CATÁLOGO (globais) depois da 1ª obra,
+        // então toda obra importada herda a CÉLULA vazia. Aqui a gente (re)CALCULA a verba da célula desta obra.
+        // find-or-create do serviço (reusa o do catálogo) + garante a célula do radar nesta obra:
+        $ensureItem = function($nome, $tipo) use ($pdo, $obraId) {
+            $q = $pdo->prepare("SELECT id FROM servico WHERE nome=? LIMIT 1"); $q->execute([$nome]); $sid = (int)($q->fetchColumn() ?: 0);
+            if (!$sid) { $sid = criar_item($pdo, $nome, 'Estrutura', $tipo, 'A', null, [$obraId]); }
+            else { $c = $pdo->prepare("SELECT COUNT(*) FROM radar_item WHERE obra_id=? AND servico_id=?"); $c->execute([$obraId, $sid]);
+                if (!(int)$c->fetchColumn()) $pdo->prepare("INSERT INTO radar_item (obra_id,servico_id,status,updated_at) VALUES (?,?, 'Não Iniciado', ?)")->execute([$obraId, $sid, date('c')]); }
+            return $sid;
+        };
         $LIN = []; $linesByComp = [];
         $q = $pdo->prepare("SELECT id, descricao, qtde, unidade FROM orcamento_linha WHERE obra_id=? AND folha=1"); $q->execute([$obraId]);
         foreach ($q->fetchAll() as $l) { $LIN[(int)$l['id']] = $l; $linesByComp[$l['descricao']][] = (int)$l['id']; }
@@ -101,7 +107,7 @@ try {
         // M.O. de laje maciça que menciona "alvenaria estrutural" no nome mas é CONCRETO (já pega no auto-vínculo).
         $q = $pdo->prepare("SELECT id, descricao FROM composicao WHERE obra_id=? AND LOWER(descricao) LIKE 'alvenaria estrutural com%'"); $q->execute([$obraId]);
         foreach ($q->fetchAll() as $c) $COMP[(int)$c['id']] = $c['descricao'];
-        if (!$COMP) throw new Exception('nenhuma composição de parede de alvenaria estrutural nesta obra');
+        if (!$COMP) { echo json_encode(['ok'=>true, 'obra'=>$obraId, 'comps_alvenaria'=>0, 'itens'=>[], 'nota'=>'sem composição de parede de alvenaria estrutural nesta obra'], JSON_UNESCAPED_UNICODE); exit; }
         $INS = [];
         $ids = implode(',', array_map('intval', array_keys($COMP)));
         foreach ($pdo->query("SELECT composicao_id, descricao, unidade, coef, rs_unit, tipo FROM composicao_insumo WHERE composicao_id IN ($ids) ORDER BY composicao_id, id") as $r) $INS[(int)$r['composicao_id']][] = $r;
@@ -127,7 +133,7 @@ try {
                               'locais'=>$lines, 'locais_det'=>[['local'=>$cdesc, 'qtde'=>$area, 'unidade'=>$un]]];
                 }
             }
-            $sid = criar_item($pdo, $sp['nome'], 'Estrutura', $sp['tipo'], 'A', null, [$obraId]);
+            $sid = $ensureItem($sp['nome'], $sp['tipo']);
             if ($sel) {
                 $vmat = $sp['itipo'] === 'mo' ? null : $vtot; $vmo = $sp['itipo'] === 'mo' ? $vtot : null;
                 $pdo->prepare("UPDATE radar_item SET composicao_sel=?, verba_metodo='composicao', verba_material=?, verba_mo=?, verba_override=?, verba_curada=0, auto_flags=?, updated_at=? WHERE obra_id=? AND servico_id=?")
@@ -135,7 +141,7 @@ try {
             }
             $out[] = ['servico_id'=>$sid, 'nome'=>$sp['nome'], 'insumos'=>count($sel), 'verba'=>round($vtot)];
         }
-        $sidG = criar_item($pdo, 'Graute (a conferir) — Alvenaria Estrutural', 'Estrutura', 'Material', 'A', null, [$obraId]);
+        $sidG = $ensureItem('Graute (a conferir) — Alvenaria Estrutural', 'Material');
         $out[] = ['servico_id'=>$sidG, 'nome'=>'Graute (a conferir)', 'insumos'=>0, 'verba'=>0, 'nota'=>'não consta no R10 — conferir/adicionar na curadoria'];
         $pdo->commit();
         echo json_encode(['ok'=>true, 'obra'=>$obraId, 'comps_alvenaria'=>count($COMP), 'itens'=>$out], JSON_UNESCAPED_UNICODE); exit;

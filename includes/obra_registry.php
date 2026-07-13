@@ -17,6 +17,12 @@ function obras_picker_list($pdo) {
     } catch (Throwable $e) { return []; }
 }
 
+/** tokens distintivos (>=4 letras) do nome da obra, sem acento. */
+function _obra_tokens($nome) {
+    $n = ob_norm((string)$nome); if ($n === '') return [];
+    return array_values(array_filter(explode(' ', $n), fn($t) => strlen($t) >= 4));
+}
+
 /** Garante que a obra da ficha exista no RADAR (promove se preciso) e devolve o obra_id do radar (ou null). */
 function obra_radar_id($pdo, $fichaId) {
     $fichaId = (int)$fichaId; if (!$fichaId) return null;
@@ -27,7 +33,20 @@ function obra_radar_id($pdo, $fichaId) {
         $chk = $pdo->prepare("SELECT id FROM obra WHERE id=?"); $chk->execute([(int)$of['radar_obra_id']]);
         if ($chk->fetchColumn()) return (int)$of['radar_obra_id'];
     }
-    // PROMOVE: cria a obra vazia no radar (id manual = MAX+1) e grava o vínculo na ficha
+    // 1) RECONCILIA: casa com uma obra que JÁ existe no radar pelo nome (evita duplicar — ex.: ficha "Trinity - Araçatuba" ~ radar "Trinity")
+    $ftoks = _obra_tokens((string)$of['nome']);
+    if ($ftoks) {
+        $best = null; $bestScore = 0;
+        foreach ($pdo->query("SELECT id, nome FROM obra")->fetchAll() as $ro) {
+            $score = count(array_intersect($ftoks, _obra_tokens((string)$ro['nome'])));
+            if ($score > $bestScore) { $bestScore = $score; $best = (int)$ro['id']; }
+        }
+        if ($best && $bestScore >= 1) {
+            $pdo->prepare("UPDATE obra_ficha SET radar_obra_id=?, updated_at=? WHERE id=?")->execute([$best, date('c'), $fichaId]);
+            return $best;
+        }
+    }
+    // 2) PROMOVE: cria a obra vazia no radar (id manual = MAX+1) e grava o vínculo na ficha
     $nid = (int)$pdo->query("SELECT COALESCE(MAX(id),0)+1 FROM obra")->fetchColumn();
     $base = ob_norm((string)$of['nome']); if ($base === '') $base = 'obra-' . $nid;
     $slug = $base; $k = 1;

@@ -116,10 +116,14 @@ try {
             $bk = $dias===null?'r':($dias<7?'r':($dias<15?'a':($dias<30?'l':'c')));
             // carimba a cobertura em cada item + agrega a cobertura da SC (cinza/parcial/total)
             $cmap = $cov[$s['coligada'].'|'.$s['numero']] ?? []; $nCob=0; $nAny=0; $itensC = $s['itens'];
+            // nomes normalizados que se REPETEM nesta SC — nesses, o fallback por nome é ambíguo (não usar)
+            $nameCount = [];
+            foreach ($itensC as $__c) { $nn = sol_norm($__c['produto'] ?? ''); $nameCount[$nn] = ($nameCount[$nn] ?? 0) + 1; }
             foreach ($itensC as &$__it) {
-                // item COM codprd casa SÓ por codprd (evita falso-positivo por descrição repetida); sem codprd → por nome
-                $cp = trim((string)($__it['codprd'] ?? ''));
-                $stt = ($cp !== '') ? ($cmap['c:'.$cp] ?? null) : ($cmap['p:'.sol_norm($__it['produto'] ?? '')] ?? null);
+                // 1º casa por codprd (exato); se não achar, cai p/ o nome — MAS só se o nome for único na SC (evita falso-positivo)
+                $cp = trim((string)($__it['codprd'] ?? '')); $nn = sol_norm($__it['produto'] ?? '');
+                $stt = ($cp !== '') ? ($cmap['c:'.$cp] ?? null) : null;
+                if ($stt === null && ($nameCount[$nn] ?? 0) <= 1) $stt = $cmap['p:'.$nn] ?? null;
                 $__it['cot'] = $stt ?: 'vazio';
                 if ($__it['cot']==='coberto') $nCob++; if ($__it['cot']!=='vazio') $nAny++;
             }

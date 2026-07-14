@@ -45,11 +45,11 @@
   .top{padding:20px 26px 4px}
   .h1{font-size:23px;font-weight:800;color:var(--verde-d);margin:0;display:flex;align-items:center;gap:10px}
   .sub{color:var(--muted);font-size:13px;margin:5px 0 0}
-  .kpis{display:flex;gap:12px;flex-wrap:wrap;padding:14px 26px 4px}
-  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:130px;flex:1}
-  .kpi .v{font-size:21px;font-weight:800;color:var(--verde-d)}
+  .kpis{display:flex;gap:8px;flex-wrap:wrap;padding:0;justify-content:flex-start;align-items:center}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:5px 11px;min-width:74px;flex:0 1 auto;line-height:1.1}
+  .kpi .v{font-size:17px;font-weight:800;color:var(--verde-d)}
   .kpi .v.alert{color:var(--pend)} .kpi .v.gold{color:var(--dourado)}
-  .kpi .l{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .kpi .l{font-size:10px;color:var(--muted);margin-top:1px;white-space:nowrap}
   .kpi-fill{background:#5c7b8a;border-color:#5c7b8a;box-shadow:0 1px 3px rgba(40,60,70,.18)}
   .kpi-fill .v{color:#fff} .kpi-fill .l{color:#d9e6ec}
   .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;margin:12px 26px}
@@ -336,18 +336,16 @@
 
   <main class="main">
    <section id="view-radar">
-    <div class="top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-      <div>
-        <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">radar</span> Radar de Aquisições</h1>
-      </div>
-      <div style="display:flex;gap:8px;flex:0 0 auto;margin-top:4px">
+    <div class="top" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <h1 class="h1" style="flex:0 0 auto"><span class="material-icons" style="color:var(--dourado)">radar</span> Radar de Aquisições</h1>
+      <div class="kpis" id="kpis" style="flex:1 1 320px;min-width:0"></div>
+      <div style="display:flex;gap:8px;flex:0 0 auto">
         <button class="btn-ghost" onclick="recarregar()" title="Recarregar do servidor — evita trabalhar com dado que outra pessoa já curou"><span class="material-icons" style="font-size:18px">refresh</span> Atualizar</button>
         <button id="btnNovo" class="btn-prim" onclick="novoItem()"><span class="material-icons" style="font-size:18px">add</span> Novo item</button>
       </div>
     </div>
-    <div class="kpis" id="kpis"></div>
 
-    <div class="panel" style="margin-top:8px">
+    <div class="panel" style="margin-top:6px">
       <div class="bar" style="padding:8px 12px;gap:8px">
         <div id="obraPick" style="position:relative;flex:0 0 auto">
           <button type="button" id="obraPickBtn" onclick="obraMenuToggle(event)" title="Selecionar obra(s) a exibir"
@@ -836,11 +834,11 @@ async function load(){
     const atrasados=itens.filter(i=>alertLevel(i)==='atrasado').length;
     const cv=k=>itens.filter(i=>i.curva===k).length;
     document.getElementById('kpis').innerHTML=`
-      <div class="kpi"><div class="v">${itens.length}</div><div class="l">Itens no radar${oks.length>1?' ('+oks.length+' obras)':''}</div></div>
-      <div class="kpi"><div class="v">${comData} / ${itens.length}</div><div class="l">Com data definida</div></div>
-      <div class="kpi"><div class="v ${criticos?'alert':''}">${criticos}</div><div class="l">Críticos (fim da cotação venceu)${atrasados?` · ${atrasados} atrasados`:''}</div></div>
-      <div class="kpi"><div class="v">${cv('A')} · ${cv('B')} · ${cv('C')}</div><div class="l">Curva A / B / C</div></div>
-      <div class="kpi" title="Cobertura REAL combinada: coberto ${BRL(covVal)} de ${BRL(covLeaf)} em folhas do(s) orçamento(s)."><div class="v gold">${cobertura!=null?cobertura.toLocaleString('pt-BR')+'%':'—'}</div><div class="l">Cobertura real do orçamento</div></div>`;
+      <div class="kpi" title="Itens no radar${oks.length>1?' ('+oks.length+' obras)':''}"><div class="v">${itens.length}</div><div class="l">Itens${oks.length>1?' · '+oks.length+' obras':''}</div></div>
+      <div class="kpi" title="Itens com data em obra definida (cronograma)"><div class="v">${comData}/${itens.length}</div><div class="l">Com data</div></div>
+      <div class="kpi" title="Críticos: o fim do prazo de cotação já venceu${atrasados?' · '+atrasados+' atrasados':''}"><div class="v ${criticos?'alert':''}">${criticos}</div><div class="l">Críticos${atrasados?` · ${atrasados} atras.`:''}</div></div>
+      <div class="kpi" title="Itens por curva ABC (A / B / C)"><div class="v">${cv('A')}·${cv('B')}·${cv('C')}</div><div class="l">Curva A·B·C</div></div>
+      <div class="kpi" title="Cobertura REAL do orçamento: coberto ${BRL(covVal)} de ${BRL(covLeaf)} em folhas do(s) orçamento(s)."><div class="v gold">${cobertura!=null?cobertura.toLocaleString('pt-BR')+'%':'—'}</div><div class="l">Cobertura orç.</div></div>`;
     // filtros dinâmicos (grupos em ordem lógica = ordem de aparição; demais ordenados)
     fillOrdered('fgrupo',[...new Set(itens.map(i=>i.grupo).filter(Boolean))]);
     fill('fstatus',[...new Set(itens.map(i=>i.status||'Não Iniciado'))]);

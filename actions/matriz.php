@@ -31,7 +31,11 @@ try {
     if (!$obra) { echo json_encode(['error'=>'obra não encontrada: '.$OBRA]); exit; }
 
     $st = $pdo->prepare("
-        SELECT s.ordem, s.nome, s.fase, s.grupo, s.grupo_ordem, s.curva, s.unidade, s.forma_contratacao,
+        SELECT s.ordem, COALESCE(NULLIF(r.nome_override,''), s.nome) AS nome, s.fase,
+               COALESCE(NULLIF(r.grupo_override,''), s.grupo) AS grupo,
+               COALESCE(r.grupo_ordem_override, s.grupo_ordem) AS grupo_ordem,
+               s.nome AS nome_base, s.grupo AS grupo_base, r.nome_override, r.grupo_override,
+               s.curva, s.unidade, s.forma_contratacao,
                s.lead_dias, s.marco_cronograma, s.termos_cronograma, s.quantitativo AS quantitativo_txt,
                s.escopo, s.variaveis_cotar, s.licoes, s.documentos, s.verba_linhas,
                s.responsavel_padrao,
@@ -43,7 +47,7 @@ try {
                r.tipo, r.verba_metodo, r.verba_material, r.verba_mo, r.composicao_id, r.area_base, r.composicao_sel, r.verba_curada, r.quant_comp_sel, r.quant_curada, r.orcamento_excl, r.auto_flags
         FROM servico s
         JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = ?
-        ORDER BY s.grupo_ordem, s.ordem
+        ORDER BY COALESCE(r.grupo_ordem_override, s.grupo_ordem), s.ordem
     ");
     $st->execute([$OBRA]);
     $rows = $st->fetchAll();

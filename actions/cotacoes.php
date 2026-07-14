@@ -15,6 +15,7 @@
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/obra_registry.php';   // cadastro único: resolver/promover obra
+require_once __DIR__ . '/../includes/coligadas.php';       // FASE 2: coligada_cod_de_nome p/ agrupar PC por coligada
 
 function cot_can_edit($pdo, $me, $obra) {
     $perms = user_perms($pdo, $me);
@@ -95,6 +96,36 @@ function cot_get_full($pdo, $id) {
     unset($it);
     $cot['multi_obra'] = count($obrasNoItens) > 1;
     $cot['obras_itens'] = $obrasNoItens;
+    // FASE 2 — agrupa os itens por COLIGADA (multi-PC): cada coligada tem seu Nº de Pedido de Compra próprio.
+    // coligada_cod: 1º do prefixo do colidmov ("27-20628" → 27); senão, pelo nome. num_pedido: da tabela cotacao_pedido.
+    $colItens = [];
+    foreach ($itens as $it) {
+        $col = trim((string)($it['solic_coligada'] ?? '')); if ($col === '') continue;
+        if (!isset($colItens[$col])) $colItens[$col] = ['coligada'=>$col, 'coligada_cod'=>null, 'colidmov'=>'', 'n'=>0, 'num_pedido'=>'', 'status'=>''];
+        $colItens[$col]['n']++;
+        $cm = trim((string)($it['solic_colidmov'] ?? ''));
+        if ($cm !== '' && $colItens[$col]['colidmov'] === '') {
+            $colItens[$col]['colidmov'] = $cm;
+            if (strpos($cm, '-') !== false) { $cc = (int)substr($cm, 0, strpos($cm, '-')); if ($cc > 0) $colItens[$col]['coligada_cod'] = $cc; }
+        }
+    }
+    foreach ($colItens as $cn => &$ci) { if (empty($ci['coligada_cod']) && function_exists('coligada_cod_de_nome')) { $cc = coligada_cod_de_nome($cn); if ($cc > 0) $ci['coligada_cod'] = $cc; } }
+    unset($ci);
+    // injeta o PC salvo por coligada (cotacao_pedido) — casa por coligada_cod (preferido) ou nome
+    try {
+        $pp = $pdo->prepare("SELECT * FROM cotacao_pedido WHERE cotacao_id=?"); $pp->execute([$id]);
+        foreach ($pp->fetchAll() as $row) {
+            foreach ($colItens as $cn => &$ci) {
+                if ((!empty($row['coligada_cod']) && (int)$row['coligada_cod'] === (int)$ci['coligada_cod'])
+                    || (empty($row['coligada_cod']) && trim((string)$row['coligada']) === $cn)) {
+                    $ci['num_pedido'] = (string)$row['num_pedido']; $ci['status'] = (string)($row['status'] ?? ''); break;
+                }
+            }
+            unset($ci);
+        }
+    } catch (Throwable $e) {}
+    $cot['multi_coligada'] = count($colItens) > 1;
+    $cot['coligadas_itens'] = array_values($colItens);
     $pq = $pdo->prepare("SELECT * FROM cotacao_proposta WHERE cotacao_id=? ORDER BY (total IS NULL), total, id"); $pq->execute([$id]);
     $propostas = $pq->fetchAll();
     if ($propostas) {
@@ -267,6 +298,30 @@ try {
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    if ($acao === 'pedido_coligada_salvar') {   // FASE 2 — Nº do PEDIDO de compra de UMA coligada (multi-PC por coligada)
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
+        $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
+        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+        $col = trim((string)($in['coligada'] ?? '')); $cod = (int)($in['coligada_cod'] ?? 0);
+        $cm  = trim((string)($in['colidmov'] ?? '')); $pc = trim((string)($in['num_pedido'] ?? ''));
+        if ($col === '' && $cod === 0) throw new Exception('coligada obrigatória');
+        $now = date('c');
+        // upsert por (cotacao_id, coligada_cod) — ou por nome, quando não há código
+        $sel = $cod ? $pdo->prepare("SELECT id FROM cotacao_pedido WHERE cotacao_id=? AND coligada_cod=?")
+                    : $pdo->prepare("SELECT id FROM cotacao_pedido WHERE cotacao_id=? AND coligada=?");
+        $sel->execute($cod ? [$cid, $cod] : [$cid, $col]);
+        $rid = (int)($sel->fetchColumn() ?: 0);
+        if ($rid) $pdo->prepare("UPDATE cotacao_pedido SET coligada=?, coligada_cod=?, colidmov=?, num_pedido=?, updated_by=?, updated_at=? WHERE id=?")
+                        ->execute([$col, $cod ?: null, $cm ?: null, $pc ?: null, $me, $now, $rid]);
+        else $pdo->prepare("INSERT INTO cotacao_pedido (cotacao_id, coligada, coligada_cod, colidmov, num_pedido, updated_by, updated_at) VALUES (?,?,?,?,?,?,?)")
+                   ->execute([$cid, $col, $cod ?: null, $cm ?: null, $pc ?: null, $me, $now]);
+        // denormaliza p/ o campo header num_pedido (usado na LISTA de cotações): junta os PCs distintos
+        $all = $pdo->prepare("SELECT num_pedido FROM cotacao_pedido WHERE cotacao_id=? AND num_pedido IS NOT NULL AND num_pedido<>''"); $all->execute([$cid]);
+        $nums = array_values(array_unique(array_filter(array_map(fn($x)=>trim((string)$x), $all->fetchAll(PDO::FETCH_COLUMN)))));
+        $pdo->prepare("UPDATE cotacao SET num_pedido=?, updated_at=? WHERE id=?")->execute([$nums ? implode(', ', $nums) : null, $now, $cid]);
+        echo json_encode(['ok'=>true, 'num_pedido_resumo'=>implode(', ', $nums)], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($acao === 'equaliza_salvar') {   // pontos de equalização da cotação e/ou os valores por proposta
         $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
         $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
@@ -343,10 +398,29 @@ try {
         $pc = trim((string)($cot['num_pedido'] ?? ''));
         if (array_key_exists('num_pedido', $in)) { $pc = trim((string)$in['num_pedido']); $sets[] = 'num_pedido=?'; $args[] = $pc ?: null; }
         if (isset($in['status']) && in_array($in['status'], ['aberta','aguardando','finalizada'], true)) {
-            // TRAVA: cotação AVULSA (sem vínculo ao radar) só finaliza com nº do PEDIDO DE COMPRA — exceto admin (exceção)
-            if ($in['status'] === 'finalizada' && empty($cot['servico_id']) && $pc === '') {
+            // TRAVA: cotação AVULSA (sem vínculo ao radar) só finaliza com nº do PEDIDO DE COMPRA — exceto admin (exceção).
+            // FASE 2: se atravessa VÁRIAS coligadas, exige 1 PC POR COLIGADA (cada coligada tem seu pedido).
+            if ($in['status'] === 'finalizada' && empty($cot['servico_id'])) {
                 $perms = user_perms($pdo, $me);
-                if (empty($perms['perm_admin'])) { echo json_encode(['error'=>'Informe o nº do PEDIDO DE COMPRA para finalizar esta cotação avulsa (sem vínculo ao radar).', 'precisa_pedido'=>true], JSON_UNESCAPED_UNICODE); exit; }
+                if (empty($perms['perm_admin'])) {
+                    $need = [];   // coligada => coligada_cod (coligadas presentes nos itens)
+                    foreach ($pdo->query("SELECT DISTINCT solic_coligada, solic_colidmov FROM cotacao_item WHERE cotacao_id=$cid AND solic_coligada IS NOT NULL AND solic_coligada<>''") as $r2) {
+                        $cn = trim((string)$r2['solic_coligada']); $cm = trim((string)$r2['solic_colidmov']);
+                        $cc = (strpos($cm, '-') !== false) ? (int)substr($cm, 0, strpos($cm, '-')) : 0;
+                        if (!$cc && function_exists('coligada_cod_de_nome')) $cc = coligada_cod_de_nome($cn);
+                        $need[$cn] = $cc;
+                    }
+                    if (count($need) > 1) {   // MULTI-COLIGADA: cada uma precisa do seu PC (cotacao_pedido)
+                        $have = [];
+                        foreach ($pdo->query("SELECT coligada, coligada_cod, num_pedido FROM cotacao_pedido WHERE cotacao_id=$cid") as $r3)
+                            if (trim((string)$r3['num_pedido']) !== '') { $have['c:'.(int)$r3['coligada_cod']] = 1; $have['n:'.trim((string)$r3['coligada'])] = 1; }
+                        $faltam = [];
+                        foreach ($need as $cn => $cc) if (!isset($have['c:'.$cc]) && !isset($have['n:'.$cn])) $faltam[] = preg_replace('/\s+(EMPREENDIMENTO|EMPREENDIMENTOS).*/i', '', $cn);
+                        if ($faltam) { echo json_encode(['error'=>'Informe o nº do PEDIDO DE COMPRA de cada coligada para finalizar. Faltam: '.implode(', ', $faltam).'.', 'precisa_pedido'=>true, 'multi_coligada'=>true], JSON_UNESCAPED_UNICODE); exit; }
+                    } elseif ($pc === '') {   // coligada única (ou avulsa sem origem): mantém a regra do PC único
+                        echo json_encode(['error'=>'Informe o nº do PEDIDO DE COMPRA para finalizar esta cotação avulsa (sem vínculo ao radar).', 'precisa_pedido'=>true], JSON_UNESCAPED_UNICODE); exit;
+                    }
+                }
             }
             $sets[] = 'status=?'; $args[] = $in['status'];
         }

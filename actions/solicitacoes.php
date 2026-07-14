@@ -14,6 +14,11 @@ require_once __DIR__ . '/../includes/solic.php';
 require_once __DIR__ . '/../includes/obra_registry.php';   // cadastro único: resolve obra da solicitação
 
 function sol_dias($emissao) { if (!$emissao) return null; $d = (int)(new DateTime(substr($emissao,0,10)))->diff(new DateTime('today'))->format('%r%a'); return $d; }
+// normaliza descrição p/ casar item-da-SC ↔ cotacao_item quando não há codprd (fallback do casamento exato)
+function sol_norm($s) {
+    $s = strtr((string)$s, ['Á'=>'a','À'=>'a','Â'=>'a','Ã'=>'a','É'=>'e','Ê'=>'e','Í'=>'i','Ó'=>'o','Ô'=>'o','Õ'=>'o','Ú'=>'u','Ç'=>'c','á'=>'a','à'=>'a','â'=>'a','ã'=>'a','é'=>'e','ê'=>'e','í'=>'i','ó'=>'o','ô'=>'o','õ'=>'o','ú'=>'u','ç'=>'c']);
+    return preg_replace('/\s+/', ' ', strtolower(trim($s)));
+}
 // nomes de centro de custo da CAPRETZ (do sistema antigo) — pré-preenche o nome comercial
 $GLOBALS['CAPRETZ_CC'] = ['001'=>'Comercial Americana','010'=>'Sede','015'=>'MKT','020'=>'SAT','032'=>'Licel','033'=>'Obras SAT','036'=>'Piamonte','039'=>'Contrap. Piamonte','040'=>'Cajá','041'=>'Espazo','042'=>'Prades'];
 function sol_nome_default($coligada, $obra_cod) {
@@ -63,6 +68,42 @@ try {
             }
         }
 
+        // FASE 2 — COBERTURA DE COTAÇÃO POR ITEM (cinza=sem cotação · amarelo=em cotação aberta · verde=finalizada/com PC).
+        // Mapa (coligada|numero) → { matchkey → status }. matchkey = codprd (exato) ou produto normalizado (fallback legado).
+        $cov = [];
+        $addCov = function($col,$num,$codprd,$prod,$status) use (&$cov) {
+            $col = trim((string)$col); $num = trim((string)$num); if ($col==='' || $num==='') return;
+            $k = $col.'|'.$num; $mk = trim((string)$codprd)!=='' ? ('c:'.trim((string)$codprd)) : ('p:'.sol_norm($prod));
+            if (!isset($cov[$k])) $cov[$k]=[];
+            if (($cov[$k][$mk] ?? '') !== 'coberto') $cov[$k][$mk] = $status;   // 'coberto' vence 'cotando'
+        };
+        try {
+            // PC por COLIGADA (multi-PC) + nº de coligadas por cotação → 'coberto' é POR COLIGADA (não o num_pedido agregado do header)
+            $cotPed = [];   // cotacao_id => [coligada => num_pedido]
+            foreach ($pdo->query("SELECT cotacao_id, coligada, num_pedido FROM cotacao_pedido WHERE num_pedido IS NOT NULL AND num_pedido<>''") as $r)
+                $cotPed[(int)$r['cotacao_id']][trim((string)$r['coligada'])] = trim((string)$r['num_pedido']);
+            $cotNCol = [];  // cotacao_id => nº de coligadas distintas
+            foreach ($pdo->query("SELECT cotacao_id, COUNT(DISTINCT solic_coligada) n FROM cotacao_item WHERE solic_coligada IS NOT NULL AND solic_coligada<>'' GROUP BY cotacao_id") as $r)
+                $cotNCol[(int)$r['cotacao_id']] = (int)$r['n'];
+            // (a) itens carimbados: coberto = cotação finalizada OU a COLIGADA DO ITEM tem PC (por coligada; header só serve p/ coligada única)
+            foreach ($pdo->query("SELECT ci.cotacao_id cid, ci.solic_coligada col, ci.solic_numero num, ci.solic_codprd codprd, ci.descricao prod, c.status st, c.num_pedido hdr
+                                  FROM cotacao_item ci JOIN cotacao c ON c.id=ci.cotacao_id
+                                  WHERE ci.solic_coligada IS NOT NULL AND ci.solic_coligada<>'' AND ci.solic_numero IS NOT NULL AND ci.solic_numero<>''") as $r) {
+                $cid = (int)$r['cid']; $colPc = $cotPed[$cid][trim((string)$r['col'])] ?? '';
+                $isMulti = ($cotNCol[$cid] ?? 1) > 1;
+                $effPc = $colPc !== '' ? $colPc : ($isMulti ? '' : trim((string)$r['hdr']));   // multi: só o PC da PRÓPRIA coligada conta
+                $status = (($r['st']==='finalizada') || $effPc !== '') ? 'coberto' : 'cotando';
+                $addCov($r['col'],$r['num'],$r['codprd'],$r['prod'],$status);
+            }
+            // (b) cotações antigas (single, itens sem origem): liga pela SC via overlay e casa por produto (header vale — é coligada única)
+            foreach ($pdo->query("SELECT o.coligada col, o.numero num, ci.descricao prod, c.status st, c.num_pedido pc
+                                  FROM solic_overlay o JOIN cotacao c ON c.id=o.cotacao_id JOIN cotacao_item ci ON ci.cotacao_id=c.id
+                                  WHERE o.cotacao_id IS NOT NULL AND (ci.solic_coligada IS NULL OR ci.solic_coligada='')") as $r) {
+                $status = (($r['st']==='finalizada') || trim((string)$r['pc'])!=='') ? 'coberto' : 'cotando';
+                $addCov($r['col'],$r['num'],'',$r['prod'],$status);
+            }
+        } catch (Throwable $e) { $cov = []; }
+
         // LISTA + DASHBOARD
         $lista = []; $dash = ['total'=>0,'b'=>['r'=>0,'a'=>0,'l'=>0,'c'=>0],'por_obra'=>[],'por_comprador'=>[],'por_status'=>[]];
         foreach ($sol as $s) {
@@ -73,10 +114,23 @@ try {
             $status = $ov['status'] ?? 'pendente';
             $dias = sol_dias($s['emissao']);
             $bk = $dias===null?'r':($dias<7?'r':($dias<15?'a':($dias<30?'l':'c')));
+            // carimba a cobertura em cada item + agrega a cobertura da SC (cinza/parcial/total)
+            $cmap = $cov[$s['coligada'].'|'.$s['numero']] ?? []; $nCob=0; $nAny=0; $itensC = $s['itens'];
+            foreach ($itensC as &$__it) {
+                // item COM codprd casa SÓ por codprd (evita falso-positivo por descrição repetida); sem codprd → por nome
+                $cp = trim((string)($__it['codprd'] ?? ''));
+                $stt = ($cp !== '') ? ($cmap['c:'.$cp] ?? null) : ($cmap['p:'.sol_norm($__it['produto'] ?? '')] ?? null);
+                $__it['cot'] = $stt ?: 'vazio';
+                if ($__it['cot']==='coberto') $nCob++; if ($__it['cot']!=='vazio') $nAny++;
+            }
+            unset($__it);
+            $nI = count($itensC);
+            $cobertura = ($nI>0 && $nCob===$nI) ? 'total' : ($nAny>0 ? 'parcial' : 'vazio');
             $lista[] = ['coligada'=>$s['coligada'],'numero'=>$s['numero'],'obra_cod'=>$s['obra_cod'],'nome_obra'=>$nomeObra,
                 'comprador_id'=>$compId,'comprador_nome'=>$compNome,'emissao'=>$s['emissao'],'dias'=>$dias,'bucket'=>$bk,
                 'status'=>$status,'observacoes'=>$ov['observacoes'] ?? '','cotacao_id'=>$ov['cotacao_id'] ?? null,
-                'n_itens'=>count($s['itens']),'primeiro'=>$s['itens'][0]['produto'] ?? '','itens'=>$s['itens']];
+                'cobertura'=>$cobertura,'cot_cob'=>$nCob,'cot_any'=>$nAny,
+                'n_itens'=>count($itensC),'primeiro'=>$itensC[0]['produto'] ?? '','itens'=>$itensC];
             // dashboard
             $dash['total']++; $dash['b'][$bk]++;
             $dash['por_status'][$status] = ($dash['por_status'][$status] ?? 0) + 1;
@@ -148,8 +202,10 @@ try {
         $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, descricao, num_solicitacao, solic_coligada, solic_obra_cod, solic_colidmov, status, aprovacao, criado_por, criado_nome, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'aberta','aguardando', ?,?,?,?)")
             ->execute([$obraId ?: null, null, $titulo, '', '', null, 'Solicitação de compra nº '.$num.' — '.$col.($obraCod?(' (centro de custo '.$obraCod.')'):''), $num, $col, $obraCod, $colidmov ?: null, $me, $perms['nome'] ?? null, $now, $now]);
         $cid = (int)$pdo->lastInsertId();
-        $insI = $pdo->prepare("INSERT INTO cotacao_item (cotacao_id, descricao, unidade, quantidade, observacao, ordem) VALUES (?,?,?,?,?,?)");
-        $o = 0; foreach ($rows as $r) $insI->execute([$cid, trim((string)($r['produto'] ?? '')), trim((string)($r['und'] ?? '')), ($r['qtd'] ?? null) !== null ? (float)$r['qtd'] : null, trim((string)($r['observacao'] ?? '')), $o++]);
+        // FASE 2: carimba a origem por item (coligada/numero/colidmov/seq/codprd) p/ a cobertura por item e o casamento do PC
+        $insI = $pdo->prepare("INSERT INTO cotacao_item (cotacao_id, descricao, unidade, quantidade, observacao, ordem, obra_id, solic_coligada, solic_numero, solic_colidmov, solic_seq, solic_codprd) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+        $o = 0; foreach ($rows as $r) $insI->execute([$cid, trim((string)($r['produto'] ?? '')), trim((string)($r['und'] ?? '')), ($r['qtd'] ?? null) !== null ? (float)$r['qtd'] : null, trim((string)($r['observacao'] ?? '')), $o++,
+            $obraId ?: null, $col, $num, (trim((string)($r['colidmov'] ?? '')) ?: $colidmov) ?: null, (($r['seq'] ?? null) !== null && $r['seq'] !== '') ? (int)$r['seq'] : null, trim((string)($r['codprd'] ?? '')) ?: null]);
         // liga no overlay
         $ov = $pdo->prepare("SELECT id FROM solic_overlay WHERE coligada=? AND numero=?"); $ov->execute([$col,$num]); $ovid = (int)($ov->fetchColumn() ?: 0);
         if ($ovid) $pdo->prepare("UPDATE solic_overlay SET cotacao_id=?, status='em_cotacao', updated_by=?, updated_at=? WHERE id=?")->execute([$cid,$me,$now,$ovid]);
@@ -189,12 +245,13 @@ try {
         $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, descricao, status, aprovacao, criado_por, criado_nome, created_at, updated_at) VALUES (?,?,?,?,?,?,?, 'aberta','aguardando', ?,?,?,?)")
             ->execute([$obraUnica, null, $titulo, '', '', null, $descr, $me, $perms['nome'] ?? null, $now, $now]);
         $cid = (int)$pdo->lastInsertId();
-        $insI = $pdo->prepare("INSERT INTO cotacao_item (cotacao_id, descricao, unidade, quantidade, observacao, ordem, obra_id, solic_coligada, solic_numero, solic_colidmov) VALUES (?,?,?,?,?,?,?,?,?,?)");
+        $insI = $pdo->prepare("INSERT INTO cotacao_item (cotacao_id, descricao, unidade, quantidade, observacao, ordem, obra_id, solic_coligada, solic_numero, solic_colidmov, solic_seq, solic_codprd) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
         $o = 0;
         foreach ($itens as $it) {
             $insI->execute([$cid, trim((string)$it['produto']), trim((string)($it['und'] ?? '')),
                 ($it['qtd'] ?? null) !== null && $it['qtd'] !== '' ? (float)$it['qtd'] : null, trim((string)($it['observacao'] ?? '')), $o++,
-                $it['_obra_id'] ?: null, trim((string)($it['coligada'] ?? '')), trim((string)($it['numero'] ?? '')), $it['_colidmov'] ?: null]);
+                $it['_obra_id'] ?: null, trim((string)($it['coligada'] ?? '')), trim((string)($it['numero'] ?? '')), $it['_colidmov'] ?: null,
+                (($it['seq'] ?? null) !== null && $it['seq'] !== '') ? (int)$it['seq'] : null, trim((string)($it['codprd'] ?? '')) ?: null]);
         }
         foreach ($solics as $s) {
             $ov = $pdo->prepare("SELECT id FROM solic_overlay WHERE coligada=? AND numero=?"); $ov->execute([$s['coligada'], $s['numero']]); $ovid = (int)($ov->fetchColumn() ?: 0);

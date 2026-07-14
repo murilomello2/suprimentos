@@ -27,6 +27,7 @@ try {
     $campos = $in['campos'] ?? [];
     $me     = $in['me'] ?? null;
     $OBRA   = max(1, (int)($in['obra'] ?? 1));   // multi-obra: edição é POR OBRA (default Trinity)
+    $ESCOPO = (string)($in['escopo'] ?? 'obra'); // nome/grupo: 'obra'=override na célula (padrão) · 'catalogo'=muda a base (admin)
     if (!$ordem || !is_array($campos) || !$campos) throw new Exception('payload inválido (precisa de ordem + campos)');
     $keysIn = array_keys($campos);   // capturado ANTES dos unset() — usado pra limpar auto_flags por dimensão
 
@@ -48,6 +49,7 @@ try {
         } catch (Throwable $e) {}
     }
     $is_admin = !empty($perms['perm_admin']);
+    if ($ESCOPO === 'catalogo' && !$is_admin) $ESCOPO = 'obra';   // só admin muda a lista-base; os demais caem em por-obra
     $editor   = $is_admin || can_edit_obra($perms, $OBRA);
     $FG = [
         'status'=>'geral','fornecedor'=>'geral','observacoes'=>'geral',
@@ -160,25 +162,52 @@ try {
         unset($campos['dicionario']);
     }
 
-    // ----- NOME do item — atualiza o catálogo (servico) -----
+    // ----- NOME do item — POR-OBRA por padrão (override na célula) · 'catalogo' muda a base (todas, admin) -----
+    // O nome é do CATÁLOGO (servico, global). Renomear durante a curadoria de UMA obra NÃO pode reescrever as
+    // outras (a base de concreto ≠ a base de alvenaria). Por padrão grava nome_override na célula; se o texto
+    // voltar a ser o nome-base, o override é limpo (herda de novo). Só escopo='catalogo' toca a base.
     if (array_key_exists('nome', $campos)) {
         $nm = trim((string)$campos['nome']);
-        if ($nm !== '' && $nm !== $beforeS['nome']) {
-            $pdo->prepare("UPDATE servico SET nome=?, slug=? WHERE id=?")->execute([$nm, _slugify($nm), $ordem]);
-            $h('Nome do item', $beforeS['nome'], $nm); $item_nome = $nm;
+        $curNome = ($before['nome_override'] ?? '') !== '' ? $before['nome_override'] : $beforeS['nome']; // efetivo desta obra
+        if ($nm !== '' && $nm !== $curNome) {
+            if ($ESCOPO === 'catalogo') {
+                $pdo->prepare("UPDATE servico SET nome=?, slug=? WHERE id=?")->execute([$nm, _slugify($nm), $ordem]);
+                $h('Nome do item (base · todas as obras)', $curNome, $nm); $item_nome = $nm;
+            } else {
+                $set[] = "nome_override = ?"; $vals[] = ($nm === $beforeS['nome']) ? null : $nm;  // = base → limpa override
+                $h('Nome do item', $curNome, $nm); $item_nome = $nm;
+            }
         }
         unset($campos['nome']);
     }
 
-    // ----- MOVER de GRUPO — atualiza o catálogo (servico) -----
+    // ----- MOVER de GRUPO — POR-OBRA por padrão (override na célula) · 'catalogo' muda a base (todas, admin) -----
     if (array_key_exists('grupo', $campos)) {
         $g = trim((string)$campos['grupo']);
-        if ($g !== '' && $g !== $beforeS['grupo']) {
-            $go = $pdo->prepare("SELECT grupo_ordem FROM servico WHERE grupo=? AND id<>? LIMIT 1");
-            $go->execute([$g, $ordem]); $gord = $go->fetchColumn();
-            if ($gord === false || $gord === null) $gord = (int)$pdo->query("SELECT COALESCE(MAX(grupo_ordem),0)+1 FROM servico")->fetchColumn();
-            $pdo->prepare("UPDATE servico SET grupo=?, grupo_ordem=? WHERE id=?")->execute([$g, $gord, $ordem]);
-            $h('Grupo', $beforeS['grupo'], $g);
+        $curGrp = ($before['grupo_override'] ?? '') !== '' ? $before['grupo_override'] : $beforeS['grupo']; // efetivo desta obra
+        if ($g !== '' && $g !== $curGrp) {
+            // ordem canônica do grupo destino: quem já usa esse nome (base do catálogo, ou override de qualquer obra)
+            $go = $pdo->prepare("SELECT grupo_ordem FROM servico WHERE grupo=? LIMIT 1"); $go->execute([$g]); $gord = $go->fetchColumn();
+            if ($gord === false || $gord === null) {
+                $g2 = $pdo->prepare("SELECT grupo_ordem_override FROM radar_item WHERE grupo_override=? AND grupo_ordem_override IS NOT NULL LIMIT 1");
+                $g2->execute([$g]); $gord = $g2->fetchColumn();
+            }
+            if ($gord === false || $gord === null) {   // grupo novo: vai pro fim (max das duas fontes + 1)
+                $m1 = (int)$pdo->query("SELECT COALESCE(MAX(grupo_ordem),0) FROM servico")->fetchColumn();
+                $m2 = (int)$pdo->query("SELECT COALESCE(MAX(grupo_ordem_override),0) FROM radar_item")->fetchColumn();
+                $gord = max($m1, $m2) + 1;
+            }
+            if ($ESCOPO === 'catalogo') {
+                $gb = $pdo->prepare("SELECT grupo_ordem FROM servico WHERE grupo=? AND id<>? LIMIT 1"); $gb->execute([$g, $ordem]); $gbo = $gb->fetchColumn();
+                if ($gbo === false || $gbo === null) $gbo = (int)$pdo->query("SELECT COALESCE(MAX(grupo_ordem),0)+1 FROM servico")->fetchColumn();
+                $pdo->prepare("UPDATE servico SET grupo=?, grupo_ordem=? WHERE id=?")->execute([$g, $gbo, $ordem]);
+                $h('Grupo (base · todas as obras)', $curGrp, $g);
+            } else {
+                $ehBase = ($g === $beforeS['grupo']);   // voltou ao grupo-base → limpa os overrides
+                $set[] = "grupo_override = ?";       $vals[] = $ehBase ? null : $g;
+                $set[] = "grupo_ordem_override = ?"; $vals[] = $ehBase ? null : (int)$gord;
+                $h('Grupo', $curGrp, $g);
+            }
         }
         unset($campos['grupo']);
     }

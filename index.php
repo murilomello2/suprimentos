@@ -641,6 +641,24 @@
 
 <script>
 let DATA={itens:[],obra:{}}, CUR=null, TAB='Resumo';
+let RESUMO_BY_OBRA={};   // resumo (cobertura/verba) por obra — p/ recalcular KPIs sem recarregar a matriz inteira
+// KPIs do radar (recalcula a partir de DATA.itens + RESUMO_BY_OBRA — usado no load e no save de 1 item)
+function renderKpis(){
+  const el=document.getElementById('kpis'); if(!el) return;
+  const itens=(DATA&&DATA.itens)||[]; const sel=(OBRA_SEL&&OBRA_SEL.length?OBRA_SEL:[1]);
+  let covVal=0, covLeaf=0; sel.forEach(oid=>{ const r=RESUMO_BY_OBRA[oid]; if(r){ covVal+=r.cobertura_valor||0; covLeaf+=r.cobertura_total_leaf||0; } });
+  const cobertura=covLeaf?Math.round(covVal/covLeaf*1000)/10:null, nObras=sel.length;
+  const comData=itens.filter(i=>i.data_necessaria).length;
+  const criticos=itens.filter(i=>alertLevel(i)==='critico').length;
+  const atrasados=itens.filter(i=>alertLevel(i)==='atrasado').length;
+  const cv=k=>itens.filter(i=>i.curva===k).length;
+  el.innerHTML=`
+      <div class="kpi" title="Itens no radar${nObras>1?' ('+nObras+' obras)':''}"><div class="v">${itens.length}</div><div class="l">Itens${nObras>1?' · '+nObras+' obras':''}</div></div>
+      <div class="kpi" title="Itens com data em obra definida (cronograma)"><div class="v">${comData}/${itens.length}</div><div class="l">Com data</div></div>
+      <div class="kpi" title="Críticos: o fim do prazo de cotação já venceu${atrasados?' · '+atrasados+' atrasados':''}"><div class="v ${criticos?'alert':''}">${criticos}</div><div class="l">Críticos${atrasados?` · ${atrasados} atras.`:''}</div></div>
+      <div class="kpi" title="Itens por curva ABC (A / B / C)"><div class="v">${cv('A')}·${cv('B')}·${cv('C')}</div><div class="l">Curva A·B·C</div></div>
+      <div class="kpi" title="Cobertura REAL do orçamento: coberto ${BRL(covVal)} de ${BRL(covLeaf)} em folhas do(s) orçamento(s)."><div class="v gold">${cobertura!=null?cobertura.toLocaleString('pt-BR')+'%':'—'}</div><div class="l">Cobertura orç.</div></div>`;
+}
 let RESP=[];                       // responsáveis possíveis (papel "comprador" = Suprimentos)
 let GORDER=[];                     // ordem atual dos grupos (preenchida no render)
 let COLLAPSED=new Set();           // grupos recolhidos (persistido em localStorage)
@@ -818,27 +836,16 @@ async function load(){
     if(!oks.length){document.getElementById('tb').innerHTML=`<tr><td colspan="12" class="empty">Erro: ${esc((rs0[0]&&rs0[0].d&&rs0[0].d.error)||'sem dados')}</td></tr>`;return;}
     DATA=oks[0].d;
     OBRAS=DATA.obras||OBRAS;
-    const itens=[]; let covVal=0, covLeaf=0, cronoErro=null;
+    const itens=[]; let cronoErro=null; RESUMO_BY_OBRA={};
     for(const {oid,d} of oks){
       (d.itens||[]).forEach(i=>{ i.obra_id=oid; i.obra_nome=(d.obra&&d.obra.nome)||('obra '+oid); itens.push(i); });
-      covVal+=(d.resumo&&d.resumo.cobertura_valor)||0; covLeaf+=(d.resumo&&d.resumo.cobertura_total_leaf)||0;
+      RESUMO_BY_OBRA[oid]=d.resumo||{};
       if(d.resumo&&d.resumo.crono_erro) cronoErro=d.resumo.crono_erro;
     }
     DATA.itens=itens;
-    const cobertura=covLeaf?Math.round(covVal/covLeaf*1000)/10:null;
     // obra(s) selecionada(s) aparecem SÓ no dropdown (botão + checkboxes) — sem linha de texto no topo
     obraUpdateUI();
-    // KPIs (sobre o conjunto selecionado)
-    const comData=itens.filter(i=>i.data_necessaria).length;
-    const criticos=itens.filter(i=>alertLevel(i)==='critico').length;
-    const atrasados=itens.filter(i=>alertLevel(i)==='atrasado').length;
-    const cv=k=>itens.filter(i=>i.curva===k).length;
-    document.getElementById('kpis').innerHTML=`
-      <div class="kpi" title="Itens no radar${oks.length>1?' ('+oks.length+' obras)':''}"><div class="v">${itens.length}</div><div class="l">Itens${oks.length>1?' · '+oks.length+' obras':''}</div></div>
-      <div class="kpi" title="Itens com data em obra definida (cronograma)"><div class="v">${comData}/${itens.length}</div><div class="l">Com data</div></div>
-      <div class="kpi" title="Críticos: o fim do prazo de cotação já venceu${atrasados?' · '+atrasados+' atrasados':''}"><div class="v ${criticos?'alert':''}">${criticos}</div><div class="l">Críticos${atrasados?` · ${atrasados} atras.`:''}</div></div>
-      <div class="kpi" title="Itens por curva ABC (A / B / C)"><div class="v">${cv('A')}·${cv('B')}·${cv('C')}</div><div class="l">Curva A·B·C</div></div>
-      <div class="kpi" title="Cobertura REAL do orçamento: coberto ${BRL(covVal)} de ${BRL(covLeaf)} em folhas do(s) orçamento(s)."><div class="v gold">${cobertura!=null?cobertura.toLocaleString('pt-BR')+'%':'—'}</div><div class="l">Cobertura orç.</div></div>`;
+    renderKpis();   // KPIs sobre o conjunto selecionado (recalcula de DATA.itens + RESUMO_BY_OBRA)
     // filtros dinâmicos (grupos em ordem lógica = ordem de aparição; demais ordenados)
     fillOrdered('fgrupo',[...new Set(itens.map(i=>i.grupo).filter(Boolean))]);
     fill('fstatus',[...new Set(itens.map(i=>i.status||'Não Iniciado'))]);
@@ -3141,11 +3148,30 @@ async function modalGrupo(v){
 // escopo (nome/grupo): 'obra' = override só nesta obra (padrão) · 'catalogo' = muda a lista-base (todas, admin)
 async function saveAndReload(campos, escopo){
   try{
+    const oid=CUR.obra_id||1;
     const d=await (await fetch('actions/item_update.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ordem:CUR.ordem,campos,me:EU&&EU.bitrix_id,obra:CUR.obra_id||1,escopo:escopo||'obra'})})).json();
+      body:JSON.stringify({ordem:CUR.ordem,campos,me:EU&&EU.bitrix_id,obra:oid,escopo:escopo||'obra'})})).json();
     if(d.error){toast('Erro: '+d.error);return;}
     VERBA_USOS=null;            // verba mudou → recarrega o mapa de uso na próxima leitura
-    await load();
+    // PERF: reload de UM item só (rápido) em vez de recarregar a matriz inteira (7-14s) a cada save.
+    // escopo 'catalogo' muda nome/grupo de TODAS as obras → aí recarrega tudo.
+    let merged=false;
+    if(escopo!=='catalogo'){
+      try{
+        const mr=await (await fetch('actions/matriz.php?only='+CUR.ordem+'&_='+Date.now()+(oid!==1?('&obra='+oid):''),{cache:'no-store'})).json();
+        if(mr&&mr.item){
+          mr.item.obra_id=oid; mr.item.obra_nome=(mr.obra&&mr.obra.nome)||('obra '+oid);
+          const arr=DATA.itens||(DATA.itens=[]); const idx=arr.findIndex(i=>i.ordem===CUR.ordem&&(i.obra_id||1)===oid);
+          if(idx>=0) arr[idx]=mr.item; else arr.push(mr.item);
+          if(mr.resumo) RESUMO_BY_OBRA[oid]=mr.resumo;
+          try{ fillOrdered('fgrupo',[...new Set(arr.map(i=>i.grupo).filter(Boolean))]); fill('fstatus',[...new Set(arr.map(i=>i.status||'Não Iniciado'))]); fill('fresp',[...new Set(arr.map(i=>i.responsavel).filter(Boolean))]); }catch(e){}
+          renderKpis(); render();
+          if(document.getElementById('view-matriz') && document.getElementById('view-matriz').style.display!=='none'){ MAT=null; loadMatriz(true); }
+          merged=true;
+        }
+      }catch(e){}
+    }
+    if(!merged) await load();   // escopo catálogo, ou fallback se o reload leve falhar
     CUR=byOrdem(CUR.ordem, CUR.obra_id); drawModal();
   }catch(e){toast('Falha ao salvar');}
 }
@@ -4998,7 +5024,7 @@ function solRenderDash(){
 function solRenderLista(){
   const w=document.getElementById('solwrap'), all=SOL.data.solicitacoes||[], f=SOL.filt, qn=(f.busca||'').toLowerCase();
   const obras=[...new Set(all.map(s=>s.nome_obra))].sort(), comps=[...new Set(all.map(s=>s.comprador_nome).filter(Boolean))].sort();
-  let rows=all.filter(s=>(!f.obra||s.nome_obra===f.obra)&&(!f.comprador||s.comprador_nome===f.comprador)&&(!f.status||s.status===f.status)&&(!f.bucket||s.bucket===f.bucket)&&(!f.cobertura||(s.cobertura||'vazio')===f.cobertura)&&(!qn||((s.numero+' '+s.primeiro).toLowerCase().includes(qn))));
+  let rows=all.filter(s=>(!f.obra||s.nome_obra===f.obra)&&(!f.comprador||s.comprador_nome===f.comprador)&&(!f.status||s.status===f.status)&&(!f.bucket||s.bucket===f.bucket)&&(!f.cobertura||(s.cobertura||'vazio')===f.cobertura)&&(!qn||((s.numero+' '+s.primeiro+' '+(s.cotacoes||[]).map(x=>'#'+x.id+' '+(x.titulo||'')).join(' ')).toLowerCase().includes(qn))));
   rows.sort((a,b)=>(b.dias||0)-(a.dias||0));
   let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
      <div class="search" style="min-width:180px"><span class="material-icons" style="color:var(--muted)">search</span><input id="solBusca" placeholder="Buscar nº ou item…" value="${esc(f.busca)}" oninput="SOL.filt.busca=this.value;solRenderLista()"></div>
@@ -5021,8 +5047,10 @@ function solRenderLista(){
       <td class="muted" style="font-size:11.5px">${esc(s.comprador_nome||'—')}</td>
       <td>${CAN_EDIT?`<input value="${esc(obs)}" title="${esc(obs)}" oninput="this.title=this.value" onchange="solObs('${esc(key)}',this.value,this)" placeholder="anotação…" style="width:150px;font-size:11px;padding:3px 5px">`:`<span title="${esc(obs)}">${esc(obs.slice(0,32))}${obs.length>32?'…':''}</span>`}</td>
       <td style="white-space:nowrap"><button class="btn-ghost" style="padding:2px 6px" title="Copiar mensagem para orçamento" onclick="solCopiar('${esc(key)}')"><span class="material-icons" style="font-size:15px">content_copy</span></button>
-        ${s.cotacao_id?`<button class="btn-ghost" style="padding:2px 6px;color:var(--verde-d)" title="Ver cotação gerada" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${s.cotacao_id}),200)"><span class="material-icons" style="font-size:15px">request_quote</span></button>`:(CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px" title="Gerar cotação desta solicitação" onclick="solGerar('${esc(key)}')"><span class="material-icons" style="font-size:15px;color:var(--verde)">playlist_add</span></button>`:'')}</td></tr>`;
-    if(ex) html+=`<tr><td colspan="11" style="background:#fafbfb;padding:8px 14px"><b style="font-size:11px;color:var(--muted)">ITENS</b> <span class="muted" style="font-size:10px">⚪ sem cotação · 🟡 em cotação · 🟢 finalizada</span>${s.itens.map(it=>`<div style="font-size:12px;padding:2px 0">${solCotDot(it.cot)}${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</div>`).join('')}</td></tr>`;
+        ${(s.cotacoes&&s.cotacoes.length)
+          ? s.cotacoes.map(x=>`<button class="btn-ghost" style="padding:2px 7px;color:var(--verde-d);font-weight:700;font-size:11px" title="Ver cotação #${x.id}: ${esc(x.titulo||'')}" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${x.id}),200)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">request_quote</span>#${x.id}</button>`).join('')
+          : (s.cotacao_id?`<button class="btn-ghost" style="padding:2px 6px;color:var(--verde-d)" title="Ver cotação gerada" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${s.cotacao_id}),200)"><span class="material-icons" style="font-size:15px">request_quote</span></button>`:(CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px" title="Gerar cotação desta solicitação" onclick="solGerar('${esc(key)}')"><span class="material-icons" style="font-size:15px;color:var(--verde)">playlist_add</span></button>`:''))}</td></tr>`;
+    if(ex) html+=`<tr><td colspan="11" style="background:#fafbfb;padding:8px 14px"><b style="font-size:11px;color:var(--muted)">ITENS</b> <span class="muted" style="font-size:10px">⚪ sem cotação · 🟡 em cotação · 🟢 finalizada</span>${s.itens.map(it=>`<div style="font-size:12px;padding:2px 0">${solCotDot(it.cot)}${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${it.cot_cid?` <button class="btn-ghost" style="padding:0 5px;color:var(--verde-d);font-size:10px;font-weight:700;vertical-align:1px" title="Ver cotação #${it.cot_cid}${it.cot_ctit?': '+esc(it.cot_ctit):''}" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${it.cot_cid}),200)">#${it.cot_cid}</button>`:''}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</div>`).join('')}</td></tr>`;
   }
   if(!rows.length) html+='<tr><td colspan="11" class="empty">Nenhuma solicitação nesse filtro.</td></tr>';
   const nSel=Object.keys(SOL.sel).filter(k=>SOL.sel[k]).length;
@@ -5035,7 +5063,7 @@ function solRenderLista(){
 function solSelToggle(key){ SOL.sel=SOL.sel||{}; if(SOL.sel[key])delete SOL.sel[key]; else SOL.sel[key]=true; solRenderLista(); }
 function solSelAll(on){ SOL.sel=SOL.sel||{}; (SOL._rowsKeys||[]).forEach(k=>{ if(on)SOL.sel[k]=true; else delete SOL.sel[k]; }); solRenderLista(); }
 function solGerarMulti(){ const keys=Object.keys(SOL.sel||{}).filter(k=>SOL.sel[k]); const sols=(SOL.data.solicitacoes||[]).filter(s=>keys.includes(s.coligada+'|'+s.numero)); if(!sols.length){toast('Selecione ao menos uma solicitação');return;}
-  SOL._pick={}; sols.forEach(s=>{ const k=s.coligada+'|'+s.numero; (s.itens||[]).forEach((it,idx)=>SOL._pick[k+'#'+idx]=true); });
+  SOL._pick={}; sols.forEach(s=>{ const k=s.coligada+'|'+s.numero; (s.itens||[]).forEach((it,idx)=>SOL._pick[k+'#'+idx]=((it.cot||'vazio')==='vazio')); });  // pré-marca só o que ainda NÃO está em cotação
   let ov=document.getElementById('solPickOv'); if(!ov){ov=document.createElement('div');ov.id='solPickOv';ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';document.body.appendChild(ov);} ov.onclick=e=>{if(e.target===ov)ov.remove();};
   solPickRender(sols); }
 function solPickRefresh(){ const keys=Object.keys(SOL.sel||{}).filter(k=>SOL.sel[k]); solPickRender((SOL.data.solicitacoes||[]).filter(s=>keys.includes(s.coligada+'|'+s.numero))); }
@@ -5045,7 +5073,7 @@ function solPickRender(sols){ const ov=document.getElementById('solPickOv'); if(
   const body=sols.map(s=>{ const k=s.coligada+'|'+s.numero; const allc=(s.itens||[]).length&&(s.itens||[]).every((it,idx)=>SOL._pick[k+'#'+idx]);
     return `<div style="border:1px solid var(--line);border-radius:10px;margin-top:10px;overflow:hidden">
       <div style="background:#f3f7f5;padding:8px 12px;display:flex;align-items:center;gap:8px"><b style="font-size:13px">SC ${esc(String(s.numero).replace(/^0+/,'')||s.numero)}</b><span class="muted" style="font-size:11.5px">${esc(s.nome_obra||'')} · ${esc(String(s.coligada||'').slice(0,28))}</span><label style="margin-left:auto;font-size:11px;cursor:pointer"><input type="checkbox" ${allc?'checked':''} onchange="solPickSC('${esc(k)}',this.checked)"> todos</label></div>
-      <div style="padding:6px 12px">${(s.itens||[]).map((it,idx)=>`<label style="display:flex;gap:8px;align-items:flex-start;padding:3px 0;font-size:12.5px;cursor:pointer"><input type="checkbox" ${SOL._pick[k+'#'+idx]?'checked':''} onchange="solPickIt('${esc(k)}',${idx},this.checked)"><span>${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</span></label>`).join('')}</div></div>`; }).join('');
+      <div style="padding:6px 12px">${(s.itens||[]).map((it,idx)=>`<label style="display:flex;gap:8px;align-items:flex-start;padding:3px 0;font-size:12.5px;cursor:pointer"><input type="checkbox" ${SOL._pick[k+'#'+idx]?'checked':''} onchange="solPickIt('${esc(k)}',${idx},this.checked)"><span>${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${(it.cot&&it.cot!=='vazio')?` <span class="dchip" style="background:#fdf4d9;color:#a5811a;font-size:9.5px;font-weight:700" title="Este item já está na cotação${it.cot_cid?' #'+it.cot_cid:''}${it.cot_ctit?' ('+esc(it.cot_ctit)+')':''} — desmarcado por padrão para não duplicar">⚠ já na cotação${it.cot_cid?' #'+it.cot_cid:''}</span>`:''}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</span></label>`).join('')}</div></div>`; }).join('');
   ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:720px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">
     <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:17px">Montar cotação — escolha os itens</b><span class="material-icons" style="cursor:pointer;color:var(--muted)" onclick="document.getElementById('solPickOv').remove()">close</span></div>
     <div class="muted" style="font-size:12px;margin-top:2px">${sols.length} solicitação(ões). Desmarque o que não vai (ex.: só o madeirite). A obra de cada item é resolvida pelo cadastro único; se houver mais de uma obra, a cotação fica multi-obra.</div>

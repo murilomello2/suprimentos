@@ -70,12 +70,17 @@ try {
 
         // FASE 2 — COBERTURA DE COTAÇÃO POR ITEM (cinza=sem cotação · amarelo=em cotação aberta · verde=finalizada/com PC).
         // Mapa (coligada|numero) → { matchkey → status }. matchkey = codprd (exato) ou produto normalizado (fallback legado).
-        $cov = [];
-        $addCov = function($col,$num,$codprd,$prod,$status) use (&$cov) {
+        $cov = [];   // (coligada|numero) => [ matchkey => ['status'=>, 'cid'=>, 'ctit'=>] ]
+        // matchkey: SEQ (linha EXATA da SC — distingue itens do mesmo produto) > codprd > produto normalizado
+        $addCov = function($col,$num,$seq,$codprd,$prod,$status,$cid,$ctit) use (&$cov) {
             $col = trim((string)$col); $num = trim((string)$num); if ($col==='' || $num==='') return;
-            $k = $col.'|'.$num; $mk = trim((string)$codprd)!=='' ? ('c:'.trim((string)$codprd)) : ('p:'.sol_norm($prod));
+            $seq = trim((string)$seq); $codprd = trim((string)$codprd);
+            $k = $col.'|'.$num;
+            $mk = $seq!=='' ? ('s:'.$seq) : ($codprd!=='' ? ('c:'.$codprd) : ('p:'.sol_norm($prod)));
             if (!isset($cov[$k])) $cov[$k]=[];
-            if (($cov[$k][$mk] ?? '') !== 'coberto') $cov[$k][$mk] = $status;   // 'coberto' vence 'cotando'
+            $cur = $cov[$k][$mk] ?? null;
+            if ($cur === null || ($cur['status'] !== 'coberto' && $status === 'coberto'))   // 'coberto' vence 'cotando'; senão mantém o 1º
+                $cov[$k][$mk] = ['status'=>$status, 'cid'=>(int)$cid, 'ctit'=>$ctit];
         };
         try {
             // PC por COLIGADA (multi-PC) + nº de coligadas por cotação → 'coberto' é POR COLIGADA (não o num_pedido agregado do header)
@@ -86,21 +91,21 @@ try {
             foreach ($pdo->query("SELECT cotacao_id, COUNT(DISTINCT solic_coligada) n FROM cotacao_item WHERE solic_coligada IS NOT NULL AND solic_coligada<>'' GROUP BY cotacao_id") as $r)
                 $cotNCol[(int)$r['cotacao_id']] = (int)$r['n'];
             // (a) itens carimbados: coberto = cotação finalizada OU a COLIGADA DO ITEM tem PC (por coligada; header só serve p/ coligada única)
-            foreach ($pdo->query("SELECT ci.cotacao_id cid, ci.solic_coligada col, ci.solic_numero num, ci.solic_codprd codprd, ci.descricao prod, c.status st, c.num_pedido hdr
+            foreach ($pdo->query("SELECT ci.cotacao_id cid, ci.solic_coligada col, ci.solic_numero num, ci.solic_seq seq, ci.solic_codprd codprd, ci.descricao prod, c.status st, c.num_pedido hdr, c.titulo ctit
                                   FROM cotacao_item ci JOIN cotacao c ON c.id=ci.cotacao_id
                                   WHERE ci.solic_coligada IS NOT NULL AND ci.solic_coligada<>'' AND ci.solic_numero IS NOT NULL AND ci.solic_numero<>''") as $r) {
                 $cid = (int)$r['cid']; $colPc = $cotPed[$cid][trim((string)$r['col'])] ?? '';
                 $isMulti = ($cotNCol[$cid] ?? 1) > 1;
                 $effPc = $colPc !== '' ? $colPc : ($isMulti ? '' : trim((string)$r['hdr']));   // multi: só o PC da PRÓPRIA coligada conta
                 $status = (($r['st']==='finalizada') || $effPc !== '') ? 'coberto' : 'cotando';
-                $addCov($r['col'],$r['num'],$r['codprd'],$r['prod'],$status);
+                $addCov($r['col'],$r['num'],$r['seq'],$r['codprd'],$r['prod'],$status,$cid,$r['ctit']);
             }
             // (b) cotações antigas (single, itens sem origem): liga pela SC via overlay e casa por produto (header vale — é coligada única)
-            foreach ($pdo->query("SELECT o.coligada col, o.numero num, ci.descricao prod, c.status st, c.num_pedido pc
+            foreach ($pdo->query("SELECT c.id cid, o.coligada col, o.numero num, ci.descricao prod, c.status st, c.num_pedido pc, c.titulo ctit
                                   FROM solic_overlay o JOIN cotacao c ON c.id=o.cotacao_id JOIN cotacao_item ci ON ci.cotacao_id=c.id
                                   WHERE o.cotacao_id IS NOT NULL AND (ci.solic_coligada IS NULL OR ci.solic_coligada='')") as $r) {
                 $status = (($r['st']==='finalizada') || trim((string)$r['pc'])!=='') ? 'coberto' : 'cotando';
-                $addCov($r['col'],$r['num'],'',$r['prod'],$status);
+                $addCov($r['col'],$r['num'],'','',$r['prod'],$status,(int)$r['cid'],$r['ctit']);
             }
         } catch (Throwable $e) { $cov = []; }
 
@@ -119,21 +124,25 @@ try {
             // nomes normalizados que se REPETEM nesta SC — nesses, o fallback por nome é ambíguo (não usar)
             $nameCount = [];
             foreach ($itensC as $__c) { $nn = sol_norm($__c['produto'] ?? ''); $nameCount[$nn] = ($nameCount[$nn] ?? 0) + 1; }
+            $scCots = [];   // cotações distintas que tocam esta SC (id => titulo)
             foreach ($itensC as &$__it) {
-                // 1º casa por codprd (exato); se não achar, cai p/ o nome — MAS só se o nome for único na SC (evita falso-positivo)
-                $cp = trim((string)($__it['codprd'] ?? '')); $nn = sol_norm($__it['produto'] ?? '');
-                $stt = ($cp !== '') ? ($cmap['c:'.$cp] ?? null) : null;
-                if ($stt === null && ($nameCount[$nn] ?? 0) <= 1) $stt = $cmap['p:'.$nn] ?? null;
-                $__it['cot'] = $stt ?: 'vazio';
-                if ($__it['cot']==='coberto') $nCob++; if ($__it['cot']!=='vazio') $nAny++;
+                // 1º SEQ (linha exata) · 2º codprd · 3º nome (só se único na SC) — evita falso-positivo entre itens iguais
+                $sq = trim((string)($__it['seq'] ?? '')); $cp = trim((string)($__it['codprd'] ?? '')); $nn = sol_norm($__it['produto'] ?? '');
+                $m = ($sq !== '') ? ($cmap['s:'.$sq] ?? null) : null;
+                if ($m === null && $cp !== '') $m = $cmap['c:'.$cp] ?? null;
+                if ($m === null && ($nameCount[$nn] ?? 0) <= 1) $m = $cmap['p:'.$nn] ?? null;
+                if ($m) { $__it['cot'] = $m['status']; $__it['cot_cid'] = $m['cid']; $__it['cot_ctit'] = $m['ctit']; if (!empty($m['cid'])) $scCots[$m['cid']] = $m['ctit']; }
+                else { $__it['cot'] = 'vazio'; }
+                if (($__it['cot'] ?? '')==='coberto') $nCob++; if (($__it['cot'] ?? '')!=='vazio') $nAny++;
             }
             unset($__it);
             $nI = count($itensC);
             $cobertura = ($nI>0 && $nCob===$nI) ? 'total' : ($nAny>0 ? 'parcial' : 'vazio');
+            $cotList = []; foreach ($scCots as $ccid=>$cctit) $cotList[] = ['id'=>$ccid, 'titulo'=>$cctit];
             $lista[] = ['coligada'=>$s['coligada'],'numero'=>$s['numero'],'obra_cod'=>$s['obra_cod'],'nome_obra'=>$nomeObra,
                 'comprador_id'=>$compId,'comprador_nome'=>$compNome,'emissao'=>$s['emissao'],'dias'=>$dias,'bucket'=>$bk,
                 'status'=>$status,'observacoes'=>$ov['observacoes'] ?? '','cotacao_id'=>$ov['cotacao_id'] ?? null,
-                'cobertura'=>$cobertura,'cot_cob'=>$nCob,'cot_any'=>$nAny,
+                'cobertura'=>$cobertura,'cot_cob'=>$nCob,'cot_any'=>$nAny,'cotacoes'=>$cotList,
                 'n_itens'=>count($itensC),'primeiro'=>$itensC[0]['produto'] ?? '','itens'=>$itensC];
             // dashboard
             $dash['total']++; $dash['b'][$bk]++;

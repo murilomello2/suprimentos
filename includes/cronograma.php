@@ -15,15 +15,22 @@ define('CRONO_CACHE_TTL', 1800); // 30 min
 
 function crono_tasks($cronograma_id) {
     $cache = SEED_DIR . '/../.crono_' . substr($cronograma_id, 0, 8) . '.json';
+    $rows = null;
     if (is_file($cache) && (time() - filemtime($cache)) < CRONO_CACHE_TTL) {
         $d = json_decode(@file_get_contents($cache), true);
-        if (is_array($d)) return $d;
+        if (is_array($d)) $rows = $d;
     }
-    // tarefas de resumo: poucas centenas, o suficiente para casar fases/marcos
-    $path = 'obra_cronograma_tarefas?cronograma_id=eq.' . rawurlencode($cronograma_id)
-          . '&outline_level=lte.3&select=nome,wbs,start,finish,is_milestone,outline_level,percent_complete&order=ordem&limit=600';
-    $rows = sb_get($path);
-    @file_put_contents($cache, json_encode($rows));
+    if ($rows === null) {
+        // tarefas de resumo: poucas centenas, o suficiente para casar fases/marcos
+        $path = 'obra_cronograma_tarefas?cronograma_id=eq.' . rawurlencode($cronograma_id)
+              . '&outline_level=lte.3&select=nome,wbs,start,finish,is_milestone,outline_level,percent_complete&order=ordem&limit=600';
+        $rows = sb_get($path);
+        @file_put_contents($cache, json_encode($rows));
+    }
+    // PERF: normaliza o nome de cada tarefa UMA vez por request (o matcher casava ~144 itens × ~600 tarefas,
+    // renormalizando o mesmo nome centenas de milhares de vezes — era o gargalo de 7-14s do radar).
+    foreach ($rows as &$tk) { if (!isset($tk['_n'])) $tk['_n'] = _norm_txt($tk['nome'] ?? ''); }
+    unset($tk);
     return $rows;
 }
 
@@ -51,7 +58,7 @@ function crono_resolver($servico, $tasks) {
         foreach ($tasks as $tk) {
             $st = $tk['start'] ?? null;
             if (!$st) continue;
-            if (strpos(_norm_txt($tk['nome']), $t) !== false) {
+            if (strpos($tk['_n'] ?? _norm_txt($tk['nome']), $t) !== false) {
                 if (!$melhor || $st < $melhor) { $melhor = $st; $marco = $tk['nome']; $marcoWbs = $tk['wbs'] ?? null; $pct = $tk['percent_complete'] ?? null; }
             }
         }
@@ -79,7 +86,7 @@ function crono_resolver($servico, $tasks) {
 function crono_wbs_por_nome($nome, $tasks) {
     $alvo = _norm_txt($nome);
     foreach ($tasks as $tk) {
-        if (_norm_txt($tk['nome']) === $alvo) return $tk['wbs'] ?? null;
+        if (($tk['_n'] ?? _norm_txt($tk['nome'])) === $alvo) return $tk['wbs'] ?? null;
     }
     return null;
 }
@@ -104,7 +111,7 @@ function crono_path_por_wbs($wbs, $tasks) {
 function crono_percent_por_nome($nome, $tasks) {
     $alvo = _norm_txt($nome);
     foreach ($tasks as $tk) {
-        if (_norm_txt($tk['nome']) === $alvo && isset($tk['percent_complete'])) return (float)$tk['percent_complete'];
+        if (($tk['_n'] ?? _norm_txt($tk['nome'])) === $alvo && isset($tk['percent_complete'])) return (float)$tk['percent_complete'];
     }
     return null;
 }

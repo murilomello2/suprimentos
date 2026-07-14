@@ -101,8 +101,10 @@ function cot_get_full($pdo, $id) {
     $colItens = [];
     foreach ($itens as $it) {
         $col = trim((string)($it['solic_coligada'] ?? '')); if ($col === '') continue;
-        if (!isset($colItens[$col])) $colItens[$col] = ['coligada'=>$col, 'coligada_cod'=>null, 'colidmov'=>'', 'n'=>0, 'num_pedido'=>'', 'status'=>''];
+        if (!isset($colItens[$col])) $colItens[$col] = ['coligada'=>$col, 'coligada_cod'=>null, 'colidmov'=>'', 'n'=>0, 'num_pedido'=>'', 'status'=>'', 'numeros'=>[]];
         $colItens[$col]['n']++;
+        $num = trim((string)($it['solic_numero'] ?? ''));   // Nº da SOLICITAÇÃO (SC) — pode haver mais de uma por coligada
+        if ($num !== '' && !in_array($num, $colItens[$col]['numeros'], true)) $colItens[$col]['numeros'][] = $num;
         $cm = trim((string)($it['solic_colidmov'] ?? ''));
         if ($cm !== '' && $colItens[$col]['colidmov'] === '') {
             $colItens[$col]['colidmov'] = $cm;

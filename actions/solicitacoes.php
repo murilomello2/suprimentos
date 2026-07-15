@@ -8,6 +8,7 @@
  * POST {acao:'salvar_overlay', me, coligada, numero, status?, observacoes?}
  * POST {acao:'gerar_cotacao', me, coligada, numero}   -> cria cotação no mapa a partir da solicitação
  */
+if (extension_loaded('zlib') && !ini_get('zlib.output_compression')) @ob_start('ob_gzhandler');   // PERF: gzip do JSON (hosting não faz)
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/solic.php';

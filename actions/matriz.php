@@ -3,6 +3,8 @@
  * Retorna a matriz do Radar de Aquisições (JSON) para o front.
  * Junta a base (serviço + radar_item) com as datas vivas do cronograma (Supabase).
  */
+// PERF: comprime o JSON quando o cliente aceita gzip (o hosting não faz). ~245KB → ~35KB → transferência ~7× menor.
+if (extension_loaded('zlib') && !ini_get('zlib.output_compression')) @ob_start('ob_gzhandler');
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/cronograma.php';

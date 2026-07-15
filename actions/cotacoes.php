@@ -12,6 +12,7 @@
  * POST {acao:'excluir', me, cotacao_id}
  * POST {acao:'excluir_proposta', me, proposta_id}
  */
+if (extension_loaded('zlib') && !ini_get('zlib.output_compression')) @ob_start('ob_gzhandler');   // PERF: gzip do JSON (hosting não faz)
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/obra_registry.php';   // cadastro único: resolver/promover obra

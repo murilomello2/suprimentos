@@ -10,6 +10,8 @@ require_once __DIR__ . '/../includes/cronograma.php';
 try {
     db_seed_if_empty();
     $pdo = db();
+    $_t = microtime(true); $_dbg = [];   // DEBUG PERF: mede cada fase (aparece em _dbg no JSON)
+    $_ck = function($label) use (&$_t, &$_dbg){ $now = microtime(true); $_dbg[$label] = round(($now-$_t)*1000); $_t = $now; };
 
     // Resiliência a DEPLOY PARCIAL: este endpoint lê colunas aditivas que são criadas no db.php.
     // Como o FTP às vezes sobe actions/ sem includes/db.php (timeout), garantimos as colunas aqui
@@ -55,6 +57,7 @@ try {
     ");
     $st->execute($ONLY ? [$OBRA, $ONLY] : [$OBRA]);
     $rows = $st->fetchAll();
+    $_ck('query_principal');
 
     // FASE 2 — vínculo/status AUTOMÁTICO de cotação: existe mapa de cotação p/ este serviço nesta obra?
     // (resiliente: se as tabelas de cotação ainda não existirem no deploy parcial, segue sem)
@@ -72,6 +75,7 @@ try {
             $cotByServ[$sid]['n']++;
         }
     } catch (Throwable $e) { $cotByServ = []; }
+    $_ck('cotByServ');
 
     // datas vivas do cronograma (com cache); se falhar, segue sem datas
     $tasks = [];
@@ -80,6 +84,7 @@ try {
         try { $tasks = crono_tasks($obra['cronograma_id']); }
         catch (Exception $e) { $crono_erro = $e->getMessage(); }
     }
+    $_ck('crono_tasks');
 
     $itens = [];
     $verba_total = 0;
@@ -156,6 +161,7 @@ try {
         $r['obra_nome'] = $obra['nome']; // p/ identificação e busca multi-obra futura
         $itens[] = array_merge($r, $d);
     }
+    $_ck('loop_itens');
 
     // ----- COBERTURA REAL do orçamento (sem double-count): linhas analíticas DISTINTAS + verba por composição -----
     // precisa de TODOS os itens; no modo ?only= o $rows tem 1 só, então carrega os refs à parte (leve, sem crono)
@@ -184,6 +190,7 @@ try {
     $total_leaf = (float)$tq->fetchColumn();
     $cov_real = $cov_analitico + $comp_verba;
     $cobertura_real = $total_leaf ? round($cov_real / $total_leaf * 100, 1) : null;
+    $_ck('cobertura');
 
     // no modo ?only=, verba_total é o total da OBRA (todos os itens), não só o item recarregado
     if ($ONLY) {
@@ -202,7 +209,7 @@ try {
         'cobertura_total_leaf' => round($total_leaf, 2),
     ];
     if ($ONLY) {   // reload de UM item: payload minúsculo, o front mescla na memória (sem recarregar a matriz)
-        echo json_encode(['obra'=>$obra, 'item'=>$itens[0] ?? null, 'resumo'=>$resumo], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        echo json_encode(['obra'=>$obra, 'item'=>$itens[0] ?? null, 'resumo'=>$resumo, '_dbg'=>$_dbg], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         exit;
     }
     echo json_encode([
@@ -210,6 +217,7 @@ try {
         'obras' => $pdo->query("SELECT id, nome, codinome, `local`, metodo_construtivo FROM obra ORDER BY id")->fetchAll(),
         'itens' => $itens,
         'resumo' => $resumo,
+        '_dbg' => $_dbg,
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 } catch (Throwable $e) {
     http_response_code(500);

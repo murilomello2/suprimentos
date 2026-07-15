@@ -1671,7 +1671,21 @@ let IS_ADMIN=false;                       // fail-closed; vira true só quando g
 let CAN_EDIT=false;                       // editor geral da obra (status/fornecedor/observação)
 let CAN_CRONO=false, CAN_ORC=false, CAN_QUANT=false, CAN_DIC=false, CAN_RESP=false; // permissões específicas (vínculos + dicionário + responsáveis em lote)
 let EU=null;                             // usuário logado + permissões efetivas
-function openModal(o,ob){CUR=byOrdem(o,ob);if(!CUR)return;TAB='Resumo';EDITC=EDITO=EDITQ=EDITD=EDITR=false;drawModal();document.getElementById('ov').classList.add('open');}
+function openModal(o,ob){CUR=byOrdem(o,ob);if(!CUR)return;TAB='Resumo';EDITC=EDITO=EDITQ=EDITD=EDITR=false;drawModal();document.getElementById('ov').classList.add('open');hydrateCur();}
+async function ensureFull(){ if(CUR && !CUR._full) await hydrateCur(); }   // garante os campos pesados antes de editar orçamento/quant
+// PERF: a lista vem ENXUTA (sem composicao_sel/dicionário). Ao abrir o modal, hidrata o item completo via ?only=
+// (~0,8s) e re-desenha. O Resumo aparece na hora; as abas pesadas (Orçamento/Quant/Dicionário) preenchem em seguida.
+async function hydrateCur(){
+  const cur=CUR; if(!cur || cur._full) return; const o=cur.ordem, oid=cur.obra_id||1;
+  try{
+    const mr=await (await fetch('actions/matriz.php?only='+o+'&_='+Date.now()+(oid!==1?('&obra='+oid):''),{cache:'no-store'})).json();
+    if(mr&&mr.item){
+      ['composicao_sel','quant_comp_sel','escopo','variaveis_cotar','licoes','documentos','quantitativo_txt','verba_linhas'].forEach(k=>{ cur[k]=mr.item[k]; });
+      cur._full=true;
+      if(CUR===cur && document.getElementById('ov').classList.contains('open')) drawModal();  // re-desenha se o modal ainda está no mesmo item
+    }
+  }catch(e){}
+}
 function closeModal(force){ if(!force && anyEditing()){ confirmSaveDialog(async()=>{ await saveCurrentEdit(); _closeModal(); }, ()=>{ _resetEdits(); _closeModal(); }); return; } _resetEdits(); _closeModal(); }
 function _closeModal(){document.getElementById('ov').classList.remove('open');render();renderMatriz();}
 function _resetEdits(){ EDITC=EDITO=EDITQ=EDITD=EDITR=false; }
@@ -1897,7 +1911,7 @@ function quantTab(i){
   h+=`<div class="note">O quantitativo vira aprendizado por tipo de serviço (replicável p/ obra nova) sem alterar obras passadas. Cuidado com unidades diferentes ao somar linhas.</div>`;
   return h;
 }
-function quantEditar(){ EDITQ=true; VERBA_USOS=null; QNT_NODES=[];
+async function quantEditar(){ await ensureFull(); EDITQ=true; VERBA_USOS=null; QNT_NODES=[];
   QNTFONTE=(CUR.quantitativo_fonte==='composicao'?'composicao':(CUR.quantitativo_fonte==='orcamento'?'analitico':'manual'));
   // pré-carrega a seleção atual — inclusive quando o quantitativo foi DERIVADO da verba (refs/cesta moram na verba):
   let refs=CUR.quantitativo_refs||[];
@@ -2129,7 +2143,7 @@ function orcTab(i){
   return h;
 }
 let ORCFONTE='analitico';
-function orcEditar(){ EDITO=true; VERBA_USOS=null; ORC_NODES=[]; ORCFONTE=(CUR.verba_metodo==='composicao'?'composicao':'analitico'); COMP_SEL=(CUR.composicao_sel||[]).map(s=>({...s})); ORC_EXCL=(CUR.orcamento_excl||[]).map(e=>({l:Number(e.l),d:e.d})); COMP_DATA=null; drawModal(); }
+async function orcEditar(){ await ensureFull(); EDITO=true; VERBA_USOS=null; ORC_NODES=[]; ORCFONTE=(CUR.verba_metodo==='composicao'?'composicao':'analitico'); COMP_SEL=(CUR.composicao_sel||[]).map(s=>({...s})); ORC_EXCL=(CUR.orcamento_excl||[]).map(e=>({l:Number(e.l),d:e.d})); COMP_DATA=null; drawModal(); }
 function orcCancelar(){ EDITO=false; drawModal(); }
 async function orcLoadLastChange(ordem){
   const box=document.getElementById('orcLastChange'); if(!box)return;
@@ -3160,7 +3174,7 @@ async function saveAndReload(campos, escopo){
       try{
         const mr=await (await fetch('actions/matriz.php?only='+CUR.ordem+'&_='+Date.now()+(oid!==1?('&obra='+oid):''),{cache:'no-store'})).json();
         if(mr&&mr.item){
-          mr.item.obra_id=oid; mr.item.obra_nome=(mr.obra&&mr.obra.nome)||('obra '+oid);
+          mr.item.obra_id=oid; mr.item.obra_nome=(mr.obra&&mr.obra.nome)||('obra '+oid); mr.item._full=true;  // ?only= traz o item completo
           const arr=DATA.itens||(DATA.itens=[]); const idx=arr.findIndex(i=>i.ordem===CUR.ordem&&(i.obra_id||1)===oid);
           if(idx>=0) arr[idx]=mr.item; else arr.push(mr.item);
           if(mr.resumo) RESUMO_BY_OBRA[oid]=mr.resumo;
@@ -3576,6 +3590,7 @@ function cotRender(){
 function cotNovo(){ COT.mode='novo'; COT.novoServico=null; COT.novoPre=null; COT.novoConvidados=[]; COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; cotRender(); }
 // iniciar cotação A PARTIR de um item do radar: puxa o dicionário de cotação do serviço (itens EDITÁVEIS) + pré-preenche
 async function cotIniciar(sid, obra, nome, grupo){
+  await ensureFull();   // garante composicao_sel (a cotação puxa itens da composição do radar)
   ['radar','matriz','oportunidades','dashboards','cotacoes','config','audit','updates'].forEach(x=>{ const v=document.getElementById('view-'+x); if(v)v.style.display=x==='cotacoes'?'':'none'; const n=document.getElementById('nav-'+x); if(n)n.classList.toggle('active',x==='cotacoes'); });
   if(typeof closeModal==='function'){ try{ closeModal(); }catch(e){} }
   COT.tab='cotacoes'; ['cotacoes','fornecedores'].forEach(x=>{ const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x==='cotacoes'); });

@@ -159,7 +159,14 @@ try {
         }
         $verba_total += $verba;
         $r['obra_nome'] = $obra['nome']; // p/ identificação e busca multi-obra futura
-        $itens[] = array_merge($r, $d);
+        $item = array_merge($r, $d);
+        if (!$ONLY) {
+            // LISTA ENXUTA (perf): a cesta de composição (composicao_sel ~52% do payload!) + o dicionário só o
+            // MODAL usa. Tira da lista; o front hidrata o item via ?only= ao abrir o modal. Corta ~460KB de 730KB.
+            unset($item['composicao_sel'], $item['quant_comp_sel'], $item['escopo'], $item['variaveis_cotar'],
+                  $item['licoes'], $item['documentos'], $item['quantitativo_txt'], $item['verba_linhas']);
+        }
+        $itens[] = $item;
     }
     $_ck('loop_itens');
 

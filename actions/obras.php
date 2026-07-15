@@ -176,7 +176,7 @@ try {
     if ($method === 'GET' && isset($_GET['cronogramas'])) {   // lista os cronogramas ativos p/ o admin ligar na mão os ambíguos (VS2/VS4/...)
         [$crBy, ] = obras_crono_live();
         $out = [];
-        foreach ($crBy as $oid => $r) $out[] = ['obra_id' => $oid, 'nome' => (string)($r['project_name'] ?? ($r['nome'] ?? '')),
+        foreach ($crBy as $oid => $r) $out[] = ['obra_id' => $oid, 'id' => (string)($r['id'] ?? ''), 'nome' => (string)($r['project_name'] ?? ($r['nome'] ?? '')),
             'pct' => $r['percent_complete'], 'fim' => (string)($r['project_finish'] ?? ''), 'medicao' => (string)($r['status_date'] ?? '')];
         usort($out, fn($a, $b) => strcasecmp($a['nome'], $b['nome']));
         echo json_encode(['ok' => true, 'cronogramas' => $out], JSON_UNESCAPED_UNICODE); exit;

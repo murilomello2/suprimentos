@@ -1787,6 +1787,7 @@ function cronoTab(i){
     h+=`<div style="display:flex;gap:8px;margin-top:6px">`;
     if(CAN_CRONO){
       h+=`<button class="btn-prim" onclick="cronoEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar vínculo</button>`;
+      if(!i.curado_data && i.data_necessaria && i.marco_casado) h+=`<button class="btn-ghost" style="color:var(--verde-d)" onclick="cronoConfirmar()" title="Confirma a tarefa-âncora sugerida (marca curado ✓) — sem precisar re-selecionar"><span class="material-icons" style="font-size:15px;vertical-align:-3px">check_circle</span> Confirmar</button>`;
       if(i.curado_data) h+=`<button class="btn-ghost" onclick="cronoLimpar()">↺ Voltar ao automático</button>`;
     } else h+=`<span class="muted" style="font-size:12.5px">Você não tem permissão para editar o vínculo de cronograma.</span>`;
     h+=`</div>`;
@@ -1880,6 +1881,8 @@ async function cronoBuscarNow(){
   }catch(e){box.innerHTML='<div class="muted" style="font-size:12px;padding:4px">Falha na busca.</div>';}
 }
 async function cronoLimpar(){ EDITC=false; await saveAndReload({crono_marco_override:'', data_necessaria_override:''}); toast('Voltou ao automático'); }
+// confirma o marco AUTO-sugerido como curado (✓) sem re-buscar — grava o override = a sugestão atual
+async function cronoConfirmar(){ if(!CUR||!CUR.data_necessaria||!CUR.marco_casado){toast('Sem tarefa sugerida para confirmar');return;} EDITC=false; await saveAndReload({crono_marco_override:CUR.marco_casado, data_necessaria_override:CUR.data_necessaria}); toast('Cronograma confirmado ✓'); }
 
 /* ===== Quantitativo — vínculo (read-only) + Editar → árvore (soma qtde) / manual ===== */
 let QNT_SEL=new Set(), QNT_NODES=[];
@@ -1891,7 +1894,7 @@ function quantTab(i){
     ? `<b style="font-size:16px">${QNUM(i.quantitativo)} ${esc(i.quantitativo_unidade||'')}</b> <span class="muted" style="font-size:12px">— ${_qf}</span>`
     : '<span class="muted">Sem quantitativo definido.</span>';
   const editBar = !EDITQ ? `<div style="display:flex;gap:8px;margin:0 0 10px">${
-    CAN_QUANT ? `<button class="btn-prim" onclick="quantEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar quantitativo</button>`+(i.curado_quant?`<button class="btn-ghost" onclick="qntLimpar()">↺ Limpar</button>`:'')
+    CAN_QUANT ? `<button class="btn-prim" onclick="quantEditar()"><span class="material-icons" style="font-size:16px">link</span> Editar quantitativo</button>`+((i.quantitativo!=null||(i.quant_comp_sel&&i.quant_comp_sel.length)||i.quantitativo_fonte||i.curado_quant)?`<button class="btn-ghost" onclick="qntLimpar()">↺ Limpar</button>`:'')
               : `<span class="muted" style="font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">lock</span> Você não tem permissão para editar o quantitativo.</span>`
   }</div>` : '';
   let h=`
@@ -2108,7 +2111,7 @@ async function qntManualSalvar(){
   EDITQ=false; await saveAndReload({quantitativo_valor:v, quantitativo_unidade:u, quantitativo_fonte:'manual'});
   toast('Quantitativo manual salvo');
 }
-async function qntLimpar(){ EDITQ=false; QNT_SEL.clear(); await saveAndReload({quantitativo_valor:'', quantitativo_unidade:'', quantitativo_fonte:'', quant_refs:[]}); toast('Quantitativo limpo'); }
+async function qntLimpar(){ EDITQ=false; QNT_SEL.clear(); QCOMP_SEL=[]; await saveAndReload({quantitativo_valor:'', quantitativo_unidade:'', quantitativo_fonte:'', quant_refs:[], quant_comp_sel:[]}); toast('Quantitativo limpo'); }
 
 /* ===== Orçamento — árvore navegável (Grupo → Disciplina → Elemento → item) ===== */
 let ORC_SEL=new Set(), ORC_NODES=[], ORC_EXCL=[];
@@ -2524,7 +2527,7 @@ function orcRenderSearch(){
 }
 async function orcSalvar(){ EDITO=false; const ex=(ORC_EXCL||[]).filter(e=>ORC_SEL.has(Number(e.l)));
   await saveAndReload({orcamento_refs:[...ORC_SEL], orcamento_excl:ex}); toast('Verba composta ('+ORC_SEL.size+' linhas'+(ex.length?', −'+ex.length+' insumo':'')+')'); }
-async function orcLimpar(){ EDITO=false; ORC_SEL.clear(); ORC_EXCL=[]; await saveAndReload({orcamento_refs:[], orcamento_excl:[]}); toast('Composição limpa'); }
+async function orcLimpar(){ EDITO=false; ORC_SEL.clear(); ORC_EXCL=[]; COMP_SEL=[]; await saveAndReload({orcamento_refs:[], orcamento_excl:[], composicao_sel:[]}); toast('Composição limpa'); }
 // Separar material × MO: converte verba analítica (linha inteira) em composição SÓ material, liberando a MO
 async function separarMO(){
   if(!CUR) return;

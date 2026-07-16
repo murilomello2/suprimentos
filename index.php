@@ -113,6 +113,8 @@
   .st-ComPendencias{background:var(--pendbg);color:var(--pend)} .st-EmAndamento{background:var(--andbg);color:var(--and)}
   .st-NaoIniciado{background:var(--neubg);color:var(--neu)}
   .st-NaoSeAplica{background:#eef1f4;color:#8a9299;font-style:italic}
+  .t20c{text-align:center;font-size:11.5px;padding:5px 6px} .t20click{cursor:pointer} .t20click:hover{background:#f3f7f5}
+  @media print{ body *{visibility:hidden} #view-top20,#view-top20 *{visibility:visible} #view-top20{position:absolute;left:0;top:0;width:100%} .t20-noprint{display:none!important} }
   .mapa-on{color:var(--ok);font-size:12px;font-weight:600}
   .eye{border:1px solid var(--line);background:#fff;border-radius:8px;width:30px;height:28px;cursor:pointer;color:var(--muted)}
   .eye:hover{border-color:var(--verde);color:var(--verde)}
@@ -328,6 +330,7 @@
     <div class="navlabel">Administração</div>
     <nav class="nav">
       <a id="nav-oportunidades" data-menu="oportunidades" title="Oportunidades (Curva ABC)" onclick="showView('oportunidades')"><span class="material-icons">insights</span> <span class="navtxt">Oportunidades</span></a>
+      <a id="nav-top20" data-menu="top20" title="Top 20 — volumes consolidados p/ negociação" onclick="showView('top20')"><span class="material-icons">stacked_bar_chart</span> <span class="navtxt">Top 20</span></a>
       <a id="nav-config" data-menu="config" title="Configurações" onclick="showView('config')"><span class="material-icons">settings</span> <span class="navtxt">Configurações</span></a>
       <a id="nav-updates" data-menu="updates" title="Atualizações" onclick="showView('updates')"><span class="material-icons">history</span> <span class="navtxt">Atualizações</span> <span class="navbadge" style="font-size:9px;background:var(--dourado);color:#fff;padding:1px 5px;border-radius:5px;margin-left:auto">temp</span></a>
       <a id="nav-audit" data-menu="audit" title="Auditoria" onclick="showView('audit')"><span class="material-icons">fact_check</span> <span class="navtxt">Auditoria</span> <span class="navbadge" style="font-size:9px;background:var(--dourado);color:#fff;padding:1px 5px;border-radius:5px;margin-left:auto">temp</span></a>
@@ -621,6 +624,22 @@
     <div id="auditwrap" style="margin:8px 26px 30px"><div class="empty">Carregando…</div></div>
    </section>
 
+   <section id="view-top20" style="display:none">
+    <div class="top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <div>
+        <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">stacked_bar_chart</span> Top 20 — Volumes p/ Negociação</h1>
+        <p class="sub">Grupos de negociação consolidando <b>todas as obras do radar</b> × próximos 12 meses. Clique numa célula pra ver a conta. O quantitativo distribui pela janela (início→fim) da tarefa-âncora no cronograma vivo.</p>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px" class="t20-noprint">
+        <button class="btn-ghost" onclick="t20Modo()"><span class="material-icons" style="font-size:16px">swap_horiz</span> <span id="t20ModoTxt">Ver R$</span></button>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"><input type="checkbox" onchange="t20FinToggle(this.checked)"> incluir finalizados</label>
+        <button class="btn-ghost" onclick="t20Cfg()"><span class="material-icons" style="font-size:16px">tune</span> Configurar grupos</button>
+        <button class="btn-ghost" onclick="window.print()"><span class="material-icons" style="font-size:16px">print</span> Imprimir</button>
+        <button class="btn-ghost" onclick="T20.data=null;t20Init()"><span class="material-icons" style="font-size:16px">refresh</span> Atualizar</button>
+      </div>
+    </div>
+    <div id="t20wrap" style="margin:8px 26px 30px"><div class="empty">Carregando…</div></div>
+   </section>
    <section id="view-updates" style="display:none">
     <div class="top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
       <div>
@@ -886,7 +905,7 @@ async function loadMatriz(force){
 
 /* ---------- view switch ---------- */
 function showView(v){
-  ['radar','matriz','oportunidades','dashboards','cotacoes','solicitacoes','obras','oraculo','config','audit','updates'].forEach(x=>{
+  ['radar','matriz','oportunidades','top20','dashboards','cotacoes','solicitacoes','obras','oraculo','config','audit','updates'].forEach(x=>{
     const el=document.getElementById('view-'+x); if(el) el.style.display=v===x?'':'none';
     const nav=document.getElementById('nav-'+x); if(nav) nav.classList.toggle('active',v===x);
   });
@@ -894,6 +913,7 @@ function showView(v){
   if(v==='cotacoes') cotInit();
   if(v==='solicitacoes') solInit();
   if(v==='oraculo') oracInit();
+  if(v==='top20') t20Init();
   if(v==='dashboards') dashInit();
   if(v==='matriz') loadMatriz();
   if(v==='oportunidades') renderOportunidades();
@@ -3595,7 +3615,7 @@ function cotNovo(){ COT.mode='novo'; COT.novoServico=null; COT.novoPre=null; COT
 // iniciar cotação A PARTIR de um item do radar: puxa o dicionário de cotação do serviço (itens EDITÁVEIS) + pré-preenche
 async function cotIniciar(sid, obra, nome, grupo){
   await ensureFull();   // garante composicao_sel (a cotação puxa itens da composição do radar)
-  ['radar','matriz','oportunidades','dashboards','cotacoes','config','audit','updates'].forEach(x=>{ const v=document.getElementById('view-'+x); if(v)v.style.display=x==='cotacoes'?'':'none'; const n=document.getElementById('nav-'+x); if(n)n.classList.toggle('active',x==='cotacoes'); });
+  ['radar','matriz','oportunidades','top20','dashboards','cotacoes','config','audit','updates'].forEach(x=>{ const v=document.getElementById('view-'+x); if(v)v.style.display=x==='cotacoes'?'':'none'; const n=document.getElementById('nav-'+x); if(n)n.classList.toggle('active',x==='cotacoes'); });
   if(typeof closeModal==='function'){ try{ closeModal(); }catch(e){} }
   COT.tab='cotacoes'; ['cotacoes','fornecedores'].forEach(x=>{ const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x==='cotacoes'); });
   // puxa o ITEM COMPLETO da obra (quantitativo/escopo/variáveis) + o dicionário do serviço (fallback + nome/grupo)
@@ -3615,7 +3635,7 @@ async function cotIniciar(sid, obra, nome, grupo){
   toast(src?(itens.length+' item(ns) do '+src+' — edite como precisar'):'Monte os itens a cotar (sem quantitativo/dicionário p/ este serviço ainda)');
 }
 async function cotAbrir(id){
-  ['radar','matriz','oportunidades','dashboards','cotacoes','config','audit','updates'].forEach(x=>{ const v=document.getElementById('view-'+x); if(v)v.style.display=x==='cotacoes'?'':'none'; const n=document.getElementById('nav-'+x); if(n)n.classList.toggle('active',x==='cotacoes'); });
+  ['radar','matriz','oportunidades','top20','dashboards','cotacoes','config','audit','updates'].forEach(x=>{ const v=document.getElementById('view-'+x); if(v)v.style.display=x==='cotacoes'?'':'none'; const n=document.getElementById('nav-'+x); if(n)n.classList.toggle('active',x==='cotacoes'); });
   if(typeof closeModal==='function'){ try{ closeModal(); }catch(e){} }
   COT.tab='cotacoes'; ['cotacoes','fornecedores'].forEach(x=>{ const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x==='cotacoes'); });
   await cotOpen(id);
@@ -5370,7 +5390,100 @@ async function obrasExtrairCrono(id){ const b=document.getElementById('obfExtrai
     toast('Preenchido do cronograma ('+(r.n_tarefas||0)+' tarefas · confiança '+(d.confianca||'—')+'). Revise e salve.');
     if(b){b.disabled=false;b.innerHTML='<span class="material-icons" style="font-size:14px;vertical-align:-3px">auto_awesome</span> Extrair de novo';}
   }catch(e){toast('Falha: '+e.message); if(b){b.disabled=false;b.innerHTML='<span class="material-icons" style="font-size:14px;vertical-align:-3px">auto_awesome</span> Extrair do cronograma';}} }
-const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['solicitacoes','Solicitações'],['obras','Obras'],['oportunidades','Oportunidades'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações']];
+/* ========== TOP 20 — volumes consolidados p/ negociação (grupos × 12 meses) ========== */
+let T20={data:null,modo:'quant',fin:false,cat:null,cfgSel:null};
+async function t20Init(){ if(T20.data) t20Render(); else t20Load(); }
+async function t20Load(){
+  const w=document.getElementById('t20wrap'); if(w&&!T20.data) w.innerHTML='<div class="empty">Consolidando todas as obras…</div>';
+  try{ T20.data=await (await fetch('actions/top20.php?_='+Date.now()+(T20.fin?'&fin=1':''),{cache:'no-store'})).json(); }
+  catch(e){ if(w)w.innerHTML='<div class="empty">Falha ao carregar.</div>'; return; }
+  if(T20.data&&T20.data.error){ w.innerHTML='<div class="empty">'+esc(T20.data.error)+'</div>'; T20.data=null; return; }
+  t20Render();
+}
+function t20FinToggle(on){ T20.fin=on; T20.data=null; t20Load(); }
+function t20Modo(){ T20.modo=T20.modo==='quant'?'verba':'quant'; const t=document.getElementById('t20ModoTxt'); if(t)t.textContent=T20.modo==='quant'?'Ver R$':'Ver quantitativo'; t20Render(); }
+function t20Q(q){ const ks=Object.keys(q||{}); if(!ks.length) return ['','']; const fmt=(v,u)=>Number(v).toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+u;
+  ks.sort((a,b)=>(q[b]||0)-(q[a]||0)); const full=ks.map(k=>fmt(q[k],k)).join(' + ');
+  return [fmt(q[ks[0]],ks[0])+(ks.length>1?' +':''), full]; }
+function t20MesLbl(m){ if(m==='12+')return '12+'; if(m==='sem')return 'sem data'; const N=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']; return N[(+m.split('-')[1])-1]+'/'+m.split('-')[0].slice(2); }
+function t20Render(){
+  const w=document.getElementById('t20wrap'); if(!w||!T20.data) return;
+  const d=T20.data, meses=d.meses||[], M=d.matriz||{};
+  const tot=g=>{ let v=0; const gm=M[g.id]||{}; for(const k in gm) v+=gm[k].verba||0; return v; };
+  const gs=(d.grupos||[]).slice().sort((a,b)=>tot(b)-tot(a));
+  let h='<div class="wrap" style="overflow-x:auto"><table class="mtable" style="border:none;min-width:1150px"><thead><tr><th class="svc-h" style="text-align:left;min-width:220px">Grupo de negociação</th>';
+  meses.forEach(m=>h+='<th style="min-width:64px">'+t20MesLbl(m)+'</th>');
+  h+='<th style="min-width:56px" title="início além de 12 meses">12+</th><th style="min-width:56px" title="itens sem data no cronograma">sem data</th><th style="min-width:92px;background:#eafaf0">TOTAL quant.</th><th style="min-width:104px;background:#eafaf0">TOTAL R$</th></tr></thead><tbody>';
+  gs.forEach(g=>{
+    const gm=M[g.id]||{}; let tv=0; const tq={};
+    let row='<tr><td class="svc-c" style="text-align:left"><b>'+esc(g.nome)+'</b><small>'+g.n_servicos+' serviços</small></td>';
+    [...meses,'12+','sem'].forEach(mk=>{
+      const c=gm[mk];
+      if(!c){ row+='<td class="t20c">—</td>'; return; }
+      tv+=c.verba||0; for(const u in (c.quant||{})) tq[u]=(tq[u]||0)+c.quant[u];
+      const qr=t20Q(c.quant);
+      const val=T20.modo==='quant'?(qr[0]||'<span class="muted" style="font-size:10px">só R$</span>'):BRL(c.verba);
+      row+='<td class="t20c t20click" title="'+esc((qr[1]?qr[1]+' · ':'')+'')+BRL(c.verba)+' — clique p/ ver a conta" onclick="t20Drill('+g.id+',\''+mk+'\')">'+val+'</td>';
+    });
+    const tqr=t20Q(tq);
+    row+='<td style="background:#f2faf5;font-weight:700;text-align:center" title="'+esc(tqr[1])+'">'+(tqr[0]||'—')+'</td><td style="background:#f2faf5;font-weight:800;text-align:center">'+BRL(tv)+'</td></tr>';
+    h+=row;
+  });
+  h+='</tbody></table></div><div class="note t20-noprint">Itens <b>Finalizado</b> e <b>Não se aplica</b> ficam fora'+(T20.fin?' — <b>incluídos agora</b>':' (negocia-se o que falta comprar)')+'. Janela no passado cai no mês atual. kg consolidado em <b>toneladas</b>. Unidades diferentes nunca se somam (célula mostra a principal; passe o mouse p/ ver todas).</div>';
+  w.innerHTML=h;
+}
+async function t20Drill(gid,mes){
+  const g=(T20.data.grupos||[]).find(x=>x.id===gid);
+  let d; try{ d=await (await fetch('actions/top20.php?detalhe='+gid+'&mes='+encodeURIComponent(mes)+'&_='+Date.now()+(T20.fin?'&fin=1':''))).json(); }catch(e){ toast('Falha'); return; }
+  const its=d.detalhe||[];
+  let ov=document.getElementById('t20Ov'); if(!ov){ov=document.createElement('div');ov.id='t20Ov';ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';document.body.appendChild(ov);} ov.onclick=e=>{if(e.target===ov)ov.remove();};
+  const rows=its.map(x=>'<tr><td>'+esc(x.obra)+'</td><td style="text-align:left">'+esc(x.item)+'</td><td style="text-align:right">'+(x.alocado_quant!=null?Number(x.alocado_quant).toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+esc(x.unidade||''):'—')+'</td><td style="text-align:right">'+BRL(x.alocado_verba)+'</td><td style="font-size:11px" class="muted">'+esc(x.janela)+(x.fracao<1?' · '+Math.round(x.fracao*100)+'% do item':'')+'</td><td style="text-align:right;font-size:11px" class="muted">'+(x.quant_total!=null?Number(x.quant_total).toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+esc(x.unidade||''):'—')+' · '+BRL(x.verba_total)+'</td></tr>').join('');
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:1000px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">'
+   +'<div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:16px">'+esc(g?g.nome:'Grupo')+' — '+t20MesLbl(mes)+' · a conta</b><span class="material-icons" style="cursor:pointer;color:var(--muted)" onclick="document.getElementById(\'t20Ov\').remove()">close</span></div>'
+   +'<div class="muted" style="font-size:12px;margin:4px 0 10px">'+its.length+' aporte(s). "% do item" = fração do total alocada neste mês (distribuição linear na janela da tarefa-âncora do cronograma vivo).</div>'
+   +'<div style="overflow:auto;max-height:70vh"><table class="mtable" style="border:none;width:100%"><thead><tr><th>Obra</th><th style="text-align:left">Item</th><th>Quant. no mês</th><th>R$ no mês</th><th>Janela do marco</th><th>Total do item</th></tr></thead><tbody>'+(rows||'<tr><td colspan="6" class="empty">Nada neste mês.</td></tr>')+'</tbody></table></div></div>';
+}
+async function t20Cfg(){
+  if(!IS_ADMIN){ toast('Só administradores configuram os grupos'); return; }
+  if(!T20.cat){ try{ T20.cat=(await (await fetch('actions/top20.php?catalogo=1')).json()).servicos||[]; }catch(e){ toast('Falha ao carregar catálogo'); return; } }
+  t20CfgRender();
+}
+function t20CfgRender(selId){
+  const gs=(T20.data&&T20.data.grupos)||[];
+  let ov=document.getElementById('t20Cf'); if(!ov){ov=document.createElement('div');ov.id='t20Cf';ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto';document.body.appendChild(ov);} ov.onclick=e=>{if(e.target===ov)ov.remove();};
+  const g=gs.find(x=>x.id===selId)||gs[0];
+  T20.cfgSel=g?{id:g.id,nome:g.nome,ordem:g.ordem,servicos:(g.servicos||[]).slice()}:null;
+  t20CfgDraw();
+}
+function t20CfgDraw(filtro){
+  const ov=document.getElementById('t20Cf'); if(!ov)return; const gs=(T20.data&&T20.data.grupos)||[]; const cur=T20.cfgSel;
+  const f=(filtro||'').toLowerCase();
+  const list=gs.map(x=>'<div class="pickrow" style="'+(cur&&x.id===cur.id?'background:#eef6f0;':'')+'cursor:pointer" onclick="t20CfgRender('+x.id+')"><b style="font-size:12px">'+esc(x.nome)+'</b><span class="muted" style="font-size:11px;margin-left:auto">'+x.n_servicos+'</span></div>').join('');
+  const sel=new Set((cur&&cur.servicos)||[]);
+  const svs=(T20.cat||[]).filter(s=>!f||((s.nome+' '+(s.grupo||'')).toLowerCase().includes(f)));
+  const right=cur?('<label style="display:block;margin-bottom:6px"><span style="font-size:10px;font-weight:700;color:var(--muted)">NOME DO GRUPO</span><input id="t20gNome" value="'+esc(cur.nome)+'" style="width:100%;padding:6px 8px;box-sizing:border-box"></label>'
+   +'<div class="search" style="margin:6px 0"><span class="material-icons" style="color:var(--muted)">search</span><input placeholder="filtrar serviços do catálogo…" oninput="t20CfgDraw(this.value)"></div>'
+   +'<div style="max-height:44vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px">'+svs.map(s=>'<label style="display:flex;gap:7px;align-items:flex-start;font-size:12px;padding:2px 0;cursor:pointer"><input type="checkbox" '+(sel.has(s.id)?'checked':'')+' onchange="t20CfgTog('+s.id+',this.checked)"><span>'+esc(s.nome)+' <span class="muted" style="font-size:10px">· '+esc(s.grupo||'')+'</span></span></label>').join('')+'</div>'
+   +'<div style="display:flex;gap:8px;margin-top:10px"><button class="btn-prim" onclick="t20CfgSalvar()">Salvar grupo</button>'+(cur.id?'<button class="btn-ghost" style="color:var(--pend)" onclick="t20CfgExcluir()">Excluir</button>':'')+'</div>')
+   :'<div class="empty">Escolha um grupo à esquerda.</div>';
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:1040px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">'
+   +'<div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:16px">Configurar grupos de negociação</b><span class="material-icons" style="cursor:pointer;color:var(--muted)" onclick="document.getElementById(\'t20Cf\').remove()">close</span></div>'
+   +'<div style="display:grid;grid-template-columns:290px 1fr;gap:14px;margin-top:10px">'
+   +'<div><div style="max-height:50vh;overflow:auto">'+list+'</div><div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button class="btn-ghost" onclick="t20CfgNovo()">+ Novo grupo</button><button class="btn-ghost" style="color:var(--pend)" onclick="t20Reseed()" title="apaga TUDO e volta aos 20 grupos sugeridos">↺ Padrão</button></div></div>'
+   +'<div>'+right+'</div></div></div>';
+}
+function t20CfgTog(id,on){ const c=T20.cfgSel; if(!c)return; const i=c.servicos.indexOf(id); if(on&&i<0)c.servicos.push(id); if(!on&&i>=0)c.servicos.splice(i,1); }
+function t20CfgNovo(){ T20.cfgSel={id:0,nome:'Novo grupo',ordem:99,servicos:[]}; t20CfgDraw(); }
+async function t20CfgSalvar(){ const c=T20.cfgSel; if(!c)return; const nome=(document.getElementById('t20gNome')||{}).value||c.nome;
+  try{ const r=await (await fetch('actions/top20.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_grupo',me:EU&&EU.bitrix_id,id:c.id||null,nome,servicos:c.servicos,ordem:c.ordem||0})})).json();
+    if(r&&r.error){toast(r.error);return;} toast('Grupo salvo'); const ov=document.getElementById('t20Cf'); if(ov)ov.remove(); T20.data=null; t20Load();
+  }catch(e){toast('Falha ao salvar');} }
+async function t20CfgExcluir(){ const c=T20.cfgSel; if(!c||!c.id)return; if(!confirm('Excluir o grupo "'+c.nome+'"?'))return;
+  try{ await fetch('actions/top20.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir_grupo',me:EU&&EU.bitrix_id,id:c.id})}); const ov=document.getElementById('t20Cf'); if(ov)ov.remove(); T20.data=null; t20Load(); }catch(e){toast('Falha');} }
+async function t20Reseed(){ if(!confirm('Apagar TODOS os grupos e voltar aos 20 sugeridos?'))return;
+  try{ await fetch('actions/top20.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'reseed',me:EU&&EU.bitrix_id})}); const ov=document.getElementById('t20Cf'); if(ov)ov.remove(); T20.data=null; t20Load(); }catch(e){toast('Falha');} }
+
+const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['solicitacoes','Solicitações'],['obras','Obras'],['oportunidades','Oportunidades'],['top20','Top 20'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações']];
 const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',comprador:'Suprimentos',coordenador:'Coordenador',personalizado:'Personalizado'};
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},

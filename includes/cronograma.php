@@ -21,10 +21,18 @@ function crono_tasks($cronograma_id) {
         if (is_array($d)) $rows = $d;
     }
     if ($rows === null) {
-        // tarefas de resumo: poucas centenas, o suficiente para casar fases/marcos
-        $path = 'obra_cronograma_tarefas?cronograma_id=eq.' . rawurlencode($cronograma_id)
+        // tarefas de resumo: poucas centenas, o suficiente para casar fases/marcos.
+        // PAGINADO: Trinity/Koelle já passam de 480 tarefas — um limit fixo truncaria o FIM do cronograma
+        // em silêncio e encurtaria as janelas do Top 20 (a ordem é a do documento, o fim some primeiro).
+        $base = 'obra_cronograma_tarefas?cronograma_id=eq.' . rawurlencode($cronograma_id)
               . '&outline_level=lte.3&select=nome,wbs,start,finish,is_milestone,outline_level,percent_complete&order=ordem&limit=600';
-        $rows = sb_get($path);
+        $rows = []; $off = 0;
+        do {
+            $page = sb_get($base . ($off ? '&offset=' . $off : ''));
+            if (!is_array($page)) $page = [];
+            $rows = array_merge($rows, $page);
+            $n = count($page); $off += 600;
+        } while ($n === 600 && $off < 6000);   // trava de segurança: 10 páginas
         @file_put_contents($cache, json_encode($rows));
     }
     // PERF: normaliza o nome de cada tarefa UMA vez por request (o matcher casava ~144 itens × ~600 tarefas,

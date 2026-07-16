@@ -627,8 +627,8 @@
    <section id="view-top20" style="display:none">
     <div class="top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
       <div>
-        <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">stacked_bar_chart</span> Top 20 — Volumes p/ Negociação</h1>
-        <p class="sub">Grupos de negociação consolidando <b>todas as obras do radar</b> × próximos 12 meses. Clique numa célula pra ver a conta. O quantitativo distribui pela janela (início→fim) da tarefa-âncora no cronograma vivo.</p>
+        <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">stacked_bar_chart</span> Top 20 — Volumes p/ Negociação <span id="t20CatLbl" style="font-size:14px;font-weight:800;color:var(--dourado)"></span></h1>
+        <p class="sub">Grupos de negociação consolidando <b>todas as obras do radar</b> × próximos 12 meses. Célula = volume que <b>ainda falta consumir</b>: o % já executado do marco (cronograma vivo) sai da conta e o restante distribui do mês atual até o fim do grande marco. Clique na célula pra ver a conta.</p>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px" class="t20-noprint">
         <button class="btn-ghost" onclick="t20Modo()"><span class="material-icons" style="font-size:16px">swap_horiz</span> <span id="t20ModoTxt">Ver R$</span></button>
@@ -638,7 +638,11 @@
         <button class="btn-ghost" onclick="T20.data=null;t20Init()"><span class="material-icons" style="font-size:16px">refresh</span> Atualizar</button>
       </div>
     </div>
-    <div id="t20wrap" style="margin:8px 26px 30px"><div class="empty">Carregando…</div></div>
+    <div style="display:flex;gap:6px;margin:2px 26px 0" class="t20-noprint">
+      <button class="btn-ghost" id="t20TabMat" style="border-radius:9px 9px 0 0;border-bottom:none;font-weight:700" onclick="t20Tab('material')"><span class="material-icons" style="font-size:15px">inventory_2</span> Materiais</button>
+      <button class="btn-ghost" id="t20TabSrv" style="border-radius:9px 9px 0 0;border-bottom:none" onclick="t20Tab('servico')"><span class="material-icons" style="font-size:15px">engineering</span> Serviços &amp; Equipamentos</button>
+    </div>
+    <div id="t20wrap" style="margin:0 26px 30px"><div class="empty">Carregando…</div></div>
    </section>
    <section id="view-updates" style="display:none">
     <div class="top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
@@ -5391,7 +5395,11 @@ async function obrasExtrairCrono(id){ const b=document.getElementById('obfExtrai
     if(b){b.disabled=false;b.innerHTML='<span class="material-icons" style="font-size:14px;vertical-align:-3px">auto_awesome</span> Extrair de novo';}
   }catch(e){toast('Falha: '+e.message); if(b){b.disabled=false;b.innerHTML='<span class="material-icons" style="font-size:14px;vertical-align:-3px">auto_awesome</span> Extrair do cronograma';}} }
 /* ========== TOP 20 — volumes consolidados p/ negociação (grupos × 12 meses) ========== */
-let T20={data:null,modo:'quant',fin:false,cat:null,cfgSel:null};
+let T20={data:null,modo:'quant',fin:false,tab:'material',cat:null,cfgSel:null};
+function t20Tab(t){ T20.tab=t; const m=document.getElementById('t20TabMat'),s=document.getElementById('t20TabSrv');
+  if(m)m.style.fontWeight=t==='material'?'700':'400'; if(s)s.style.fontWeight=t==='servico'?'700':'400';
+  if(m)m.style.background=t==='material'?'#fff':''; if(s)s.style.background=t==='servico'?'#fff':'';
+  t20Render(); }
 async function t20Init(){ if(T20.data) t20Render(); else t20Load(); }
 async function t20Load(){
   const w=document.getElementById('t20wrap'); if(w&&!T20.data) w.innerHTML='<div class="empty">Consolidando todas as obras…</div>';
@@ -5409,8 +5417,10 @@ function t20MesLbl(m){ if(m==='12+')return '12+'; if(m==='sem')return 'sem data'
 function t20Render(){
   const w=document.getElementById('t20wrap'); if(!w||!T20.data) return;
   const d=T20.data, meses=d.meses||[], M=d.matriz||{};
+  const lbl=document.getElementById('t20CatLbl'); if(lbl)lbl.textContent=T20.tab==='servico'?'· SERVIÇOS & EQUIPAMENTOS':'· MATERIAIS';
   const tot=g=>{ let v=0; const gm=M[g.id]||{}; for(const k in gm) v+=gm[k].verba||0; return v; };
-  const gs=(d.grupos||[]).slice().sort((a,b)=>tot(b)-tot(a));
+  const gs=(d.grupos||[]).filter(g=>(g.categoria||'material')===T20.tab).sort((a,b)=>tot(b)-tot(a));
+  if(!gs.length){ w.innerHTML='<div class="empty">Nenhum grupo na aba '+(T20.tab==='servico'?'Serviços &amp; Equipamentos':'Materiais')+'.'+(IS_ADMIN?' Use <b>Configurar grupos</b> p/ mover um grupo p/ cá ou criar um novo.':'')+'</div>'; return; }
   let h='<div class="wrap" style="overflow-x:auto"><table class="mtable" style="border:none;min-width:1150px"><thead><tr><th class="svc-h" style="text-align:left;min-width:220px">Grupo de negociação</th>';
   meses.forEach(m=>h+='<th style="min-width:64px">'+t20MesLbl(m)+'</th>');
   h+='<th style="min-width:56px" title="início além de 12 meses">12+</th><th style="min-width:56px" title="itens sem data no cronograma">sem data</th><th style="min-width:92px;background:#eafaf0">TOTAL quant.</th><th style="min-width:104px;background:#eafaf0">TOTAL R$</th></tr></thead><tbody>';
@@ -5429,7 +5439,7 @@ function t20Render(){
     row+='<td style="background:#f2faf5;font-weight:700;text-align:center" title="'+esc(tqr[1])+'">'+(tqr[0]||'—')+'</td><td style="background:#f2faf5;font-weight:800;text-align:center">'+BRL(tv)+'</td></tr>';
     h+=row;
   });
-  h+='</tbody></table></div><div class="note t20-noprint">Itens <b>Finalizado</b> e <b>Não se aplica</b> ficam fora'+(T20.fin?' — <b>incluídos agora</b>':' (negocia-se o que falta comprar)')+'. Janela no passado cai no mês atual. kg consolidado em <b>toneladas</b>. Unidades diferentes nunca se somam (célula mostra a principal; passe o mouse p/ ver todas).</div>';
+  h+='</tbody></table></div><div class="note t20-noprint">Célula = o que <b>falta consumir</b>: o % já executado do marco (cronograma vivo) sai da conta; o restante distribui do mês atual até o fim do grande marco (fase inteira — estrutura, fundação…, nunca uma tarefa pontual). Itens <b>Finalizado</b> e <b>Não se aplica</b> ficam fora'+(T20.fin?' — <b>incluídos agora</b>':'')+'. kg consolidado em <b>toneladas</b>. Unidades diferentes nunca se somam (célula mostra a principal; tooltip mostra todas).</div>';
   w.innerHTML=h;
 }
 async function t20Drill(gid,mes){
@@ -5437,11 +5447,12 @@ async function t20Drill(gid,mes){
   let d; try{ d=await (await fetch('actions/top20.php?detalhe='+gid+'&mes='+encodeURIComponent(mes)+'&_='+Date.now()+(T20.fin?'&fin=1':''))).json(); }catch(e){ toast('Falha'); return; }
   const its=d.detalhe||[];
   let ov=document.getElementById('t20Ov'); if(!ov){ov=document.createElement('div');ov.id='t20Ov';ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';document.body.appendChild(ov);} ov.onclick=e=>{if(e.target===ov)ov.remove();};
-  const rows=its.map(x=>'<tr><td>'+esc(x.obra)+'</td><td style="text-align:left">'+esc(x.item)+'</td><td style="text-align:right">'+(x.alocado_quant!=null?Number(x.alocado_quant).toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+esc(x.unidade||''):'—')+'</td><td style="text-align:right">'+BRL(x.alocado_verba)+'</td><td style="font-size:11px" class="muted">'+esc(x.janela)+(x.fracao<1?' · '+Math.round(x.fracao*100)+'% do item':'')+'</td><td style="text-align:right;font-size:11px" class="muted">'+(x.quant_total!=null?Number(x.quant_total).toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+esc(x.unidade||''):'—')+' · '+BRL(x.verba_total)+'</td></tr>').join('');
-  ov.innerHTML='<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:1000px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">'
+  const andou=x=>{ if(x.pct_fonte==='cronograma') return 'andou <b>'+x.consumido+'%</b>'; if(x.pct_fonte==='tempo') return '~'+x.consumido+'% (tempo)'; return x.consumido>0?x.consumido+'%':'0%'; };
+  const rows=its.map(x=>'<tr><td>'+esc(x.obra)+'</td><td style="text-align:left">'+esc(x.item)+'</td><td style="text-align:right">'+(x.alocado_quant!=null?Number(x.alocado_quant).toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+esc(x.unidade||''):'—')+'</td><td style="text-align:right">'+BRL(x.alocado_verba)+'</td><td style="font-size:11px" class="muted">'+esc(x.janela)+'<br><span style="font-size:10px">'+esc(x.fonte||'')+'</span></td><td style="font-size:11px;text-align:center">'+andou(x)+(x.fracao<1?'<br><span class="muted" style="font-size:10px">'+Math.round(x.fracao*100)+'% do item neste mês</span>':'')+'</td><td style="text-align:right;font-size:11px" class="muted">'+(x.quant_total!=null?Number(x.quant_total).toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+esc(x.unidade||''):'—')+' · '+BRL(x.verba_total)+'</td></tr>').join('');
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:1060px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">'
    +'<div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:16px">'+esc(g?g.nome:'Grupo')+' — '+t20MesLbl(mes)+' · a conta</b><span class="material-icons" style="cursor:pointer;color:var(--muted)" onclick="document.getElementById(\'t20Ov\').remove()">close</span></div>'
-   +'<div class="muted" style="font-size:12px;margin:4px 0 10px">'+its.length+' aporte(s). "% do item" = fração do total alocada neste mês (distribuição linear na janela da tarefa-âncora do cronograma vivo).</div>'
-   +'<div style="overflow:auto;max-height:70vh"><table class="mtable" style="border:none;width:100%"><thead><tr><th>Obra</th><th style="text-align:left">Item</th><th>Quant. no mês</th><th>R$ no mês</th><th>Janela do marco</th><th>Total do item</th></tr></thead><tbody>'+(rows||'<tr><td colspan="6" class="empty">Nada neste mês.</td></tr>')+'</tbody></table></div></div>';
+   +'<div class="muted" style="font-size:12px;margin:4px 0 10px">'+its.length+' aporte(s). A janela é o <b>grande marco</b> (fase inteira no cronograma vivo — nunca só uma data). O % já andado sai da conta; o restante distribui do mês atual até o fim da janela.</div>'
+   +'<div style="overflow:auto;max-height:70vh"><table class="mtable" style="border:none;width:100%"><thead><tr><th>Obra</th><th style="text-align:left">Item</th><th>Quant. no mês</th><th>R$ no mês</th><th>Janela do marco</th><th>Andamento</th><th>Total do item</th></tr></thead><tbody>'+(rows||'<tr><td colspan="7" class="empty">Nada neste mês.</td></tr>')+'</tbody></table></div></div>';
 }
 async function t20Cfg(){
   if(!IS_ADMIN){ toast('Só administradores configuram os grupos'); return; }
@@ -5452,16 +5463,17 @@ function t20CfgRender(selId){
   const gs=(T20.data&&T20.data.grupos)||[];
   let ov=document.getElementById('t20Cf'); if(!ov){ov=document.createElement('div');ov.id='t20Cf';ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto';document.body.appendChild(ov);} ov.onclick=e=>{if(e.target===ov)ov.remove();};
   const g=gs.find(x=>x.id===selId)||gs[0];
-  T20.cfgSel=g?{id:g.id,nome:g.nome,ordem:g.ordem,servicos:(g.servicos||[]).slice()}:null;
+  T20.cfgSel=g?{id:g.id,nome:g.nome,ordem:g.ordem,categoria:g.categoria||'material',servicos:(g.servicos||[]).slice()}:null;
   t20CfgDraw();
 }
 function t20CfgDraw(filtro){
   const ov=document.getElementById('t20Cf'); if(!ov)return; const gs=(T20.data&&T20.data.grupos)||[]; const cur=T20.cfgSel;
   const f=(filtro||'').toLowerCase();
-  const list=gs.map(x=>'<div class="pickrow" style="'+(cur&&x.id===cur.id?'background:#eef6f0;':'')+'cursor:pointer" onclick="t20CfgRender('+x.id+')"><b style="font-size:12px">'+esc(x.nome)+'</b><span class="muted" style="font-size:11px;margin-left:auto">'+x.n_servicos+'</span></div>').join('');
+  const list=gs.map(x=>'<div class="pickrow" style="'+(cur&&x.id===cur.id?'background:#eef6f0;':'')+'cursor:pointer" onclick="t20CfgRender('+x.id+')"><b style="font-size:12px">'+esc(x.nome)+'</b><span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:6px;margin-left:6px;'+((x.categoria||'material')==='servico'?'background:#fdf1dd;color:#a4761c':'background:#e7f2ff;color:#2b6cb0')+'">'+((x.categoria||'material')==='servico'?'SRV':'MAT')+'</span><span class="muted" style="font-size:11px;margin-left:auto">'+x.n_servicos+'</span></div>').join('');
   const sel=new Set((cur&&cur.servicos)||[]);
   const svs=(T20.cat||[]).filter(s=>!f||((s.nome+' '+(s.grupo||'')).toLowerCase().includes(f)));
-  const right=cur?('<label style="display:block;margin-bottom:6px"><span style="font-size:10px;font-weight:700;color:var(--muted)">NOME DO GRUPO</span><input id="t20gNome" value="'+esc(cur.nome)+'" style="width:100%;padding:6px 8px;box-sizing:border-box"></label>'
+  const right=cur?('<div style="display:grid;grid-template-columns:1fr 200px;gap:8px;margin-bottom:6px"><label><span style="font-size:10px;font-weight:700;color:var(--muted)">NOME DO GRUPO</span><input id="t20gNome" value="'+esc(cur.nome)+'" oninput="if(T20.cfgSel)T20.cfgSel.nome=this.value" style="width:100%;padding:6px 8px;box-sizing:border-box"></label>'
+   +'<label><span style="font-size:10px;font-weight:700;color:var(--muted)">ABA</span><select id="t20gCat" onchange="if(T20.cfgSel)T20.cfgSel.categoria=this.value" style="width:100%;padding:6px 8px;box-sizing:border-box"><option value="material"'+(cur.categoria!=='servico'?' selected':'')+'>Materiais</option><option value="servico"'+(cur.categoria==='servico'?' selected':'')+'>Serviços &amp; Equipamentos</option></select></label></div>'
    +'<div class="search" style="margin:6px 0"><span class="material-icons" style="color:var(--muted)">search</span><input placeholder="filtrar serviços do catálogo…" oninput="t20CfgDraw(this.value)"></div>'
    +'<div style="max-height:44vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px">'+svs.map(s=>'<label style="display:flex;gap:7px;align-items:flex-start;font-size:12px;padding:2px 0;cursor:pointer"><input type="checkbox" '+(sel.has(s.id)?'checked':'')+' onchange="t20CfgTog('+s.id+',this.checked)"><span>'+esc(s.nome)+' <span class="muted" style="font-size:10px">· '+esc(s.grupo||'')+'</span></span></label>').join('')+'</div>'
    +'<div style="display:flex;gap:8px;margin-top:10px"><button class="btn-prim" onclick="t20CfgSalvar()">Salvar grupo</button>'+(cur.id?'<button class="btn-ghost" style="color:var(--pend)" onclick="t20CfgExcluir()">Excluir</button>':'')+'</div>')
@@ -5473,9 +5485,10 @@ function t20CfgDraw(filtro){
    +'<div>'+right+'</div></div></div>';
 }
 function t20CfgTog(id,on){ const c=T20.cfgSel; if(!c)return; const i=c.servicos.indexOf(id); if(on&&i<0)c.servicos.push(id); if(!on&&i>=0)c.servicos.splice(i,1); }
-function t20CfgNovo(){ T20.cfgSel={id:0,nome:'Novo grupo',ordem:99,servicos:[]}; t20CfgDraw(); }
+function t20CfgNovo(){ T20.cfgSel={id:0,nome:'Novo grupo',ordem:99,categoria:T20.tab,servicos:[]}; t20CfgDraw(); }
 async function t20CfgSalvar(){ const c=T20.cfgSel; if(!c)return; const nome=(document.getElementById('t20gNome')||{}).value||c.nome;
-  try{ const r=await (await fetch('actions/top20.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_grupo',me:EU&&EU.bitrix_id,id:c.id||null,nome,servicos:c.servicos,ordem:c.ordem||0})})).json();
+  const categoria=(document.getElementById('t20gCat')||{}).value||c.categoria||'material';
+  try{ const r=await (await fetch('actions/top20.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_grupo',me:EU&&EU.bitrix_id,id:c.id||null,nome,categoria,servicos:c.servicos,ordem:c.ordem||0})})).json();
     if(r&&r.error){toast(r.error);return;} toast('Grupo salvo'); const ov=document.getElementById('t20Cf'); if(ov)ov.remove(); T20.data=null; t20Load();
   }catch(e){toast('Falha ao salvar');} }
 async function t20CfgExcluir(){ const c=T20.cfgSel; if(!c||!c.id)return; if(!confirm('Excluir o grupo "'+c.nome+'"?'))return;

@@ -13,7 +13,7 @@ $SIMPLES = ['status','fornecedor','responsavel','observacoes','validado','tipo',
             'lead_override','crono_marco_override','data_necessaria_override','verba_override',
             'quantitativo_valor','quantitativo_unidade','quantitativo_fonte'];
 $TIPOS_OK = ['', 'Material', 'Mão de obra', 'Empreitada', 'Material + MO', 'Locação'];
-$STATUS_OK = ['Não Iniciado','Cotação Iniciada','Com Pendências','Em Andamento','Finalizado'];
+$STATUS_OK = ['Não Iniciado','Cotação Iniciada','Com Pendências','Em Andamento','Finalizado','Não se aplica'];
 $LABEL = ['status'=>'Status','tipo'=>'Tipo','responsavel'=>'Responsável','fornecedor'=>'Fornecedor',
           'observacoes'=>'Observações','lead_override'=>'Lead time','validado'=>'Validado',
           'crono_marco_override'=>'Cronograma','data_necessaria_override'=>'Data em obra',

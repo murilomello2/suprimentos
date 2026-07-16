@@ -112,6 +112,7 @@
   .st-Finalizado{background:var(--okbg);color:var(--ok)} .st-CotacaoIniciada{background:var(--cotbg);color:var(--cot)}
   .st-ComPendencias{background:var(--pendbg);color:var(--pend)} .st-EmAndamento{background:var(--andbg);color:var(--and)}
   .st-NaoIniciado{background:var(--neubg);color:var(--neu)}
+  .st-NaoSeAplica{background:#eef1f4;color:#8a9299;font-style:italic}
   .mapa-on{color:var(--ok);font-size:12px;font-weight:600}
   .eye{border:1px solid var(--line);background:#fff;border-radius:8px;width:30px;height:28px;cursor:pointer;color:var(--muted)}
   .eye:hover{border-color:var(--verde);color:var(--verde)}
@@ -691,8 +692,8 @@ function tpSubHtml(list){ const {t,total}=tpSubtotais(list); const p=[];
   ['material','mo','mat_mo','equip'].forEach(k=>{ if(t[k]>0.5) p.push('<b>'+TP_FULL[k]+':</b> '+BRL(t[k])); });
   return p.join(' &nbsp;·&nbsp; ')+' &nbsp;·&nbsp; <b>Total:</b> '+BRL(total); }
 const today=new Date().toISOString().slice(0,10);
-const STK={'Finalizado':'st-Finalizado','Cotação Iniciada':'st-CotacaoIniciada','Com Pendências':'st-ComPendencias','Em Andamento':'st-EmAndamento','Não Iniciado':'st-NaoIniciado'};
-const STATUSES=['Não Iniciado','Cotação Iniciada','Com Pendências','Em Andamento','Finalizado'];
+const STK={'Finalizado':'st-Finalizado','Cotação Iniciada':'st-CotacaoIniciada','Com Pendências':'st-ComPendencias','Em Andamento':'st-EmAndamento','Não Iniciado':'st-NaoIniciado','Não se aplica':'st-NaoSeAplica'};
+const STATUSES=['Não Iniciado','Cotação Iniciada','Com Pendências','Em Andamento','Finalizado','Não se aplica'];
 function toast(m){const t=document.getElementById('toastEl');t.textContent=m;t.style.display='block';clearTimeout(t._);t._=setTimeout(()=>t.style.display='none',2400);}
 // multi-obra: a mesma ordem existe em 2+ obras. Procura no RADAR (DATA.itens = só OBRA_SEL) e, se não achar,
 // cai na MATRIZ (MAT = TODAS as obras) — assim clicar numa célula da matriz abre o item mesmo se a obra
@@ -705,7 +706,7 @@ function daysBetween(a,b){ return Math.round((new Date(b)-new Date(a))/86400000)
    > 'proximo' (faltam ≤7d p/ iniciar) > 'ok'. Item finalizado saiu do radar de Suprimentos = ok. */
 function alertLevel(i){
   const st=i.status||'Não Iniciado';
-  if(st==='Finalizado') return 'finalizado';                  // concluído (fica no radar p/ consulta; sem alerta)
+  if(st==='Finalizado'||st==='Não se aplica') return 'finalizado';   // concluído ou N/A (fica no radar, sem alerta)
   const F=i.fim_cotacao, I=i.inicio_cotacao||i.data_gatilho;
   if(F && F<today) return 'critico';                          // passou o FIM e não está finalizado
   if(st==='Não Iniciado'){

@@ -179,7 +179,14 @@ try {
     $obra = $pdo->prepare("SELECT * FROM obra WHERE id=?"); $obra->execute([$obraId]);
     $obra = $obra->fetch();
     if (!$obra) throw new Exception('obra não encontrada');
-    $mc = $obra['metodo_construtivo'] ?: 'concreto armado convencional';
+    // OVERRIDE explícito do método: a obra pode ter sido importada com um método de BOOTSTRAP (ex.: Lírios
+    // importou como 'concreto armado convencional' pro auto-vínculo casar, mas É alvenaria). Derivar com o
+    // método errado sobrescreveria o dicionário do outro método! Se vier override, usa ele e ALINHA a obra.
+    $mcOver = trim((string)($in['metodo_construtivo'] ?? ''));
+    $mc = $mcOver ?: ($obra['metodo_construtivo'] ?: 'concreto armado convencional');
+    if ($mcOver !== '' && $mcOver !== (string)($obra['metodo_construtivo'] ?? '')) {
+        $pdo->prepare("UPDATE obra SET metodo_construtivo=? WHERE id=?")->execute([$mcOver, $obraId]);
+    }
 
     // ---- bases da obra: linhas-folha (id→desc/path) + composições (id→desc) + insumos ----
     $LIN = []; $descCount = []; $linesByDesc = []; $SIS = [];

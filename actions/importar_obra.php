@@ -225,9 +225,14 @@ try {
 
     // ---- células do radar: 1 por serviço do catálogo (curadoria/auto-vínculo vêm depois) ----
     $nR = 0;
+    // NÃO duplica células que já existem (obra promovida ao radar ANTES do import — ex.: Caja já tinha
+    // as células dos itens novos do catálogo criados com escopo "todas as obras")
+    $ja = [];
+    foreach ($pdo->query("SELECT servico_id FROM radar_item WHERE obra_id=" . (int)$obraId)->fetchAll() as $x) $ja[(int)$x['servico_id']] = true;
     // a obra nova HERDA o responsável padrão de cada serviço (regra padrão)
     $insR = $pdo->prepare("INSERT INTO radar_item (obra_id, servico_id, status, responsavel, updated_at) VALUES (?,?,?,?,?)");
     foreach ($pdo->query("SELECT id, responsavel_padrao FROM servico ORDER BY id")->fetchAll() as $s) {
+        if (isset($ja[(int)$s['id']])) continue;
         $rp = trim((string)($s['responsavel_padrao'] ?? ''));
         $insR->execute([$obraId, (int)$s['id'], 'Não Iniciado', $rp !== '' ? $rp : null, date('c')]);
         $nR++;

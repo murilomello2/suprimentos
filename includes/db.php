@@ -134,6 +134,7 @@ function db_schema_mysql($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta (
         id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, fornecedor_id INT, fornecedor_nome VARCHAR(255),
         prazo VARCHAR(120), observacoes TEXT, equaliza TEXT, data_resposta VARCHAR(40), total DOUBLE, created_at VARCHAR(40),
+        revisao INT DEFAULT 0, raiz_id INT, ativa TINYINT DEFAULT 1,
         PRIMARY KEY (id), KEY idx_prop_cot (cotacao_id)
     ) $E");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta_item (
@@ -326,6 +327,11 @@ function db_schema_mysql($pdo) {
         if ($ofc && !isset($ofc['centro_custo'])) $pdo->exec("ALTER TABLE obra_ficha ADD COLUMN centro_custo VARCHAR(10)");         // centro de custo nas solicitações (campo 'obra': 001 padrão; 040/041/042/036/032 nas CAPRETZ)
         $pc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cotacao_proposta'") as $c) $pc[$c['COLUMN_NAME']] = true;
         if ($pc && !isset($pc['equaliza'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN equaliza TEXT");
+        // REVISÕES de proposta (não perder o histórico quando o fornecedor manda preço novo): revisao 0,1,2…;
+        // raiz_id = proposta original da cadeia; ativa=1 só na revisão vigente (a que entra no mapa comparativo)
+        if ($pc && !isset($pc['revisao'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN revisao INT DEFAULT 0");
+        if ($pc && !isset($pc['raiz_id'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN raiz_id INT");
+        if ($pc && !isset($pc['ativa']))   $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN ativa TINYINT DEFAULT 1");
         // solic_obra.cnpj (CNPJ da obra p/ a carta de cotação) — self-heal p/ tabela já existente
         $sc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='solic_obra'") as $c) $sc[$c['COLUMN_NAME']] = true;
         if ($sc && !isset($sc['cnpj'])) $pdo->exec("ALTER TABLE solic_obra ADD COLUMN cnpj VARCHAR(24)");
@@ -507,7 +513,7 @@ function db_schema($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS cot_fornecedor (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, categoria TEXT, cidade TEXT, contato TEXT, telefone TEXT, whatsapp TEXT, email TEXT, itens TEXT, tipo TEXT, cnpj TEXT, contatos_at TEXT, ativo INTEGER DEFAULT 1, ext_id TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao (id INTEGER PRIMARY KEY AUTOINCREMENT, obra_id INTEGER, servico_id INTEGER, titulo TEXT NOT NULL, categoria TEXT, tipo_servico TEXT, verba REAL, verba_origem TEXT, descricao TEXT, equalizacao TEXT, num_solicitacao TEXT, num_pedido TEXT, solic_coligada TEXT, solic_obra_cod TEXT, status TEXT DEFAULT 'rascunho', aprovacao TEXT DEFAULT 'aguardando', criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_item (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, quantidade REAL, observacao TEXT, ordem INTEGER)");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, prazo TEXT, observacoes TEXT, equaliza TEXT, data_resposta TEXT, total REAL, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, prazo TEXT, observacoes TEXT, equaliza TEXT, data_resposta TEXT, total REAL, revisao INTEGER DEFAULT 0, raiz_id INTEGER, ativa INTEGER DEFAULT 1, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta_item (id INTEGER PRIMARY KEY AUTOINCREMENT, proposta_id INTEGER NOT NULL, cotacao_item_id INTEGER NOT NULL, preco_unit REAL, preco_total REAL, observacao TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, proposta_id INTEGER, fornecedor_id INTEGER, fornecedor_nome TEXT, nome TEXT, arquivo TEXT, tamanho INTEGER, mime TEXT, criado_por TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cot_dicionario (id INTEGER PRIMARY KEY AUTOINCREMENT, servico_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, ordem INTEGER, nota TEXT, created_at TEXT)");
@@ -566,6 +572,9 @@ function db_schema($pdo) {
     if (!isset($cfcols['inbound_resumo'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN inbound_resumo TEXT");
     $pcols = []; foreach ($pdo->query("PRAGMA table_info(cotacao_proposta)") as $c) $pcols[$c['name']] = true;
     if (!isset($pcols['equaliza'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN equaliza TEXT");
+    if (!isset($pcols['revisao'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN revisao INTEGER DEFAULT 0");
+    if (!isset($pcols['raiz_id'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN raiz_id INTEGER");
+    if (!isset($pcols['ativa'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN ativa INTEGER DEFAULT 1");
 
     // permissões GRANULARES de edição (além do editar_escopo geral) — aditivas, fora do drop de migração.
     // perm_admin = tudo. editar_escopo (todas/sel) = editor geral (status/fornecedor/observação).

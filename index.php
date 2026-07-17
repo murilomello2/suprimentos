@@ -699,6 +699,14 @@ function maskMoneyInput(el){ let v=el.value.replace(/[^\d,]/g,''); const k=v.ind
   ip=ip.replace(/^0+(?=\d)/,''); const ii=ip===''?(dp!==null?'0':''):Number(ip).toLocaleString('pt-BR'); el.value=ii+(dp!==null?(','+dp):''); }
 // Ao sair do campo, normaliza p/ 2 casas: "150.000" -> "150.000,00"
 function moneyBlur(el){ const n=parseBRLInput(el.value); el.value=(n==null)?'':fmtMoney(n); }
+// ---- variantes com N casas decimais (min 2, até `dec`) — p/ PREÇO UNITÁRIO da cotação, que aceita até 4 casas ----
+const fmtMoneyN=(n,dec)=>{ dec=Math.max(2,dec||2); return (n===0||n)?Number(n).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:dec}):''; };
+function maskMoneyInputN(el,dec){ dec=Math.max(2,dec||2); let v=el.value.replace(/[^\d,]/g,''); const k=v.indexOf(','); let ip,dp=null;
+  if(k>=0){ ip=v.slice(0,k).replace(/\D/g,''); dp=v.slice(k+1).replace(/\D/g,'').slice(0,dec); } else ip=v.replace(/\D/g,'');
+  ip=ip.replace(/^0+(?=\d)/,''); const ii=ip===''?(dp!==null?'0':''):Number(ip).toLocaleString('pt-BR'); el.value=ii+(dp!==null?(','+dp):''); }
+function moneyBlurN(el,dec){ const n=parseBRLInput(el.value); el.value=(n==null)?'':fmtMoneyN(n,dec); }
+// R$ do PREÇO UNITÁRIO: mostra 2 a 4 casas (não arredonda 0,0325 p/ 0,03). Totais seguem em BRL (2 casas).
+const BRLp=n=>(n||n===0)?Number(n).toLocaleString('pt-BR',{style:'currency',currency:'BRL',minimumFractionDigits:2,maximumFractionDigits:4}):'—';
 // Moeda COMPACTA p/ espaços apertados (donut/badges): R$ 4,2 mi ; R$ 350 mil ; senão o valor cheio.
 const BRLc=n=>{n=Number(n)||0;const a=Math.abs(n);if(a>=1e6)return 'R$ '+(n/1e6).toLocaleString('pt-BR',{maximumFractionDigits:1})+' mi';if(a>=1e3)return 'R$ '+(n/1e3).toLocaleString('pt-BR',{maximumFractionDigits:0})+' mil';return BRL(n);};
 const D=s=>{if(!s)return'—';const p=String(s).split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:s;};
@@ -3569,23 +3577,27 @@ function cotRender(){
   if(COT.mode==='detalhe') return cotRenderDetalhe();
   if(COT.mode==='proposta') return cotRenderProposta();
   const w=document.getElementById('cotwrap');
-  COT.filt=COT.filt||{q:'',categoria:'',status:''}; COT.sort=COT.sort||{col:'created_at',dir:-1};
+  COT.filt=COT.filt||{q:'',categoria:'',status:'',criador:''}; if(COT.filt.criador==null)COT.filt.criador=''; COT.sort=COT.sort||{col:'created_at',dir:-1};
   const all=COT.list||[];
   const inboxNovoTotal=all.reduce((s,c)=>s+(+c.n_inbound_novo||0),0);   // e-mails de fornecedor ainda não processados (global)
   const cats=[...new Set(all.map(c=>c.categoria).filter(Boolean))].sort();
   const sts=[...new Set(all.map(c=>c.status).filter(Boolean))];
+  // criadores distintos (id→nome) p/ o filtro por responsável
+  const creators=[...new Map(all.filter(c=>c.criado_por!=null&&c.criado_por!=='').map(c=>[String(c.criado_por),{id:String(c.criado_por),nome:c.criado_nome||('#'+c.criado_por)}])).values()].sort((a,b)=>a.nome.localeCompare(b.nome));
   // filtro que não existe mais nesta obra → limpa (evita lista vazia enganosa com o dropdown mostrando "Todas")
   if(COT.filt.categoria && !cats.includes(COT.filt.categoria)) COT.filt.categoria='';
   if(COT.filt.status && !sts.includes(COT.filt.status)) COT.filt.status='';
+  if(COT.filt.criador && !creators.some(x=>x.id===COT.filt.criador)) COT.filt.criador='';
   // filtros CLIENT-SIDE (a obra continua server-side no cotLoad)
   const qn=opNorm(COT.filt.q||'');
   let rows=all.filter(c=>
-    (!qn || opNorm((c.titulo||'')+' '+(c.categoria||'')+' '+(c.obra_nome||'')+' '+(c.num_solicitacao||'')+' '+(c.num_pedido||'')).includes(qn)) &&
+    (!qn || opNorm((c.titulo||'')+' '+(c.categoria||'')+' '+(c.obra_nome||'')+' '+(c.num_solicitacao||'')+' '+(c.num_pedido||'')+' '+(c.criado_nome||'')).includes(qn)) &&
     (!COT.filt.categoria || (c.categoria||'')===COT.filt.categoria) &&
+    (!COT.filt.criador || String(c.criado_por)===COT.filt.criador) &&
     (!COT.filt.status || (c.status||'')===COT.filt.status));
   // ordenação
   const sc=COT.sort.col, dir=COT.sort.dir;
-  const sval=c=>({titulo:(c.titulo||'').toLowerCase(),obra_nome:(c.obra_nome||'').toLowerCase(),categoria:(c.categoria||'').toLowerCase(),
+  const sval=c=>({titulo:(c.titulo||'').toLowerCase(),obra_nome:(c.obra_nome||'').toLowerCase(),categoria:(c.categoria||'').toLowerCase(),criado_nome:(c.criado_nome||'').toLowerCase(),
       n_itens:+c.n_itens||0,n_propostas:+c.n_propostas||0,melhor_oferta:+c.melhor_oferta||0,status:(c.status||''),created_at:(c.created_at||''),id:+c.id||0}[sc]);
   rows=rows.slice().sort((a,b)=>{ const x=sval(a),y=sval(b); return (x<y?-1:x>y?1:0)*dir; });
   const arw=col=>COT.sort.col===col?(COT.sort.dir>0?' ▲':' ▼'):'';
@@ -3595,6 +3607,7 @@ function cotRender(){
      <label class="muted" style="font-size:12px">Obra <select onchange="COT.obra=this.value;cotLoad()" style="margin-left:4px">${cotObraOpts(COT.obra)}</select></label>
      <select onchange="COT.filt.categoria=this.value;cotRender()" style="font-size:12px;padding:6px"><option value="">Todas categorias</option>${cats.map(c=>`<option value="${esc(c)}" ${c===COT.filt.categoria?'selected':''}>${esc(c)}</option>`).join('')}</select>
      <select onchange="COT.filt.status=this.value;cotRender()" style="font-size:12px;padding:6px"><option value="">Todos status</option>${sts.map(s=>`<option value="${esc(s)}" ${s===COT.filt.status?'selected':''}>${esc(cotStLabel(s))}</option>`).join('')}</select>
+     <select onchange="COT.filt.criador=this.value;cotRender()" style="font-size:12px;padding:6px" title="filtrar pelo criador (responsável) da cotação"><option value="">Todos criadores</option>${creators.map(u=>`<option value="${esc(u.id)}" ${u.id===COT.filt.criador?'selected':''}>${esc(u.nome)}</option>`).join('')}</select>
      <span class="muted" style="font-size:11.5px">${rows.length} de ${all.length}</span>
      <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
        ${inboxNovoTotal?`<span class="dchip" style="background:var(--pend);color:#fff" title="e-mails de fornecedores ainda não processados — clique em Buscar respostas">📨 ${inboxNovoTotal} não processada(s)</span>`:''}
@@ -3602,14 +3615,14 @@ function cotRender(){
        ${IS_ADMIN?`<button class="btn-ghost" style="padding:7px 12px" onclick="cotReprocessarObras()" title="preencher a obra das cotações sem obra, pela solicitação vinculada (cadastro único)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_fix_high</span> Reprocessar obras</button>`:''}
        ${CAN_EDIT?`<button class="btn-prim" style="padding:7px 14px" onclick="cotNovo()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">add</span> Nova cotação</button>`:''}
      </span>
-   </div></div><div class="wrap"><table><thead><tr>${th('Cotação','titulo')}${th('Obra','obra_nome')}${th('Categoria','categoria')}<th>Tipo</th><th title="Nº da solicitação de compra / nº do pedido de compra">SC / Pedido</th>${th('Itens','n_itens','style="text-align:center"')}${th('Propostas','n_propostas','style="text-align:center" title="recebidas / convidados"')}${th('Melhor oferta','melhor_oferta','style="text-align:right"')}${th('Criada em','created_at')}${th('Status','status')}<th></th></tr></thead><tbody>`;
+   </div></div><div class="wrap"><table><thead><tr>${th('Cotação','titulo')}${th('Obra','obra_nome')}${th('Categoria','categoria')}<th>Tipo</th><th title="Nº da solicitação de compra / nº do pedido de compra">SC / Pedido</th>${th('Itens','n_itens','style="text-align:center"')}${th('Propostas','n_propostas','style="text-align:center" title="recebidas / convidados"')}${th('Melhor oferta','melhor_oferta','style="text-align:right"')}${th('Criada em','created_at')}${th('Criador','criado_nome')}${th('Status','status')}<th></th></tr></thead><tbody>`;
   for(const c of rows){
     html+=`<tr style="cursor:pointer" onclick="cotOpen(${c.id})"><td><b>${esc(c.titulo)}</b>${(+c.n_inbound_novo)?` <span class="dchip" style="background:var(--pend);color:#fff" title="${c.n_inbound_novo} e-mail(s) de fornecedor não processado(s) nesta cotação">📨 ${c.n_inbound_novo}</span>`:''}</td><td>${esc(c.obra_nome||'—')}</td><td class="muted">${esc(c.categoria||'')}</td><td class="muted">${esc(c.tipo_servico||'')}</td>
       <td class="muted" style="font-size:11px;white-space:nowrap;line-height:1.35">${c.num_solicitacao?('SC '+esc(c.num_solicitacao)):''}${c.num_solicitacao&&c.num_pedido?'<br>':''}${c.num_pedido?('<b style="color:var(--verde-d)">PC '+esc(c.num_pedido)+'</b>'):''}${!c.num_solicitacao&&!c.num_pedido?'—':''}</td>
-      <td style="text-align:center">${c.n_itens}</td><td style="text-align:center" title="${c.n_propostas} recebida(s) de ${c.n_convidados||0} convidado(s)"><b>${c.n_propostas}</b><span class="muted">/${c.n_convidados||0}</span></td><td style="text-align:right">${c.melhor_oferta?BRL(c.melhor_oferta):'—'}</td><td class="muted" style="font-size:11.5px;white-space:nowrap">${cotFmtDT(c.created_at)}</td><td>${cotStChip(c.status)}</td>
+      <td style="text-align:center">${c.n_itens}</td><td style="text-align:center" title="${c.n_propostas} recebida(s) de ${c.n_convidados||0} convidado(s)"><b>${c.n_propostas}</b><span class="muted">/${c.n_convidados||0}</span></td><td style="text-align:right">${c.melhor_oferta?BRL(c.melhor_oferta):'—'}</td><td class="muted" style="font-size:11.5px;white-space:nowrap">${cotFmtDT(c.created_at)}</td><td class="muted" style="font-size:11.5px;white-space:nowrap" title="usuário do Bitrix que criou">${esc(c.criado_nome||'—')}</td><td>${cotStChip(c.status)}</td>
       <td><span class="material-icons" style="color:var(--muted)">chevron_right</span></td></tr>`;
   }
-  if(!rows.length) html+=`<tr><td colspan="11" class="empty">${all.length?'Nenhuma cotação casa os filtros.':'Nenhuma cotação ainda. Crie a primeira.'}</td></tr>`;
+  if(!rows.length) html+=`<tr><td colspan="12" class="empty">${all.length?'Nenhuma cotação casa os filtros.':'Nenhuma cotação ainda. Crie a primeira.'}</td></tr>`;
   // preserva foco/caret da busca — o innerHTML recria o input a cada tecla e mataria o foco
   const _foc=document.activeElement, _wasBusca=_foc&&_foc.id==='cotListBusca', _car=_wasBusca?_foc.selectionStart:null;
   w.innerHTML=html+'</tbody></table></div>';
@@ -3943,8 +3956,9 @@ async function cotOpen(id){
 }
 function cotNum(x){ return x!=null&&x!==''?Number(x).toLocaleString('pt-BR'):''; }
 // --- Itens a cotar: exibição (com observação = complemento) + edição (add/editar/excluir) ---
+function cotEditavel(){ const c=(COT.cur&&COT.cur.cotacao)||{}; return !!(IS_ADMIN||(c.criado_por!=null&&c.criado_por!==''&&EU&&String(c.criado_por)===String(EU.bitrix_id))); }
 function cotItensPanel(d){
-  const c=d.cotacao, itens=d.itens||[], podeGerir=!!(IS_ADMIN||CAN_EDIT||(c.criado_por&&EU&&String(c.criado_por)===String(EU.bitrix_id)));
+  const c=d.cotacao, itens=d.itens||[], CAN_EDIT=cotEditavel(), podeGerir=CAN_EDIT;
   if(COT.editItens){
     return `<div class="panel" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px"><b style="font-size:13px">Itens a cotar — editando</b>
         <span><button class="btn-prim" style="padding:4px 11px" onclick="cotItensSalvar()">Salvar itens</button> <button class="btn-ghost" style="padding:4px 11px" onclick="COT.editItens=false;cotRenderDetalhe()">Cancelar</button></span></div>
@@ -3952,9 +3966,53 @@ function cotItensPanel(d){
       <div id="cotItEd"></div>
       <button class="btn-ghost" style="margin-top:6px" onclick="cotItAdd()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Adicionar item</button></div>`;
   }
-  const rows=itens.map(it=>`<tr><td style="text-align:left"><b>${esc(it.descricao)}</b>${it.observacao?`<div class="muted" style="font-size:11px;margin-top:1px">${esc(it.observacao)}</div>`:''}</td><td style="text-align:right;white-space:nowrap">${cotNum(it.quantidade)} ${esc(it.unidade||'')}</td></tr>`).join('');
-  return `<div class="panel" style="margin-bottom:10px">${cotSecHead('list_alt','Itens a cotar','('+itens.length+')',podeGerir?`<button class="btn-ghost" style="padding:4px 11px" onclick="cotEditItens()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit</span> Editar itens</button>`:'')}
-    ${itens.length?`<div class="wrap"><table><thead><tr><th>Item</th><th style="text-align:right;width:110px">Qtde</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="dmini">Nenhum item. Clique em “Editar itens” para adicionar.</div>'}</div>`;
+  // BLOCOS por obra (vindos do servidor): agrupa a lista por obra + SC + CNPJ. Fallback = 1 bloco "geral".
+  const blocos=(c.blocos_obra&&c.blocos_obra.length)?c.blocos_obra
+    :[{chave:'geral',obra_nome:'',cidade:'',coligada:'',cnpj:'',scs:[],itens:itens.map(it=>({id:it.id,descricao:it.descricao,unidade:it.unidade,quantidade:it.quantidade,observacao:it.observacao,sc:''}))}];
+  const agrupar = blocos.length>1 || (blocos[0] && (blocos[0].obra_nome||blocos[0].coligada));
+  const linhas=b=>b.itens.map(it=>`<tr><td style="text-align:left"><b>${esc(it.descricao)}</b>${it.observacao?`<div class="muted" style="font-size:11px;margin-top:1px">${esc(it.observacao)}</div>`:''}</td><td style="text-align:right;white-space:nowrap">${cotNum(it.quantidade)} ${esc(it.unidade||'')}</td></tr>`).join('');
+  const chip=(txt,bg,cor)=>`<span style="background:${bg};color:${cor};font-size:10px;font-weight:700;padding:1px 7px;border-radius:6px">${esc(txt)}</span>`;
+  let corpo;
+  if(!itens.length){ corpo='<div class="dmini">Nenhum item. Clique em “Editar itens” para adicionar.</div>'; }
+  else if(agrupar){ corpo=blocos.map(b=>`<div style="margin-top:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+        <span class="material-icons" style="font-size:16px;color:var(--verde)">apartment</span>
+        <b style="font-size:12.5px">${esc(b.obra_nome||b.coligada||'Sem obra')}</b>
+        ${b.cidade?`<span class="muted" style="font-size:11px">📍 ${esc(b.cidade)}</span>`:''}
+        ${b.cnpj?`<span class="muted" style="font-size:11px">CNPJ ${esc(b.cnpj)}</span>`:''}
+        ${(b.scs||[]).map(sc=>chip('SC '+sc,'#eef4f0','var(--verde-d)')).join(' ')}
+        <span class="muted" style="font-size:11px;margin-left:auto">${b.itens.length} item(ns)</span></div>
+      <div class="wrap"><table><thead><tr><th>Item</th><th style="text-align:right;width:110px">Qtde</th></tr></thead><tbody>${linhas(b)}</tbody></table></div></div>`).join(''); }
+  else { corpo=`<div class="wrap"><table><thead><tr><th>Item</th><th style="text-align:right;width:110px">Qtde</th></tr></thead><tbody>${linhas(blocos[0])}</tbody></table></div>`; }
+  const acoes=(itens.length?`<button class="btn-ghost" style="padding:4px 11px" onclick="cotCopiarItens()" title="copia o texto separado por obra/CNPJ p/ mandar ao fornecedor (WhatsApp)"><span class="material-icons" style="font-size:14px;vertical-align:-3px">content_copy</span> Copiar texto</button> `:'')
+    +(podeGerir?`<button class="btn-ghost" style="padding:4px 11px" onclick="cotEditItens()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit</span> Editar itens</button>`:'');
+  return `<div class="panel" style="margin-bottom:10px">${cotSecHead('list_alt','Itens a cotar','('+itens.length+')',acoes)}${corpo}</div>`;
+}
+// texto pré-cotação separado por obra (WhatsApp / e-mail) — SEM preço (é pedido de cotação ao fornecedor)
+function cotTextoItens(){
+  const d=COT.cur, c=d.cotacao;
+  const blocos=(c.blocos_obra&&c.blocos_obra.length)?c.blocos_obra
+    :[{obra_nome:'',cidade:'',coligada:'',cnpj:'',scs:[],itens:(d.itens||[])}];
+  let t='*Solicitação de cotação — '+(c.titulo||'')+'*\n';
+  blocos.forEach(b=>{
+    t+='\n📍 *'+((b.obra_nome||b.coligada||c.obra_nome||c.obra_livre||'Obra'))+'*'+(b.cidade?' — '+b.cidade:'')+'\n';
+    if(b.cnpj) t+='CNPJ: '+b.cnpj+'\n';
+    if(b.scs&&b.scs.length) t+='Solicitação (SC): '+b.scs.join(', ')+'\n';
+    (b.itens||[]).forEach(it=>{ const q=(it.quantidade!=null&&it.quantidade!=='')?(cotNum(it.quantidade)+' '+(it.unidade||'')+' — '):''; t+='• '+q+(it.descricao||'')+'\n'; });
+  });
+  t+='\nFavor cotar os itens acima. Obrigado!';
+  return t;
+}
+function cotCopiarItens(){
+  const t=cotTextoItens();
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(t).then(()=>toast('Texto copiado — cole no WhatsApp')).catch(()=>cotCopiarFallback(t)); }
+  else cotCopiarFallback(t);
+}
+function cotCopiarFallback(t){
+  let ov=document.getElementById('cotCopyOv'); if(!ov){ ov=document.createElement('div'); ov.id='cotCopyOv'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px'; document.body.appendChild(ov); }
+  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
+  ov.innerHTML='<div style="background:#fff;border-radius:12px;padding:16px 18px;max-width:640px;width:100%" onclick="event.stopPropagation()"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b>Copiar texto</b><span class="material-icons" style="cursor:pointer;color:var(--muted)" onclick="document.getElementById(\'cotCopyOv\').remove()">close</span></div><div class="muted" style="font-size:12px;margin-bottom:6px">Selecione tudo (Ctrl+A) e copie (Ctrl+C).</div><textarea readonly style="width:100%;height:260px;font-size:12px;font-family:ui-monospace,Consolas,monospace"></textarea></div>';
+  const ta=ov.querySelector('textarea'); ta.value=t; ta.focus(); ta.select();
 }
 function cotEditItens(){ COT.itensEdit=(COT.cur.itens||[]).map(it=>({id:it.id,descricao:it.descricao||'',unidade:it.unidade||'',quantidade:it.quantidade!=null?it.quantidade:'',observacao:it.observacao||''})); if(!COT.itensEdit.length) COT.itensEdit=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; COT.editItens=true; cotRenderDetalhe(); cotItRenderEd(); }
 function cotItRenderEd(){ const box=document.getElementById('cotItEd'); if(!box)return;
@@ -3990,7 +4048,7 @@ function cotObsShow(el){ const obs=el.getAttribute('data-obs')||'', forn=el.getA
 // FASE 2 — multi-PC por coligada: rótulo curto + cor estável por coligada, e o painel de PC por coligada
 function colCurta(n){ return String(n||'').replace(/\s+(EMPREENDIMENTO|EMPREENDIMENTOS).*/i,'').replace(/\s+SPE\b.*/i,'').trim().slice(0,16)||String(n||'').slice(0,16); }
 function coligadaCor(seed){ let s=String(seed||''),h=0; for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0; return `hsl(${h%360},42%,40%)`; }
-function cotPCColigadas(c){
+function cotPCColigadas(c){ const CAN_EDIT=cotEditavel();
   const cols=c.coligadas_itens||[];
   return `<div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:9px">
     <div class="muted" style="font-size:11px;font-weight:700;margin-bottom:7px">SOLICITAÇÃO E PEDIDO POR COLIGADA <span style="font-weight:400">— cada coligada tem sua SC e seu nº de PC</span></div>
@@ -4009,7 +4067,7 @@ async function cotPCColSalvar(i){ const c=(COT.cur||{}).cotacao; const cc=(c.col
     if(r.error){toast(r.error);return;} cc.num_pedido=v; toast('PC da '+colCurta(cc.coligada)+' salvo'); cotOpen(c.id);
   }catch(e){toast('Falha ao salvar');} }
 // auto-detecta o PC de CADA coligada pelo colidmov (sem achatar tudo num campo só)
-async function cotDetectarPedidosColigada(c){ const cols=c.coligadas_itens||[];
+async function cotDetectarPedidosColigada(c){ const CAN_EDIT=cotEditavel(); const cols=c.coligadas_itens||[];
   for(let i=0;i<cols.length;i++){ const cc=cols[i]; if(!cc.colidmov)continue;
     try{ const r=await (await fetch('actions/pedidos.php?solicitacao='+encodeURIComponent(c.num_solicitacao||'')+'&coligada='+encodeURIComponent(cc.coligada||'')+'&colidmov='+encodeURIComponent(cc.colidmov)+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
       const peds=(r&&r.pedidos)||[], det=document.getElementById('cotPCcolDet'+i);
@@ -4021,9 +4079,9 @@ async function cotDetectarPedidosColigada(c){ const cols=c.coligadas_itens||[];
     }catch(e){}
   }
 }
-function cotRenderDetalhe(){
+function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
   const d=COT.cur,c=d.cotacao,itens=d.itens||[],props=d.propostas||[],m=d.mapa||{},best=m.melhor_por_item||{},w=document.getElementById('cotwrap');
-  const podeGerir=!!(IS_ADMIN||CAN_EDIT||(c.criado_por&&EU&&String(c.criado_por)===String(EU.bitrix_id)));   // admin, edita a obra, ou criador
+  const podeGerir=CAN_EDIT;   // CAN_EDIT já sombreado = admin OU criador (só o dono edita/exclui)
   let html=`<div class="panel" style="margin-bottom:10px"><div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap">
       <button class="btn-ghost" onclick="cotLoad()" style="margin-top:2px"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button>
       <div style="min-width:0"><div style="font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted)">Descrição da cotação</div>
@@ -4072,7 +4130,7 @@ function cotRenderDetalhe(){
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotAnexarAbrir(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="anexar PDF, Excel ou print — arraste, cole (Ctrl+V) ou clique"><span class="material-icons" style="font-size:14px;vertical-align:-2px">attach_file</span> anexar${ax.length?` (${ax.length})`:''}</button>`:''}
         ${CAN_EDIT&&ax.length?`<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotIAPreencher(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="a IA lê os anexos e preenche a proposta (rascunho para você conferir)"><span class="material-icons" style="font-size:14px;vertical-align:-2px">auto_awesome</span> preencher com IA</button>`:''}
         ${CAN_EDIT&&!cf.respondeu?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotPropostaDe(${ci})">Lançar proposta</button>`:''}
-        ${CAN_EDIT&&cf.respondeu&&cf.proposta_id?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotProposta(${cf.proposta_id})" title="editar a proposta"><span class="material-icons" style="font-size:13px;vertical-align:-2px">edit</span> editar</button><button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="cotExcluirProposta(${cf.proposta_id})" title="excluir a proposta">excluir</button>`:''}
+        ${CAN_EDIT&&cf.respondeu&&cf.proposta_id?`<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotPropostaRevisar(${cf.proposta_id})" title="o fornecedor mandou preço novo — registra a próxima revisão sem perder a atual"><span class="material-icons" style="font-size:13px;vertical-align:-2px">published_with_changes</span> nova revisão</button><button class="btn-ghost" style="padding:2px 9px" onclick="cotProposta(${cf.proposta_id})" title="corrigir a revisão atual (não cria revisão nova)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">edit</span> editar</button><button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="cotExcluirProposta(${cf.proposta_id})" title="excluir a proposta">excluir</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="cotDesconvidar(${cf.id})" title="tirar da concorrência">×</button>`:''}
       </div>
       ${cotConvContatos(cf)}
@@ -4086,12 +4144,14 @@ function cotRenderDetalhe(){
   if(!props.length){ html+='<div class="panel"><div class="empty">Nenhuma proposta ainda. Clique em "Cadastrar proposta" ou "Lançar proposta" de um convidado para montar o mapa.</div></div>'; }
   else{
     html+='<div class="panel">'+cotSecHead('table_view','Mapa de cotações','comparativo · melhor preço por item','<button class="btn-ghost" style="padding:4px 10px" onclick="cotUmaPagina()" title="ver este mapa em uma página"><span class="material-icons" style="font-size:14px;vertical-align:-3px">description</span> uma página</button>')+'<div style="overflow-x:auto"><table class="mtable" style="border:none"><thead><tr><th class="svc-h" style="text-align:left">Item</th>';
-    props.forEach(p=>{ html+=`<th style="min-width:120px">${esc(p.fornecedor_nome)}${p.prazo?`<div class="muted" style="font-size:9.5px;font-weight:400">${esc(p.prazo)}</div>`:''}</th>`; });
+    props.forEach(p=>{ const rev=p.revisao||0, hist=(p.historico||[]);
+      const revChip=(rev>0||hist.length)?`<div style="margin-top:2px"><span style="background:#eef4f0;color:var(--verde-d);font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:5px">rev ${rev}</span>${hist.length?` <span onclick="cotHistorico(${p.id})" style="font-size:9px;color:#5c7b8a;cursor:pointer;text-decoration:underline">histórico</span>`:''}</div>`:'';
+      html+=`<th style="min-width:120px">${esc(p.fornecedor_nome)}${p.prazo?`<div class="muted" style="font-size:9.5px;font-weight:400">${esc(p.prazo)}</div>`:''}${revChip}</th>`; });
     html+='<th style="min-width:140px;color:var(--verde-d)">🏆 Melhor Compra</th></tr></thead><tbody>';
     itens.forEach(it=>{ const b=best[it.id];
       html+=`<tr><td class="svc-c" style="text-align:left">${(c.multi_obra&&it.obra_nome)?`<span class="dchip" style="background:${obraCor(it.obra_id)};color:#fff;font-size:9px;margin-right:4px">${esc(String(it.obra_nome).slice(0,12))}</span>`:''}${(c.multi_coligada&&it.solic_coligada)?`<span class="dchip" style="background:${coligadaCor(it.solic_colidmov||it.solic_coligada)};color:#fff;font-size:9px;margin-right:4px" title="${esc(it.solic_coligada)}">${esc(colCurta(it.solic_coligada))}</span>`:''}${esc(it.descricao)}<small>${cotNum(it.quantidade)} ${esc(it.unidade||'')}${it.observacao?' · '+esc(it.observacao):''}</small></td>`;
       props.forEach(p=>{ const pi=(p.itens||{})[it.id]; const isB=b&&b.proposta_id===p.id;
-        html+=`<td style="text-align:center;padding:6px 8px;${isB?'background:#e7f6ee':''}">${pi&&pi.preco_total!=null?`<b>${BRL(pi.preco_unit)}</b>${isB?' 🏆':''}${pi.observacao?` <span class="material-icons" title="${esc(pi.observacao)}" data-obs="${esc(pi.observacao)}" data-forn="${esc(p.fornecedor_nome)}" data-item="${esc(it.descricao)}" style="font-size:13px;color:#5c7b8a;cursor:help;vertical-align:-2px" onclick="event.stopPropagation();cotObsShow(this)">info</span>`:''}<div class="muted" style="font-size:10px">${BRL(pi.preco_total)}</div>`:'<span class="muted">—</span>'}</td>`; });
+        html+=`<td style="text-align:center;padding:6px 8px;${isB?'background:#e7f6ee':''}">${pi&&pi.preco_total!=null?`<b>${BRLp(pi.preco_unit)}</b>${isB?' 🏆':''}${pi.observacao?` <span class="material-icons" title="${esc(pi.observacao)}" data-obs="${esc(pi.observacao)}" data-forn="${esc(p.fornecedor_nome)}" data-item="${esc(it.descricao)}" style="font-size:13px;color:#5c7b8a;cursor:help;vertical-align:-2px" onclick="event.stopPropagation();cotObsShow(this)">info</span>`:''}<div class="muted" style="font-size:10px">${BRL(pi.preco_total)}</div>`:'<span class="muted">—</span>'}</td>`; });
       html+=`<td style="text-align:center;padding:6px 8px;background:#eafaf0">${b?`<b>${BRL(b.preco_total)}</b><div class="muted" style="font-size:10px">${esc(b.fornecedor)}</div>`:'—'}</td></tr>`;
     });
     html+='<tr style="background:#f7faf8"><td class="svc-c" style="text-align:left;font-weight:800">TOTAL</td>';
@@ -4104,7 +4164,7 @@ function cotRenderDetalhe(){
   cotInboxLoad(c.id);                            // Fase 4: carrega as respostas de e-mail desta cotação (se houver)
 }
 // detecta os pedidos de compra que nasceram desta solicitação (vínculo EXATO por colidmov, que embute a coligada)
-async function cotDetectarPedido(c){
+async function cotDetectarPedido(c){ const CAN_EDIT=cotEditavel();
   const host=document.getElementById('cotPedDetect'); if(!host||!c||!c.num_solicitacao)return;
   try{ const r=await (await fetch('actions/pedidos.php?solicitacao='+encodeURIComponent(c.num_solicitacao)+'&coligada='+encodeURIComponent(c.solic_coligada||'')+'&colidmov='+encodeURIComponent(c.solic_colidmov||'')+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
     const peds=(r&&r.pedidos)||[];
@@ -4137,7 +4197,7 @@ async function cotInboxBuscar(){
     cotOpen(c.id);   // recarrega: os cards atualizam o estado e o painel da caixa recarrega
   }catch(e){toast('Falha: '+e.message);}
 }
-async function cotInboxLoad(cid){
+async function cotInboxLoad(cid){ const CAN_EDIT=cotEditavel();
   const host=document.getElementById('cotInboxPanel'); if(!host||!cid)return;
   try{ const r=await (await fetch('actions/inbox.php?listar=1&cotacao='+cid+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
     if((((COT.cur||{}).cotacao||{}).id)!=cid) return;   // o usuário já trocou de cotação — não sobrescreve o painel/estado da atual
@@ -4203,11 +4263,11 @@ function upPrecos(itens,props,m,best,verba){
     ranked.forEach((p,idx)=>{ const win=p.total!=null&&p.total===cheapest;
       h+=`<tr style="${win?'background:#eafaf0':''}"><td style="font-weight:700;text-align:center">${win?'🏆':(idx+1)}</td><td style="text-align:left;font-weight:${win?'800':'600'}">${esc(p.fornecedor_nome)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}</td>`;
       itens.forEach(it=>{ const pi=(p.itens||{})[it.id], bb=best[it.id], isBI=bb&&bb.proposta_id===p.id;
-        h+=`<td style="${isBI?'background:#d9f2e3;font-weight:700':''};vertical-align:top">${pi&&pi.preco_unit!=null?`${BRL(pi.preco_unit)}${pi.observacao?`<div style="margin-top:3px;background:#eef1f3;border:1px solid #dde2e6;border-radius:5px;padding:4px 6px;font-size:8.5px;font-weight:400;color:#4a5560;text-align:left;line-height:1.35;white-space:normal">${esc(pi.observacao)}</div>`:''}`:'<span style="color:#bbb">—</span>'}</td>`; });
+        h+=`<td style="${isBI?'background:#d9f2e3;font-weight:700':''};vertical-align:top">${pi&&pi.preco_unit!=null?`${BRLp(pi.preco_unit)}${pi.observacao?`<div style="margin-top:3px;background:#eef1f3;border:1px solid #dde2e6;border-radius:5px;padding:4px 6px;font-size:8.5px;font-weight:400;color:#4a5560;text-align:left;line-height:1.35;white-space:normal">${esc(pi.observacao)}</div>`:''}`:'<span style="color:#bbb">—</span>'}</td>`; });
       const vv=(verba>0&&p.total!=null)?verba-p.total:null;
       h+=`<td style="font-weight:800">${p.total!=null?BRL(p.total):'—'}</td>${verba>0?`<td style="font-size:10.5px;color:${vv==null?'#889':(vv>=0?'var(--ok)':'var(--pend)')}">${vv==null?'—':(vv>=0?'+':'')+BRL(vv)}</td>`:''}</tr>`; });
     if(itens.length>1){ h+=`<tr style="background:#f4f7f5;font-weight:800"><td style="text-align:center">★</td><td style="text-align:left">Melhor por item</td>`;
-      itens.forEach(it=>{ const bb=best[it.id]; h+=`<td style="color:var(--verde-d)">${bb?BRL(bb.preco_unit):'—'}</td>`; });
+      itens.forEach(it=>{ const bb=best[it.id]; h+=`<td style="color:var(--verde-d)">${bb?BRLp(bb.preco_unit):'—'}</td>`; });
       h+=`<td style="color:var(--verde-d)">${melhor?BRL(melhor):'—'}</td>${verba>0?'<td></td>':''}</tr>`; }
   } else {
     // ---- ITENS nas linhas (poucos fornecedores) ----
@@ -4217,8 +4277,8 @@ function upPrecos(itens,props,m,best,verba){
     itens.forEach(it=>{ const b=best[it.id];
       h+=`<tr><td style="text-align:left">${esc(it.descricao)}</td><td>${cotNum(it.quantidade)}</td><td>${esc(it.unidade||'')}</td>`;
       props.forEach(p=>{ const pi=(p.itens||{})[it.id], isB=b&&b.proposta_id===p.id;
-        h+=`<td style="${isB?'background:#d9f2e3;font-weight:700':''};vertical-align:top">${pi&&pi.preco_total!=null?`${BRL(pi.preco_unit)}${isB?' 🏆':''}<div style="font-size:9.5px;color:#889;font-weight:400">${BRL(pi.preco_total)}</div>${pi.observacao?`<div style="margin-top:3px;background:#eef1f3;border:1px solid #dde2e6;border-radius:5px;padding:4px 6px;font-size:8.5px;font-weight:400;color:#4a5560;text-align:left;line-height:1.35;white-space:normal">${esc(pi.observacao)}</div>`:''}`:'<span style="color:#bbb">—</span>'}</td>`; });
-      h+=`<td style="background:#eafaf0">${b?`<b>${BRL(b.preco_unit)}</b><div style="font-size:9.5px;color:#889">${BRL(b.preco_total)} · ${esc(b.fornecedor)}</div>`:'—'}</td></tr>`; });
+        h+=`<td style="${isB?'background:#d9f2e3;font-weight:700':''};vertical-align:top">${pi&&pi.preco_total!=null?`${BRLp(pi.preco_unit)}${isB?' 🏆':''}<div style="font-size:9.5px;color:#889;font-weight:400">${BRL(pi.preco_total)}</div>${pi.observacao?`<div style="margin-top:3px;background:#eef1f3;border:1px solid #dde2e6;border-radius:5px;padding:4px 6px;font-size:8.5px;font-weight:400;color:#4a5560;text-align:left;line-height:1.35;white-space:normal">${esc(pi.observacao)}</div>`:''}`:'<span style="color:#bbb">—</span>'}</td>`; });
+      h+=`<td style="background:#eafaf0">${b?`<b>${BRLp(b.preco_unit)}</b><div style="font-size:9.5px;color:#889">${BRL(b.preco_total)} · ${esc(b.fornecedor)}</div>`:'—'}</td></tr>`; });
     h+=`<tr style="background:#f4f7f5;font-weight:800"><td style="text-align:left">TOTAL GERAL</td><td></td><td></td>`;
     props.forEach(p=>{ const isBS=m.fornecedor_destaque===p.fornecedor_nome; h+=`<td style="${isBS?'color:var(--verde-d)':''}">${p.total!=null?BRL(p.total):'—'}</td>`; });
     h+=`<td style="background:#eafaf0;color:var(--verde-d)">${melhor?BRL(melhor):'—'}</td></tr>`;
@@ -4275,7 +4335,7 @@ function cotUmaPagina(){
 const DEFAULT_EQ=['Frete','Condição de pagamento','Descarregamento'];   // pontos padrão em TODA cotação (em branco até preencher)
 function cotEqPontos(c){ const p=((c&&c.equalizacao)||'').split(/\r?\n|\|/).map(s=>s.trim()).filter(Boolean); return p.length?p:DEFAULT_EQ.slice(); }
 /* CONFERÊNCIA DE CONTATOS do convidado (e-mail/telefone/WhatsApp) — indicador de preenchido + última atualização + edição inline (base p/ o disparo) */
-function cotConvContatos(cf){
+function cotConvContatos(cf){ const CAN_EDIT=cotEditavel();
   const at=cf.contatos_at||{}, fid=cf.fornecedor_id, editable=fid&&CAN_EDIT;
   const fld=(icon,key,val,ph,w)=>{ const v=(val||''), filled=!!String(v).trim(), when=at[key]?` <span class="muted" style="font-size:9.5px" title="última atualização">${D(String(at[key]).slice(0,10))}</span>`:'';
     return `<div style="display:flex;align-items:center;gap:3px"><span class="material-icons" style="font-size:13px;color:${filled?'var(--ok)':'var(--pend)'}" title="${filled?'preenchido':'faltando'}">${icon}</span>${editable?`<input data-ct="${key}" value="${esc(v)}" placeholder="${ph}" style="font-size:11px;padding:2px 5px;width:${w}px;border:1px solid ${filled?'var(--line)':'var(--pend)'};border-radius:5px">`:`<span style="font-size:11px;${filled?'':'color:var(--pend)'}">${filled?esc(v):'faltando'}</span>`}${when}</div>`; };
@@ -4292,7 +4352,7 @@ async function cotContatoSalvar(fid,btn){
     if(r.error){toast(r.error);return;} toast('Contatos salvos'); cotOpen(COT.cur.cotacao.id);
   }catch(e){toast('Falha: '+e.message);}
 }
-function cotEqualizaPanel(d){
+function cotEqualizaPanel(d){ const CAN_EDIT=cotEditavel();
   const c=d.cotacao||{}, props=d.propostas||[], pontos=cotEqPontos(c), editV=!!COT.eqEdit;
   const eqActions=`${CAN_EDIT?`<button class="btn-ghost" style="padding:3px 9px" onclick="cotEqualizaEdit()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit_note</span> Editar pontos</button>`:''}${(CAN_EDIT&&props.length&&pontos.length)?(editV?`<button class="btn-prim" style="padding:3px 10px" onclick="cotEqValoresSave()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">check</span> Salvar valores</button><button class="btn-ghost" style="padding:3px 9px" onclick="cotEqValoresCancel()">Cancelar</button>`:`<button class="btn-ghost" style="padding:3px 9px" onclick="cotEqValoresEdit()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">edit</span> Editar valores</button>`):''}`;
   let h=`<div class="panel" style="margin-bottom:10px">${cotSecHead('rule','Equalização','pontos a conferir por proposta',eqActions)}
@@ -4340,25 +4400,50 @@ async function cotEqualizaPontosSave(){
   }catch(e){ toast('Falha ao salvar'); }
 }
 function cotProposta(pid){
-  const d=COT.cur; let ex=null; if(pid) ex=(d.propostas||[]).find(p=>p.id===pid);
+  const d=COT.cur; let ex=null; if(pid) ex=(d.propostas||[]).find(p=>String(p.id)===String(pid));   // id vem STRING do PDO MySQL
   COT.prop={id:pid||0, precos:{}};
   (d.itens||[]).forEach(it=>{ const pi=ex?(ex.itens||{})[it.id]:null; COT.prop.precos[it.id]={preco_unit:pi&&pi.preco_unit!=null?pi.preco_unit:'',preco_total:pi&&pi.preco_total!=null?pi.preco_total:''}; });
   COT.prop.fornecedor_nome=ex?ex.fornecedor_nome:''; COT.prop.prazo=ex?ex.prazo:''; COT.prop.observacoes=ex?ex.observacoes:'';
-  COT.mode='proposta'; cotRenderProposta(); cotFornDatalist(((COT.cur||{}).cotacao||{}).categoria);
+  COT.mode='proposta'; cotRenderProposta();
 }
-async function cotFornDatalist(categoria){
-  // datalist de sugestão (input é texto livre) — NÃO filtra por categoria (evita lista vazia por taxonomia divergente)
-  try{ const d=await (await fetch('actions/fornecedores.php?limit=500')).json();
-    const dl=document.getElementById('prFForn'); if(dl) dl.innerHTML=(d.fornecedores||[]).map(f=>`<option value="${esc(f.nome)}">${esc(f.categoria||'')}</option>`).join('');
-  }catch(e){}
+// Autocomplete próprio do fornecedor (substitui o <datalist> nativo, que renderizava preto e filtrava mal).
+// Busca no SERVIDOR (?q= casa nome/itens/categoria/cidade) — por isso "life" acha "LIFE CONSTRUCOES".
+let _prFT=null;
+function cotFornSearch(el){
+  COT.prop.fornecedor_nome=el.value;                 // mantém o texto livre p/ salvar
+  const q=(el.value||'').trim();
+  clearTimeout(_prFT);
+  _prFT=setTimeout(async()=>{
+    const drop=document.getElementById('prFDrop'); if(!drop)return;
+    if(q.length<2){ drop.style.display='none'; drop.innerHTML=''; return; }
+    try{
+      const d=await (await fetch('actions/fornecedores.php?limit=40&q='+encodeURIComponent(q))).json();
+      const L=d.fornecedores||[]; COT.prop._fornList=L;
+      if(!L.length){ drop.innerHTML='<div class="muted" style="padding:10px 12px;font-size:12px">Nenhum fornecedor cadastrado com esse termo. Digite o nome livre e salve — ele entra na Concorrência.</div>'; drop.style.display='block'; return; }
+      drop.innerHTML=L.map((f,i)=>`<div onmousedown="cotFornPick(${i})" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f2f4f3" onmouseover="this.style.background='#f3f7f5'" onmouseout="this.style.background='#fff'">
+        <b style="font-size:12.5px">${esc(f.nome)}</b>
+        <div class="muted" style="font-size:10.5px">${esc(f.categoria||'sem categoria')}${f.cidade?' · '+esc(f.cidade):''}${f.tipo?' · '+esc(f.tipo):''}${f.itens?' · '+esc((''+f.itens).slice(0,60)):''}</div></div>`).join('');
+      drop.style.display='block';
+    }catch(e){ drop.style.display='none'; }
+  },220);
 }
+function cotFornPick(i){
+  const f=(COT.prop._fornList||[])[i]; if(!f)return;
+  const el=document.getElementById('prF'); if(el)el.value=f.nome;
+  COT.prop.fornecedor_nome=f.nome;
+  const drop=document.getElementById('prFDrop'); if(drop){ drop.style.display='none'; drop.innerHTML=''; }
+}
+function cotFornBlur(){ setTimeout(()=>{ const drop=document.getElementById('prFDrop'); if(drop) drop.style.display='none'; },160); }
 function cotRenderProposta(){
   const d=COT.cur,c=d.cotacao,itens=d.itens||[],pr=COT.prop;
+  const ehRev=!!pr.revisarDe, titulo=ehRev?('Nova revisão (rev '+((pr.revisaoBase||0)+1)+')'):(pr.id?'Editar':'Cadastrar')+' proposta';
+  const banner=ehRev?`<div class="dmini" style="margin-bottom:10px;background:#fff8ec;border:1px solid #f0e2c2;padding:8px 12px;border-radius:9px">📝 Você está registrando a <b>revisão ${(pr.revisaoBase||0)+1}</b> de <b>${esc(pr.fornecedor_nome||'')}</b>. Os preços vieram da revisão anterior — ajuste o que o fornecedor mudou. A anterior fica guardada no histórico (não se perde).</div>`:'';
   document.getElementById('cotwrap').innerHTML=`<div class="panel">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="cotRenderDetalhe()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar ao mapa</button><b style="font-size:15px">${pr.id?'Editar':'Cadastrar'} proposta · ${esc(c.titulo)}</b></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="cotRenderDetalhe()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar ao mapa</button><b style="font-size:15px">${titulo} · ${esc(c.titulo)}</b></div>
+    ${banner}
     <div style="max-width:860px">
     <div style="display:grid;grid-template-columns:1fr 220px;gap:10px">
-      ${cotFld('Fornecedor *','<input id="prF" list="prFForn" autocomplete="off" style="width:100%" value="'+esc(pr.fornecedor_nome||'')+'" placeholder="Fornecedor (sugestões por categoria)"><datalist id="prFForn"></datalist>')}
+      ${cotFld('Fornecedor *','<div style="position:relative"><input id="prF" autocomplete="off" oninput="cotFornSearch(this)" onfocus="cotFornSearch(this)" onblur="cotFornBlur()" style="width:100%" value="'+esc(pr.fornecedor_nome||'')+'" placeholder="Digite o nome do fornecedor…"><div id="prFDrop" style="display:none;position:absolute;left:0;right:0;top:calc(100% + 3px);z-index:60;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.16);max-height:290px;overflow:auto"></div></div>')}
       ${cotFld('Prazo de entrega','<input id="prP" style="width:100%" value="'+esc(pr.prazo||'')+'" placeholder="Ex.: 15 dias">')}
     </div>
     ${cotFld('Observações','<textarea id="prO" rows="2" style="width:100%">'+esc(pr.observacoes||'')+'</textarea>','margin-top:8px')}
@@ -4367,22 +4452,24 @@ function cotRenderProposta(){
       <div style="display:grid;grid-template-columns:minmax(0,1fr) 130px 150px;gap:10px;padding:7px 12px;background:#fafbfb;border-bottom:1px solid var(--line);font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.3px"><span>Item</span><span style="text-align:right">Preço unit.</span><span style="text-align:right">Preço total</span></div>
       ${itens.map((it,ix)=>`<div style="display:grid;grid-template-columns:minmax(0,1fr) 130px 150px;gap:10px;align-items:center;padding:9px 12px;${ix<itens.length-1?'border-bottom:1px solid #f1f3f2':''}">
       <div><b style="font-size:12.5px">${esc(it.descricao)}</b> <span class="muted" style="font-size:11px">· ${cotNum(it.quantidade)} ${esc(it.unidade||'')}</span>${it.observacao?`<div class="muted" style="font-size:10.5px;margin-top:1px">${esc(it.observacao)}</div>`:''}</div>
-      <input type="text" inputmode="decimal" id="prU${it.id}" value="${pr.precos[it.id].preco_unit!==''?fmtMoney(pr.precos[it.id].preco_unit):''}" oninput="cotPrecoIn(${it.id},'u',this)" onblur="moneyBlur(this)" placeholder="0,00" style="width:100%;text-align:right">
-      <input type="text" inputmode="decimal" id="prT${it.id}" value="${pr.precos[it.id].preco_total!==''?fmtMoney(pr.precos[it.id].preco_total):''}" oninput="cotPrecoIn(${it.id},'t',this)" onblur="moneyBlur(this)" placeholder="0,00" style="width:100%;text-align:right"></div>`).join('')}</div>
+      <input type="text" inputmode="decimal" id="prU${it.id}" value="${pr.precos[it.id].preco_unit!==''?fmtMoneyN(pr.precos[it.id].preco_unit,4):''}" oninput="cotPrecoIn(${it.id},'u',this)" onblur="moneyBlurN(this,4)" placeholder="0,00" title="aceita até 4 casas decimais" style="width:100%;text-align:right">
+      <input type="text" inputmode="decimal" id="prT${it.id}" value="${pr.precos[it.id].preco_total!==''?fmtMoneyN(pr.precos[it.id].preco_total,4):''}" oninput="cotPrecoIn(${it.id},'t',this)" onblur="moneyBlurN(this,4)" placeholder="0,00" style="width:100%;text-align:right"></div>`).join('')}</div>
     <div style="margin-top:14px"><button class="btn-prim" onclick="cotSalvarProposta()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar proposta</button></div>
     </div></div>`;
 }
 function cotPrecoIn(iid,which,el){
-  maskMoneyInput(el);                              // reformata ao vivo (150000 -> 150.000)
+  maskMoneyInputN(el,4);                            // reformata ao vivo, aceitando até 4 casas decimais
   const n=parseBRLInput(el.value);                 // número (ou null)
   const p=COT.prop.precos[iid], it=(COT.cur.itens||[]).find(x=>x.id===iid), q=it&&it.quantidade?Number(it.quantidade):null;
-  if(which==='u'){ p.preco_unit=(n==null?'':n); if(q&&n!=null){ p.preco_total=+(n*q).toFixed(2); const el2=document.getElementById('prT'+iid); if(el2)el2.value=fmtMoney(p.preco_total); } }
+  if(which==='u'){ p.preco_unit=(n==null?'':n); if(q&&n!=null){ p.preco_total=+(n*q).toFixed(4); const el2=document.getElementById('prT'+iid); if(el2)el2.value=fmtMoneyN(p.preco_total,4); } }
   else p.preco_total=(n==null?'':n);
 }
 async function cotSalvarProposta(){
   const forn=val('prF').trim(); if(!forn){toast('Informe o fornecedor');return;}
   const itens=Object.entries(COT.prop.precos).map(([iid,p])=>({cotacao_item_id:Number(iid),preco_unit:p.preco_unit!==''?Number(p.preco_unit):'',preco_total:p.preco_total!==''?Number(p.preco_total):''}));
-  const body={acao:'proposta',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:COT.prop.id||undefined,fornecedor_nome:forn,prazo:val('prP'),observacoes:val('prO'),itens};
+  const body=COT.prop.revisarDe
+    ? {acao:'proposta_revisar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:COT.prop.revisarDe,fornecedor_nome:forn,fornecedor_id:COT.prop.fornecedor_id||undefined,prazo:val('prP'),observacoes:val('prO'),itens}
+    : {acao:'proposta',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:COT.prop.id||undefined,fornecedor_nome:forn,prazo:val('prP'),observacoes:val('prO'),itens};
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error);return;}
     // garante que o fornecedor da proposta esteja na Concorrência (p/ editar/excluir a proposta ali)
@@ -4393,8 +4480,34 @@ async function cotSalvarProposta(){
       const merged=Object.assign(base,COT.prop.eqIA);
       try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'equaliza_salvar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:r.proposta_id,equaliza:merged})}); }catch(e){}
     }
-    toast('Proposta salva'); cotOpen(COT.cur.cotacao.id);
+    toast(COT.prop.revisarDe?('Revisão '+(r.revisao||'')+' registrada'):'Proposta salva'); cotOpen(COT.cur.cotacao.id);
   }catch(e){toast('Falha: '+e.message);}
+}
+// abre o form pré-preenchido com a proposta VIGENTE p/ registrar a próxima revisão (a anterior fica no histórico)
+function cotPropostaRevisar(pid){
+  const d=COT.cur, ex=(d.propostas||[]).find(p=>String(p.id)===String(pid)); if(!ex){toast('Proposta não encontrada');return;}   // id STRING no MySQL
+  COT.prop={id:0, revisarDe:pid, revisaoBase:ex.revisao||0, fornecedor_id:ex.fornecedor_id||null, precos:{}};
+  (d.itens||[]).forEach(it=>{ const pi=(ex.itens||{})[it.id]; COT.prop.precos[it.id]={preco_unit:pi&&pi.preco_unit!=null?pi.preco_unit:'',preco_total:pi&&pi.preco_total!=null?pi.preco_total:''}; });
+  COT.prop.fornecedor_nome=ex.fornecedor_nome; COT.prop.prazo=ex.prazo||''; COT.prop.observacoes=ex.observacoes||'';
+  COT.mode='proposta'; cotRenderProposta();
+}
+// linha do tempo das revisões de um fornecedor, com % que subiu/desceu por item vs a revisão anterior
+function cotHistorico(pid){
+  const d=COT.cur, cur=(d.propostas||[]).find(p=>String(p.id)===String(pid)); if(!cur){toast('Proposta não encontrada');return;}   // id STRING no MySQL
+  const itens=d.itens||[];
+  const chain=[...(cur.historico||[]).map(h=>Object.assign({},h)), {id:cur.id,revisao:cur.revisao||0,total:cur.total,created_at:cur.created_at,itens:cur.itens||{},vigente:true}];
+  chain.sort((a,b)=>(a.revisao||0)-(b.revisao||0));
+  const pct=(nv,ov)=>{ if(ov==null||ov===0||nv==null) return null; return (nv-ov)/ov*100; };
+  const delta=p=>{ if(p==null) return ''; const dn=p<-0.05, up=p>0.05; const col=dn?'#1a8a4a':(up?'#c0392b':'#8a9299'), ar=dn?'▼':(up?'▲':'='); return ` <span style="color:${col};font-size:9.5px">${ar}${Math.abs(p).toFixed(1)}%</span>`; };
+  let h='<table class="mtable" style="border:none;width:100%"><thead><tr><th style="text-align:left">Item</th>'+chain.map(r=>`<th>rev ${r.revisao}${r.vigente?' <span style="color:var(--verde-d)">•vigente</span>':''}${r.created_at?`<div class="muted" style="font-size:9px;font-weight:400">${cotFmtDT(r.created_at)}</div>`:''}</th>`).join('')+'</tr></thead><tbody>';
+  itens.forEach(it=>{ h+=`<tr><td style="text-align:left">${esc(it.descricao)}</td>`; let prev=null;
+    chain.forEach(r=>{ const pi=(r.itens||{})[it.id]; const u=pi&&pi.preco_unit!=null?pi.preco_unit:null; const dl=prev!=null?delta(pct(u,prev)):''; h+=`<td style="text-align:center;white-space:nowrap">${u!=null?BRLp(u):'—'}${dl}</td>`; prev=u; });
+    h+='</tr>'; });
+  h+='<tr style="background:#f7faf8;font-weight:800"><td style="text-align:left">TOTAL</td>'; let pt=null;
+  chain.forEach(r=>{ const t=r.total; const dl=pt!=null?delta(pct(t,pt)):''; h+=`<td style="text-align:center;white-space:nowrap">${t!=null?BRL(t):'—'}${dl}</td>`; pt=t; });
+  h+='</tr></tbody></table>';
+  let ov=document.getElementById('cotHistOv'); if(!ov){ov=document.createElement('div');ov.id='cotHistOv';ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';document.body.appendChild(ov);} ov.onclick=e=>{if(e.target===ov)ov.remove();};
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:940px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:16px">Histórico de revisões · ${esc(cur.fornecedor_nome)}</b><span class="material-icons" style="cursor:pointer;color:var(--muted)" onclick="document.getElementById('cotHistOv').remove()">close</span></div><div class="muted" style="font-size:12px;margin:4px 0 10px">Cada revisão que o fornecedor enviou. <span style="color:#1a8a4a">▼ caiu</span> · <span style="color:#c0392b">▲ subiu</span> vs a revisão anterior. A <b>vigente</b> é a que entra no mapa comparativo.</div><div style="overflow:auto;max-height:70vh">${h}</div></div>`;
 }
 async function cotFinalizar(){ const c=COT.cur.cotacao, novo=c.status==='finalizada'?'aguardando':'finalizada';
   let numPedido;
@@ -4439,7 +4552,7 @@ async function cotPedidoVer(numero,coligadaCod){
     ov.innerHTML=shell(`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><b style="font-size:15px"><span class="material-icons" style="font-size:17px;vertical-align:-3px;color:var(--verde-d)">receipt_long</span> Pedido de compra ${esc(p.numero)}</b>${close}</div>
       <div class="muted" style="font-size:11.5px;margin-bottom:10px">${esc(p.coligada||'')}${p.data?' · '+D(String(p.data).slice(0,10)):''}${p.status?' · TOTVS '+esc(p.status):''} · ${p.n_itens} item(ns) · Fornecedor(es): ${esc(forn)}</div>
       <div style="overflow-x:auto"><table class="mtable" style="border:none"><thead><tr><th class="svc-h" style="text-align:left">Item</th><th style="text-align:right">Qtde</th><th style="text-align:right">Preço unit.</th><th style="text-align:right">Total</th></tr></thead><tbody>
-      ${p.itens.map(it=>`<tr><td class="svc-c" style="text-align:left;font-size:12px">${esc(it.produto)}<small>${it.codprd?esc(it.codprd)+' · ':''}forn. ${esc(it.fornecedor_cod||'—')}</small></td><td style="text-align:right">${cotNum(it.qtd)} ${esc(it.und||'')}</td><td style="text-align:right">${BRL(it.preco_unit)}</td><td style="text-align:right"><b>${BRL(it.total)}</b></td></tr>`).join('')}
+      ${p.itens.map(it=>`<tr><td class="svc-c" style="text-align:left;font-size:12px">${esc(it.produto)}<small>${it.codprd?esc(it.codprd)+' · ':''}forn. ${esc(it.fornecedor_cod||'—')}</small></td><td style="text-align:right">${cotNum(it.qtd)} ${esc(it.und||'')}</td><td style="text-align:right">${BRLp(it.preco_unit)}</td><td style="text-align:right"><b>${BRL(it.total)}</b></td></tr>`).join('')}
       <tr style="background:#f7faf8"><td class="svc-c" style="text-align:left;font-weight:800">TOTAL</td><td></td><td></td><td style="text-align:right;font-weight:800;color:var(--verde-d)">${BRL(p.total)}</td></tr>
       </tbody></table></div>
       <div class="dmini" style="margin-top:8px">Dados do TOTVS (somente leitura). O total usa preço unit × qtde quando o valor líquido ainda não foi gravado no TOTVS.</div>`);
@@ -4517,7 +4630,7 @@ async function cotIAAplicar(fornNome,draft,meta){ const d=COT.cur; draft=draft||
   const byId={}; (draft.itens||[]).forEach(x=>{ if(x&&x.item_id!=null)byId[x.item_id]=x; });
   let preench=0;
   (d.itens||[]).forEach(it=>{ const x=byId[it.id]; if(x&&x.preco_unit!=null&&x.preco_unit!==''){ const u=Number(x.preco_unit);
-    if(!isNaN(u)){ COT.prop.precos[it.id].preco_unit=u; const q=it.quantidade?Number(it.quantidade):null; if(q)COT.prop.precos[it.id].preco_total=+(u*q).toFixed(2); preench++; } } });
+    if(!isNaN(u)){ COT.prop.precos[it.id].preco_unit=u; const q=it.quantidade?Number(it.quantidade):null; if(q)COT.prop.precos[it.id].preco_total=+(u*q).toFixed(4); preench++; } } });
   COT.prop.fornecedor_nome=fornNome; COT.prop.prazo=draft.prazo_entrega||'';
   const partes=[];
   if(Array.isArray(draft.extras)&&draft.extras.length) partes.push('Custos adicionais: '+draft.extras.map(e=>`${e.descricao||'extra'}${(e.valor!=null&&e.valor!=='')?' '+BRL(Number(e.valor)):''}`).join('; '));
@@ -4538,7 +4651,7 @@ async function cotIAAplicar(fornNome,draft,meta){ const d=COT.cur; draft=draft||
     if(add.length){ d.cotacao.equalizacao=[...pts,...add].join('\n'); novos=add.length;
       try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'equaliza_salvar',me:EU&&EU.bitrix_id,cotacao_id:d.cotacao.id,equalizacao:d.cotacao.equalizacao})}); }catch(e){} }
   }
-  COT.mode='proposta'; cotRenderProposta(); cotFornDatalist(((COT.cur||{}).cotacao||{}).categoria);
+  COT.mode='proposta'; cotRenderProposta();
   toast(preench+' item(ns) preenchido(s) pela IA'+(novos?' · '+novos+' ponto(s) de equalização novo(s)':'')+((meta&&meta.avisos&&meta.avisos.length)?' · '+meta.avisos.length+' aviso(s)':'')); }
 /* ===== E-MAIL DE COTAÇÃO — Fase 2: compositor (prévia editável, individual por fornecedor; envio real na próxima fase) ===== */
 async function cotEmailAbrir(cid){
@@ -4662,7 +4775,7 @@ async function cotPropIAResConfirm(){ const R=COT.propIAres; if(!R)return; let f
 async function cotDelAnexo(id){ if(!confirm('Excluir este anexo?'))return;
   try{ await fetch('actions/cotacao_anexo.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
 /* --- Concorrência: convidar / desconvidar / lançar proposta de um convidado --- */
-function cotPropostaDe(ci){ const cf=((COT.cur||{}).convidados||[])[ci]; if(!cf)return; cotProposta(0); COT.prop.fornecedor_nome=cf.fornecedor_nome; cotRenderProposta(); cotFornDatalist(((COT.cur||{}).cotacao||{}).categoria); }
+function cotPropostaDe(ci){ const cf=((COT.cur||{}).convidados||[])[ci]; if(!cf)return; cotProposta(0); COT.prop.fornecedor_nome=cf.fornecedor_nome; cotRenderProposta(); }
 async function cotDesconvidar(id){ if(!confirm('Tirar este fornecedor da concorrência?'))return;
   try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'desconvidar',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
 let _cotCB;

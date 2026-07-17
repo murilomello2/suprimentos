@@ -24,14 +24,14 @@ function cot_can_edit($pdo, $me, $obra) {
     if (can_edit_obra($perms, max(1, (int)$obra))) return $perms;
     return null;
 }
-// Gerir a cotação (excluir / editar itens): ADMIN, ou quem CRIOU, ou quem edita a obra dela.
+// Gerir/editar/excluir uma cotação EXISTENTE: só ADMIN ou quem CRIOU (comprador não mexe nas dos outros).
+// (Criar cotação nova segue liberado por obra via cot_can_edit — isso não é "editar a dos outros".)
 function cot_can_manage($pdo, $me, $cid) {
-    $q = $pdo->prepare("SELECT COALESCE(obra_id,1) AS obra, criado_por FROM cotacao WHERE id=?"); $q->execute([(int)$cid]); $r = $q->fetch();
+    $q = $pdo->prepare("SELECT criado_por FROM cotacao WHERE id=?"); $q->execute([(int)$cid]); $r = $q->fetch();
     if (!$r) return false;
     $perms = user_perms($pdo, $me);
     if (!empty($perms['perm_admin'])) return true;
-    if ($me !== null && $me !== '' && (string)$r['criado_por'] === (string)$me) return true;
-    return (bool)cot_can_edit($pdo, $me, (int)$r['obra'] ?: 1);
+    return ($me !== null && $me !== '' && (string)$r['criado_por'] === (string)$me);
 }
 // insere fornecedores CONVIDADOS na concorrência (dedup por fornecedor_id/nome)
 function cot_insert_convidados($pdo, $cid, $lista) {
@@ -90,13 +90,46 @@ function cot_get_full($pdo, $id) {
     if (empty($cot['obra_nome']) && !empty($cot['obra_livre'])) $cot['obra_nome'] = $cot['obra_livre'];   // cotação importada (obra por texto)
     $iq = $pdo->prepare("SELECT * FROM cotacao_item WHERE cotacao_id=? ORDER BY ordem, id"); $iq->execute([$id]);
     $itens = $iq->fetchAll();
-    // obra por item (cotação MULTI-OBRA): resolve o nome p/ o front agrupar/rotular no mapa
-    $obraNomes = []; foreach ($pdo->query("SELECT id, nome FROM obra") as $o) $obraNomes[(int)$o['id']] = $o['nome'];
+    // obra por item (cotação MULTI-OBRA): resolve nome + cidade p/ o front agrupar/rotular e p/ o texto de negociação
+    // (cidade existe no MySQL de produção; no SQLite-sandbox pode faltar → fallback sem cidade)
+    $obraNomes = []; $obraCidades = [];
+    try { $orows = $pdo->query("SELECT id, nome, cidade FROM obra"); }
+    catch (Throwable $e) { $orows = $pdo->query("SELECT id, nome FROM obra"); }
+    foreach ($orows as $o) { $obraNomes[(int)$o['id']] = $o['nome']; $obraCidades[(int)$o['id']] = (string)($o['cidade'] ?? ''); }
     $obrasNoItens = [];
-    foreach ($itens as &$it) { $oid = (int)($it['obra_id'] ?? 0); $it['obra_nome'] = $oid ? ($obraNomes[$oid] ?? '') : ''; if ($oid) $obrasNoItens[$oid] = $it['obra_nome']; }
+    // CNPJ da coligada por item: cod do prefixo do colidmov ("27-20628"→27) senão pelo nome da coligada
+    $cnpjColidmov = function($cm, $col) {
+        $cod = 0;
+        if ($cm !== '' && strpos($cm, '-') !== false) { $cc = (int)substr($cm, 0, strpos($cm, '-')); if ($cc > 0) $cod = $cc; }
+        if (!$cod && $col !== '' && function_exists('coligada_cod_de_nome')) $cod = (int)coligada_cod_de_nome($col);
+        return $cod && function_exists('coligada_cnpj') ? (string)coligada_cnpj($cod) : '';
+    };
+    foreach ($itens as &$it) {
+        $oid = (int)($it['obra_id'] ?? 0);
+        $it['obra_nome'] = $oid ? ($obraNomes[$oid] ?? '') : '';
+        $it['cidade'] = $oid ? ($obraCidades[$oid] ?? '') : '';
+        $it['sc'] = trim((string)($it['solic_numero'] ?? ''));
+        $it['coligada'] = trim((string)($it['solic_coligada'] ?? ''));
+        $it['cnpj'] = $cnpjColidmov(trim((string)($it['solic_colidmov'] ?? '')), $it['coligada']);
+        if ($oid) $obrasNoItens[$oid] = $it['obra_nome'];
+    }
     unset($it);
     $cot['multi_obra'] = count($obrasNoItens) > 1;
     $cot['obras_itens'] = $obrasNoItens;
+    // BLOCOS por OBRA (agrupamento p/ a lista, o texto de WhatsApp, a carta e o PDF): cada bloco carrega
+    // obra/cidade/coligada/CNPJ + as SCs + os itens. Chave = obra_id (senão coligada; senão "geral").
+    $blocos = [];
+    foreach ($itens as $it) {
+        $oid = (int)($it['obra_id'] ?? 0);
+        $chave = $oid ? ('o'.$oid) : ($it['coligada'] !== '' ? ('c'.strtolower($it['coligada'])) : 'geral');
+        if (!isset($blocos[$chave])) $blocos[$chave] = ['chave'=>$chave, 'obra_id'=>$oid ?: null,
+            'obra_nome'=>$it['obra_nome'], 'cidade'=>$it['cidade'], 'coligada'=>$it['coligada'], 'cnpj'=>$it['cnpj'], 'scs'=>[], 'itens'=>[]];
+        if ($it['sc'] !== '' && !in_array($it['sc'], $blocos[$chave]['scs'], true)) $blocos[$chave]['scs'][] = $it['sc'];
+        if ($it['cnpj'] !== '' && $blocos[$chave]['cnpj'] === '') $blocos[$chave]['cnpj'] = $it['cnpj'];
+        if ($it['cidade'] !== '' && $blocos[$chave]['cidade'] === '') $blocos[$chave]['cidade'] = $it['cidade'];
+        $blocos[$chave]['itens'][] = ['id'=>(int)$it['id'], 'descricao'=>$it['descricao'], 'unidade'=>$it['unidade'], 'quantidade'=>$it['quantidade'], 'observacao'=>$it['observacao'], 'sc'=>$it['sc']];
+    }
+    $cot['blocos_obra'] = array_values($blocos);
     // FASE 2 — agrupa os itens por COLIGADA (multi-PC): cada coligada tem seu Nº de Pedido de Compra próprio.
     // coligada_cod: 1º do prefixo do colidmov ("27-20628" → 27); senão, pelo nome. num_pedido: da tabela cotacao_pedido.
     $colItens = [];
@@ -129,18 +162,34 @@ function cot_get_full($pdo, $id) {
     } catch (Throwable $e) {}
     $cot['multi_coligada'] = count($colItens) > 1;
     $cot['coligadas_itens'] = array_values($colItens);
+    // REVISÕES: busca TODAS as propostas; só a VIGENTE (ativa=1) entra no mapa; as anteriores viram histórico da cadeia.
     $pq = $pdo->prepare("SELECT * FROM cotacao_proposta WHERE cotacao_id=? ORDER BY (total IS NULL), total, id"); $pq->execute([$id]);
-    $propostas = $pq->fetchAll();
-    if ($propostas) {
-        $ids = implode(',', array_map(fn($p)=>(int)$p['id'], $propostas));
-        $piq = $pdo->query("SELECT * FROM cotacao_proposta_item WHERE proposta_id IN ($ids)");
-        $byp = [];
-        foreach ($piq->fetchAll() as $r) $byp[(int)$r['proposta_id']][(int)$r['cotacao_item_id']] =
-            ['preco_unit'=>$r['preco_unit']!==null?(float)$r['preco_unit']:null, 'preco_total'=>$r['preco_total']!==null?(float)$r['preco_total']:null, 'observacao'=>$r['observacao']];
-        foreach ($propostas as &$p) { $p['total'] = $p['total']!==null?(float)$p['total']:null; $p['itens'] = $byp[(int)$p['id']] ?? [];
-            $p['equaliza'] = !empty($p['equaliza'] ?? '') ? (json_decode($p['equaliza'], true) ?: []) : []; }
-        unset($p);
+    $allProp = $pq->fetchAll();
+    $byp = [];
+    if ($allProp) {
+        $ids = implode(',', array_map(fn($p)=>(int)$p['id'], $allProp));
+        foreach ($pdo->query("SELECT * FROM cotacao_proposta_item WHERE proposta_id IN ($ids)")->fetchAll() as $r)
+            $byp[(int)$r['proposta_id']][(int)$r['cotacao_item_id']] =
+                ['preco_unit'=>$r['preco_unit']!==null?(float)$r['preco_unit']:null, 'preco_total'=>$r['preco_total']!==null?(float)$r['preco_total']:null, 'observacao'=>$r['observacao']];
     }
+    $chain = fn($p)=> ((int)($p['raiz_id'] ?? 0)) ?: (int)$p['id'];   // raiz da cadeia de revisões
+    $isAtiva = fn($p)=> ((int)($p['ativa'] ?? 1)) === 1;
+    $histChain = [];
+    foreach ($allProp as $p) {
+        if ($isAtiva($p)) continue;
+        $histChain[$chain($p)][] = ['id'=>(int)$p['id'], 'revisao'=>(int)($p['revisao'] ?? 0),
+            'total'=>$p['total']!==null?(float)$p['total']:null, 'prazo'=>$p['prazo'], 'observacoes'=>$p['observacoes'],
+            'created_at'=>$p['created_at'], 'itens'=>$byp[(int)$p['id']] ?? []];
+    }
+    foreach ($histChain as &$h) usort($h, fn($a,$b)=>($a['revisao']<=>$b['revisao'])); unset($h);
+    $propostas = array_values(array_filter($allProp, $isAtiva));
+    foreach ($propostas as &$p) {
+        $p['total'] = $p['total']!==null?(float)$p['total']:null; $p['itens'] = $byp[(int)$p['id']] ?? [];
+        $p['equaliza'] = !empty($p['equaliza'] ?? '') ? (json_decode($p['equaliza'], true) ?: []) : [];
+        $p['revisao'] = (int)($p['revisao'] ?? 0);
+        $p['historico'] = $histChain[$chain($p)] ?? [];
+    }
+    unset($p);
     $anx = $pdo->prepare("SELECT id, proposta_id, fornecedor_id, fornecedor_nome, nome, tamanho, mime, url FROM cotacao_anexo WHERE cotacao_id=? AND (fornecedor_nome IS NULL OR fornecedor_nome<>'__CARTA__') ORDER BY id"); $anx->execute([$id]);
     // fornecedores CONVIDADOS (concorrência) + status respondeu (deriva de proposta com mesmo fornecedor)
     $cf = $pdo->prepare("SELECT cf.*, f.email AS f_email, f.telefone AS f_telefone, f.whatsapp AS f_whatsapp, f.contatos_at AS f_contatos_at
@@ -187,11 +236,11 @@ try {
         if (isset($_GET['obra']) && $_GET['obra'] !== '') { $where = 'WHERE c.obra_id=?'; $args[] = (int)$_GET['obra']; }
         $q = $pdo->prepare("SELECT c.id, c.obra_id, c.servico_id, c.titulo, c.categoria, c.tipo_servico, c.verba,
                                    c.num_solicitacao, c.num_pedido,
-                                   c.status, c.aprovacao, c.criado_nome, c.created_at, COALESCE(NULLIF(o.nome,''), c.obra_livre) AS obra_nome,
+                                   c.status, c.aprovacao, c.criado_por, c.criado_nome, c.created_at, COALESCE(NULLIF(o.nome,''), c.obra_livre) AS obra_nome,
                                    (SELECT COUNT(*) FROM cotacao_item ci WHERE ci.cotacao_id=c.id) AS n_itens,
-                                   (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id) AS n_propostas,
+                                   (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND (cp.ativa=1 OR cp.ativa IS NULL)) AS n_propostas,
                                    (SELECT COUNT(*) FROM cotacao_fornecedor cf WHERE cf.cotacao_id=c.id) AS n_convidados,
-                                   (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND cp.total>0) AS melhor_oferta,
+                                   (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND cp.total>0 AND (cp.ativa=1 OR cp.ativa IS NULL)) AS melhor_oferta,
                                    (SELECT COUNT(*) FROM cotacao_email_in ei WHERE ei.cotacao_id=c.id AND ei.status='novo') AS n_inbound_novo
                             FROM cotacao c LEFT JOIN obra o ON o.id=c.obra_id
                             $where ORDER BY c.id DESC LIMIT 500");
@@ -263,7 +312,7 @@ try {
     if ($acao === 'convidar') {   // adiciona fornecedores convidados a uma cotação existente
         $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
         $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
-        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
         $pdo->beginTransaction();
         $n = cot_insert_convidados($pdo, $cid, $in['convidados'] ?? $in['fornecedores'] ?? []);
         $pdo->commit();
@@ -273,7 +322,7 @@ try {
         $id = (int)($in['id'] ?? 0); if (!$id) throw new Exception('id obrigatório');
         $row = $pdo->prepare("SELECT c.obra_id FROM cotacao_fornecedor cf JOIN cotacao c ON c.id=cf.cotacao_id WHERE cf.id=?"); $row->execute([$id]);
         $obra = (int)($row->fetchColumn() ?: 1);
-        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão.']); exit; }
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
         $pdo->prepare("DELETE FROM cotacao_fornecedor WHERE id=?")->execute([$id]);
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
@@ -281,7 +330,7 @@ try {
     if ($acao === 'verba_salvar') {   // edita/puxa a verba prevista da cotação
         $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
         $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
-        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
         $verba = (float)($in['verba'] ?? 0);
         $pdo->prepare("UPDATE cotacao SET verba=?, verba_origem=?, updated_at=? WHERE id=?")
             ->execute([$verba ?: null, trim((string)($in['verba_origem'] ?? 'manual')), date('c'), $cid]);
@@ -291,7 +340,7 @@ try {
     if ($acao === 'numeros_salvar') {   // nº da SOLICITAÇÃO de compra (SC) e/ou nº do PEDIDO de compra (PC)
         $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
         $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
-        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
         $sets = []; $args = [];
         if (array_key_exists('num_solicitacao', $in)) { $sets[] = 'num_solicitacao=?'; $args[] = trim((string)$in['num_solicitacao']) ?: null; }
         if (array_key_exists('num_pedido', $in))      { $sets[] = 'num_pedido=?';      $args[] = trim((string)$in['num_pedido']) ?: null; }
@@ -304,7 +353,7 @@ try {
     if ($acao === 'pedido_coligada_salvar') {   // FASE 2 — Nº do PEDIDO de compra de UMA coligada (multi-PC por coligada)
         $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
         $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
-        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
         $col = trim((string)($in['coligada'] ?? '')); $cod = (int)($in['coligada_cod'] ?? 0);
         $cm  = trim((string)($in['colidmov'] ?? '')); $pc = trim((string)($in['num_pedido'] ?? ''));
         if ($col === '' && $cod === 0) throw new Exception('coligada obrigatória');
@@ -328,7 +377,7 @@ try {
     if ($acao === 'equaliza_salvar') {   // pontos de equalização da cotação e/ou os valores por proposta
         $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
         $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
-        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
         // 1) lista de pontos a conferir (texto livre, 1 por linha) — no header da cotação
         if (array_key_exists('equalizacao', $in)) {
             $pdo->prepare("UPDATE cotacao SET equalizacao=?, updated_at=? WHERE id=?")->execute([trim((string)$in['equalizacao']), date('c'), $cid]);
@@ -361,7 +410,7 @@ try {
     if ($acao === 'proposta') {
         $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
         $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
-        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
         $forn = trim((string)($in['fornecedor_nome'] ?? '')); if ($forn === '') throw new Exception('fornecedor obrigatório');
         $itens = (array)($in['itens'] ?? []);
         $total = 0.0;
@@ -390,12 +439,50 @@ try {
         echo json_encode(['ok'=>true, 'proposta_id'=>$pid, 'total'=>round($total, 2)], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    // NOVA REVISÃO de uma proposta: arquiva a vigente (ativa=0) e cria a próxima revisão como vigente,
+    // preservando o histórico. O fornecedor mandou preço novo depois da negociação — nada se perde.
+    if ($acao === 'proposta_revisar') {
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
+        $pid = (int)($in['proposta_id'] ?? 0); if (!$pid) throw new Exception('proposta_id obrigatório');
+        $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
+        $cur = $pdo->prepare("SELECT * FROM cotacao_proposta WHERE id=? AND cotacao_id=?"); $cur->execute([$pid, $cid]); $cur = $cur->fetch();
+        if (!$cur) throw new Exception('proposta não encontrada');
+        if (($cur['ativa'] ?? null) !== null && (int)$cur['ativa'] === 0) throw new Exception('só a proposta vigente pode ser revisada');
+        $raiz = ((int)($cur['raiz_id'] ?? 0)) ?: (int)$cur['id'];
+        // revisão = MAX da cadeia + 1 (monotônico — nunca colide, mesmo revisando a partir de uma arquivada)
+        $mx = $pdo->prepare("SELECT COALESCE(MAX(revisao),0) FROM cotacao_proposta WHERE cotacao_id=? AND (id=? OR raiz_id=?)");
+        $mx->execute([$cid, $raiz, $raiz]);
+        $rev = (int)$mx->fetchColumn() + 1;
+        $forn = trim((string)($in['fornecedor_nome'] ?? $cur['fornecedor_nome']));
+        $fid  = ($in['fornecedor_id'] ?? $cur['fornecedor_id']) ?: null;
+        $itens = (array)($in['itens'] ?? []);
+        $total = 0.0; foreach ($itens as $it) $total += (float)($it['preco_total'] ?? 0);
+        $now = date('c');
+        $pdo->beginTransaction();
+        // arquiva TODA a cadeia como não-vigente (defensivo: garante uma só ativa) e cria a nova
+        $pdo->prepare("UPDATE cotacao_proposta SET ativa=0 WHERE cotacao_id=? AND (id=? OR raiz_id=?)")->execute([$cid, $raiz, $raiz]);
+        $pdo->prepare("INSERT INTO cotacao_proposta (cotacao_id, fornecedor_id, fornecedor_nome, prazo, observacoes, data_resposta, total, revisao, raiz_id, ativa, created_at) VALUES (?,?,?,?,?,?,?,?,?,1,?)")
+            ->execute([$cid, $fid, $forn, trim((string)($in['prazo'] ?? '')), trim((string)($in['observacoes'] ?? '')), $now, $total ?: null, $rev, $raiz, $now]);
+        $novo = (int)$pdo->lastInsertId();
+        $insPI = $pdo->prepare("INSERT INTO cotacao_proposta_item (proposta_id, cotacao_item_id, preco_unit, preco_total, observacao) VALUES (?,?,?,?,?)");
+        foreach ($itens as $it) {
+            $ciid = (int)($it['cotacao_item_id'] ?? 0); if (!$ciid) continue;
+            $pu = ($it['preco_unit'] ?? '') !== '' ? (float)$it['preco_unit'] : null;
+            $pt = ($it['preco_total'] ?? '') !== '' ? (float)$it['preco_total'] : null;
+            $insPI->execute([$novo, $ciid, $pu, $pt, trim((string)($it['observacao'] ?? ''))]);
+        }
+        $pdo->prepare("UPDATE cotacao SET updated_at=? WHERE id=?")->execute([$now, $cid]);
+        $pdo->commit();
+        echo json_encode(['ok'=>true, 'proposta_id'=>$novo, 'revisao'=>$rev, 'total'=>round($total, 2)], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($acao === 'status') {
         $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
         $row = $pdo->prepare("SELECT COALESCE(obra_id,1) AS obra, servico_id, num_pedido FROM cotacao WHERE id=?"); $row->execute([$cid]);
         $cot = $row->fetch(); if (!$cot) throw new Exception('cotação não encontrada');
         $obra = (int)$cot['obra'];
-        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
         $sets = []; $args = [];
         // se veio o nº do pedido junto, grava e usa ele na trava
         $pc = trim((string)($cot['num_pedido'] ?? ''));
@@ -476,11 +563,15 @@ try {
 
     if ($acao === 'excluir_proposta') {
         $pid = (int)($in['proposta_id'] ?? 0); if (!$pid) throw new Exception('proposta_id obrigatório');
-        $row = $pdo->prepare("SELECT c.obra_id FROM cotacao_proposta p JOIN cotacao c ON c.id=p.cotacao_id WHERE p.id=?"); $row->execute([$pid]);
-        $obra = (int)($row->fetchColumn() ?: 1);
-        if (!cot_can_edit($pdo, $me, $obra ?: 1)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
-        $pdo->prepare("DELETE FROM cotacao_proposta_item WHERE proposta_id=?")->execute([$pid]);
-        $pdo->prepare("DELETE FROM cotacao_proposta WHERE id=?")->execute([$pid]);
+        $row = $pdo->prepare("SELECT p.cotacao_id, p.raiz_id, c.obra_id FROM cotacao_proposta p JOIN cotacao c ON c.id=p.cotacao_id WHERE p.id=?"); $row->execute([$pid]);
+        $r = $row->fetch(); if (!$r) throw new Exception('proposta não encontrada');
+        if (!cot_can_manage($pdo, $me, (int)$r['cotacao_id'])) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
+        // exclui a CADEIA inteira de revisões (id=raiz OU raiz_id=raiz) — não deixa revisão arquivada órfã/invisível
+        $cidp = (int)$r['cotacao_id']; $raiz = ((int)($r['raiz_id'] ?? 0)) ?: $pid;
+        $pdo->beginTransaction();
+        $pdo->prepare("DELETE FROM cotacao_proposta_item WHERE proposta_id IN (SELECT id FROM cotacao_proposta WHERE cotacao_id=? AND (id=? OR raiz_id=?))")->execute([$cidp, $raiz, $raiz]);
+        $pdo->prepare("DELETE FROM cotacao_proposta WHERE cotacao_id=? AND (id=? OR raiz_id=?)")->execute([$cidp, $raiz, $raiz]);
+        $pdo->commit();
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 

@@ -320,8 +320,10 @@ try {
     }
     if ($acao === 'desconvidar') {
         $id = (int)($in['id'] ?? 0); if (!$id) throw new Exception('id obrigatório');
-        $row = $pdo->prepare("SELECT c.obra_id FROM cotacao_fornecedor cf JOIN cotacao c ON c.id=cf.cotacao_id WHERE cf.id=?"); $row->execute([$id]);
-        $obra = (int)($row->fetchColumn() ?: 1);
+        // deriva a cotação a partir do convidado (esta ação recebe o id do cotacao_fornecedor, não cotacao_id)
+        $row = $pdo->prepare("SELECT cotacao_id FROM cotacao_fornecedor WHERE id=?"); $row->execute([$id]);
+        $cid = (int)$row->fetchColumn();
+        if (!$cid) { echo json_encode(['ok'=>true, 'ja_removido'=>true], JSON_UNESCAPED_UNICODE); exit; }   // já não existe
         if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
         $pdo->prepare("DELETE FROM cotacao_fornecedor WHERE id=?")->execute([$id]);
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;

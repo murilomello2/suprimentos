@@ -4131,7 +4131,7 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
         ${CAN_EDIT&&ax.length?`<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotIAPreencher(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="a IA lê os anexos e preenche a proposta (rascunho para você conferir)"><span class="material-icons" style="font-size:14px;vertical-align:-2px">auto_awesome</span> preencher com IA</button>`:''}
         ${CAN_EDIT&&!cf.respondeu?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotPropostaDe(${ci})">Lançar proposta</button>`:''}
         ${CAN_EDIT&&cf.respondeu&&cf.proposta_id?`<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotPropostaRevisar(${cf.proposta_id})" title="o fornecedor mandou preço novo — registra a próxima revisão sem perder a atual"><span class="material-icons" style="font-size:13px;vertical-align:-2px">published_with_changes</span> nova revisão</button><button class="btn-ghost" style="padding:2px 9px" onclick="cotProposta(${cf.proposta_id})" title="corrigir a revisão atual (não cria revisão nova)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">edit</span> editar</button><button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="cotExcluirProposta(${cf.proposta_id})" title="excluir a proposta">excluir</button>`:''}
-        ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="cotDesconvidar(${cf.id})" title="tirar da concorrência">×</button>`:''}
+        ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="cotDesconvidar(${cf.id},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="tirar da concorrência">×</button>`:''}
       </div>
       ${cotConvContatos(cf)}
       ${ax.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;padding-left:16px">${ax.map(anexoChip).join('')}</div>`:''}
@@ -4776,8 +4776,9 @@ async function cotDelAnexo(id){ if(!confirm('Excluir este anexo?'))return;
   try{ await fetch('actions/cotacao_anexo.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
 /* --- Concorrência: convidar / desconvidar / lançar proposta de um convidado --- */
 function cotPropostaDe(ci){ const cf=((COT.cur||{}).convidados||[])[ci]; if(!cf)return; cotProposta(0); COT.prop.fornecedor_nome=cf.fornecedor_nome; cotRenderProposta(); }
-async function cotDesconvidar(id){ if(!confirm('Tirar este fornecedor da concorrência?'))return;
-  try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'desconvidar',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
+async function cotDesconvidar(id,nome){ if(!confirm('Tirar '+(nome?('"'+nome+'"'):'este fornecedor')+' da concorrência desta cotação?\n\nEle sai da tomada de preços deste processo.'))return;
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'desconvidar',me:EU&&EU.bitrix_id,id})})).json();
+    if(r&&r.error){toast(r.error);return;} toast('Fornecedor removido da concorrência'); await cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha: '+e.message);} }
 let _cotCB;
 function cotConvBuscaInput(){ clearTimeout(_cotCB); const q=(document.getElementById('cotConvBusca').value||'').trim(), box=document.getElementById('cotConvSug'); if(!box)return; if(q.length<2){box.style.display='none';box.innerHTML='';return;}
   _cotCB=setTimeout(async()=>{ try{ const d=await (await fetch('actions/fornecedores.php?q='+encodeURIComponent(q)+'&limit=14')).json(); COT.convBusca=d.fornecedores||[];

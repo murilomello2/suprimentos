@@ -120,7 +120,7 @@ function db_schema_mysql($pdo) {
         PRIMARY KEY (id), KEY idx_forn_cat (categoria)
     ) $E");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao (
-        id INT NOT NULL AUTO_INCREMENT, obra_id INT, servico_id INT, titulo VARCHAR(255) NOT NULL,
+        id INT NOT NULL AUTO_INCREMENT, obra_id INT, servico_id INT, titulo VARCHAR(255) NOT NULL, apelido VARCHAR(160),
         categoria VARCHAR(191), tipo_servico VARCHAR(60), verba DOUBLE, verba_origem VARCHAR(40), descricao TEXT, equalizacao TEXT,
         num_solicitacao VARCHAR(60), num_pedido VARCHAR(60),
         status VARCHAR(40) DEFAULT 'rascunho', aprovacao VARCHAR(40) DEFAULT 'aguardando',
@@ -296,6 +296,7 @@ function db_schema_mysql($pdo) {
     try {
         $cc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cotacao'") as $c) $cc[$c['COLUMN_NAME']] = true;
         if ($cc && !isset($cc['equalizacao'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN equalizacao TEXT");
+        if ($cc && !isset($cc['apelido'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN apelido VARCHAR(160)");   // nome curto/descrição do criador (achar fácil)
         if ($cc && !isset($cc['verba_origem'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN verba_origem VARCHAR(40)");
         if ($cc && !isset($cc['num_solicitacao'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_solicitacao VARCHAR(60)");
         if ($cc && !isset($cc['num_pedido'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_pedido VARCHAR(60)");
@@ -511,7 +512,7 @@ function db_schema($pdo) {
     // ---- MAPA DE COTAÇÕES (reconstruído no cockpit) ----
     $pdo->exec("CREATE TABLE IF NOT EXISTS cot_categoria (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL UNIQUE, ext_id TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cot_fornecedor (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, categoria TEXT, cidade TEXT, contato TEXT, telefone TEXT, whatsapp TEXT, email TEXT, itens TEXT, tipo TEXT, cnpj TEXT, contatos_at TEXT, ativo INTEGER DEFAULT 1, ext_id TEXT, created_at TEXT)");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao (id INTEGER PRIMARY KEY AUTOINCREMENT, obra_id INTEGER, servico_id INTEGER, titulo TEXT NOT NULL, categoria TEXT, tipo_servico TEXT, verba REAL, verba_origem TEXT, descricao TEXT, equalizacao TEXT, num_solicitacao TEXT, num_pedido TEXT, solic_coligada TEXT, solic_obra_cod TEXT, status TEXT DEFAULT 'rascunho', aprovacao TEXT DEFAULT 'aguardando', criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao (id INTEGER PRIMARY KEY AUTOINCREMENT, obra_id INTEGER, servico_id INTEGER, titulo TEXT NOT NULL, apelido TEXT, categoria TEXT, tipo_servico TEXT, verba REAL, verba_origem TEXT, descricao TEXT, equalizacao TEXT, num_solicitacao TEXT, num_pedido TEXT, solic_coligada TEXT, solic_obra_cod TEXT, status TEXT DEFAULT 'rascunho', aprovacao TEXT DEFAULT 'aguardando', criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_item (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, quantidade REAL, observacao TEXT, ordem INTEGER)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, prazo TEXT, observacoes TEXT, equaliza TEXT, data_resposta TEXT, total REAL, revisao INTEGER DEFAULT 0, raiz_id INTEGER, ativa INTEGER DEFAULT 1, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta_item (id INTEGER PRIMARY KEY AUTOINCREMENT, proposta_id INTEGER NOT NULL, cotacao_item_id INTEGER NOT NULL, preco_unit REAL, preco_total REAL, observacao TEXT)");
@@ -543,6 +544,7 @@ function db_schema($pdo) {
     $ccols = []; foreach ($pdo->query("PRAGMA table_info(cotacao)") as $c) $ccols[$c['name']] = true;
     if (!isset($ccols['equalizacao'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN equalizacao TEXT");
     if (!isset($ccols['verba_origem'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN verba_origem TEXT");
+    if (!isset($ccols['apelido'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN apelido TEXT");
     if (!isset($ccols['num_solicitacao'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_solicitacao TEXT");
     if (!isset($ccols['num_pedido'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_pedido TEXT");
     if (!isset($ccols['solic_coligada'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_coligada TEXT");

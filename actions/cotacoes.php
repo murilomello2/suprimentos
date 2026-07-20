@@ -236,7 +236,7 @@ try {
         if (isset($_GET['obra']) && $_GET['obra'] !== '') { $where = 'WHERE c.obra_id=?'; $args[] = (int)$_GET['obra']; }
         $q = $pdo->prepare("SELECT c.id, c.obra_id, c.servico_id, c.titulo, c.categoria, c.tipo_servico, c.verba,
                                    c.num_solicitacao, c.num_pedido,
-                                   c.status, c.aprovacao, c.criado_por, c.criado_nome, c.created_at, COALESCE(NULLIF(o.nome,''), c.obra_livre) AS obra_nome,
+                                   c.apelido, c.status, c.aprovacao, c.criado_por, c.criado_nome, c.created_at, COALESCE(NULLIF(o.nome,''), c.obra_livre) AS obra_nome,
                                    (SELECT COUNT(*) FROM cotacao_item ci WHERE ci.cotacao_id=c.id) AS n_itens,
                                    (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND (cp.ativa=1 OR cp.ativa IS NULL)) AS n_propostas,
                                    (SELECT COUNT(*) FROM cotacao_fornecedor cf WHERE cf.cotacao_id=c.id) AS n_convidados,
@@ -327,6 +327,14 @@ try {
         if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
         $pdo->prepare("DELETE FROM cotacao_fornecedor WHERE id=?")->execute([$id]);
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'apelido_salvar') {   // nome curto/descrição do criador (achar fácil) — ex.: "Pregos"
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
+        $ap = trim((string)($in['apelido'] ?? '')); if (function_exists('mb_substr')) $ap = mb_substr($ap, 0, 160); else $ap = substr($ap, 0, 160);
+        $pdo->prepare("UPDATE cotacao SET apelido=?, updated_at=? WHERE id=?")->execute([$ap !== '' ? $ap : null, date('c'), $cid]);
+        echo json_encode(['ok'=>true, 'apelido'=>$ap], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'verba_salvar') {   // edita/puxa a verba prevista da cotação
@@ -420,6 +428,14 @@ try {
         $now = date('c');
         $pdo->beginTransaction();
         $pid = (int)($in['proposta_id'] ?? 0);
+        // DEDUP: proposta NOVA (sem proposta_id) de um fornecedor que JÁ tem proposta vigente nesta cotação
+        // → atualiza a existente em vez de criar outra (mata o duplo-submit/duplo-clique e o cadastro repetido).
+        if (!$pid) {
+            $fid = (int)($in['fornecedor_id'] ?? 0);
+            if ($fid) { $q = $pdo->prepare("SELECT id FROM cotacao_proposta WHERE cotacao_id=? AND fornecedor_id=? AND (ativa=1 OR ativa IS NULL) ORDER BY id DESC LIMIT 1"); $q->execute([$cid, $fid]); }
+            else { $q = $pdo->prepare("SELECT id FROM cotacao_proposta WHERE cotacao_id=? AND LOWER(TRIM(fornecedor_nome))=? AND (ativa=1 OR ativa IS NULL) ORDER BY id DESC LIMIT 1"); $q->execute([$cid, strtolower(trim($forn))]); }
+            $pid = (int)$q->fetchColumn();
+        }
         if ($pid) {
             $pdo->prepare("UPDATE cotacao_proposta SET fornecedor_id=?, fornecedor_nome=?, prazo=?, observacoes=?, total=? WHERE id=? AND cotacao_id=?")
                 ->execute([($in['fornecedor_id'] ?? null) ?: null, $forn, trim((string)($in['prazo'] ?? '')), trim((string)($in['observacoes'] ?? '')), $total ?: null, $pid, $cid]);

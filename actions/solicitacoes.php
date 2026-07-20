@@ -28,6 +28,15 @@ function sol_nome_default($coligada, $obra_cod) {
     $n = preg_replace('/\s+(EMPREENDIMENTO|EMPREENDIMENTOS).*/i', '', $coligada);
     return trim($n) ?: $coligada;
 }
+// título automático pelos números das SCs: "SC 1533" | "SCs 1533 e 1544" | "SCs 1533, 1544 e 1550" | "SCs 1533, 1544, 1550 +3"
+function sol_titulo_scs($nums) {
+    $nums = array_values(array_filter(array_map('strval', (array)$nums), fn($x)=>$x !== ''));
+    $n = count($nums);
+    if ($n === 0) return 'Cotação';
+    if ($n === 1) return 'SC ' . $nums[0];
+    if ($n <= 4) { $last = array_pop($nums); return 'SCs ' . implode(', ', $nums) . ' e ' . $last; }
+    return 'SCs ' . implode(', ', array_slice($nums, 0, 3)) . ' +' . ($n - 3);
+}
 
 try {
     $pdo = db();
@@ -251,8 +260,9 @@ try {
         $obraUnica = count($obras) === 1 ? (int)array_key_first($obras) : null;   // >1 obra = cotação mista (obra por item)
         $titulo = trim((string)($in['titulo'] ?? ''));
         if ($titulo === '') {
-            if (count($solics) === 1) { $s0 = reset($solics); $titulo = 'SC ' . $s0['numero'] . ' · ' . sol_nome_default($s0['coligada'], $s0['obra_cod']); }
-            else $titulo = 'Cotação · ' . count($solics) . ' solicitações · ' . max(1, count($obras)) . ' obra(s)';
+            // título automático pelos NÚMEROS das SCs (sem zeros à esquerda): "SC 1533" / "SCs 1533 e 1544" / "SCs 1533, 1544 e 1550"
+            $scNums = array_values(array_unique(array_map(fn($s)=>ltrim((string)$s['numero'], '0') ?: (string)$s['numero'], $solics)));
+            $titulo = sol_titulo_scs($scNums);
         }
         $descr = 'Cotação de ' . count($solics) . ' solicitação(ões): ' . implode(', ', array_map(fn($s)=>'SC ' . $s['numero'] . ' (' . $s['coligada'] . ')', $solics));
         $pdo->beginTransaction();

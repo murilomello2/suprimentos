@@ -220,6 +220,42 @@ try {
         echo json_encode(['servicos'=>$rows], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    // ---------- GET ?itens_andamento=1 : marco/janela/% ANDADO por radar_item (TODOS, inclusive Finalizado) ----------
+    // Reaproveita o motor do Top 20 (âncora com fronteira de palavra + fase WBS + termos) p/ revisar STATUS em lote.
+    if (isset($_GET['itens_andamento'])) {
+        $mesAtual = date('Y-m'); $horizonte = t20_mes_add($mesAtual, 11);
+        $obras = $pdo->query("SELECT id, nome, cronograma_id FROM obra ORDER BY id")->fetchAll();
+        $out = [];
+        foreach ($obras as $ob) {
+            $oid = (int)$ob['id']; $tasks = [];
+            if (!empty($ob['cronograma_id'])) { try { $tasks = crono_tasks($ob['cronograma_id']); } catch (Throwable $e) { $tasks = []; } }
+            $byName = []; $byWbs = [];
+            foreach ($tasks as $tk) { $k = $tk['_n'] ?? _norm_txt($tk['nome'] ?? ''); if ($k !== '') $byName[$k][] = $tk; if (isset($tk['wbs']) && $tk['wbs'] !== '') $byWbs[(string)$tk['wbs']] = $tk; }
+            $q = $pdo->prepare("SELECT s.id sid, COALESCE(NULLIF(r.nome_override,''), s.nome) nome, s.grupo, s.termos_cronograma,
+                                       r.status, r.responsavel, r.fornecedor, r.crono_marco_override, r.data_necessaria_override
+                                FROM servico s JOIN radar_item r ON r.servico_id=s.id AND r.obra_id=?");
+            $q->execute([$oid]);
+            foreach ($q->fetchAll() as $r) {
+                $termos = [];
+                foreach (preg_split('/[;,\/]/', (string)$r['termos_cronograma']) as $t) { $t = trim(_norm_txt($t)); if (strlen($t) >= 4) $termos[] = $t; }
+                $marco = trim((string)($r['crono_marco_override'] ?? '')); $marcoWbs = null; $ancFonte = $marco !== '' ? 'curado' : '';
+                if ($marco === '' && $tasks) {
+                    $auto = crono_resolver($r, $tasks); $marco = (string)($auto['marco_casado'] ?? ''); $marcoWbs = $auto['marco_wbs'] ?? null; $ancFonte = 'auto';
+                    if ($marco !== '' && $termos) { $mn = _norm_txt($marco); $okAnc = false; foreach ($termos as $t) if (t20_match($mn, $t)) { $okAnc = true; break; } if (!$okAnc) { $marco = ''; $marcoWbs = null; } }
+                } elseif ($marco !== '' && $tasks) { $marcoWbs = crono_wbs_por_nome($marco, $tasks); }
+                [$mi, $mf, $pct, $fonte] = (($marco !== '' || $termos) && $tasks) ? t20_janela($marco, $marcoWbs, $termos, $byName, $byWbs, $tasks) : [null, null, null, 'sem data'];
+                if (!empty($r['data_necessaria_override'])) { $mi = $r['data_necessaria_override']; if ($mf && $mf < $mi) { $mf = null; $pct = null; } if ($fonte === 'sem data') $fonte = 'data curada'; }
+                $out[] = ['obra_id'=>$oid, 'obra'=>$ob['nome'], 'servico_id'=>(int)$r['sid'], 'servico'=>$r['nome'], 'grupo'=>$r['grupo'],
+                    'status'=>(string)($r['status'] ?? ''), 'responsavel'=>$r['responsavel'] ?? '', 'fornecedor'=>$r['fornecedor'] ?? '',
+                    'marco'=>$marco, 'marco_fonte'=>$ancFonte, 'janela_fonte'=>$fonte,
+                    'inicio'=>$mi ? substr($mi,0,10) : null, 'fim'=>$mf ? substr($mf,0,10) : null,
+                    'pct'=>$pct !== null ? round($pct, 1) : null,
+                    'passado'=>($mf && substr($mf,0,7) < $mesAtual) ? 1 : 0, 'futuro'=>($mi && substr($mi,0,7) > $mesAtual) ? 1 : 0];
+            }
+        }
+        echo json_encode(['mes_atual'=>$mesAtual, 'n'=>count($out), 'itens'=>$out], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     // semeia os grupos-padrão na primeira vez
     if (!(int)$pdo->query("SELECT COUNT(*) FROM neg_grupo")->fetchColumn()) t20_seed($pdo);
 

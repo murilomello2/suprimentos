@@ -66,6 +66,13 @@ function av_keyword_map() {
         'aco estrutura (c&d)'                    => ['prio'=>30, 'sis'=>['estrutura','torre'], 'inc'=>['aco=','armacao','vergalhao','ca-50','ca-60'], 'exc'=>['tela','fundacao']],
         'concreto estrutura'                     => ['prio'=>31, 'sis'=>['estrutura','torre'], 'inc'=>['concreto'], 'exc'=>['bombeamento','magro','fundacao']],
         'formas pronta obra toda'                => ['prio'=>32, 'sis'=>['estrutura','torre'], 'inc'=>['forma'], 'exc'=>['fundacao']],
+        // ALVENARIA ESTRUTURAL (obras de bloco estrutural sem aba de composição no R10 — Licel/LTB-3).
+        // 'metodo'=>'alvenaria': só dispara em obra de método alvenaria (não contamina obra de concreto).
+        // Prio menor que a vedação → reivindica o bloco estrutural 1º. A linha COMPOSTA "Alvenaria estrutural
+        // com blocos…" (que embute bloco+argamassa+M.O.) cai inteira em Blocos (não dá pra rachar sem composição).
+        'alvenaria estrutural — blocos de concreto'          => ['prio'=>38, 'metodo'=>'alvenaria', 'sis'=>['alvenaria'], 'inc'=>['bloco','canaleta','verga'], 'exc'=>[]],
+        'alvenaria estrutural — argamassa e demais materiais' => ['prio'=>39, 'metodo'=>'alvenaria', 'sis'=>['alvenaria'], 'inc'=>['argamassa','graute','grouteamento'], 'exc'=>['bloco']],
+        'alvenaria estrutural — mao de obra (empreitada)'    => ['prio'=>44, 'metodo'=>'alvenaria', 'sis'=>['alvenaria'], 'inc'=>['assentamento','elevacao de alvenaria','levantamento de alvenaria'], 'exc'=>['bloco','argamassa']],
         // ALVENARIA (vedação)
         'blocos (vedacao)'                       => ['prio'=>40, 'sis'=>['alvenaria'], 'inc'=>['bloco'], 'exc'=>[]],
         'argamassa para alvenaria de vedacao (mat)' => ['prio'=>41, 'sis'=>['alvenaria'], 'inc'=>['argamassa'], 'exc'=>[]],
@@ -92,8 +99,9 @@ try {
     if (($in['acao'] ?? '') === 'vincular_keyword') {
         $obraId = (int)($in['obra_id'] ?? 0); if ($obraId < 2) throw new Exception('obra_id >= 2');
         $dry = !empty($in['dry']);
-        $ob = $pdo->prepare("SELECT nome, orcamento_total FROM obra WHERE id=?"); $ob->execute([$obraId]); $ob = $ob->fetch();
+        $ob = $pdo->prepare("SELECT nome, orcamento_total, metodo_construtivo FROM obra WHERE id=?"); $ob->execute([$obraId]); $ob = $ob->fetch();
         if (!$ob) throw new Exception('obra não encontrada');
+        $isAlv = stripos((string)($ob['metodo_construtivo'] ?? ''), 'alvenaria') !== false;   // entradas 'metodo'=>'alvenaria' só disparam aqui
         // folhas do orçamento DESTA obra
         $F = [];
         $q = $pdo->prepare("SELECT id, descricao, path_str, valor FROM orcamento_linha WHERE obra_id=? AND folha=1"); $q->execute([$obraId]);
@@ -103,7 +111,8 @@ try {
         $SV = [];
         $q = $pdo->prepare("SELECT r.servico_id sid, s.nome, r.verba_metodo, r.verba_curada, r.auto_flags FROM radar_item r JOIN servico s ON s.id=r.servico_id WHERE r.obra_id=?");
         $q->execute([$obraId]);
-        foreach ($q->fetchAll() as $r) $SV[sup_normt($r['nome'])] = $r;
+        // chave = nome normalizado SEM pontuação/espaços (o em-dash "—" dos serviços de alvenaria some) → casa robusto
+        foreach ($q->fetchAll() as $r) $SV[preg_replace('/[^a-z0-9]/', '', sup_normt($r['nome']))] = $r;
         // matcher: sis=substring no path; termo com sufixo '=' = palavra exata (\bX\b), senão substring
         $mt = function($hay, $terms) { foreach ((array)$terms as $t) { if ($t === '') continue;
             if (substr($t, -1) === '=') { if (preg_match('/\b' . preg_quote(substr($t, 0, -1), '/') . '\b/', $hay)) return true; }
@@ -112,7 +121,8 @@ try {
         uasort($MAP, fn($a, $b) => ($a['prio'] <=> $b['prio']));   // mais específico (prio menor) reivindica 1º
         $claimed = []; $out = [];
         foreach ($MAP as $nomeNorm => $sp) {
-            $s = $SV[$nomeNorm] ?? null; if (!$s) continue;
+            if (($sp['metodo'] ?? '') === 'alvenaria' && !$isAlv) continue; // entrada de alvenaria estrutural não roda em obra de concreto
+            $s = $SV[preg_replace('/[^a-z0-9]/', '', $nomeNorm)] ?? null; if (!$s) continue;
             if ((int)($s['verba_curada'] ?? 0) === 1) continue;            // respeita curadoria humana
             if (trim((string)($s['verba_metodo'] ?? '')) !== '') continue; // não clobbera verba já preenchida
             $sid = (int)$s['sid']; $refs = []; $sum = 0.0;

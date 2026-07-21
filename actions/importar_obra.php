@@ -172,7 +172,10 @@ try {
     $orc  = json_decode(@file_get_contents(SEED_DIR . "/orcamento_$slug.json"), true);
     $comp = json_decode(@file_get_contents(SEED_DIR . "/composicao_$slug.json"), true);
     if (empty($orc['linhas']))       throw new Exception("seed orcamento_$slug.json ausente/vazio");
-    if (empty($comp['composicoes'])) throw new Exception("seed composicao_$slug.json ausente/vazio");
+    // composição é OPCIONAL: orçamentos R10 (ex.: Licel/LTB-3) não têm aba de composição — importa só o
+    // analítico. A verba vem do keyword linker (lê as folhas do orçamento direto). Sem composição, o recorte
+    // por composição no aplicar_receitas simplesmente não encontra nada (no-op).
+    if (!is_array($comp) || !is_array($comp['composicoes'] ?? null)) $comp = ['composicoes'=>[]];
 
     // idempotência: recusa se a obra já tem dados (use wipe antes pra re-importar)
     $chk = $pdo->prepare("SELECT COUNT(*) FROM orcamento_linha WHERE obra_id=?"); $chk->execute([$obraId]);

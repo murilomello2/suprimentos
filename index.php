@@ -763,7 +763,7 @@ function obraMenuRender(){
   const m=document.getElementById('obraMenu'); if(!m)return;
   m.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 6px 6px;border-bottom:1px solid var(--line);margin-bottom:4px">
       <span style="font-size:10px;font-weight:800;letter-spacing:.6px;color:var(--muted)">SELECIONE 1 OU MAIS OBRAS</span>
-      <button class="btn-ghost" style="padding:2px 8px;font-size:11px" onclick="obraSelTodas(event)">Todas</button></div>`+
+      <span style="display:flex;gap:4px"><button class="btn-ghost" style="padding:2px 8px;font-size:11px" onclick="obraSelLimpar(event)">Desmarcar</button><button class="btn-ghost" style="padding:2px 8px;font-size:11px" onclick="obraSelTodas(event)">Todas</button></span></div>`+
     (OBRAS.length?OBRAS.map(o=>{ const on=OBRA_SEL.includes(Number(o.id));
       return `<label style="display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;cursor:pointer;font-size:12.5px" onmouseover="this.style.background='#eff7f1'" onmouseout="this.style.background=''">
         <input type="checkbox" ${on?'checked':''} onchange="obraSet(${o.id},this.checked)">
@@ -780,11 +780,13 @@ function obraSet(id,checked){
 }
 function obraSelTodas(e){ if(e) e.stopPropagation(); if(!OBRAS.length)return;
   OBRA_SEL=OBRAS.map(o=>Number(o.id)); localStorage.setItem('sup_obras',JSON.stringify(OBRA_SEL)); load(); }
+// desmarca TODAS (permite zero — o radar mostra um estado vazio pedindo p/ selecionar; depois é só marcar as que quer)
+function obraSelLimpar(e){ if(e) e.stopPropagation(); OBRA_SEL=[]; localStorage.setItem('sup_obras',JSON.stringify(OBRA_SEL)); obraMenuRender(); load(); }
 // atualiza o rótulo do botão + o menu (se aberto) — chamado no fim do load()
 function obraUpdateUI(){
   const lbl=document.getElementById('obraPickLbl');
   if(lbl){ const nomes=OBRA_SEL.map(id=>{ const o=OBRAS.find(x=>Number(x.id)===id); return o?o.nome:('#'+id); });
-    lbl.textContent = nomes.length===1 ? nomes[0] : (nomes.length+' obras selecionadas'); }
+    lbl.textContent = nomes.length===0 ? 'Selecione a obra' : (nomes.length===1 ? nomes[0] : (nomes.length+' obras selecionadas')); }
   const m=document.getElementById('obraMenu'); if(m && m.style.display==='block') obraMenuRender();
 }
 
@@ -858,6 +860,11 @@ let _loadSeq=0;   // versão da requisição: evita que um load() antigo (obra a
 async function load(){
   const seq=++_loadSeq;
   const selNoInicio=OBRA_SEL.slice();   // congela a seleção desta chamada
+  if(!selNoInicio.length){   // nenhuma obra marcada (após "Desmarcar") → estado vazio amigável, sem fetch
+    DATA={itens:[]}; RESUMO_BY_OBRA={};
+    const tb=document.getElementById('tb'); if(tb) tb.innerHTML=`<tr><td colspan="12" class="empty">Nenhuma obra selecionada. Marque ao menos uma obra no seletor acima para ver o radar.</td></tr>`;
+    try{ renderKpis(); }catch(_){} obraUpdateUI(); return;
+  }
   try{
     // busca a matriz de CADA obra selecionada em paralelo e mescla (item ganha obra_id/obra_nome)
     const rs0=await Promise.all(selNoInicio.map(async oid=>{

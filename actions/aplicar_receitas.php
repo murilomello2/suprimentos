@@ -43,11 +43,112 @@ function av_tokens($s) {   // tokens de busca da âncora: palavras >=3 chars, pl
     return $out;
 }
 
+// Mapa de KEYWORDS p/ vincular verba em orçamentos FORA do padrão Tron (Polastri) por SISTEMA (path) + TERMO (descrição).
+// [nome_servico_normalizado => ['prio'=>N (menor reivindica 1º), 'sis'=>[termos no path], 'inc'=>[termos na descrição; 'x='=palavra exata], 'exc'=>[]]]
+// Foco nos GRANDES de concreto armado (estrutura/fundação/contenção/alvenaria/elevadores + imperm/contrapiso). O resto = curadoria.
+function av_keyword_map() {
+    return [
+        // CONTENÇÃO
+        'cravacao de perfil metalico'            => ['prio'=>5,  'sis'=>['contencao','cortina'], 'inc'=>['perfil','cravacao'], 'exc'=>[]],
+        'painel dupla face cortina de contencao' => ['prio'=>6,  'sis'=>['contencao','cortina'], 'inc'=>['painel','cortina','prancha'], 'exc'=>['perfil']],
+        'tirantes - mo para execucao'            => ['prio'=>7,  'sis'=>['contencao'], 'inc'=>['tirante'], 'exc'=>[]],
+        // FUNDAÇÃO
+        'execucao de estaca helice continua'     => ['prio'=>9,  'sis'=>['fundacao'], 'inc'=>['estaca','helice','perfuracao','escava'], 'exc'=>['aco=','concreto','armacao']],
+        'aco para fundacao profunda - c&d + armacao' => ['prio'=>10, 'sis'=>['fundacao'], 'inc'=>['aco=','armacao','vergalhao','ca-50','ca-60'], 'exc'=>['tela']],
+        'concreto para fundacao profunda'        => ['prio'=>11, 'sis'=>['fundacao'], 'inc'=>['concreto'], 'exc'=>['magro','bombeamento']],
+        'aco para fundacao rasa - c&d'           => ['prio'=>12, 'sis'=>['fundacao','baldrame','sapata'], 'inc'=>['aco=','armacao'], 'exc'=>['tela']],
+        'concreto fundacao rasa (blocos + vigas baldrame)' => ['prio'=>13, 'sis'=>['fundacao','baldrame','sapata'], 'inc'=>['concreto'], 'exc'=>['magro','bombeamento']],
+        'forma madeira para fundacao (mat)'      => ['prio'=>14, 'sis'=>['fundacao','baldrame'], 'inc'=>['forma'], 'exc'=>[]],
+        // ESTRUTURA
+        'bombeamento de concreto'                => ['prio'=>20, 'sis'=>[], 'inc'=>['bombeamento','bomba lanca','bombeavel'], 'exc'=>[]],
+        'tela de aco para laje (mat)'            => ['prio'=>26, 'sis'=>['estrutura','torre'], 'inc'=>['tela'], 'exc'=>[]],
+        'escoramento torres + periferia'         => ['prio'=>28, 'sis'=>['estrutura','torre','escora'], 'inc'=>['escora'], 'exc'=>[]],
+        'aco estrutura (c&d)'                    => ['prio'=>30, 'sis'=>['estrutura','torre'], 'inc'=>['aco=','armacao','vergalhao','ca-50','ca-60'], 'exc'=>['tela','fundacao']],
+        'concreto estrutura'                     => ['prio'=>31, 'sis'=>['estrutura','torre'], 'inc'=>['concreto'], 'exc'=>['bombeamento','magro','fundacao']],
+        'formas pronta obra toda'                => ['prio'=>32, 'sis'=>['estrutura','torre'], 'inc'=>['forma'], 'exc'=>['fundacao']],
+        // ALVENARIA (vedação)
+        'blocos (vedacao)'                       => ['prio'=>40, 'sis'=>['alvenaria'], 'inc'=>['bloco'], 'exc'=>[]],
+        'argamassa para alvenaria de vedacao (mat)' => ['prio'=>41, 'sis'=>['alvenaria'], 'inc'=>['argamassa'], 'exc'=>[]],
+        'mo alvenaria de vedacao'                => ['prio'=>42, 'sis'=>['alvenaria'], 'inc'=>['mao de obra','m.o','empreitada','assentamento','pedreiro','servente'], 'exc'=>['bloco','argamassa','tela']],
+        // ELEVADORES
+        'elevadores definitivos'                 => ['prio'=>45, 'sis'=>[], 'inc'=>['elevador'], 'exc'=>['cremalheira','de obra','provisorio','carga']],
+        // IMPERMEABILIZAÇÃO / CONTRAPISO (limpos)
+        'impermeabilizacao torre'                => ['prio'=>60, 'sis'=>['impermeabiliza'], 'inc'=>['impermeabiliza','manta','asfaltic','cristaliza'], 'exc'=>[]],
+        'contra piso - torre'                    => ['prio'=>62, 'sis'=>['regulariza','revestimento','contrapiso','piso'], 'inc'=>['contrapiso','contra piso','regulariza'], 'exc'=>['reboco','chapisco','emboco']],
+    ];
+}
+
 try {
     $pdo = db();
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
     $perms = user_perms($pdo, $in['me'] ?? null);
     if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
+
+    // ============ VÍNCULO POR KEYWORD (orçamentos FORA do padrão Tron — Polastri/Vitrius) ============
+    // ISOLADO POR OBRA: lê SÓ o orçamento desta obra, escreve SÓ nas células desta obra. NÃO toca no
+    // dicionário `receita` nem em nenhuma outra obra. Grava idêntico ao analítico (orcamento_refs + verba,
+    // 🤖 sugerido, verba_curada=0) → reversível/curável. Só preenche onde a verba está VAZIA (não clobbera).
+    // POST (ADMIN) {acao:'vincular_keyword', obra_id, me, dry:0|1}
+    if (($in['acao'] ?? '') === 'vincular_keyword') {
+        $obraId = (int)($in['obra_id'] ?? 0); if ($obraId < 2) throw new Exception('obra_id >= 2');
+        $dry = !empty($in['dry']);
+        $ob = $pdo->prepare("SELECT nome, orcamento_total FROM obra WHERE id=?"); $ob->execute([$obraId]); $ob = $ob->fetch();
+        if (!$ob) throw new Exception('obra não encontrada');
+        // folhas do orçamento DESTA obra
+        $F = [];
+        $q = $pdo->prepare("SELECT id, descricao, path_str, valor FROM orcamento_linha WHERE obra_id=? AND folha=1"); $q->execute([$obraId]);
+        foreach ($q->fetchAll() as $l) { $l['_d'] = sup_normt($l['descricao']); $l['_p'] = sup_normt($l['path_str']); $F[(int)$l['id']] = $l; }
+        if (!$F) throw new Exception('obra sem orçamento importado');
+        // serviços do radar DESTA obra (por nome normalizado) + estado da verba
+        $SV = [];
+        $q = $pdo->prepare("SELECT r.servico_id sid, s.nome, r.verba_metodo, r.verba_curada, r.auto_flags FROM radar_item r JOIN servico s ON s.id=r.servico_id WHERE r.obra_id=?");
+        $q->execute([$obraId]);
+        foreach ($q->fetchAll() as $r) $SV[sup_normt($r['nome'])] = $r;
+        // matcher: sis=substring no path; termo com sufixo '=' = palavra exata (\bX\b), senão substring
+        $mt = function($hay, $terms) { foreach ((array)$terms as $t) { if ($t === '') continue;
+            if (substr($t, -1) === '=') { if (preg_match('/\b' . preg_quote(substr($t, 0, -1), '/') . '\b/', $hay)) return true; }
+            elseif (strpos($hay, $t) !== false) return true; } return false; };
+        $MAP = av_keyword_map();
+        uasort($MAP, fn($a, $b) => ($a['prio'] <=> $b['prio']));   // mais específico (prio menor) reivindica 1º
+        $claimed = []; $out = [];
+        foreach ($MAP as $nomeNorm => $sp) {
+            $s = $SV[$nomeNorm] ?? null; if (!$s) continue;
+            if ((int)($s['verba_curada'] ?? 0) === 1) continue;            // respeita curadoria humana
+            if (trim((string)($s['verba_metodo'] ?? '')) !== '') continue; // não clobbera verba já preenchida
+            $sid = (int)$s['sid']; $refs = []; $sum = 0.0;
+            foreach ($F as $fid => $f) {
+                if (isset($claimed[$fid])) continue;
+                if (!empty($sp['sis']) && !$mt($f['_p'], $sp['sis'])) continue;
+                if (!$mt($f['_d'], $sp['inc'])) continue;
+                if (!empty($sp['exc']) && $mt($f['_d'], $sp['exc'])) continue;
+                $claimed[$fid] = $sid; $refs[] = $fid; $sum += (float)$f['valor'];
+            }
+            if ($sum > 0) {
+                $am = array_slice(array_map(fn($id) => $F[$id]['descricao'] . ' — R$ ' . number_format($F[$id]['valor'], 0, ',', '.'), $refs), 0, 4);
+                $out[$sid] = ['servico_id' => $sid, 'nome' => $s['nome'], 'verba' => round($sum, 2), 'linhas' => count($refs), 'amostra' => $am, '_af' => $s['auto_flags'], '_refs' => $refs];
+            }
+        }
+        $tot = 0.0; foreach ($out as $o) $tot += $o['verba'];
+        if ($dry) {
+            $prev = array_map(fn($o) => ['servico_id' => $o['servico_id'], 'nome' => $o['nome'], 'verba' => $o['verba'], 'linhas' => $o['linhas'], 'amostra' => $o['amostra']], array_values($out));
+            usort($prev, fn($a, $b) => $b['verba'] <=> $a['verba']);
+            echo json_encode(['ok' => true, 'dry' => true, 'obra' => $ob['nome'], 'itens' => count($out), 'verba_total' => round($tot, 2),
+                'cobertura_pct' => $ob['orcamento_total'] ? round(100 * $tot / (float)$ob['orcamento_total'], 1) : null,
+                'folhas_reivindicadas' => count($claimed), 'folhas_total' => count($F), 'preview' => $prev], JSON_UNESCAPED_UNICODE); exit;
+        }
+        $upd = $pdo->prepare("UPDATE radar_item SET orcamento_refs=?, verba_override=?, verba_metodo='analitico', verba_material=?, verba_mo=NULL, verba_curada=0, auto_flags=?, updated_at=? WHERE obra_id=? AND servico_id=?");
+        $now = date('c'); $n = 0;
+        $pdo->beginTransaction();
+        foreach ($out as $sid => $o) {
+            $af = json_decode($o['_af'] ?: '{}', true) ?: []; $af['verba'] = 1;   // preserva crono/quant, marca verba=1 (🤖)
+            $upd->execute([json_encode(array_values($o['_refs'])), $o['verba'], $o['verba'], json_encode($af), $now, $obraId, $sid]);
+            $n++;
+        }
+        $pdo->commit();
+        echo json_encode(['ok' => true, 'dry' => false, 'obra' => $ob['nome'], 'itens_gravados' => $n, 'verba_total' => round($tot, 2),
+            'cobertura_pct' => $ob['orcamento_total'] ? round(100 * $tot / (float)$ob['orcamento_total'], 1) : null], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if (($in['acao'] ?? '') !== 'aplicar') throw new Exception('acao inválida');
     $obraId = (int)($in['obra_id'] ?? 0);
     if ($obraId < 2) throw new Exception('obra_id deve ser >= 2 (a origem do aprendizado não se auto-aplica)');

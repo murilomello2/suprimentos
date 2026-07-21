@@ -76,8 +76,10 @@ try {
             // nome (case-insensitive). Fecha o furo do cadastro-por-IA (proposta de PDF) que criava fornecedor repetido.
             $dupe = null;
             $cnpjDig = preg_replace('/\D/', '', $vals['cnpj']);
-            if ($cnpjDig !== '') {
-                $q = $pdo->prepare("SELECT id FROM cot_fornecedor WHERE REPLACE(REPLACE(REPLACE(REPLACE(cnpj,'.',''),'/',''),'-',''),' ','')=? AND cnpj<>'' AND (ativo=1 OR ativo IS NULL) ORDER BY id LIMIT 1");
+            // só casa por CNPJ se for um CNPJ/CPF REAL — ignora placeholders (00000000000, 11111111111, muito curto)
+            $cnpjValido = strlen($cnpjDig) >= 11 && !preg_match('/^(\d)\1+$/', $cnpjDig);
+            if ($cnpjValido) {
+                $q = $pdo->prepare("SELECT id FROM cot_fornecedor WHERE REPLACE(REPLACE(REPLACE(REPLACE(cnpj,'.',''),'/',''),'-',''),' ','')=? AND (ativo=1 OR ativo IS NULL) ORDER BY id LIMIT 1");
                 $q->execute([$cnpjDig]); $dupe = $q->fetchColumn() ?: null;
             }
             if (!$dupe) {

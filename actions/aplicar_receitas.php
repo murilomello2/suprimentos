@@ -227,8 +227,11 @@ try {
         }
         if (!$specs) { $R['verba'] = 'composição: receita sem insumos'; continue; }
         // enumera folhas candidatas e agrupa por (cid,idx)
+        // DEDUP: itera $compByDesc (1 composição por DESCRIÇÃO), não $COMPD (todos os cids). Composições
+        // DUPLICADAS (mesma descrição, ex.: orçamento do Signa) re-casavam as MESMAS folhas sob cids diferentes
+        // → o anti-dup insClaim (chave cid#idx|L) não pegava e a verba contava a mesma linha N vezes (Aço 96 grupos = R$191M).
         $sel = []; $confl = 0;
-        foreach ($COMPD as $cid => $cdesc) {
+        foreach ($compByDesc as $cdesc => $cid) {
             $lines = $linesByDesc[$cdesc] ?? []; if (!$lines) continue;
             foreach (($INS[$cid] ?? []) as $idx => $i) {
                 $din = sup_normt($i['descricao']);

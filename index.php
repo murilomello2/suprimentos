@@ -4487,7 +4487,7 @@ function cotPrecoIn(iid,which,el){
   const n=parseBRLInput(el.value);                 // número (ou null)
   const p=COT.prop.precos[iid], it=(COT.cur.itens||[]).find(x=>x.id===iid), q=it&&it.quantidade?Number(it.quantidade):null;
   if(which==='u'){ p.preco_unit=(n==null?'':n); if(q&&n!=null){ p.preco_total=+(n*q).toFixed(4); const el2=document.getElementById('prT'+iid); if(el2)el2.value=fmtMoneyN(p.preco_total,4); } }
-  else p.preco_total=(n==null?'':n);
+  else { p.preco_total=(n==null?'':n); if(q&&n!=null){ p.preco_unit=+(n/q).toFixed(4); const el2=document.getElementById('prU'+iid); if(el2)el2.value=fmtMoneyN(p.preco_unit,4); } }   // total digitado → deriva o unitário (÷ qtde), simétrico ao unitário→total
 }
 async function cotSalvarProposta(){
   if(COT._savingProp) return;   // trava DUPLO-SUBMIT (duplo-clique criava 2 propostas iguais 1s de diferença)
@@ -4795,7 +4795,7 @@ function cotPropIAResRender(){ const R=COT.propIAres; if(!R)return; let ov=docum
 async function cotPropIAResConfirm(){ const R=COT.propIAres; if(!R)return; let fid=null, fnome='';
   if(R.sel==='novo'){ const g=id=>((document.getElementById(id)||{}).value||'').trim(); fnome=g('piaN'); if(!fnome){toast('Informe o nome do fornecedor');return;}
     try{ const r=await (await fetch('actions/fornecedores.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'fornecedor_salvar',me:EU&&EU.bitrix_id,nome:fnome,cnpj:g('piaC'),categoria:g('piaCat'),telefone:g('piaT'),email:g('piaE')})})).json();
-      if(r.error){toast(r.error);return;} fid=r.id; toast('Fornecedor cadastrado'); }catch(e){toast('Falha ao cadastrar: '+e.message);return;}
+      if(r.error){toast(r.error);return;} fid=r.id; toast(r.dedup?'Fornecedor já existia — reaproveitado (sem duplicar)':'Fornecedor cadastrado'); }catch(e){toast('Falha ao cadastrar: '+e.message);return;}
   } else { const id=Number(String(R.sel).split(':')[1]); const c=R.cands.find(x=>x.id===id); if(!c){toast('Selecione o fornecedor');return;} fid=c.id; fnome=c.nome; }
   try{
     const jaConv=(COT.cur.convidados||[]).some(cv=>String(cv.fornecedor_id)===String(fid)||(cv.fornecedor_nome||'').trim().toLowerCase()===fnome.trim().toLowerCase());
@@ -5373,7 +5373,7 @@ async function fornSalvar(){
   const g=id=>val('fe_'+id); const nome=g('nome').trim(); if(!nome){toast('Nome obrigatório');return;}
   const body={acao:'fornecedor_salvar',me:EU&&EU.bitrix_id,id:FORN.edit.id||undefined,nome,categoria:g('categoria'),cidade:g('cidade'),contato:g('contato'),telefone:g('telefone'),whatsapp:g('whatsapp'),email:g('email'),cnpj:g('cnpj'),itens:g('itens'),tipo:g('tipo')};
   try{ const r=await (await fetch('actions/fornecedores.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
-    if(r.error){toast(r.error);return;} toast('Fornecedor salvo'); FORN.edit=null; fornLoad();
+    if(r.error){toast(r.error);return;} toast(r.dedup?'Já existia um fornecedor com esse nome/CNPJ — reaproveitado':'Fornecedor salvo'); FORN.edit=null; fornLoad();
   }catch(e){toast('Falha: '+e.message);}
 }
 async function fornExcluir(id){ if(!confirm('Excluir este fornecedor?'))return;

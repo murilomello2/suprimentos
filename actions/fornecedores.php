@@ -72,6 +72,25 @@ try {
             $pdo->prepare("UPDATE cot_fornecedor SET nome=?,categoria=?,cidade=?,contato=?,telefone=?,whatsapp=?,email=?,itens=?,tipo=?,cnpj=? WHERE id=?")
                 ->execute([$vals['nome'],$vals['categoria'],$vals['cidade'],$vals['contato'],$vals['telefone'],$vals['whatsapp'],$vals['email'],$vals['itens'],$vals['tipo'],$vals['cnpj'],$id]);
         } else {
+            // ANTI-DUPLICAÇÃO: sem id, reaproveita um fornecedor existente com o MESMO CNPJ (dígitos) ou o MESMO
+            // nome (case-insensitive). Fecha o furo do cadastro-por-IA (proposta de PDF) que criava fornecedor repetido.
+            $dupe = null;
+            $cnpjDig = preg_replace('/\D/', '', $vals['cnpj']);
+            if ($cnpjDig !== '') {
+                $q = $pdo->prepare("SELECT id FROM cot_fornecedor WHERE REPLACE(REPLACE(REPLACE(REPLACE(cnpj,'.',''),'/',''),'-',''),' ','')=? AND cnpj<>'' AND (ativo=1 OR ativo IS NULL) ORDER BY id LIMIT 1");
+                $q->execute([$cnpjDig]); $dupe = $q->fetchColumn() ?: null;
+            }
+            if (!$dupe) {
+                $q = $pdo->prepare("SELECT id FROM cot_fornecedor WHERE LOWER(TRIM(nome))=LOWER(TRIM(?)) AND (ativo=1 OR ativo IS NULL) ORDER BY id LIMIT 1");
+                $q->execute([$vals['nome']]); $dupe = $q->fetchColumn() ?: null;
+            }
+            if ($dupe) {
+                // reaproveita: atualiza só os campos vindos PREENCHIDOS (não apaga o que o fornecedor já tinha)
+                $id = (int)$dupe; $sets = []; $sv = [];
+                foreach ($cols as $c) { if ($c === 'nome') continue; if ($vals[$c] !== '') { $sets[] = "$c=?"; $sv[] = $vals[$c]; } }
+                if ($sets) { $sv[] = $id; $pdo->prepare("UPDATE cot_fornecedor SET " . implode(',', $sets) . " WHERE id=?")->execute($sv); }
+                echo json_encode(['ok'=>true, 'id'=>$id, 'dedup'=>true], JSON_UNESCAPED_UNICODE); exit;
+            }
             $pdo->prepare("INSERT INTO cot_fornecedor (nome,categoria,cidade,contato,telefone,whatsapp,email,itens,tipo,cnpj,ativo,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,1,?)")
                 ->execute([$vals['nome'],$vals['categoria'],$vals['cidade'],$vals['contato'],$vals['telefone'],$vals['whatsapp'],$vals['email'],$vals['itens'],$vals['tipo'],$vals['cnpj'],date('c')]);
             $id = (int)$pdo->lastInsertId();

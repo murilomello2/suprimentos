@@ -55,16 +55,18 @@ function av_keyword_map() {
         // FUNDAÇÃO
         'execucao de estaca helice continua'     => ['prio'=>9,  'sis'=>['fundacao'], 'inc'=>['estaca','helice','perfuracao','escava'], 'exc'=>['aco=','concreto','armacao']],
         'aco para fundacao profunda - c&d + armacao' => ['prio'=>10, 'sis'=>['fundacao'], 'inc'=>['aco=','armacao','vergalhao','ca-50','ca-60'], 'exc'=>['tela']],
-        'concreto para fundacao profunda'        => ['prio'=>11, 'sis'=>['fundacao'], 'inc'=>['concreto'], 'exc'=>['magro','bombeamento']],
+        'concreto para fundacao profunda'        => ['prio'=>11, 'sis'=>['fundacao'], 'inc'=>['concreto'], 'exc'=>['magro','bombeamento','forma']],
         'aco para fundacao rasa - c&d'           => ['prio'=>12, 'sis'=>['fundacao','baldrame','sapata'], 'inc'=>['aco=','armacao'], 'exc'=>['tela']],
-        'concreto fundacao rasa (blocos + vigas baldrame)' => ['prio'=>13, 'sis'=>['fundacao','baldrame','sapata'], 'inc'=>['concreto'], 'exc'=>['magro','bombeamento']],
+        'concreto fundacao rasa (blocos + vigas baldrame)' => ['prio'=>13, 'sis'=>['fundacao','baldrame','sapata'], 'inc'=>['concreto'], 'exc'=>['magro','bombeamento','forma']],
         'forma madeira para fundacao (mat)'      => ['prio'=>14, 'sis'=>['fundacao','baldrame'], 'inc'=>['forma'], 'exc'=>[]],
         // ESTRUTURA
         'bombeamento de concreto'                => ['prio'=>20, 'sis'=>[], 'inc'=>['bombeamento','bomba lanca','bombeavel'], 'exc'=>[]],
-        'tela de aco para laje (mat)'            => ['prio'=>26, 'sis'=>['estrutura','torre'], 'inc'=>['tela'], 'exc'=>[]],
+        'tela de aco para laje (mat)'            => ['prio'=>26, 'sis'=>['estrutura','torre'], 'inc'=>['tela'], 'exc'=>['impermeabiliza','poliester','polimerica','manta','asfaltic']],
         'escoramento torres + periferia'         => ['prio'=>28, 'sis'=>['estrutura','torre','escora'], 'inc'=>['escora'], 'exc'=>[]],
         'aco estrutura (c&d)'                    => ['prio'=>30, 'sis'=>['estrutura','torre'], 'inc'=>['aco=','armacao','vergalhao','ca-50','ca-60'], 'exc'=>['tela','fundacao']],
-        'concreto estrutura'                     => ['prio'=>31, 'sis'=>['estrutura','torre'], 'inc'=>['concreto'], 'exc'=>['bombeamento','magro','fundacao']],
+        // exc 'forma'/'bloco'/'alvenaria': "Forma para estruturas de CONCRETO" e "Alvenaria estrutural com blocos de
+        // CONCRETO" contêm a palavra concreto — sem isso o Concreto engolia a forma e as paredes de alvenaria (R$ milhões).
+        'concreto estrutura'                     => ['prio'=>31, 'sis'=>['estrutura','torre'], 'inc'=>['concreto'], 'exc'=>['bombeamento','magro','fundacao','forma','bloco','alvenaria']],
         'formas pronta obra toda'                => ['prio'=>32, 'sis'=>['estrutura','torre'], 'inc'=>['forma'], 'exc'=>['fundacao']],
         // ALVENARIA ESTRUTURAL (obras de bloco estrutural sem aba de composição no R10 — Licel/LTB-3).
         // 'metodo'=>'alvenaria': só dispara em obra de método alvenaria (não contamina obra de concreto).

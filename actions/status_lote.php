@@ -14,6 +14,7 @@
  */
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
+if (!function_exists('sup_nome_limpo')) { function sup_nome_limpo($s) { return trim(preg_replace('/\s+/u', ' ', (string)$s)); } }   // resiliência a deploy parcial (db.php pode chegar depois)
 
 $STATUS_OK = ['Não Iniciado','Cotação Iniciada','Com Pendências','Em Andamento','Finalizado','Não se aplica'];
 $LOTE_LABEL = ['status'=>'Status (lote)', 'fornecedor'=>'Fornecedor (lote)', 'responsavel'=>'Responsável (lote)'];
@@ -44,7 +45,9 @@ try {
         if (array_key_exists('responsavel', $campos)) {
             if (!$is_admin && !$is_gerente) { http_response_code(403); echo json_encode(['error'=>'Atribuir responsável em lote é só para administrador/gerente.'], JSON_UNESCAPED_UNICODE); exit; }
             if (stripos((string)$campos['responsavel'], 'camila') !== false) throw new Exception('responsável inválido');
+            $campos['responsavel'] = sup_nome_limpo((string)$campos['responsavel']);   // higiene de nome
         }
+        if (array_key_exists('fornecedor', $campos)) $campos['fornecedor'] = sup_nome_limpo((string)$campos['fornecedor']);
     } else {
         foreach ($itens as $i => $it) {
             $st = (string)($it['status'] ?? '');
@@ -71,8 +74,9 @@ try {
 
         // ---- permissão POR ITEM: admin/gerente tudo; senão editor da obra E responsável pelo item ----
         if (!$is_admin && !$is_gerente) {
-            $respItem = trim((string)($cur['responsavel'] ?? ''));
-            if (!can_edit_obra($perms, $ob) || $respItem === '' || $euNome === '' || strcasecmp($respItem, $euNome) !== 0) { $sem_permissao++; continue; }
+            $respItem = sup_nome_limpo((string)($cur['responsavel'] ?? ''));
+            $euN = sup_nome_limpo($euNome);
+            if (!can_edit_obra($perms, $ob) || $respItem === '' || $euN === '' || strcasecmp($respItem, $euN) !== 0) { $sem_permissao++; continue; }
         }
 
         $alvos = $campos !== null ? $campos : ['status' => (string)$it['status']];

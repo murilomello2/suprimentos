@@ -8,6 +8,7 @@
  */
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
+if (!function_exists('sup_nome_limpo')) { function sup_nome_limpo($s) { return trim(preg_replace('/\s+/u', ' ', (string)$s)); } }   // resiliência a deploy parcial (db.php pode chegar depois)
 
 $SIMPLES = ['status','fornecedor','responsavel','observacoes','validado','tipo',
             'lead_override','crono_marco_override','data_necessaria_override','verba_override',
@@ -91,8 +92,8 @@ try {
     if (!$is_admin && (($perms['papel'] ?? '') !== 'gerente')) {
         $ger = array_intersect($keysIn, ['status', 'fornecedor', 'observacoes']);
         if ($ger) {
-            $respItem = trim((string)($before['responsavel'] ?? ''));
-            $eu = trim((string)($perms['nome'] ?? ''));
+            $respItem = sup_nome_limpo((string)($before['responsavel'] ?? ''));
+            $eu = sup_nome_limpo((string)($perms['nome'] ?? ''));
             if ($respItem === '' || $eu === '' || strcasecmp($respItem, $eu) !== 0) {
                 http_response_code(403);
                 echo json_encode(['error' => 'Este item está sob responsabilidade de ' . ($respItem !== '' ? $respItem : 'ninguém (sem responsável definido)') . ' — você só altera status/fornecedor/observação dos itens em que VOCÊ é o responsável.'], JSON_UNESCAPED_UNICODE);
@@ -413,6 +414,7 @@ try {
         if ($k === 'tipo' && !in_array($v, $TIPOS_OK, true)) throw new Exception('tipo inválido: ' . $v);
         if ($k === 'status' && $v !== '' && !in_array($v, $STATUS_OK, true)) throw new Exception('status inválido: ' . $v);
         if ($k === 'responsavel' && stripos((string)$v, 'camila') !== false) throw new Exception('responsável inválido');
+        if (($k === 'responsavel' || $k === 'fornecedor') && is_string($v)) $v = sup_nome_limpo($v);   // higiene: espaço duplo/invisível quebra filtro e dashboard
         $antes = $before[$k] ?? '';
         if ((string)$antes !== (string)$v) $h($LABEL[$k] ?? $k, $antes, $v);
         if ($k === 'validado')          { $set[]="$k = ?"; $vals[]=(int)(bool)$v; continue; }

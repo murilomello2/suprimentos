@@ -14,6 +14,7 @@
 header('Content-Type: application/json; charset=utf-8');
 set_time_limit(120);
 require_once __DIR__ . '/../includes/db.php';
+if (!function_exists('sup_nome_limpo')) { function sup_nome_limpo($s) { return trim(preg_replace('/\s+/u', ' ', (string)$s)); } }   // resiliência a deploy parcial (db.php pode chegar depois)
 
 try {
     $pdo = db();
@@ -59,7 +60,7 @@ try {
 
     $ids = array_values(array_unique(array_filter(array_map('intval', (array)($in['servico_ids'] ?? [])))));
     if (!$ids) throw new Exception('nenhum item selecionado');
-    $resp = trim((string)($in['responsavel'] ?? ''));   // '' = limpar
+    $resp = sup_nome_limpo((string)($in['responsavel'] ?? ''));   // '' = limpar; colapsa espaço duplo/invisível (quebrava filtro/dashboard)
     $tornarPadrao = !empty($in['tornar_padrao']);
     if ($tornarPadrao) {   // padrão é GLOBAL (template): exige escopo amplo
         $podePadrao = !empty($perms['perm_admin']) || (($perms['editar_escopo'] ?? '') === 'todas');

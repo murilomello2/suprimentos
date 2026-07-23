@@ -700,6 +700,11 @@ function can_edit_obra($perms, $obra_id) {
 }
 // NB: o enforcement por campo (mapa campo->grupo + checagem) é INLINE no actions/item_update.php,
 // pra ser resiliente a deploy parcial (não depende deste arquivo chegar atualizado no FTP).
+/** Normaliza NOME DE PESSOA: colapsa espaços múltiplos (inclusive NBSP) e faz trim.
+ *  "João  Nogueira" (espaço DUPLO vindo do Bitrix) quebrava filtro/dashboard: o <option> do navegador
+ *  colapsa o valor ao selecionar e a comparação exata com o banco nunca casava. Aplicar em TODA gravação. */
+function sup_nome_limpo($s) { return trim(preg_replace('/[\s\x{00A0}]+/u', ' ', (string)$s)); }
+
 function log_historico($pdo, $obra_id, $servico_id, $item_nome, $bid, $nome, $campo, $antes, $depois) {
     $pdo->prepare("INSERT INTO historico
         (obra_id,servico_id,item_nome,bitrix_id,usuario_nome,campo,valor_antes,valor_depois,created_at)

@@ -744,6 +744,9 @@ function toast(m){const t=document.getElementById('toastEl');t.textContent=m;t.s
 // multi-obra: a mesma ordem existe em 2+ obras. Procura no RADAR (DATA.itens = só OBRA_SEL) e, se não achar,
 // cai na MATRIZ (MAT = TODAS as obras) — assim clicar numa célula da matriz abre o item mesmo se a obra
 // não estiver selecionada no radar (as duas telas são independentes).
+// nome de pessoa NORMALIZADO (colapsa espaço duplo/invisível + trim) — o <option> do navegador colapsa o
+// valor ao selecionar, então TODA comparação de responsável tem que passar por aqui ("João  Nogueira" ≠ "João Nogueira")
+const nrmResp=s=>String(s||'').replace(/\s+/g,' ').trim();
 const byOrdem=(o,ob)=>DATA.itens.find(i=>i.ordem==o && (ob==null || i.obra_id==ob))
   || ((typeof MAT!=='undefined' && MAT) ? MAT.find(i=>i.ordem==o && (ob==null || i.obra_id==ob)) : null);
 const OBQ=()=>((CUR&&CUR.obra_id)||OBRA_SEL[0]||1);   // obra do MODAL aberto (ou a primária) — vai em todo fetch do modal
@@ -903,7 +906,7 @@ async function load(){
     // filtros dinâmicos (grupos em ordem lógica = ordem de aparição; demais ordenados)
     fillOrdered('fgrupo',[...new Set(itens.map(i=>i.grupo).filter(Boolean))]);
     fill('fstatus',[...new Set(itens.map(i=>i.status||'Não Iniciado'))]);
-    fill('fresp',[...new Set(itens.map(i=>i.responsavel).filter(Boolean))]);
+    fill('fresp',[...new Set(itens.map(i=>nrmResp(i.responsavel)).filter(Boolean))]);
     render();
     // a MATRIZ tem fonte PRÓPRIA (todas as obras, independente do Radar) — invalida o cache e refresca se estiver aberta
     MAT=null;
@@ -1642,7 +1645,7 @@ function render(){
   const rows=DATA.itens.filter(i=>
     (!q||(i.nome+' '+(i.forma_contratacao||'')+' '+(i.responsavel||'')).toLowerCase().includes(q))&&
     (!fg||i.grupo===fg)&&(!fo||i.obra_nome===fo)&&(!fc||i.curva===fc)&&
-    (!fs||(i.status||'Não Iniciado')===fs)&&(!fr||i.responsavel===fr)&&(!oa||isAlert(i))&&
+    (!fs||(i.status||'Não Iniciado')===fs)&&(!fr||nrmResp(i.responsavel)===nrmResp(fr))&&(!oa||isAlert(i))&&
     (!fcd||(fcd==='sim'?i.curado_verba:!i.curado_verba))&&
     (!fcr||(fcr==='sim'?i.curado_data:!i.curado_data))&&
     (!fqt||(fqt==='sim'?i.curado_quant:!i.curado_quant))&&
@@ -1674,8 +1677,8 @@ let RSEL=new Map(), RVIS=[];
 function rselPode(i){
   if(IS_ADMIN||(((EU&&EU.papel)||'')==='gerente')) return true;
   if(!CAN_EDIT) return false;
-  const eu=((EU&&EU.nome)||'').trim().toLowerCase();
-  return !!eu && (i.responsavel||'').trim().toLowerCase()===eu;
+  const eu=nrmResp((EU&&EU.nome)||'').toLowerCase();
+  return !!eu && nrmResp(i.responsavel).toLowerCase()===eu;
 }
 function rselToggle(k,on){
   if(on){ const [ob,ord]=k.split(':'); RSEL.set(k,{obra_id:Number(ob),ordem:Number(ord)}); }
@@ -1788,7 +1791,7 @@ async function saveField(ordem,campo,valor){
     if(d.error){toast('Erro: '+d.error);return false;}
     Object.assign(byOrdem(ordem),d.item); // reflete na memória
     fill('fstatus',[...new Set(DATA.itens.map(i=>i.status||'Não Iniciado'))]);
-    fill('fresp',[...new Set(DATA.itens.map(i=>i.responsavel).filter(Boolean))]);
+    fill('fresp',[...new Set(DATA.itens.map(i=>nrmResp(i.responsavel)).filter(Boolean))]);
     render(); renderMatriz(); // reflete cor/valores nas duas visões na hora
     return true;
   }catch(e){toast('Falha ao salvar');return false;}
@@ -3310,7 +3313,7 @@ async function saveAndReload(campos, escopo){
           const arr=DATA.itens||(DATA.itens=[]); const idx=arr.findIndex(i=>i.ordem===CUR.ordem&&(i.obra_id||1)===oid);
           if(idx>=0) arr[idx]=mr.item; else arr.push(mr.item);
           if(mr.resumo) RESUMO_BY_OBRA[oid]=mr.resumo;
-          try{ fillOrdered('fgrupo',[...new Set(arr.map(i=>i.grupo).filter(Boolean))]); fill('fstatus',[...new Set(arr.map(i=>i.status||'Não Iniciado'))]); fill('fresp',[...new Set(arr.map(i=>i.responsavel).filter(Boolean))]); }catch(e){}
+          try{ fillOrdered('fgrupo',[...new Set(arr.map(i=>i.grupo).filter(Boolean))]); fill('fstatus',[...new Set(arr.map(i=>i.status||'Não Iniciado'))]); fill('fresp',[...new Set(arr.map(i=>nrmResp(i.responsavel)).filter(Boolean))]); }catch(e){}
           renderKpis(); render();
           if(document.getElementById('view-matriz') && document.getElementById('view-matriz').style.display!=='none'){ MAT=null; loadMatriz(true); }
           merged=true;
@@ -3395,9 +3398,9 @@ async function excluirItemCatalogo(){
 }
 /* ===================== DASHBOARDS ===================== */
 let DASH={tab:null, D:null, oppByObra:{}};
-const DASH_TABS=[['comprador','Comprador','person'],['gerente','Gerente de Compras','groups'],['diretor','Diretor','insights'],['oportunidades','Oportunidades','savings']];
+const DASH_TABS=[['comprador','Comprador','person'],['gerente','Gerente de Compras','groups'],['diretor','Diretor','insights']];   // aba "Oportunidades" DELETADA (23/jul, pedido do Murilo — não servia; a tela Oportunidades do MENU continua)
 function dashAllowed(){ const papel=(EU&&EU.papel)||''; if(IS_ADMIN||papel==='diretor') return DASH_TABS.map(t=>t[0]);
-  let a; if(papel==='gerente') a=['gerente','comprador','oportunidades']; else a=['comprador','oportunidades'];
+  let a; if(papel==='gerente') a=['gerente','comprador']; else a=['comprador'];
   const d=(EU&&EU.dashboard)||''; if(d&&!a.includes(d)&&DASH_TABS.some(t=>t[0]===d)) a.unshift(d);   // painel ATRIBUÍDO pelo admin sempre entra
   return a; }
 function dashInit(){
@@ -3435,7 +3438,7 @@ function renderDash(){
   const w=document.getElementById('dwrap'), D=DASH.D; if(!w)return;
   if(!D){ w.innerHTML='<div class="dempty">Sem dados.</div>'; return; }
   const meta=document.getElementById('dmeta'); if(meta) meta.textContent=`${D.obras.length} obra(s) · ${D.totalItens} itens · hoje ${D.hojeBR}`;
-  const f={comprador:renderDashComprador,gerente:renderDashGerente,diretor:renderDashDiretor,oportunidades:renderDashOpp}[DASH.tab];
+  const f={comprador:renderDashComprador,gerente:renderDashGerente,diretor:renderDashDiretor}[DASH.tab];
   w.innerHTML=f?f(D):'<div class="dempty">—</div>';
 }
 /* ---------- cálculo das métricas (client-side, a partir do MAT + oportunidades) ---------- */
@@ -3462,7 +3465,7 @@ function dashCompute(){
     if(d<0){g.atras.n++;g.atras.v+=v;} else if(d<=7){g.d7.n++;g.d7.v+=v;} else if(d<=15){g.d15.n++;g.d15.v+=v;} else {g.d30.n++;g.d30.v+=v;} });
   D.gatilhos=g;
   // por comprador
-  const cm={}; items.forEach(i=>{ const r=(i.responsavel||'').trim(); if(!r)return; (cm[r]=cm[r]||{nome:r,itens:0,criticos:0,exposta:0}); cm[r].itens++;
+  const cm={}; items.forEach(i=>{ const r=nrmResp(i.responsavel); if(!r)return; (cm[r]=cm[r]||{nome:r,itens:0,criticos:0,exposta:0}); cm[r].itens++;
     if(lvl(i)==='critico')cm[r].criticos++; if(isAtras(i))cm[r].exposta+=val(i); });
   D.compradores=Object.values(cm).sort((a,b)=>b.exposta-a.exposta);
   const maxExp=Math.max(1,...D.compradores.map(c=>c.exposta)); D.compradores.forEach(c=>c.risco=Math.round(100*c.exposta/maxExp));
@@ -3524,9 +3527,9 @@ function renderDashComprador(D){
   const papel=(EU&&EU.papel)||'';
   const podeEscolher=IS_ADMIN||papel==='gerente'||papel==='diretor';
   const eu=((EU&&EU.nome)||'').trim();
-  const nomes=[...new Set(base.map(i=>(i.responsavel||'').trim()).filter(Boolean))].sort();
+  const nomes=[...new Set(base.map(i=>nrmResp(i.responsavel)).filter(Boolean))].sort();
   const alvo=(DASH.comprador||eu||nomes[0]||'').trim();
-  const meus=base.filter(i=>(i.responsavel||'').trim()===alvo);
+  const meus=base.filter(i=>nrmResp(i.responsavel)===nrmResp(alvo));
   const val=i=>Number(i.verba||0), lvl=i=>alertLevel(i);
   const dDiff=f=>f?Math.round((new Date(f+'T00:00:00')-new Date(D.hoje+'T00:00:00'))/864e5):null;
   const M=v=>v>=1e6?('R$ '+(v/1e6).toFixed(1).replace('.',',')+' mi'):(v>=1e3?('R$ '+Math.round(v/1e3)+' mil'):('R$ '+Math.round(v)));

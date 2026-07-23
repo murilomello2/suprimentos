@@ -8,6 +8,7 @@
  */
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
+if (!function_exists('sup_nome_limpo')) { function sup_nome_limpo($s) { return trim(preg_replace('/\s+/u', ' ', (string)$s)); } }   // resiliência a deploy parcial (db.php pode chegar depois)
 
 // presets de papel (defaults; o admin pode sobrescrever campo a campo)
 function preset($papel) {
@@ -100,6 +101,22 @@ try {
             echo json_encode(['ok'=>true, 'afetados'=>$st->rowCount()], JSON_UNESCAPED_UNICODE); exit;
         }
 
+        // ---- HIGIENE DE NOMES (admin, one-shot/idempotente): colapsa espaços múltiplos + trim em
+        // usuario.nome, radar_item.responsavel/fornecedor e servico.responsavel_padrao. "João  Nogueira"
+        // (espaço duplo do Bitrix) quebrava filtro de responsável e dashboard (o <option> colapsa o valor). ----
+        if ($acao === 'normalizar_nomes') {
+            $tot = [];
+            foreach ([['usuario','nome'], ['radar_item','responsavel'], ['radar_item','fornecedor'], ['servico','responsavel_padrao']] as [$tb, $col]) {
+                $n = 0;
+                for ($i = 0; $i < 3; $i++) {   // 3 passadas de duplo→simples cobrem até 8 espaços seguidos
+                    $st = $pdo->prepare("UPDATE $tb SET $col=TRIM(REPLACE($col,'  ',' ')) WHERE $col IS NOT NULL AND ($col LIKE '%  %' OR $col<>TRIM($col))");
+                    $st->execute(); $n += $st->rowCount();
+                }
+                $tot["$tb.$col"] = $n;
+            }
+            echo json_encode(['ok'=>true, 'corrigidos'=>$tot], JSON_UNESCAPED_UNICODE); exit;
+        }
+
         $bid = (string)($in['bitrix_id'] ?? '');
         if ($bid === '') throw new Exception('bitrix_id obrigatório');
 
@@ -112,7 +129,7 @@ try {
         $p = preset($papel);
         $rec = [
             'bitrix_id'     => $bid,
-            'nome'          => $in['nome'] ?? '',
+            'nome'          => sup_nome_limpo($in['nome'] ?? ''),
             'cargo'         => $in['cargo'] ?? '',
             'papel'         => $papel,
             'ver_escopo'    => $in['ver_escopo']    ?? $p['ver_escopo'],

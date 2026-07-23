@@ -4099,6 +4099,7 @@ async function cotOpen(id){
 function cotNum(x){ return x!=null&&x!==''?Number(x).toLocaleString('pt-BR'):''; }
 // --- Itens a cotar: exibição (com observação = complemento) + edição (add/editar/excluir) ---
 function cotEditavel(){ const c=(COT.cur&&COT.cur.cotacao)||{}; if(IS_ADMIN) return true; if(!EU) return false;
+  if(((EU.papel)||'')==='gerente') return true;   // GERENTE DE SUPRIMENTOS edita qualquer cotação (tudo no Histórico)
   if(c.criado_por!=null&&c.criado_por!==''&&String(c.criado_por)===String(EU.bitrix_id)) return true;
   return (c.colaboradores||[]).some(b=>String(b)===String(EU.bitrix_id));   // COLABORADOR compartilhado edita também (férias do criador)
 }
@@ -4307,7 +4308,7 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
         ${CAN_EDIT?`<button class="btn-prim" style="padding:6px 12px" onclick="cotProposta()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Cadastrar proposta</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotFinalizar()">${c.status==='finalizada'?'Reabrir':'Finalizar'}</button>`:''}
         <button class="btn-ghost" style="padding:6px 12px" onclick="cotHistOpen()" title="Histórico de alterações desta cotação — quem mudou o quê, data e hora"><span class="material-icons" style="font-size:15px;vertical-align:-3px">history</span> Histórico</button>
-        ${(IS_ADMIN||(c.criado_por!=null&&c.criado_por!==''&&EU&&String(c.criado_por)===String(EU.bitrix_id)))?`<button class="btn-ghost" style="padding:6px 12px${(c.colaboradores||[]).length?';border-color:var(--verde);color:var(--verde-d)':''}" onclick="cotColabOpen()" title="${(c.colaboradores||[]).length?('Colaboradores: '+esc((c.colaboradores_nomes||[]).join(', '))):'Compartilhar a edição com outra pessoa (ex.: criador de férias)'}"><span class="material-icons" style="font-size:15px;vertical-align:-3px">group_add</span> Compartilhar${(c.colaboradores||[]).length?' ('+(c.colaboradores||[]).length+')':''}</button>`:''}
+        ${(IS_ADMIN||((EU&&EU.papel)||'')==='gerente'||(c.criado_por!=null&&c.criado_por!==''&&EU&&String(c.criado_por)===String(EU.bitrix_id)))?`<button class="btn-ghost" style="padding:6px 12px${(c.colaboradores||[]).length?';border-color:var(--verde);color:var(--verde-d)':''}" onclick="cotColabOpen()" title="${(c.colaboradores||[]).length?('Colaboradores: '+esc((c.colaboradores_nomes||[]).join(', '))):'Compartilhar a edição com outra pessoa (ex.: criador de férias)'}"><span class="material-icons" style="font-size:15px;vertical-align:-3px">group_add</span> Compartilhar${(c.colaboradores||[]).length?' ('+(c.colaboradores||[]).length+')':''}</button>`:''}
         ${podeGerir?`<button class="btn-ghost" style="padding:6px 12px;color:var(--pend)" onclick="cotExcluir()" title="Excluir esta cotação (admin ou quem criou)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">delete</span> Excluir</button>`:''}
       </span></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;padding:16px 0 2px">

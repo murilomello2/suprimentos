@@ -39,6 +39,7 @@ function cot_can_manage($pdo, $me, $cid) {
     if (!$r) return false;
     $perms = user_perms($pdo, $me);
     if (!empty($perms['perm_admin'])) return true;
+    if (($perms['papel'] ?? '') === 'gerente') return true;   // GERENTE DE SUPRIMENTOS edita qualquer cotação (decisão 23/jul — tudo fica no Histórico)
     if ($me === null || $me === '') return false;
     if ((string)$r['criado_por'] === (string)$me) return true;
     // COLABORADORES (compartilhar — ex.: criador de férias): lista de bitrix_ids com os mesmos poderes de edição
@@ -322,7 +323,8 @@ try {
         $criador = (string)($row->fetchColumn() ?? '');
         $perms = user_perms($pdo, $me);
         $souCriador = ($me !== null && $me !== '' && $criador === (string)$me);
-        if (empty($perms['perm_admin']) && !$souCriador) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode compartilhá-la.'], JSON_UNESCAPED_UNICODE); exit; }
+        $souGerente = (($perms['papel'] ?? '') === 'gerente');
+        if (empty($perms['perm_admin']) && !$souGerente && !$souCriador) { http_response_code(403); echo json_encode(['error'=>'Só administrador, gerente de suprimentos ou quem criou a cotação pode compartilhá-la.'], JSON_UNESCAPED_UNICODE); exit; }
         $cols = array_values(array_unique(array_filter(array_map(fn($b) => trim((string)$b), (array)($in['colaboradores'] ?? [])), fn($b) => $b !== '' && $b !== $criador)));   // criador não precisa estar na lista
         $pdo->prepare("UPDATE cotacao SET colaboradores=?, updated_at=? WHERE id=?")->execute([$cols ? json_encode($cols) : null, date('c'), $cid]);
         // nomes p/ o log

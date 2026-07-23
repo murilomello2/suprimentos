@@ -83,6 +83,23 @@ try {
     $s0 = $pdo->prepare("SELECT nome, grupo FROM servico WHERE id=?"); $s0->execute([$ordem]);
     $beforeS = $s0->fetch() ?: ['nome'=>'','grupo'=>''];
     $item_nome = $beforeS['nome'] ?? '';
+
+    // ---- TRAVA DE RESPONSABILIDADE (decisão do Murilo, 21/jul/2026): comprador NÃO-admin/NÃO-gerente só altera
+    // os campos GERAIS (status/fornecedor/observação) de item onde ELE é o responsável — conferência de status
+    // pelos compradores sem risco de mexer no item alheio. Admin e gerente seguem sem trava; vínculos/curadoria
+    // continuam gateados pelas permissões específicas (acima). Enforcement no SERVIDOR (vale individual e lote).
+    if (!$is_admin && (($perms['papel'] ?? '') !== 'gerente')) {
+        $ger = array_intersect($keysIn, ['status', 'fornecedor', 'observacoes']);
+        if ($ger) {
+            $respItem = trim((string)($before['responsavel'] ?? ''));
+            $eu = trim((string)($perms['nome'] ?? ''));
+            if ($respItem === '' || $eu === '' || strcasecmp($respItem, $eu) !== 0) {
+                http_response_code(403);
+                echo json_encode(['error' => 'Este item está sob responsabilidade de ' . ($respItem !== '' ? $respItem : 'ninguém (sem responsável definido)') . ' — você só altera status/fornecedor/observação dos itens em que VOCÊ é o responsável.'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+        }
+    }
     $hist = [];                      // [ [campo, antes, depois], ... ]
     $h = function($campo,$antes,$depois) use (&$hist){ $hist[] = [$campo,$antes,$depois]; };
 

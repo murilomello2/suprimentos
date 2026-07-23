@@ -26,12 +26,25 @@ function cot_can_edit($pdo, $me, $obra) {
 }
 // Gerir/editar/excluir uma cotação EXISTENTE: só ADMIN ou quem CRIOU (comprador não mexe nas dos outros).
 // (Criar cotação nova segue liberado por obra via cot_can_edit — isso não é "editar a dos outros".)
+// registra uma mudança na trilha de auditoria da cotação (quem/o quê/quando) — nunca derruba a ação principal
+function cot_log($pdo, $cid, $me, $acao, $detalhe = '') {
+    try {
+        $nome = ''; try { $p = user_perms($pdo, $me); $nome = $p['nome'] ?? ''; } catch (Throwable $e) {}
+        $pdo->prepare("INSERT INTO cotacao_historico (cotacao_id, bitrix_id, usuario_nome, acao, detalhe, created_at) VALUES (?,?,?,?,?,?)")
+            ->execute([(int)$cid, (string)$me, $nome ?: ('Usuário ' . $me), $acao, $detalhe, date('c')]);
+    } catch (Throwable $e) {}
+}
 function cot_can_manage($pdo, $me, $cid) {
-    $q = $pdo->prepare("SELECT criado_por FROM cotacao WHERE id=?"); $q->execute([(int)$cid]); $r = $q->fetch();
+    $q = $pdo->prepare("SELECT criado_por, colaboradores FROM cotacao WHERE id=?"); $q->execute([(int)$cid]); $r = $q->fetch();
     if (!$r) return false;
     $perms = user_perms($pdo, $me);
     if (!empty($perms['perm_admin'])) return true;
-    return ($me !== null && $me !== '' && (string)$r['criado_por'] === (string)$me);
+    if ($me === null || $me === '') return false;
+    if ((string)$r['criado_por'] === (string)$me) return true;
+    // COLABORADORES (compartilhar — ex.: criador de férias): lista de bitrix_ids com os mesmos poderes de edição
+    $cols = json_decode((string)($r['colaboradores'] ?? ''), true) ?: [];
+    foreach ((array)$cols as $b) if (trim((string)$b) === trim((string)$me)) return true;
+    return false;
 }
 // insere fornecedores CONVIDADOS na concorrência (dedup por fornecedor_id/nome)
 function cot_insert_convidados($pdo, $cid, $lista) {
@@ -88,6 +101,18 @@ function cot_get_full($pdo, $id) {
         $nc = (string)$so->fetchColumn(); if ($nc !== '') $cot['obra_nome'] = $nc;
     }
     if (empty($cot['obra_nome']) && !empty($cot['obra_livre'])) $cot['obra_nome'] = $cot['obra_livre'];   // cotação importada (obra por texto)
+    // colaboradores (compartilhar): ids + nomes resolvidos (p/ o front mostrar e o dono gerenciar)
+    $cot['colaboradores'] = array_values(array_filter(array_map(fn($b) => trim((string)$b), (array)(json_decode((string)($cot['colaboradores'] ?? ''), true) ?: []))));
+    $cot['colaboradores_nomes'] = [];
+    if ($cot['colaboradores']) {
+        try {
+            $ph = implode(',', array_fill(0, count($cot['colaboradores']), '?'));
+            $nq = $pdo->prepare("SELECT bitrix_id, nome FROM usuario WHERE TRIM(bitrix_id) IN ($ph)");
+            $nq->execute($cot['colaboradores']);
+            $nm = []; foreach ($nq->fetchAll() as $u) $nm[trim((string)$u['bitrix_id'])] = $u['nome'];
+            $cot['colaboradores_nomes'] = array_map(fn($b) => $nm[$b] ?? ('#' . $b), $cot['colaboradores']);
+        } catch (Throwable $e) {}
+    }
     $iq = $pdo->prepare("SELECT * FROM cotacao_item WHERE cotacao_id=? ORDER BY ordem, id"); $iq->execute([$id]);
     $itens = $iq->fetchAll();
     // obra por item (cotação MULTI-OBRA): resolve nome + cidade p/ o front agrupar/rotular e p/ o texto de negociação
@@ -226,6 +251,11 @@ try {
             $sv = $pdo->prepare("SELECT nome, grupo FROM servico WHERE id=?"); $sv->execute([$sid]); $sv = $sv->fetch();
             echo json_encode(['servico'=>$sv, 'itens'=>$q->fetchAll()], JSON_UNESCAPED_UNICODE); exit;
         }
+        if (isset($_GET['historico'])) {   // trilha de auditoria da cotação (quem mudou o quê, quando)
+            $hq = $pdo->prepare("SELECT bitrix_id, usuario_nome, acao, detalhe, created_at FROM cotacao_historico WHERE cotacao_id=? ORDER BY id DESC LIMIT 300");
+            $hq->execute([(int)$_GET['historico']]);
+            echo json_encode(['historico' => $hq->fetchAll()], JSON_UNESCAPED_UNICODE); exit;
+        }
         if (isset($_GET['id'])) {
             $full = cot_get_full($pdo, (int)$_GET['id']);
             if (!$full) { http_response_code(404); echo json_encode(['error'=>'cotação não encontrada']); exit; }
@@ -286,6 +316,22 @@ try {
         echo json_encode(['ok'=>true, 'id'=>$cid], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    if ($acao === 'colaborador_salvar') {   // COMPARTILHAR a cotação: admin OU o criador definem quem mais pode editá-la
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
+        $row = $pdo->prepare("SELECT criado_por FROM cotacao WHERE id=?"); $row->execute([$cid]);
+        $criador = (string)($row->fetchColumn() ?? '');
+        $perms = user_perms($pdo, $me);
+        $souCriador = ($me !== null && $me !== '' && $criador === (string)$me);
+        if (empty($perms['perm_admin']) && !$souCriador) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode compartilhá-la.'], JSON_UNESCAPED_UNICODE); exit; }
+        $cols = array_values(array_unique(array_filter(array_map(fn($b) => trim((string)$b), (array)($in['colaboradores'] ?? [])), fn($b) => $b !== '' && $b !== $criador)));   // criador não precisa estar na lista
+        $pdo->prepare("UPDATE cotacao SET colaboradores=?, updated_at=? WHERE id=?")->execute([$cols ? json_encode($cols) : null, date('c'), $cid]);
+        // nomes p/ o log
+        $nomes = [];
+        if ($cols) { try { $ph = implode(',', array_fill(0, count($cols), '?')); $nq = $pdo->prepare("SELECT nome FROM usuario WHERE TRIM(bitrix_id) IN ($ph)"); $nq->execute($cols); $nomes = $nq->fetchAll(PDO::FETCH_COLUMN); } catch (Throwable $e) {} }
+        cot_log($pdo, $cid, $me, 'Compartilhamento', $cols ? ('Colaboradores: ' . implode(', ', $nomes ?: $cols)) : 'Removeu todos os colaboradores');
+        echo json_encode(['ok'=>true, 'colaboradores'=>$cols], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($acao === 'set_obra') {   // define/corrige a obra de uma cotação (cadastro único: obra_ficha_id → promove)
         $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
         if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só admin ou quem criou a cotação pode mudar a obra.']); exit; }
@@ -293,6 +339,7 @@ try {
         if (!empty($in['obra_ficha_id'])) $obra = (int)obra_radar_id($pdo, (int)$in['obra_ficha_id']);
         elseif (isset($in['obra_id'])) $obra = (int)$in['obra_id'];   // 0 = limpar
         $pdo->prepare("UPDATE cotacao SET obra_id=?, updated_at=? WHERE id=?")->execute([$obra ?: null, date('c'), $cid]);
+        cot_log($pdo, $cid, $me, 'Obra', 'Obra da cotação alterada (id ' . ($obra ?: '—') . ')');
         echo json_encode(['ok'=>true, 'cotacao_id'=>$cid, 'obra_id'=>$obra ?: null], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -316,6 +363,7 @@ try {
         $pdo->beginTransaction();
         $n = cot_insert_convidados($pdo, $cid, $in['convidados'] ?? $in['fornecedores'] ?? []);
         $pdo->commit();
+        if ($n) cot_log($pdo, $cid, $me, 'Concorrência', 'Convidou ' . $n . ' fornecedor(es): ' . implode(', ', array_slice(array_map(fn($f) => (string)($f['nome'] ?? $f['fornecedor_nome'] ?? ''), (array)($in['convidados'] ?? $in['fornecedores'] ?? [])), 0, 6)));
         echo json_encode(['ok'=>true, 'n'=>$n], JSON_UNESCAPED_UNICODE); exit;
     }
     if ($acao === 'desconvidar') {
@@ -325,7 +373,9 @@ try {
         $cid = (int)$row->fetchColumn();
         if (!$cid) { echo json_encode(['ok'=>true, 'ja_removido'=>true], JSON_UNESCAPED_UNICODE); exit; }   // já não existe
         if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
+        $fn = $pdo->prepare("SELECT fornecedor_nome FROM cotacao_fornecedor WHERE id=?"); $fn->execute([$id]); $fn = (string)$fn->fetchColumn();
         $pdo->prepare("DELETE FROM cotacao_fornecedor WHERE id=?")->execute([$id]);
+        cot_log($pdo, $cid, $me, 'Concorrência', 'Desconvidou ' . ($fn ?: ('convidado #' . $id)));
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -334,6 +384,7 @@ try {
         if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
         $ap = trim((string)($in['apelido'] ?? '')); if (function_exists('mb_substr')) $ap = mb_substr($ap, 0, 160); else $ap = substr($ap, 0, 160);
         $pdo->prepare("UPDATE cotacao SET apelido=?, updated_at=? WHERE id=?")->execute([$ap !== '' ? $ap : null, date('c'), $cid]);
+        cot_log($pdo, $cid, $me, 'Apelido', $ap !== '' ? ('Apelido → "' . $ap . '"') : 'Apelido removido');
         echo json_encode(['ok'=>true, 'apelido'=>$ap], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -344,6 +395,7 @@ try {
         $verba = (float)($in['verba'] ?? 0);
         $pdo->prepare("UPDATE cotacao SET verba=?, verba_origem=?, updated_at=? WHERE id=?")
             ->execute([$verba ?: null, trim((string)($in['verba_origem'] ?? 'manual')), date('c'), $cid]);
+        cot_log($pdo, $cid, $me, 'Verba', 'Verba prevista → R$ ' . number_format($verba, 2, ',', '.'));
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -357,6 +409,7 @@ try {
         if (!$sets) throw new Exception('nada a atualizar');
         $sets[] = 'updated_at=?'; $args[] = date('c'); $args[] = $cid;
         $pdo->prepare("UPDATE cotacao SET " . implode(',', $sets) . " WHERE id=?")->execute($args);
+        cot_log($pdo, $cid, $me, 'SC/PC', 'Números atualizados' . (array_key_exists('num_solicitacao', $in) ? (' · SC: ' . trim((string)$in['num_solicitacao'])) : '') . (array_key_exists('num_pedido', $in) ? (' · PC: ' . trim((string)$in['num_pedido'])) : ''));
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -381,6 +434,7 @@ try {
         $all = $pdo->prepare("SELECT num_pedido FROM cotacao_pedido WHERE cotacao_id=? AND num_pedido IS NOT NULL AND num_pedido<>''"); $all->execute([$cid]);
         $nums = array_values(array_unique(array_filter(array_map(fn($x)=>trim((string)$x), $all->fetchAll(PDO::FETCH_COLUMN)))));
         $pdo->prepare("UPDATE cotacao SET num_pedido=?, updated_at=? WHERE id=?")->execute([$nums ? implode(', ', $nums) : null, $now, $cid]);
+        cot_log($pdo, $cid, $me, 'SC/PC', 'PC da coligada ' . ($col ?: $cod) . ' → ' . ($pc ?: '—'));
         echo json_encode(['ok'=>true, 'num_pedido_resumo'=>implode(', ', $nums)], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -400,6 +454,7 @@ try {
             $val = isset($in['equaliza']) ? json_encode((object)$in['equaliza'], JSON_UNESCAPED_UNICODE) : null;
             $pdo->prepare("UPDATE cotacao_proposta SET equaliza=? WHERE id=?")->execute([$val, $pid]);
         }
+        cot_log($pdo, $cid, $me, 'Equalização', !empty($in['proposta_id']) ? ('Equalização da proposta #' . (int)$in['proposta_id'] . ' atualizada') : 'Pontos de equalização atualizados');
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -454,6 +509,7 @@ try {
         }
         $pdo->prepare("UPDATE cotacao SET status=CASE WHEN status='aberta' THEN 'aguardando' ELSE status END, updated_at=? WHERE id=?")->execute([$now, $cid]);
         $pdo->commit();
+        cot_log($pdo, $cid, $me, 'Proposta', 'Proposta de ' . $forn . ' salva — total R$ ' . number_format($total, 2, ',', '.') . ' (' . count($itens) . ' item(ns))');
         echo json_encode(['ok'=>true, 'proposta_id'=>$pid, 'total'=>round($total, 2)], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -492,6 +548,7 @@ try {
         }
         $pdo->prepare("UPDATE cotacao SET updated_at=? WHERE id=?")->execute([$now, $cid]);
         $pdo->commit();
+        cot_log($pdo, $cid, $me, 'Proposta', 'Revisão ' . $rev . ' da proposta de ' . $forn . ' — total R$ ' . number_format($total, 2, ',', '.'));
         echo json_encode(['ok'=>true, 'proposta_id'=>$novo, 'revisao'=>$rev, 'total'=>round($total, 2)], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -536,6 +593,7 @@ try {
         if (!$sets) throw new Exception('nada a atualizar');
         $sets[] = 'updated_at=?'; $args[] = date('c'); $args[] = $cid;
         $pdo->prepare("UPDATE cotacao SET " . implode(',', $sets) . " WHERE id=?")->execute($args);
+        cot_log($pdo, $cid, $me, 'Status', (isset($in['status']) ? ('Status → ' . $in['status']) : '') . (isset($in['aprovacao']) ? ((isset($in['status']) ? ' · ' : '') . 'Aprovação → ' . $in['aprovacao']) : ''));
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -558,6 +616,7 @@ try {
         foreach ($existing as $id => $_) if (empty($keep[$id])) { $pdo->prepare("DELETE FROM cotacao_proposta_item WHERE cotacao_item_id=?")->execute([$id]); $pdo->prepare("DELETE FROM cotacao_item WHERE id=?")->execute([$id]); }
         $pdo->prepare("UPDATE cotacao SET updated_at=? WHERE id=?")->execute([$now, $cid]);
         $pdo->commit();
+        cot_log($pdo, $cid, $me, 'Itens', 'Itens a cotar editados (' . count(array_filter($itens, fn($i) => trim((string)($i['descricao'] ?? '')) !== '')) . ' na lista)');
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 
@@ -581,7 +640,7 @@ try {
 
     if ($acao === 'excluir_proposta') {
         $pid = (int)($in['proposta_id'] ?? 0); if (!$pid) throw new Exception('proposta_id obrigatório');
-        $row = $pdo->prepare("SELECT p.cotacao_id, p.raiz_id, c.obra_id FROM cotacao_proposta p JOIN cotacao c ON c.id=p.cotacao_id WHERE p.id=?"); $row->execute([$pid]);
+        $row = $pdo->prepare("SELECT p.cotacao_id, p.raiz_id, p.fornecedor_nome, c.obra_id FROM cotacao_proposta p JOIN cotacao c ON c.id=p.cotacao_id WHERE p.id=?"); $row->execute([$pid]);
         $r = $row->fetch(); if (!$r) throw new Exception('proposta não encontrada');
         if (!cot_can_manage($pdo, $me, (int)$r['cotacao_id'])) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
         // exclui a CADEIA inteira de revisões (id=raiz OU raiz_id=raiz) — não deixa revisão arquivada órfã/invisível
@@ -590,6 +649,7 @@ try {
         $pdo->prepare("DELETE FROM cotacao_proposta_item WHERE proposta_id IN (SELECT id FROM cotacao_proposta WHERE cotacao_id=? AND (id=? OR raiz_id=?))")->execute([$cidp, $raiz, $raiz]);
         $pdo->prepare("DELETE FROM cotacao_proposta WHERE cotacao_id=? AND (id=? OR raiz_id=?)")->execute([$cidp, $raiz, $raiz]);
         $pdo->commit();
+        cot_log($pdo, $cidp, $me, 'Proposta', 'Excluiu a proposta de ' . ((string)($r['fornecedor_nome'] ?? '') ?: ('#' . $pid)) . ' (cadeia de revisões inteira)');
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 

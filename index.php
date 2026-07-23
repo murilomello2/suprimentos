@@ -395,7 +395,7 @@
     <div class="wrap">
       <table>
         <thead><tr>
-          <th class="srt" onclick="sortBy('nome')">Item<span class="sar" id="sar-nome"></span></th>
+          <th class="srt" onclick="sortBy('nome')"><input type="checkbox" id="rselAll" title="marcar/desmarcar todos os itens visíveis (respeita os filtros)" onclick="event.stopPropagation();rselTodosVisiveis(this.checked)" style="width:auto;accent-color:var(--verde);margin-right:6px;vertical-align:-2px">Item<span class="sar" id="sar-nome"></span></th>
           <th class="srt" onclick="sortBy('curva')">Cv<span class="sar" id="sar-curva"></span></th>
           <th class="srt" onclick="sortBy('resp')">Resp.<span class="sar" id="sar-resp"></span></th>
           <th class="srt" onclick="sortBy('verba')">Verba (R$)<span class="sar" id="sar-verba"></span></th>
@@ -409,6 +409,8 @@
         </tr></thead>
         <tbody id="tb"><tr><td colspan="12" class="empty">Carregando…</td></tr></tbody>
       </table>
+      <!-- barra flutuante de AÇÃO EM LOTE (aparece quando há itens selecionados no radar) -->
+      <div id="rselBar" style="display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:900;background:#fff;border:1.5px solid var(--verde);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.18);padding:10px 14px;align-items:center;gap:10px;flex-wrap:wrap;max-width:94vw"></div>
     </div>
    </section>
 
@@ -1612,8 +1614,11 @@ function groupHeaderHtml(g,items,idx){
       <button class="gbtn" title="descer grupo" ${idx>=GORDER.length-1?'disabled':''} onclick="event.stopPropagation();grupoMover(${idx},1)">▼</button>
       <button class="gbtn" title="renomear grupo" onclick="event.stopPropagation();grupoRenomear(${idx})"><span class="material-icons" style="font-size:14px">edit</span></button>
     </span>`:'';
+  const selecionaveis=items.filter(rselPode);
+  const todosSel=selecionaveis.length>0&&selecionaveis.every(i=>RSEL.has((i.obra_id||1)+':'+i.ordem));
+  const gcb=selecionaveis.length?`<input type="checkbox" ${todosSel?'checked':''} title="marcar/desmarcar o grupo inteiro (${selecionaveis.length} selecionáveis)" onclick="event.stopPropagation();rselGrupoIdx(${idx},this.checked)" style="width:auto;accent-color:var(--verde);margin-right:4px;vertical-align:-2px">`:'';
   return `<tr class="grp" onclick="toggleGroup(${idx})"><td colspan="12"><span class="gwrap">
-      <span class="material-icons gcaret">${collapsed?'chevron_right':'expand_more'}</span>
+      ${gcb}<span class="material-icons gcaret">${collapsed?'chevron_right':'expand_more'}</span>
       <span class="gname">${esc(g)}</span>${adm}
       <span class="gcount">· ${n} ${n>1?'itens':'item'} · ${BRL(verbaDefSum)}${prox}</span>
       ${chip}
@@ -1659,8 +1664,77 @@ function render(){
       if(!COLLAPSED.has(g)) html+=items.map(rowHtml).join('');
     });
   }
+  RVIS=rows;   // itens VISÍVEIS (pós-filtro) — base do "marcar todos" e do marcar-grupo
   tb.innerHTML=html;
-  updateCollapseBtn(); updateSortArrows(); fitRadarHeight();
+  updateCollapseBtn(); updateSortArrows(); fitRadarHeight(); rselBarUpd();
+}
+/* ===== SELEÇÃO EM LOTE no radar (conferência de status — 21/jul/2026) =====
+   Comprador não-admin/não-gerente só seleciona (e o servidor só grava) itens onde ELE é o responsável. */
+let RSEL=new Map(), RVIS=[];
+function rselPode(i){
+  if(IS_ADMIN||(((EU&&EU.papel)||'')==='gerente')) return true;
+  if(!CAN_EDIT) return false;
+  const eu=((EU&&EU.nome)||'').trim().toLowerCase();
+  return !!eu && (i.responsavel||'').trim().toLowerCase()===eu;
+}
+function rselToggle(k,on){
+  if(on){ const [ob,ord]=k.split(':'); RSEL.set(k,{obra_id:Number(ob),ordem:Number(ord)}); }
+  else RSEL.delete(k);
+  rselBarUpd();
+}
+function rselGrupoIdx(idx,on){
+  const g=GORDER[idx]; RVIS.filter(i=>(i.grupo||'—')===g&&rselPode(i)).forEach(i=>{
+    const k=(i.obra_id||1)+':'+i.ordem; if(on) RSEL.set(k,{obra_id:i.obra_id||1,ordem:i.ordem}); else RSEL.delete(k); });
+  render();
+}
+function rselTodosVisiveis(on){
+  RVIS.filter(rselPode).forEach(i=>{ const k=(i.obra_id||1)+':'+i.ordem; if(on) RSEL.set(k,{obra_id:i.obra_id||1,ordem:i.ordem}); else RSEL.delete(k); });
+  render();
+}
+function rselLimpar(){ RSEL.clear(); const a=document.getElementById('rselAll'); if(a) a.checked=false; render(); }
+function rselBarUpd(){
+  const b=document.getElementById('rselBar'); if(!b) return;
+  const n=RSEL.size;
+  if(!n){ b.style.display='none'; return; }
+  const podeResp=IS_ADMIN||(((EU&&EU.papel)||'')==='gerente');
+  const STS=['Não Iniciado','Cotação Iniciada','Com Pendências','Em Andamento','Finalizado','Não se aplica'];
+  const respOpts=((typeof RESP!=='undefined'&&RESP)||[]).map(r=>`<option>${esc(r.nome)}</option>`).join('');
+  const stSel=document.getElementById('rselSt')?val('rselSt'):'Finalizado';   // preserva escolha entre re-renders
+  const foVal=document.getElementById('rselFo')?document.getElementById('rselFo').value:'';
+  const reVal=document.getElementById('rselRe')?val('rselRe'):'';
+  b.style.display='flex';
+  b.innerHTML=`
+    <b style="font-size:13.5px">${n} selecionado${n>1?'s':''}</b>
+    <button class="btn-ghost" style="padding:4px 9px;font-size:12px" onclick="rselLimpar()">✕ limpar</button>
+    <span style="width:1px;height:24px;background:var(--line)"></span>
+    <select id="rselSt" style="padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:12.5px">${STS.map(s=>`<option ${s===stSel?'selected':''}>${s}</option>`).join('')}</select>
+    <button class="btn-prim" style="padding:6px 11px;font-size:12.5px" onclick="rselAplicar('status')">Aplicar status</button>
+    <span style="width:1px;height:24px;background:var(--line)"></span>
+    <input id="rselFo" value="${esc(foVal)}" placeholder="fornecedor…" style="width:150px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:12.5px">
+    <button class="btn-ghost" style="padding:6px 10px;font-size:12.5px" onclick="rselAplicar('fornecedor')">Aplicar</button>
+    ${podeResp?`<span style="width:1px;height:24px;background:var(--line)"></span>
+    <select id="rselRe" style="padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-size:12.5px"><option value="">responsável…</option>${respOpts}</select>
+    <button class="btn-ghost" style="padding:6px 10px;font-size:12.5px" onclick="rselAplicar('responsavel')">Atribuir</button>`:''}`;
+  if(reVal){ const e=document.getElementById('rselRe'); if(e) e.value=reVal; }
+}
+async function rselAplicar(campo){
+  const itens=[...RSEL.values()].map(x=>({obra_id:x.obra_id,servico_id:x.ordem}));
+  if(!itens.length) return;
+  const campos={};
+  if(campo==='status') campos.status=val('rselSt');
+  else if(campo==='fornecedor'){ const f=(document.getElementById('rselFo').value||'').trim(); if(!f){toast('Digite o fornecedor');return;} campos.fornecedor=f; }
+  else { campos.responsavel=val('rselRe'); if(!campos.responsavel){toast('Escolha o responsável');return;} }
+  const rot=campo==='status'?('status → '+campos.status):campo==='fornecedor'?('fornecedor → '+campos.fornecedor):('responsável → '+campos.responsavel);
+  if(!confirm('Aplicar '+rot+' em '+itens.length+' item(ns)? Cada mudança fica no histórico.')) return;
+  try{
+    const r=await (await fetch('actions/status_lote.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({me:EU&&EU.bitrix_id,itens,campos})})).json();
+    if(r.error){toast(r.error);return;}
+    const ks=new Set(itens.map(x=>x.obra_id+':'+x.servico_id));
+    DATA.itens.forEach(i=>{ if(ks.has((i.obra_id||1)+':'+i.ordem)) Object.assign(i,campos); });
+    toast(`${r.aplicados} aplicado(s)`+(r.sem_permissao?` · ${r.sem_permissao} sem permissão (não é o responsável)`:'')+(r.sem_mudanca?` · ${r.sem_mudanca} já estavam assim`:''));
+    RSEL.clear(); const a=document.getElementById('rselAll'); if(a) a.checked=false;
+    render(); try{ renderKpis(); }catch(e){} try{ renderMatriz(); }catch(e){}
+  }catch(e){ toast('Falha: '+e.message); }
 }
 function rowHtml(i){
   const st=i.status||'Não Iniciado';
@@ -1668,8 +1742,10 @@ function rowHtml(i){
   const chipIni=lvl==='atrasado'?`<span class="tag-al atras">atrasado</span>`:lvl==='proximo'?`<span class="tag-al prox">iniciar</span>`:'';
   const chipFim=lvl==='critico'?`<span class="tag-al crit">crítico</span>`:lvl==='finalizado'?`<span class="tag-al fin">✓ concluído</span>`:'';
   const obTag=(OBRA_SEL.length>1)?`<span style="display:inline-block;font-size:9px;font-weight:800;color:#fff;background:${obraCor(i.obra_id)};border-radius:4px;padding:1px 6px;vertical-align:1px;margin-right:4px">${esc((i.obra_nome||'').slice(0,10))}</span>`:'';
+  const _rk=(i.obra_id||1)+':'+i.ordem, _rp=rselPode(i);
+  const _rcb=`<input type="checkbox" class="rselcb" ${RSEL.has(_rk)?'checked':''} ${_rp?'':'disabled'} title="${_rp?'selecionar p/ ação em lote':('só o responsável altera — '+(i.responsavel?esc(i.responsavel):'sem responsável definido'))}" onclick="event.stopPropagation();rselToggle('${_rk}',this.checked)" style="width:auto;accent-color:var(--verde);margin-right:7px;vertical-align:-2px;${_rp?'':'opacity:.35'}">`;
   return `<tr class="item" onclick="openModal(${i.ordem},${i.obra_id||1})">
-    <td><div class="svc">${obTag}${esc(i.nome)} ${tipoChip(i.tipo)}</div></td>
+    <td><div class="svc">${_rcb}${obTag}${esc(i.nome)} ${tipoChip(i.tipo)}</div></td>
     <td><span class="curva c-${i.curva||'C'}">${esc(i.curva||'—')}</span></td>
     <td>${i.responsavel?esc(i.responsavel):`<button class="resp-miss" onclick="event.stopPropagation();openModal(${i.ordem},${i.obra_id||1})">definir</button>`}</td>
     <td class="money">${verbaDefinida(i)?`${BRL(verbaDef(i))}${i.curado_verba?' <span class="material-icons" title="verba curada" style="font-size:13px;color:var(--ok);vertical-align:-2px">verified</span>':(i.auto&&i.auto.verba?' <span title="sugerido pelo auto-vínculo (receita) — confira e salve pra confirmar" style="font-size:11px">🤖</span>':'')}`:`<span class="muted" title="sem verba definida — a estimativa preliminar do orçamento não conta como verba">R$ 0 <span style="font-size:10px">· a definir</span></span>`}</td>
@@ -3442,8 +3518,8 @@ function stCor(s){ return ST_COR[s]||'#8a9299'; }
 
 /* ---------- 1) COMPRADOR ---------- */
 function renderDashComprador(D){
-  /* PAINEL PESSOAL do comprador: filtrado no logado (SEM fallback pra "toda a equipe" — se vazio, diz).
-     Admin/gerente/diretor ganham seletor p/ ver o painel de qualquer comprador. Prioridade = atrasado 1º, MAIOR verba 1º. */
+  /* PAINEL PESSOAL do comprador. CARDS CLICÁVEIS (pedido 23/jul): clicar num card FILTRA a tabela de baixo
+     ("Detalhar ›" no rodapé de cada card; ativo = borda verde + "✕ limpar filtro"; clicar de novo desfiltra). */
   const base=(DASH.items&&DASH.items.length)?DASH.items:(MAT||[]);
   const papel=(EU&&EU.papel)||'';
   const podeEscolher=IS_ADMIN||papel==='gerente'||papel==='diretor';
@@ -3455,37 +3531,59 @@ function renderDashComprador(D){
   const dDiff=f=>f?Math.round((new Date(f+'T00:00:00')-new Date(D.hoje+'T00:00:00'))/864e5):null;
   const M=v=>v>=1e6?('R$ '+(v/1e6).toFixed(1).replace('.',',')+' mi'):(v>=1e3?('R$ '+Math.round(v/1e3)+' mil'):('R$ '+Math.round(v)));
   const sel=podeEscolher
-    ?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span class="dmini">Painel de:</span><select onchange="DASH.comprador=this.value;renderDash()" style="padding:5px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px">${nomes.map(n=>`<option ${n===alvo?'selected':''}>${esc(n)}</option>`).join('')}</select></div>`
+    ?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span class="dmini">Painel de:</span><select onchange="DASH.comprador=this.value;DASH.cfiltro=null;renderDash()" style="padding:5px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px">${nomes.map(n=>`<option ${n===alvo?'selected':''}>${esc(n)}</option>`).join('')}</select></div>`
     :`<div class="dmini" style="margin-bottom:10px">Painel pessoal de <b>${esc(alvo||'—')}</b></div>`;
   if(!meus.length) return sel+`<div class="dempty">Nenhum item do radar está atribuído a <b>${esc(alvo||'você')}</b>.<br><span class="dmini">O responsável de cada item é definido no Radar (coluna Responsável) ou em Configurações › Responsáveis.</span></div>`;
   const abertos=meus.filter(i=>i.status!=='Finalizado'&&i.status!=='Não se aplica');
   const atras=abertos.filter(i=>['critico','atrasado'].includes(lvl(i)));
   const v7=abertos.filter(i=>{const d=dDiff(i.fim_cotacao); return d!==null&&d>=0&&d<=7;});
   const v30=abertos.filter(i=>{const d=dDiff(i.fim_cotacao); return d!==null&&d>7&&d<=30;});
-  const emCot=abertos.filter(i=>/cota/i.test(i.status||'')).length;
+  const emCotItens=abertos.filter(i=>/cota/i.test(i.status||''));
   const verbaTot=abertos.reduce((a,i)=>a+val(i),0), verbaAtras=atras.reduce((a,i)=>a+val(i),0);
   const nivelOrd={critico:0,atrasado:1,proximo:2};
-  const prio=abertos.slice().sort((a,b)=>(((nivelOrd[lvl(a)]??3)-(nivelOrd[lvl(b)]??3)))||(val(b)-val(a))).slice(0,15);
+  const byPrio=(a,b)=>(((nivelOrd[lvl(a)]??3)-(nivelOrd[lvl(b)]??3)))||(val(b)-val(a));
+  const byPrazo=(a,b)=>((a.fim_cotacao||'9999').localeCompare(b.fim_cotacao||'9999'))||(val(b)-val(a));
+  const byVerba=(a,b)=>val(b)-val(a);
+  // definição de cada card → título + lista + ordenação
+  const FDEF={
+    abertos:{t:'Todos os meus itens abertos', list:abertos.slice().sort(byPrio)},
+    atrasados:{t:'Atrasados / vencidos — maior verba primeiro', list:atras.slice().sort(byVerba)},
+    v7:{t:'Vencem em até 7 dias', list:v7.slice().sort(byPrazo)},
+    v30:{t:'Vencem em 8–30 dias', list:v30.slice().sort(byPrazo)},
+    cotacao:{t:'Em cotação agora — maior verba primeiro', list:emCotItens.slice().sort(byVerba)},
+    verba:{t:'Maiores verbas sob minha gestão', list:abertos.slice().sort(byVerba)},
+  };
+  const ativo=FDEF[DASH.cfiltro]?DASH.cfiltro:'';
+  const card=(key,vHtml,lHtml)=>`<div class="dkpi" onclick="dashCFiltro('${key}')" title="${ativo===key?'clique p/ limpar o filtro':'clique p/ detalhar na tabela abaixo'}" style="cursor:pointer;${ativo===key?'border:1.5px solid var(--verde);box-shadow:0 0 0 2px #e6f4ea':''}">
+    <div class="v">${vHtml}</div><div class="l">${lHtml}</div>
+    <div style="margin-top:6px;font-size:10.5px;font-weight:800;letter-spacing:.2px;color:${ativo===key?'var(--pend)':'var(--verde)'}">${ativo===key?'✕ LIMPAR FILTRO':'DETALHAR ›'}</div></div>`;
+  const cur=FDEF[ativo]||null;
+  const listaBase=cur?cur.list:abertos.slice().sort(byPrio).slice(0,15);
+  const capped=cur?cur.list.slice(0,60):listaBase;
+  const titulo=cur?`${cur.t} — ${cur.list.length} item(ns)`:'🎯 Ações prioritárias — atacar nesta ordem (atrasado primeiro · maior verba primeiro)';
   const acaoDe=i=>{const s=i.status||'Não Iniciado'; if(/cota/i.test(s))return'Cobrar propostas'; if(/proposta/i.test(s))return'Aprovar fornecedor'; if(/negocia/i.test(s))return'Fechar negociação'; if(/pend/i.test(s))return'Resolver pendência'; return'Iniciar cotação';};
   const chipNivel=i=>{const l=lvl(i); return l==='critico'?'<span class="dchip" style="background:var(--pend)">VENCIDO</span>':(l==='atrasado'?'<span class="dchip" style="background:#e67e22">atrasado</span>':(l==='proximo'?'<span class="dchip" style="background:var(--dourado);color:#333">próximo</span>':''));};
   return sel+`
   <div class="dkpis">
-    <div class="dkpi"><div class="v">${abertos.length}</div><div class="l">itens ABERTOS comigo<br><span class="dmini">${meus.length} no total (com finalizados)</span></div></div>
-    <div class="dkpi"><div class="v red">${atras.length}</div><div class="l">atrasados / vencidos<br><span class="dmini">${M(verbaAtras)} expostos</span></div></div>
-    <div class="dkpi"><div class="v gold">${v7.length}</div><div class="l">vencem em até 7 dias</div></div>
-    <div class="dkpi"><div class="v blue">${v30.length}</div><div class="l">vencem em 8–30 dias</div></div>
-    <div class="dkpi"><div class="v">${emCot}</div><div class="l">em cotação agora</div></div>
-    <div class="dkpi"><div class="v">${M(verbaTot)}</div><div class="l">verba sob minha gestão</div></div>
+    ${card('abertos',`${abertos.length}`,`itens ABERTOS comigo<br><span class="dmini">${meus.length} no total (com finalizados)</span>`)}
+    ${card('atrasados',`<span class="red">${atras.length}</span>`,`atrasados / vencidos<br><span class="dmini">${M(verbaAtras)} expostos</span>`)}
+    ${card('v7',`<span class="gold">${v7.length}</span>`,`vencem em até 7 dias`)}
+    ${card('v30',`<span class="blue">${v30.length}</span>`,`vencem em 8–30 dias`)}
+    ${card('cotacao',`${emCotItens.length}`,`em cotação agora`)}
+    ${card('verba',`${M(verbaTot)}`,`verba sob minha gestão`)}
   </div>
-  <div class="dcard wide" style="margin-top:10px"><h3>🎯 Ações prioritárias — atacar nesta ordem (atrasado primeiro · maior verba primeiro)</h3>
+  <div class="dcard wide" style="margin-top:10px"><h3>${titulo}</h3>
     <div style="overflow-x:auto"><table class="dtable"><thead><tr><th></th><th>Item</th><th>Obra</th><th>Próxima ação</th><th>Prazo</th><th>Status</th><th class="r">Verba</th></tr></thead><tbody>
-    ${prio.map(i=>`<tr style="cursor:pointer" onclick="openModal(${Number(i.ordem)||0},${Number(i.obra_id)||1})" title="clique p/ abrir o item">
+    ${capped.map(i=>`<tr style="cursor:pointer" onclick="openModal(${Number(i.ordem)||0},${Number(i.obra_id)||1})" title="clique p/ abrir o item">
       <td>${chipNivel(i)}</td><td><b>${esc(i.nome)}</b></td><td style="white-space:nowrap"><span class="dgm" style="background:${obraCor(i.obra_id)}"></span>${esc(i.obra_nome||'')}</td>
       <td>${acaoDe(i)}</td><td style="white-space:nowrap">${D2(i.fim_cotacao)}</td><td>${esc(i.status||'Não Iniciado')}</td><td class="r"><b>${val(i)?M(val(i)):'—'}</b></td></tr>`).join('')}
+    ${capped.length?'':'<tr><td colspan="7" class="dempty" style="padding:18px">nenhum item neste recorte 🎉</td></tr>'}
     </tbody></table></div>
-    ${abertos.length>15?`<div class="dmini" style="margin-top:6px">mostrando os 15 mais prioritários de ${abertos.length} abertos — o restante está no Radar filtrado por responsável</div>`:''}
+    ${cur&&cur.list.length>60?`<div class="dmini" style="margin-top:6px">mostrando 60 de ${cur.list.length} — refine no Radar se precisar da lista completa</div>`:''}
+    ${!cur&&abertos.length>15?`<div class="dmini" style="margin-top:6px">mostrando os 15 mais prioritários de ${abertos.length} abertos — clique num card acima pra detalhar um recorte</div>`:''}
   </div>`;
 }
+function dashCFiltro(k){ DASH.cfiltro=(DASH.cfiltro===k?null:k); renderDash(); }
 function D2(s){ if(!s)return'—'; const p=String(s).split('-'); return p.length===3?p[2]+'/'+p[1]:s; }
 
 /* ---------- 2) GERENTE DE COMPRAS ---------- */
@@ -4000,7 +4098,52 @@ async function cotOpen(id){
 }
 function cotNum(x){ return x!=null&&x!==''?Number(x).toLocaleString('pt-BR'):''; }
 // --- Itens a cotar: exibição (com observação = complemento) + edição (add/editar/excluir) ---
-function cotEditavel(){ const c=(COT.cur&&COT.cur.cotacao)||{}; return !!(IS_ADMIN||(c.criado_por!=null&&c.criado_por!==''&&EU&&String(c.criado_por)===String(EU.bitrix_id))); }
+function cotEditavel(){ const c=(COT.cur&&COT.cur.cotacao)||{}; if(IS_ADMIN) return true; if(!EU) return false;
+  if(c.criado_por!=null&&c.criado_por!==''&&String(c.criado_por)===String(EU.bitrix_id)) return true;
+  return (c.colaboradores||[]).some(b=>String(b)===String(EU.bitrix_id));   // COLABORADOR compartilhado edita também (férias do criador)
+}
+/* ===== COMPARTILHAR cotação (colaboradores) + HISTÓRICO de alterações (23/jul/2026) ===== */
+async function cotColabOpen(){
+  const c=(COT.cur&&COT.cur.cotacao)||{}; if(!c.id) return;
+  let usuarios=[]; try{ const d=await (await fetch('actions/usuarios.php')).json(); usuarios=(d.usuarios||[]).filter(u=>u.ativo); }catch(e){}
+  if(!usuarios.length){toast('Não consegui carregar a lista de usuários');return;}
+  const atuais=new Set((c.colaboradores||[]).map(String));
+  document.getElementById('modal').innerHTML=`
+    <div class="mhead"><button class="mclose" onclick="closeModal()">×</button>
+      <div class="crumb">Cotação · ${esc(c.apelido||c.titulo||'')}</div><div class="mt">Compartilhar edição</div></div>
+    <div class="tabbody">
+      <div style="margin-bottom:12px;padding:9px 12px;background:#eef6f0;border:1px solid #dcebe1;border-radius:8px;font-size:12.5px">
+        Criador: <b>${esc(c.criado_nome||('#'+(c.criado_por||'—')))}</b> — continua como criador. Quem você marcar abaixo ganha os <b>mesmos poderes de edição</b> (propostas, itens, status, tudo). Cada alteração fica registrada no <b>Histórico</b> com nome, data e hora.</div>
+      <div class="ckgrid">${usuarios.filter(u=>String(u.bitrix_id)!==String(c.criado_por)).map(u=>`<label class="ckl"><input type="checkbox" id="cb-colab-${esc(String(u.bitrix_id))}" ${atuais.has(String(u.bitrix_id))?'checked':''}> ${esc(u.nome)} <span class="muted" style="font-size:10.5px">${esc(PAPEL_LABEL[u.papel]||u.papel||'')}</span></label>`).join('')}</div>
+      <div style="display:flex;gap:8px;margin-top:14px"><button class="btn-prim" onclick="cotColabSalvar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">group_add</span> Salvar compartilhamento</button>
+        <button class="btn-ghost" onclick="closeModal()">Cancelar</button></div>
+    </div>`;
+  COT._colabUsers=usuarios; document.getElementById('ov').classList.add('open');
+}
+async function cotColabSalvar(){
+  const c=(COT.cur&&COT.cur.cotacao)||{};
+  const sel=(COT._colabUsers||[]).filter(u=>{const e=document.getElementById('cb-colab-'+String(u.bitrix_id));return e&&e.checked;}).map(u=>String(u.bitrix_id));
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'colaborador_salvar',me:EU&&EU.bitrix_id,cotacao_id:c.id,colaboradores:sel})})).json();
+    if(r.error){toast(r.error);return;}
+    toast(sel.length?('Compartilhada com '+sel.length+' colaborador(es)'):'Compartilhamento removido'); closeModal(); cotOpen(c.id);
+  }catch(e){toast('Falha: '+e.message);}
+}
+async function cotHistOpen(){
+  const c=(COT.cur&&COT.cur.cotacao)||{}; if(!c.id) return;
+  let hs=[]; try{ const d=await (await fetch('actions/cotacoes.php?historico='+c.id+'&_='+Date.now())).json(); hs=d.historico||[]; }catch(e){}
+  const fmt=s=>{ if(!s) return '—'; const d=new Date(s); return isNaN(d)?String(s):d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); };
+  document.getElementById('modal').innerHTML=`
+    <div class="mhead"><button class="mclose" onclick="closeModal()">×</button>
+      <div class="crumb">Cotação · ${esc(c.apelido||c.titulo||'')}</div><div class="mt">Histórico de alterações</div></div>
+    <div class="tabbody">
+      ${hs.length?`<div style="max-height:62vh;overflow:auto">${hs.map(h=>`<div style="display:flex;gap:10px;padding:9px 4px;border-bottom:1px solid #f0f2f1;align-items:flex-start">
+        <span class="muted" style="font-size:11px;white-space:nowrap;min-width:106px">${fmt(h.created_at)}</span>
+        <span style="font-size:11px;font-weight:800;color:var(--verde-d);background:#eef6f0;border-radius:6px;padding:2px 8px;white-space:nowrap">${esc(h.acao||'')}</span>
+        <span style="font-size:12.5px;min-width:0"><b>${esc(h.usuario_nome||('#'+(h.bitrix_id||'')))}</b> — ${esc(h.detalhe||'')}</span></div>`).join('')}</div>`
+      :'<div class="dempty">Sem alterações registradas ainda.<br><span class="dmini">O histórico passou a valer em 23/07/2026 — mudanças anteriores a isso não aparecem.</span></div>'}
+    </div>`;
+  document.getElementById('ov').classList.add('open');
+}
 function cotItensPanel(d){
   const c=d.cotacao, itens=d.itens||[], CAN_EDIT=cotEditavel(), podeGerir=CAN_EDIT;
   if(COT.editItens){
@@ -4144,6 +4287,8 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px;color:var(--verde-d)" onclick="cotPropIAAbrir()" title="a IA lê um PDF/print de proposta, identifica o fornecedor e preenche os preços"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Proposta via IA</button>`:''}
         ${CAN_EDIT?`<button class="btn-prim" style="padding:6px 12px" onclick="cotProposta()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Cadastrar proposta</button>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotFinalizar()">${c.status==='finalizada'?'Reabrir':'Finalizar'}</button>`:''}
+        <button class="btn-ghost" style="padding:6px 12px" onclick="cotHistOpen()" title="Histórico de alterações desta cotação — quem mudou o quê, data e hora"><span class="material-icons" style="font-size:15px;vertical-align:-3px">history</span> Histórico</button>
+        ${(IS_ADMIN||(c.criado_por!=null&&c.criado_por!==''&&EU&&String(c.criado_por)===String(EU.bitrix_id)))?`<button class="btn-ghost" style="padding:6px 12px${(c.colaboradores||[]).length?';border-color:var(--verde);color:var(--verde-d)':''}" onclick="cotColabOpen()" title="${(c.colaboradores||[]).length?('Colaboradores: '+esc((c.colaboradores_nomes||[]).join(', '))):'Compartilhar a edição com outra pessoa (ex.: criador de férias)'}"><span class="material-icons" style="font-size:15px;vertical-align:-3px">group_add</span> Compartilhar${(c.colaboradores||[]).length?' ('+(c.colaboradores||[]).length+')':''}</button>`:''}
         ${podeGerir?`<button class="btn-ghost" style="padding:6px 12px;color:var(--pend)" onclick="cotExcluir()" title="Excluir esta cotação (admin ou quem criou)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">delete</span> Excluir</button>`:''}
       </span></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;padding:16px 0 2px">

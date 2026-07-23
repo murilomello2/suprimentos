@@ -92,6 +92,7 @@ function db_schema_mysql($pdo) {
         perm_admin INT DEFAULT 0, ativo INT DEFAULT 1, updated_at VARCHAR(40),
         perm_crono INT DEFAULT 0, perm_orcamento INT DEFAULT 0, perm_quant INT DEFAULT 0, perm_dicionario INT DEFAULT 0,
         perm_responsaveis INT DEFAULT 0,
+        dashboard VARCHAR(32) DEFAULT '',
         PRIMARY KEY (bitrix_id)
     ) $E");
     $pdo->exec("CREATE TABLE IF NOT EXISTS historico (
@@ -283,6 +284,8 @@ function db_schema_mysql($pdo) {
     foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='usuario'") as $c) $uc[$c['COLUMN_NAME']] = true;
     foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis'] as $pc)
         if (!isset($uc[$pc])) $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INT DEFAULT 0");
+    // dashboard atribuído por usuário (''=padrão | comprador | gerente | diretor) — landing + conteúdo do painel
+    if (!isset($uc['dashboard'])) $pdo->exec("ALTER TABLE usuario ADD COLUMN dashboard VARCHAR(32) DEFAULT ''");
     // ALARGA as colunas de JSON de seleção: uma busca EM MASSA por insumo (ex.: "encanador" em N composições × M
     // locais) gera composicao_sel > 64KB e o MySQL TRUNCA a coluna TEXT (max 65.535 bytes) SILENCIOSAMENTE →
     // JSON inválido → a seleção "some" (some do read-only) embora a verba/total já tenham sido calculados.
@@ -498,6 +501,7 @@ function db_schema($pdo) {
         menus TEXT,                 -- json de chaves de menu liberadas
         perm_admin INTEGER DEFAULT 0,
         ativo INTEGER DEFAULT 1,
+        dashboard TEXT DEFAULT '',   -- painel atribuído ('' padrão | comprador | gerente | diretor)
         updated_at TEXT
     )");
     // histórico de alterações — NÃO entra no drop de migração (persiste entre versões)
@@ -586,6 +590,7 @@ function db_schema($pdo) {
     foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis'] as $pc) {
         if (!isset($ucols[$pc])) $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INTEGER DEFAULT 0");
     }
+    if (!isset($ucols['dashboard'])) $pdo->exec("ALTER TABLE usuario ADD COLUMN dashboard TEXT DEFAULT ''");
 
     // data-fix one-shot: compradores nasciam com editar_escopo='sel' + obras_editar vazio => 403 em tudo
     // (regressão do enforcement). Destrava quem é da equipe de Suprimentos pra editar.

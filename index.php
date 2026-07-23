@@ -179,7 +179,19 @@
   .srbox{border:1px solid var(--line);border-radius:10px;max-height:300px;overflow:auto;margin-bottom:8px;background:#fbfdfb}
   .tnode.tsel{background:var(--okbg);outline:2px solid var(--ok);border-radius:6px;font-weight:600}
   .ckl{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
+  /* dentro de .fld, DUAS regras estragavam o checkbox: ".fld label" (uppercase/block) vencia a .ckl,
+     e ".fld input{width:100%}" ALARGAVA o input do checkbox (caixa invisível gigante separando o
+     quadradinho do texto — o "layout torto"). Reset explícito dos dois. */
+  .fld .ckl{display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;color:var(--ink);font-weight:400;font-size:13px;margin:0;cursor:pointer}
+  .fld .ckl input{width:auto;flex:0 0 auto;margin:0}
   .chkbox{margin-top:6px;display:flex;flex-direction:column;gap:5px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fafbfa}
+  /* CHIPS de checkbox (menus/permissões/obras): cada opção é uma PÍLULA com o checkbox colado no texto;
+     marcada fica verde — impossível confundir de qual opção é o checkbox */
+  .ckgrid{margin-top:6px;display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:8px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fafbfa}
+  .ckgrid .ckl{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1.5px solid var(--line);border-radius:8px;background:#fff;font-size:12.5px;line-height:1.25;font-weight:500;user-select:none}
+  .ckgrid .ckl:hover{border-color:var(--verde)}
+  .ckgrid .ckl:has(input:checked){background:#e6f4ea;border-color:var(--verde);color:var(--verde-d)}
+  .ckgrid .ckl input{width:auto;flex:0 0 auto;margin:0;accent-color:var(--verde)}
   .pctw{display:inline-flex;align-items:center;gap:4px} .pctbar{width:26px;height:5px;border-radius:4px;background:#e6e9e7;overflow:hidden;display:inline-block} .pctfill{display:block;height:100%} .pctn{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
   .pendbar{font-size:13px;color:var(--verde-d);display:flex;align-items:center;gap:6px}
   .pendbar:empty{display:none}
@@ -539,6 +551,7 @@
         <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">settings</span> Configurações</h1>
         <p class="sub">Área administrativa — acesso, permissões e o dicionário de aprendizado das obras.</p>
       </div>
+      <button class="btn-ghost" id="cfgLoteBtn" onclick="userLote()" style="flex:0 0 auto;margin-top:4px"><span class="material-icons" style="font-size:18px;vertical-align:-4px">groups</span> Configurar em lote</button>
       <button class="btn-prim" id="cfgAddBtn" onclick="userForm()" style="flex:0 0 auto;margin-top:4px"><span class="material-icons" style="font-size:18px">person_add</span> Adicionar usuário</button>
     </div>
     <div class="bar" style="gap:6px;padding:0 2px 8px">
@@ -3308,10 +3321,13 @@ async function excluirItemCatalogo(){
 let DASH={tab:null, D:null, oppByObra:{}};
 const DASH_TABS=[['comprador','Comprador','person'],['gerente','Gerente de Compras','groups'],['diretor','Diretor','insights'],['oportunidades','Oportunidades','savings']];
 function dashAllowed(){ const papel=(EU&&EU.papel)||''; if(IS_ADMIN||papel==='diretor') return DASH_TABS.map(t=>t[0]);
-  if(papel==='comprador') return ['comprador','oportunidades']; return ['comprador','oportunidades']; }
+  let a; if(papel==='gerente') a=['gerente','comprador','oportunidades']; else a=['comprador','oportunidades'];
+  const d=(EU&&EU.dashboard)||''; if(d&&!a.includes(d)&&DASH_TABS.some(t=>t[0]===d)) a.unshift(d);   // painel ATRIBUÍDO pelo admin sempre entra
+  return a; }
 function dashInit(){
   const allowed=dashAllowed(), tb=document.getElementById('dtabs');
   if(tb) tb.innerHTML=DASH_TABS.filter(t=>allowed.includes(t[0])).map(t=>`<button class="dtab" id="dtab-${t[0]}" onclick="dashTab('${t[0]}')"><span class="material-icons">${t[2]}</span> ${t[1]}</button>`).join('');
+  if(!DASH.tab){ const d=(EU&&EU.dashboard)||''; if(d&&allowed.includes(d)) DASH.tab=d; }   // aba inicial = painel atribuído
   if(!DASH.tab||!allowed.includes(DASH.tab)) DASH.tab=allowed[0]||'comprador';
   dashActive(); dashLoad();
 }
@@ -3426,39 +3442,48 @@ function stCor(s){ return ST_COR[s]||'#8a9299'; }
 
 /* ---------- 1) COMPRADOR ---------- */
 function renderDashComprador(D){
+  /* PAINEL PESSOAL do comprador: filtrado no logado (SEM fallback pra "toda a equipe" — se vazio, diz).
+     Admin/gerente/diretor ganham seletor p/ ver o painel de qualquer comprador. Prioridade = atrasado 1º, MAIOR verba 1º. */
   const base=(DASH.items&&DASH.items.length)?DASH.items:(MAT||[]);
-  const eu=(EU&&EU.nome)||''; const meus=base.filter(i=>(i.responsavel||'').trim() && (!eu||(i.responsavel||'')===eu));
-  const escopo = eu && meus.length ? eu : 'toda a equipe';
-  const src = (eu && meus.length) ? meus : base;
+  const papel=(EU&&EU.papel)||'';
+  const podeEscolher=IS_ADMIN||papel==='gerente'||papel==='diretor';
+  const eu=((EU&&EU.nome)||'').trim();
+  const nomes=[...new Set(base.map(i=>(i.responsavel||'').trim()).filter(Boolean))].sort();
+  const alvo=(DASH.comprador||eu||nomes[0]||'').trim();
+  const meus=base.filter(i=>(i.responsavel||'').trim()===alvo);
   const val=i=>Number(i.verba||0), lvl=i=>alertLevel(i);
-  const emCot=src.filter(i=>/cota/i.test(i.status||'')).length;
-  const crit=src.filter(i=>lvl(i)==='critico');
-  const prazo7=src.filter(i=>{const d=i.fim_cotacao?Math.round((new Date(i.fim_cotacao+'T00:00:00')-new Date(D.hoje+'T00:00:00'))/864e5):null; return d!==null&&d>=0&&d<=7&&i.status!=='Finalizado';});
-  const props=src.filter(i=>/proposta|negocia/i.test(i.status||'')).length;
-  const stc={}; src.forEach(i=>{const s=i.status||'Não Iniciado'; stc[s]=(stc[s]||0)+1;});
-  const donutSegs=Object.entries(stc).map(([s,n])=>({v:n,color:stCor(s),label:s}));
-  const crList=crit.slice().sort((a,b)=>(a.fim_cotacao||'9999').localeCompare(b.fim_cotacao||'9999')).slice(0,6);
-  const prox=src.filter(i=>i.fim_cotacao&&i.status!=='Finalizado').sort((a,b)=>a.fim_cotacao.localeCompare(b.fim_cotacao)).slice(0,6);
-  const tab=src.slice().sort((a,b)=>(a.fim_cotacao||'9999').localeCompare(b.fim_cotacao||'9999')).slice(0,8);
-  return `
+  const dDiff=f=>f?Math.round((new Date(f+'T00:00:00')-new Date(D.hoje+'T00:00:00'))/864e5):null;
+  const M=v=>v>=1e6?('R$ '+(v/1e6).toFixed(1).replace('.',',')+' mi'):(v>=1e3?('R$ '+Math.round(v/1e3)+' mil'):('R$ '+Math.round(v)));
+  const sel=podeEscolher
+    ?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span class="dmini">Painel de:</span><select onchange="DASH.comprador=this.value;renderDash()" style="padding:5px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px">${nomes.map(n=>`<option ${n===alvo?'selected':''}>${esc(n)}</option>`).join('')}</select></div>`
+    :`<div class="dmini" style="margin-bottom:10px">Painel pessoal de <b>${esc(alvo||'—')}</b></div>`;
+  if(!meus.length) return sel+`<div class="dempty">Nenhum item do radar está atribuído a <b>${esc(alvo||'você')}</b>.<br><span class="dmini">O responsável de cada item é definido no Radar (coluna Responsável) ou em Configurações › Responsáveis.</span></div>`;
+  const abertos=meus.filter(i=>i.status!=='Finalizado'&&i.status!=='Não se aplica');
+  const atras=abertos.filter(i=>['critico','atrasado'].includes(lvl(i)));
+  const v7=abertos.filter(i=>{const d=dDiff(i.fim_cotacao); return d!==null&&d>=0&&d<=7;});
+  const v30=abertos.filter(i=>{const d=dDiff(i.fim_cotacao); return d!==null&&d>7&&d<=30;});
+  const emCot=abertos.filter(i=>/cota/i.test(i.status||'')).length;
+  const verbaTot=abertos.reduce((a,i)=>a+val(i),0), verbaAtras=atras.reduce((a,i)=>a+val(i),0);
+  const nivelOrd={critico:0,atrasado:1,proximo:2};
+  const prio=abertos.slice().sort((a,b)=>(((nivelOrd[lvl(a)]??3)-(nivelOrd[lvl(b)]??3)))||(val(b)-val(a))).slice(0,15);
+  const acaoDe=i=>{const s=i.status||'Não Iniciado'; if(/cota/i.test(s))return'Cobrar propostas'; if(/proposta/i.test(s))return'Aprovar fornecedor'; if(/negocia/i.test(s))return'Fechar negociação'; if(/pend/i.test(s))return'Resolver pendência'; return'Iniciar cotação';};
+  const chipNivel=i=>{const l=lvl(i); return l==='critico'?'<span class="dchip" style="background:var(--pend)">VENCIDO</span>':(l==='atrasado'?'<span class="dchip" style="background:#e67e22">atrasado</span>':(l==='proximo'?'<span class="dchip" style="background:var(--dourado);color:#333">próximo</span>':''));};
+  return sel+`
   <div class="dkpis">
-    <div class="dkpi"><div class="v">${src.length}</div><div class="l">itens sob responsabilidade<br><span class="dmini">${esc(escopo)}</span></div></div>
-    <div class="dkpi"><div class="v blue">${emCot}</div><div class="l">em cotação</div></div>
-    <div class="dkpi"><div class="v red">${crit.length}</div><div class="l">críticos (fim venceu)</div></div>
-    <div class="dkpi"><div class="v gold">${prazo7.length}</div><div class="l">prazo ≤ 7 dias</div></div>
-    <div class="dkpi"><div class="v">${props}</div><div class="l">propostas / negociação</div></div>
+    <div class="dkpi"><div class="v">${abertos.length}</div><div class="l">itens ABERTOS comigo<br><span class="dmini">${meus.length} no total (com finalizados)</span></div></div>
+    <div class="dkpi"><div class="v red">${atras.length}</div><div class="l">atrasados / vencidos<br><span class="dmini">${M(verbaAtras)} expostos</span></div></div>
+    <div class="dkpi"><div class="v gold">${v7.length}</div><div class="l">vencem em até 7 dias</div></div>
+    <div class="dkpi"><div class="v blue">${v30.length}</div><div class="l">vencem em 8–30 dias</div></div>
+    <div class="dkpi"><div class="v">${emCot}</div><div class="l">em cotação agora</div></div>
+    <div class="dkpi"><div class="v">${M(verbaTot)}</div><div class="l">verba sob minha gestão</div></div>
   </div>
-  <div class="dgrid">
-    <div class="dcard"><h3>Status das minhas cotações</h3>
-      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">${dashDonut(donutSegs)}
-        <div style="flex:1;min-width:120px">${Object.entries(stc).sort((a,b)=>b[1]-a[1]).map(([s,n])=>`<div class="drow" style="padding:3px 0"><span class="dgm" style="background:${stCor(s)}"></span><span style="flex:1">${esc(s)}</span><b>${n}</b> <span class="dmini">${Math.round(100*n/(src.length||1))}%</span></div>`).join('')}</div>
-      </div></div>
-    <div class="dcard"><h3>Meus itens críticos</h3>${crList.length?crList.map(i=>`<div class="drow"><span class="material-icons" style="font-size:16px;color:var(--pend)">warning</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(i.nome)} <span class="dmini">· ${esc(i.obra_nome||'')}</span></span><span class="dmini">${D2(i.fim_cotacao)}</span> <b style="min-width:66px;text-align:right">${BRL(val(i))}</b></div>`).join(''):'<div class="dmini">Nenhum item crítico. 👏</div>'}</div>
-    <div class="dcard"><h3>Próximos vencimentos de cotação</h3>${prox.length?prox.map(i=>`<div class="drow"><span class="dgm" style="background:${obraCor(i.obra_id)}"></span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(i.nome)}</span><span class="dmini">${D2(i.fim_cotacao)}</span> <b style="min-width:66px;text-align:right">${BRL(val(i))}</b></div>`).join(''):'<div class="dmini">—</div>'}</div>
-    <div class="dcard wide"><h3>Minhas aquisições</h3>
-      <div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Item</th><th>Obra</th><th>Fim cotação</th><th>Status</th><th class="r">Verba</th></tr></thead><tbody>
-      ${tab.map(i=>`<tr><td>${esc(i.nome)}</td><td>${esc(i.obra_nome||'')}</td><td>${D2(i.fim_cotacao)} ${lvl(i)==='critico'?'<span class="dchip" style="background:var(--pend)">vencido</span>':''}</td><td><span class="dchip" style="background:${stCor(i.status||'Não Iniciado')}">${esc(i.status||'Não Iniciado')}</span></td><td class="r">${BRL(val(i))}</td></tr>`).join('')}
-      </tbody></table></div></div>
+  <div class="dcard wide" style="margin-top:10px"><h3>🎯 Ações prioritárias — atacar nesta ordem (atrasado primeiro · maior verba primeiro)</h3>
+    <div style="overflow-x:auto"><table class="dtable"><thead><tr><th></th><th>Item</th><th>Obra</th><th>Próxima ação</th><th>Prazo</th><th>Status</th><th class="r">Verba</th></tr></thead><tbody>
+    ${prio.map(i=>`<tr style="cursor:pointer" onclick="openModal(${Number(i.ordem)||0},${Number(i.obra_id)||1})" title="clique p/ abrir o item">
+      <td>${chipNivel(i)}</td><td><b>${esc(i.nome)}</b></td><td style="white-space:nowrap"><span class="dgm" style="background:${obraCor(i.obra_id)}"></span>${esc(i.obra_nome||'')}</td>
+      <td>${acaoDe(i)}</td><td style="white-space:nowrap">${D2(i.fim_cotacao)}</td><td>${esc(i.status||'Não Iniciado')}</td><td class="r"><b>${val(i)?M(val(i)):'—'}</b></td></tr>`).join('')}
+    </tbody></table></div>
+    ${abertos.length>15?`<div class="dmini" style="margin-top:6px">mostrando os 15 mais prioritários de ${abertos.length} abertos — o restante está no Radar filtrado por responsável</div>`:''}
   </div>`;
 }
 function D2(s){ if(!s)return'—'; const p=String(s).split('-'); return p.length===3?p[2]+'/'+p[1]:s; }
@@ -5658,10 +5683,11 @@ async function t20Reseed(){ if(!confirm('Apagar TODOS os grupos e voltar aos 20 
   try{ await fetch('actions/top20.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'reseed',me:EU&&EU.bitrix_id})}); const ov=document.getElementById('t20Cf'); if(ov)ov.remove(); T20.data=null; t20Load(); }catch(e){toast('Falha');} }
 
 const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['solicitacoes','Solicitações'],['obras','Obras'],['oportunidades','Oportunidades'],['top20','Top 20'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações']];
-const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',comprador:'Suprimentos',coordenador:'Coordenador',personalizado:'Personalizado'};
+const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',gerente:'Gerente de Suprimentos',comprador:'Suprimentos',coordenador:'Coordenador',personalizado:'Personalizado'};
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},
   diretor:{ver:'todas',edit:'nenhuma',menus:['dashboard','radar','matriz','cotacoes'],adm:0},
+  gerente:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','solicitacoes','obras','oportunidades','top20'],adm:0},
   comprador:{ver:'todas',edit:'sel',menus:['radar','matriz','cotacoes'],adm:0},
   coordenador:{ver:'sel',edit:'nenhuma',menus:['radar','matriz'],adm:0},
   personalizado:null,
@@ -5712,6 +5738,8 @@ function applyMenus(){
     a.style.display = show?'':'none';
   });
   const bn=document.getElementById('btnNovo'); if(bn) bn.style.display=CAN_EDIT?'':'none'; // só quem edita cria item
+  // LANDING: usuário com DASHBOARD ATRIBUÍDO (Configurações › Editar usuário) CAI direto no painel dele (1× por sessão)
+  if(!window._dashLanded && EU && EU.autorizado && (EU.dashboard||'')){ window._dashLanded=1; try{ showView('dashboards'); }catch(e){} }
 }
 function toggleSide(){
   const app=document.getElementById('app');
@@ -5735,6 +5763,7 @@ function cfgTab(t){
   document.getElementById('cfg-resp').style.display = t==='resp'?'':'none';
   const ce=document.getElementById('cfg-email'); if(ce) ce.style.display = t==='email'?'':'none';
   const ab=document.getElementById('cfgAddBtn'); if(ab) ab.style.display = (t==='users'&&IS_ADMIN)?'':'none';
+  const lb=document.getElementById('cfgLoteBtn'); if(lb) lb.style.display = (t==='users'&&IS_ADMIN)?'':'none';
   ['users','resp','receitas','email'].forEach(x=>{ const b=document.getElementById('cfgtab-'+x); if(b){ b.style.background = x===t?'var(--verde)':''; b.style.color = x===t?'#fff':''; } });
   if(t==='receitas') renderReceitas();
   if(t==='resp') renderRespLote();
@@ -6098,6 +6127,7 @@ function userForm(bid){
   const obrasVer=u?(u.obras_ver||[]):[], obrasEdit=u?(u.obras_editar||[]):[];
   const adm=u?u.perm_admin:0, ativo=u?u.ativo:1;
   const pc=u?u.perm_crono:0, po=u?u.perm_orcamento:0, pq=u?u.perm_quant:0, pd=u?u.perm_dicionario:0, pr=u?u.perm_responsaveis:0;
+  const dash=u?(u.dashboard||''):'';
   const obrasChk=(pref,sel)=>CFG.obras.map(o=>`<label class="ckl"><input type="checkbox" id="${pref}-${o.id}" ${sel.includes(o.id)?'checked':''}> ${esc(o.nome)}</label>`).join('');
   document.getElementById('modal').innerHTML=`
     <div class="mhead"><button class="mclose" onclick="closeModal()">×</button>
@@ -6113,16 +6143,23 @@ function userForm(bid){
         <div class="fld"><label>Papel</label><select id="uPapel" onchange="userPreset()">${Object.keys(PAPEL_LABEL).map(p=>`<option value="${p}" ${p===papel?'selected':''}>${PAPEL_LABEL[p]}</option>`).join('')}</select></div>
         <div class="fld"><label>Ativo</label><select id="uAtivo"><option value="1" ${ativo?'selected':''}>Sim</option><option value="0" ${!ativo?'selected':''}>Não</option></select></div>
       </div>
+      <div class="fld"><label>Dashboard inicial <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— o painel em que a pessoa CAI ao entrar no sistema</span></label>
+        <select id="uDash">
+          <option value="" ${dash===''?'selected':''}>Nenhum (entra no Radar, dashboard geral por aba)</option>
+          <option value="comprador" ${dash==='comprador'?'selected':''}>Painel do comprador — minhas tarefas e prioridades</option>
+          <option value="gerente" ${dash==='gerente'?'selected':''}>Painel do gerente — visão do time</option>
+          <option value="diretor" ${dash==='diretor'?'selected':''}>Painel do diretor — visão ampla</option>
+        </select></div>
       <div class="grid2">
         <div class="fld"><label>Vê obras</label><select id="uVer" onchange="userToggleObras()"><option value="todas" ${ver==='todas'?'selected':''}>Todas</option><option value="sel" ${ver==='sel'?'selected':''}>Selecionadas</option></select>
-          <div id="uVerObras" class="chkbox" style="display:${ver==='sel'?'block':'none'}">${obrasChk('ov',obrasVer)}</div></div>
+          <div id="uVerObras" class="ckgrid" style="display:${ver==='sel'?'grid':'none'}">${obrasChk('ov',obrasVer)}</div></div>
         <div class="fld"><label>Edita obras</label><select id="uEdit" onchange="userToggleObras()"><option value="nenhuma" ${edit==='nenhuma'?'selected':''}>Nenhuma (só leitura)</option><option value="todas" ${edit==='todas'?'selected':''}>Todas</option><option value="sel" ${edit==='sel'?'selected':''}>Selecionadas</option></select>
-          <div id="uEditObras" class="chkbox" style="display:${edit==='sel'?'block':'none'}">${obrasChk('oe',obrasEdit)}</div></div>
+          <div id="uEditObras" class="ckgrid" style="display:${edit==='sel'?'grid':'none'}">${obrasChk('oe',obrasEdit)}</div></div>
       </div>
-      <div class="fld"><label>Menus visíveis</label><div class="chkbox" style="display:flex;flex-wrap:wrap;gap:12px">
+      <div class="fld"><label>Menus visíveis</label><div class="ckgrid">
         ${MENUS.map(m=>`<label class="ckl"><input type="checkbox" id="mn-${m[0]}" ${menus.includes(m[0])?'checked':''}> ${m[1]}</label>`).join('')}</div></div>
       <div class="fld"><label>Permissões específicas <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— além de editar status / fornecedor / observação</span></label>
-        <div class="chkbox" style="display:flex;flex-wrap:wrap;gap:14px">
+        <div class="ckgrid">
           <label class="ckl"><input type="checkbox" id="pCrono" ${pc?'checked':''}> Vínculo de cronograma</label>
           <label class="ckl"><input type="checkbox" id="pOrc" ${po?'checked':''}> Vínculo de orçamento (verba)</label>
           <label class="ckl"><input type="checkbox" id="pQuant" ${pq?'checked':''}> Vínculo de quantitativo</label>
@@ -6144,8 +6181,96 @@ function userPreset(){
   userToggleObras();
 }
 function userToggleObras(){
-  document.getElementById('uVerObras').style.display=val('uVer')==='sel'?'block':'none';
-  document.getElementById('uEditObras').style.display=val('uEdit')==='sel'?'block':'none';
+  document.getElementById('uVerObras').style.display=val('uVer')==='sel'?'grid':'none';
+  document.getElementById('uEditObras').style.display=val('uEdit')==='sel'?'grid':'none';
+}
+/* ===== CONFIGURAR EM LOTE: aplica um pacote (menus/escopo de obras/permissões) a um grupo de usuários
+   (todos de um PAPEL, ou seleção manual). Só as seções MARCADAS são aplicadas — o resto de cada cadastro
+   fica intacto. Papel e flag admin ficam de fora do lote (segurança). ===== */
+async function userLote(){
+  if(!CFG||!CFG.usuarios||!CFG.usuarios.length){ try{ CFG=await (await fetch('actions/usuarios.php')).json(); }catch(e){} }   // auto-carrega (clique antes da lista terminar de carregar)
+  if(!CFG||!CFG.usuarios||!CFG.usuarios.length){toast('Não consegui carregar os usuários');return;}
+  const ativos=CFG.usuarios.filter(u=>u.ativo);
+  const papeis=Object.keys(PAPEL_LABEL).map(p=>({p,n:ativos.filter(u=>u.papel===p).length})).filter(x=>x.n>0);
+  const sec=(id,titulo,inner)=>`<div class="fld" style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px">
+    <label class="ckl" style="font-weight:700;font-size:13px;margin-bottom:8px"><input type="checkbox" id="${id}" onchange="userLoteDim()"> ${titulo}</label>
+    <div id="${id}Box" style="opacity:.45;pointer-events:none">${inner}</div></div>`;
+  document.getElementById('modal').innerHTML=`
+    <div class="mhead"><button class="mclose" onclick="closeModal()">×</button>
+      <div class="crumb">Configurações</div><div class="mt">Configurar em lote</div></div>
+    <div class="tabbody">
+      <div class="fld"><label>Aplicar a</label>
+        <select id="ltAlvo" onchange="userLoteAlvo()">
+          ${papeis.map(x=>`<option value="papel:${x.p}">Papel: ${PAPEL_LABEL[x.p]} — ${x.n} usuário(s) ativo(s)</option>`).join('')}
+          <option value="sel">Escolher usuários…</option>
+        </select>
+        <div id="ltUsers" class="ckgrid" style="display:none">${ativos.map(u=>`<label class="ckl"><input type="checkbox" id="lu-${esc(String(u.bitrix_id))}"> ${esc(u.nome)} <span class="muted">#${esc(String(u.bitrix_id))}</span></label>`).join('')}</div></div>
+      <div style="margin:10px 0 14px;padding:9px 12px;background:#fff9e6;border:1px solid #efe3b0;border-radius:8px;font-size:12.5px;color:#6b5d1f">
+        Só as seções <b>marcadas</b> abaixo são aplicadas ao grupo — o resto do cadastro de cada usuário fica como está.
+        <b>Papel</b> e <b>administrador</b> não mudam em lote (ajuste individualmente).</div>
+      ${sec('ltApMenus','Aplicar: Menus visíveis',`<div class="ckgrid" style="margin-top:0">
+        ${MENUS.map(m=>`<label class="ckl"><input type="checkbox" id="lm-${m[0]}"> ${m[1]}</label>`).join('')}</div>`)}
+      ${sec('ltApEscopo','Aplicar: Escopo de obras',`<div class="grid2">
+        <div class="fld"><label>Vê obras</label><select id="ltVer" onchange="userLoteObras()"><option value="todas">Todas</option><option value="sel">Selecionadas</option></select>
+          <div id="ltVerObras" class="ckgrid" style="display:none">${CFG.obras.map(o=>`<label class="ckl"><input type="checkbox" id="lov-${o.id}"> ${esc(o.nome)}</label>`).join('')}</div></div>
+        <div class="fld"><label>Edita obras</label><select id="ltEdit" onchange="userLoteObras()"><option value="nenhuma">Nenhuma (só leitura)</option><option value="todas">Todas</option><option value="sel">Selecionadas</option></select>
+          <div id="ltEditObras" class="ckgrid" style="display:none">${CFG.obras.map(o=>`<label class="ckl"><input type="checkbox" id="loe-${o.id}"> ${esc(o.nome)}</label>`).join('')}</div></div></div>`)}
+      ${sec('ltApPerms','Aplicar: Permissões específicas',`<div class="ckgrid" style="margin-top:0">
+        <label class="ckl"><input type="checkbox" id="lp-crono"> Vínculo de cronograma</label>
+        <label class="ckl"><input type="checkbox" id="lp-orc"> Vínculo de orçamento (verba)</label>
+        <label class="ckl"><input type="checkbox" id="lp-quant"> Vínculo de quantitativo</label>
+        <label class="ckl"><input type="checkbox" id="lp-dic"> Editar dicionário</label>
+        <label class="ckl"><input type="checkbox" id="lp-resp"> Atribuir responsáveis em lote</label></div>`)}
+      ${sec('ltApDash','Aplicar: Dashboard inicial',`<select id="ltDash" style="max-width:420px">
+        <option value="">Nenhum (entra no Radar)</option>
+        <option value="comprador">Painel do comprador — minhas tarefas e prioridades</option>
+        <option value="gerente">Painel do gerente — visão do time</option>
+        <option value="diretor">Painel do diretor — visão ampla</option></select>`)}
+      <div style="display:flex;gap:8px"><button class="btn-prim" onclick="userLoteSave()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">done_all</span> Aplicar ao grupo</button>
+        <button class="btn-ghost" onclick="closeModal()">Cancelar</button></div>
+    </div>`;
+  document.getElementById('ov').classList.add('open');
+}
+function userLoteAlvo(){ document.getElementById('ltUsers').style.display = val('ltAlvo')==='sel'?'grid':'none'; }
+function userLoteObras(){
+  document.getElementById('ltVerObras').style.display = val('ltVer')==='sel'?'grid':'none';
+  document.getElementById('ltEditObras').style.display = val('ltEdit')==='sel'?'grid':'none';
+}
+function userLoteDim(){
+  [['ltApMenus'],['ltApEscopo'],['ltApPerms'],['ltApDash']].forEach(([id])=>{
+    const on=document.getElementById(id).checked, box=document.getElementById(id+'Box');
+    if(box){ box.style.opacity=on?'1':'.45'; box.style.pointerEvents=on?'auto':'none'; }
+  });
+}
+async function userLoteSave(){
+  const ck=id=>{const e=document.getElementById(id);return e&&e.checked;};
+  // alvo
+  let papel_alvo=null, bitrix_ids=null, n=0, rotulo='';
+  const alvo=val('ltAlvo');
+  if(alvo==='sel'){
+    bitrix_ids=CFG.usuarios.filter(u=>u.ativo&&ck('lu-'+String(u.bitrix_id))).map(u=>String(u.bitrix_id));
+    n=bitrix_ids.length; rotulo=n+' usuário(s) escolhido(s)';
+    if(!n){toast('Marque ao menos um usuário');return;}
+  } else {
+    papel_alvo=alvo.slice(6); n=CFG.usuarios.filter(u=>u.ativo&&u.papel===papel_alvo).length;
+    rotulo='todos os '+n+' ativos do papel '+(PAPEL_LABEL[papel_alvo]||papel_alvo);
+  }
+  // pacote: só as seções marcadas entram
+  const campos={};
+  if(ck('ltApMenus')) campos.menus=MENUS.filter(m=>ck('lm-'+m[0])).map(m=>m[0]);
+  if(ck('ltApEscopo')){
+    campos.ver_escopo=val('ltVer'); campos.obras_ver=campos.ver_escopo==='sel'?CFG.obras.filter(o=>ck('lov-'+o.id)).map(o=>o.id):[];
+    campos.editar_escopo=val('ltEdit'); campos.obras_editar=campos.editar_escopo==='sel'?CFG.obras.filter(o=>ck('loe-'+o.id)).map(o=>o.id):[];
+  }
+  if(ck('ltApPerms')){ campos.perm_crono=ck('lp-crono')?1:0; campos.perm_orcamento=ck('lp-orc')?1:0; campos.perm_quant=ck('lp-quant')?1:0; campos.perm_dicionario=ck('lp-dic')?1:0; campos.perm_responsaveis=ck('lp-resp')?1:0; }
+  if(ck('ltApDash')) campos.dashboard=val('ltDash');
+  if(!Object.keys(campos).length){toast('Marque ao menos uma seção pra aplicar');return;}
+  if(!confirm('Aplicar este pacote a '+rotulo+'?')) return;
+  try{
+    const r=await (await fetch('actions/usuarios.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'save_lote',me:EU&&EU.bitrix_id,papel_alvo,bitrix_ids,campos})})).json();
+    if(r.error){toast(r.error);return;}
+    toast((r.afetados??0)+' usuário(s) atualizados'); closeModal(); renderConfig();
+  }catch(e){toast('Falha: '+e.message);}
 }
 async function userBuscar(){
   const q=val('uQ'); const box=document.getElementById('uRes');
@@ -6176,6 +6301,7 @@ async function userSave(){
     perm_quant:document.getElementById('pQuant').checked?1:0,
     perm_dicionario:document.getElementById('pDic').checked?1:0,
     perm_responsaveis:document.getElementById('pRespLote').checked?1:0,
+    dashboard:val('uDash'),
     ativo:parseInt(val('uAtivo'))};
   const d=await (await fetch('actions/usuarios.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
   if(d.error){

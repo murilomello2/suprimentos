@@ -4128,6 +4128,23 @@ async function cotColabSalvar(){
     toast(sel.length?('Compartilhada com '+sel.length+' colaborador(es)'):'Compartilhamento removido'); closeModal(); cotOpen(c.id);
   }catch(e){toast('Falha: '+e.message);}
 }
+/* Abre o ITEM DO RADAR que originou a cotação — POR CIMA da tela de cotação (fechou o popup, está de volta).
+   Se a obra do item não está carregada no radar/matriz, busca a matriz dela e alimenta o fallback do byOrdem. */
+async function cotVerItemRadar(){
+  const c=(COT.cur&&COT.cur.cotacao)||{}; if(!c.servico_id){toast('Esta cotação não tem vínculo com o radar');return;}
+  const ord=Number(c.servico_id), ob=Number(c.obra_id)||1;
+  if(!byOrdem(ord,ob)){
+    try{
+      const d=await (await fetch('actions/matriz.php'+(ob!==1?('?obra='+ob+'&'):'?')+'_='+Date.now())).json();
+      if(d&&d.itens){ const nome=(d.obra&&d.obra.nome)||c.obra_nome||('obra '+ob);
+        d.itens.forEach(i=>{ i.obra_id=i.obra_id||ob; i.obra_nome=i.obra_nome||nome; });
+        MAT=(typeof MAT!=='undefined'&&Array.isArray(MAT)&&MAT.length)?MAT.concat(d.itens.filter(i=>!MAT.some(m=>m.ordem==i.ordem&&m.obra_id==i.obra_id))):d.itens;
+      }
+    }catch(e){}
+  }
+  if(!byOrdem(ord,ob)){toast('Não consegui carregar o item do radar — abra o Radar com a obra '+esc(c.obra_nome||ob)+' selecionada');return;}
+  openModal(ord,ob);   // popup por cima da cotação — fechar volta exatamente pra cá
+}
 async function cotHistOpen(){
   const c=(COT.cur&&COT.cur.cotacao)||{}; if(!c.id) return;
   let hs=[]; try{ const d=await (await fetch('actions/cotacoes.php?historico='+c.id+'&_='+Date.now())).json(); hs=d.historico||[]; }catch(e){}
@@ -4279,7 +4296,9 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
   let html=`<div class="panel" style="margin-bottom:12px;padding:16px 20px"><div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap">
       <button class="btn-ghost" onclick="cotLoad()" style="margin-top:2px"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button>
       <div style="min-width:0"><div style="font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted)">Descrição da cotação</div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px"><b style="font-size:18px">${esc(c.titulo)}</b> ${cotStChip(c.status)}${(c.apelido||CAN_EDIT)?`<span ${CAN_EDIT?'onclick="cotApelidoEditar()"':''} title="${CAN_EDIT?'clique para dar/editar um apelido (ex.: Pregos) — assim você acha fácil na lista':'apelido'}" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;padding:3px 10px;border-radius:8px;${CAN_EDIT?'cursor:pointer;':''}${c.apelido?'background:#eef6f0;color:var(--verde-d)':'background:#fff;color:var(--verde-d);border:1px dashed var(--verde)'}"><span class="material-icons" style="font-size:13px">sell</span>${c.apelido?esc(c.apelido):'dar um apelido'}${CAN_EDIT?'<span class="material-icons" style="font-size:12px;opacity:.7">edit</span>':''}</span>`:''}<span class="muted" style="font-size:12px"><span id="cotObraWrap">${cotObraLabel(c,podeGerir)}</span>${c.categoria?' · '+esc(c.categoria):''}${c.tipo_servico?' · '+esc(c.tipo_servico):''}</span></div></div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px"><b style="font-size:18px">${esc(c.titulo)}</b> ${cotStChip(c.status)}${(c.apelido||CAN_EDIT)?`<span ${CAN_EDIT?'onclick="cotApelidoEditar()"':''} title="${CAN_EDIT?'clique para dar/editar um apelido (ex.: Pregos) — assim você acha fácil na lista':'apelido'}" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;padding:3px 10px;border-radius:8px;${CAN_EDIT?'cursor:pointer;':''}${c.apelido?'background:#eef6f0;color:var(--verde-d)':'background:#fff;color:var(--verde-d);border:1px dashed var(--verde)'}"><span class="material-icons" style="font-size:13px">sell</span>${c.apelido?esc(c.apelido):'dar um apelido'}${CAN_EDIT?'<span class="material-icons" style="font-size:12px;opacity:.7">edit</span>':''}</span>`:''}${c.servico_id
+        ?`<span onclick="cotVerItemRadar()" title="Esta cotação NASCEU do item do radar “${esc(c.servico_nome||'')}” — clique p/ abrir o item (verba, curadoria, cronograma). Feche o popup e você volta pra cá." style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:800;padding:4px 11px;border-radius:8px;background:#eef6f0;border:1.5px solid var(--verde);color:var(--verde-d);cursor:pointer"><span class="material-icons" style="font-size:14px">radar</span> do RADAR: ${esc(c.servico_nome||('item #'+c.servico_id))} <span class="material-icons" style="font-size:13px;opacity:.7">open_in_new</span></span>`
+        :`<span title="cotação criada do zero — sem vínculo a nenhum item do radar" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:700;padding:4px 11px;border-radius:8px;background:#f2f3f4;border:1px solid #d7dbde;color:#6a737b"><span class="material-icons" style="font-size:14px">edit_note</span> criada do zero — sem vínculo ao radar</span>`}<span class="muted" style="font-size:12px"><span id="cotObraWrap">${cotObraLabel(c,podeGerir)}</span>${c.categoria?' · '+esc(c.categoria):''}${c.tipo_servico?' · '+esc(c.tipo_servico):''}</span></div></div>
       <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cartaGerar(${c.id})" title="${(c.num_solicitacao&&!c.servico_id)?'Carta de cotação (material) desta cotação':'Carta convite desta cotação'} — PDF / Word"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> ${(d.cartas_geradas&&d.cartas_geradas.length)?'Ver/editar carta':'Gerar carta'}</button>${(d.cartas_geradas&&d.cartas_geradas.length)?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="carta salva em ${D(String(d.cartas_geradas[0].created_at).slice(0,10))}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">description</span> carta salva</span>`:''}`:''}
         <button class="btn-ghost" style="padding:6px 12px" onclick="cotUmaPagina()" title="Resumo do mapa em uma página, pronto pra imprimir/PDF"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Mapa em uma página</button>
@@ -5883,8 +5902,10 @@ function applyMenus(){
     a.style.display = show?'':'none';
   });
   const bn=document.getElementById('btnNovo'); if(bn) bn.style.display=CAN_EDIT?'':'none'; // só quem edita cria item
-  // LANDING: usuário com DASHBOARD ATRIBUÍDO (Configurações › Editar usuário) CAI direto no painel dele (1× por sessão)
-  if(!window._dashLanded && EU && EU.autorizado && (EU.dashboard||'')){ window._dashLanded=1; try{ showView('dashboards'); }catch(e){} }
+  // LANDING (pedido 23/jul): a TELA INICIAL é o DASHBOARD pra todo mundo que tem esse menu liberado — não o Radar.
+  // O painel atribuído (EU.dashboard) segue definindo a ABA inicial; sem atribuição cai na 1ª aba permitida do papel.
+  const dashVis = (adminSel ? allow.includes('dashboard') : (IS_ADMIN || allow.includes('dashboard')));
+  if(!window._dashLanded && EU && EU.autorizado && dashVis){ window._dashLanded=1; try{ showView('dashboards'); }catch(e){} }
 }
 function toggleSide(){
   const app=document.getElementById('app');

@@ -16,6 +16,7 @@
  */
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
+if (!function_exists('cot_pode_gerir')) { function cot_pode_gerir($pdo,$me,$cid){ $p=user_perms($pdo,$me); if(empty($p['autorizado']))return false; if(!empty($p['perm_admin'])||(($p['papel']??'')==='gerente'))return true; if($me===null||$me==='')return false; try{$r=$pdo->prepare('SELECT criado_por,colaboradores FROM cotacao WHERE id=?');$r->execute([(int)$cid]);$r=$r->fetch();}catch(Throwable $e){return false;} if(!$r)return false; if((string)($r['criado_por']??'')===(string)$me)return true; foreach((array)(json_decode((string)($r['colaboradores']??''),true)?:[]) as $b) if(trim((string)$b)===trim((string)$me))return true; return false; } }
 require_once __DIR__ . '/../includes/imap_inbox.php';
 define('COTACAO_IA_LIB_ONLY', 1);
 require_once __DIR__ . '/cotacao_ia.php';   // traz ia_xlsx_text() + (via ele) oracle_cfg/oracle_post/prompts, sem executar o endpoint
@@ -377,8 +378,7 @@ try {
     if ($acao === 'listar') {
         $cid = (int)($_GET['cotacao'] ?? ($in['cotacao'] ?? 0));
         if ($cid) {
-            $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
-            if (!can_edit_obra($perms, max(1, $obra)) && empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Sem acesso.']); exit; }
+            if (!cot_pode_gerir($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error' => 'Sem acesso a esta cotação (só admin, gerente, quem criou ou um colaborador).']); exit; }
             $q = $pdo->prepare("SELECT * FROM cotacao_email_in WHERE cotacao_id=? ORDER BY id DESC"); $q->execute([$cid]);
         } else {
             if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores veem a caixa completa.']); exit; }
@@ -410,8 +410,7 @@ try {
         $id = (int)($in['id'] ?? 0); if (!$id) throw new Exception('id obrigatório');
         $r = $pdo->prepare("SELECT cotacao_id FROM cotacao_email_in WHERE id=?"); $r->execute([$id]); $row = $r->fetch();
         if (!$row) { echo json_encode(['ok' => true]); exit; }
-        if ($row['cotacao_id']) { $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . (int)$row['cotacao_id'])->fetchColumn();
-            if (!can_edit_obra($perms, max(1, $obra)) && empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Sem permissão.']); exit; } }
+        if ($row['cotacao_id']) { if (!cot_pode_gerir($pdo, $me, (int)$row['cotacao_id'])) { http_response_code(403); echo json_encode(['error' => 'Sem permissão nesta cotação.']); exit; } }
         else if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores.']); exit; }   // não vinculado = só admin (espelha o ?listar)
         $st = ['ignorar' => 'ignorado', 'converter' => 'convertido', 'marcar_lido' => 'lido'][$acao] ?? 'lido';
         $pdo->prepare("UPDATE cotacao_email_in SET status=?, lido_por=?, lido_em=? WHERE id=?")->execute([$st, (string)$me, date('c'), $id]);

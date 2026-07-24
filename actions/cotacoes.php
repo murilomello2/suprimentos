@@ -20,8 +20,11 @@ require_once __DIR__ . '/../includes/coligadas.php';       // FASE 2: coligada_c
 
 function cot_can_edit($pdo, $me, $obra) {
     $perms = user_perms($pdo, $me);
-    if (!empty($perms['perm_admin'])) return $perms;
-    if (can_edit_obra($perms, max(1, (int)$obra))) return $perms;
+    if (empty($perms['autorizado'])) return null;
+    // CRIAR cotação é dinâmica de comprador — liberado por PAPEL (admin/gerente/comprador), NÃO por edição de obra
+    // (a maioria dos compradores tem editar_escopo='nenhuma'). can_edit_obra fica só p/ o menu Obras/estrutura.
+    if (!empty($perms['perm_admin']) || in_array(($perms['papel'] ?? ''), ['gerente', 'comprador'], true)) return $perms;
+    if (can_edit_obra($perms, max(1, (int)$obra))) return $perms;   // compat: quem edita a obra também pode
     return null;
 }
 // Gerir/editar/excluir uma cotação EXISTENTE: só ADMIN ou quem CRIOU (comprador não mexe nas dos outros).

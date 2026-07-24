@@ -74,9 +74,10 @@ try {
 
         // ---- permissão POR ITEM: admin/gerente tudo; senão editor da obra E responsável pelo item ----
         if (!$is_admin && !$is_gerente) {
+            // comprador só mexe no PRÓPRIO item (é o responsável) — NÃO exige edição de obra (dinâmica de comprador)
             $respItem = sup_nome_limpo((string)($cur['responsavel'] ?? ''));
             $euN = sup_nome_limpo($euNome);
-            if (!can_edit_obra($perms, $ob) || $respItem === '' || $euN === '' || strcasecmp($respItem, $euN) !== 0) { $sem_permissao++; continue; }
+            if ($respItem === '' || $euN === '' || strcasecmp($respItem, $euN) !== 0) { $sem_permissao++; continue; }
         }
 
         $alvos = $campos !== null ? $campos : ['status' => (string)$it['status']];

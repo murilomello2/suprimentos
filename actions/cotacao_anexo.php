@@ -14,11 +14,21 @@ require_once __DIR__ . '/../includes/db.php';
 define('ANEXO_DIR', __DIR__ . '/../data/anexos');
 define('ANEXO_MAX', 25 * 1024 * 1024);
 
+// pode GERIR a cotação (anexar/excluir/vincular) = MESMA regra de lançar proposta: admin | gerente | criador |
+// colaborador. Antes o anexo exigia can_edit_obra (edição de obra) → comprador criador/colaborador via o botão
+// mas o upload dava 403 ("Falha no carregamento"). Retorna [$perms, $obra, $pode_gerir].
 function anexo_can($pdo, $me, $cotacao_id) {
     $perms = user_perms($pdo, $me);
-    if (empty($perms['autorizado'])) return [null, null];
-    $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . (int)$cotacao_id)->fetchColumn();
-    return [$perms, max(1, $obra)];
+    if (empty($perms['autorizado'])) return [null, null, false];
+    $row = $pdo->prepare("SELECT COALESCE(obra_id,1) AS obra, criado_por, colaboradores FROM cotacao WHERE id=?");
+    $row->execute([(int)$cotacao_id]); $c = $row->fetch() ?: [];
+    $obra = max(1, (int)($c['obra'] ?? 1));
+    $pode = !empty($perms['perm_admin']) || (($perms['papel'] ?? '') === 'gerente');
+    if (!$pode && $me !== null && $me !== '' && $c) {
+        if ((string)($c['criado_por'] ?? '') === (string)$me) $pode = true;
+        else foreach ((array)(json_decode((string)($c['colaboradores'] ?? ''), true) ?: []) as $b) if (trim((string)$b) === trim((string)$me)) { $pode = true; break; }
+    }
+    return [$perms, $obra, $pode];
 }
 
 try {
@@ -58,8 +68,8 @@ try {
         $in = json_decode(file_get_contents('php://input'), true) ?: [];
         $ids = array_values(array_filter(array_map('intval', (array)($in['ids'] ?? []))));
         $cid = (int)($in['cotacao_id'] ?? 0); if (!$ids || !$cid) throw new Exception('ids e cotacao_id obrigatórios');
-        [$perms, $obra] = anexo_can($pdo, $in['me'] ?? null, $cid);
-        if (!$perms || !can_edit_obra($perms, $obra)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão.']); exit; }
+        [$perms, $obra, $pode] = anexo_can($pdo, $in['me'] ?? null, $cid);
+        if (!$pode) { http_response_code(403); echo json_encode(['error'=>'Sem permissão.']); exit; }
         $fid = (int)($in['fornecedor_id'] ?? 0) ?: null; $fnome = trim((string)($in['fornecedor_nome'] ?? '')) ?: null;
         $ph = implode(',', array_fill(0, count($ids), '?'));
         $pdo->prepare("UPDATE cotacao_anexo SET fornecedor_id=?, fornecedor_nome=? WHERE cotacao_id=? AND id IN ($ph)")
@@ -75,8 +85,8 @@ try {
         $id = (int)($in['id'] ?? 0); if (!$id) throw new Exception('id obrigatório');
         $a = $pdo->prepare("SELECT * FROM cotacao_anexo WHERE id=?"); $a->execute([$id]); $a = $a->fetch();
         if (!$a) { echo json_encode(['ok'=>true]); exit; }
-        [$perms, $obra] = anexo_can($pdo, $in['me'] ?? null, $a['cotacao_id']);
-        if (!$perms || !can_edit_obra($perms, $obra)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão.']); exit; }
+        [$perms, $obra, $pode] = anexo_can($pdo, $in['me'] ?? null, $a['cotacao_id']);
+        if (!$pode) { http_response_code(403); echo json_encode(['error'=>'Sem permissão.']); exit; }
         $path = ANEXO_DIR . '/' . basename((string)$a['arquivo']);
         if (is_file($path)) @unlink($path);
         $pdo->prepare("DELETE FROM cotacao_anexo WHERE id=?")->execute([$id]);
@@ -86,8 +96,8 @@ try {
     // ---------- UPLOAD (multipart) ----------
     header('Content-Type: application/json; charset=utf-8');
     $cid = (int)($_POST['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
-    [$perms, $obra] = anexo_can($pdo, $_POST['me'] ?? null, $cid);
-    if (!$perms || !can_edit_obra($perms, $obra)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão de edição.']); exit; }
+    [$perms, $obra, $pode] = anexo_can($pdo, $_POST['me'] ?? null, $cid);
+    if (!$pode) { http_response_code(403); echo json_encode(['error'=>'Sem permissão para anexar nesta cotação (só admin, gerente, quem criou ou um colaborador).']); exit; }
     // a carta em PDF (__CARTA__) é ÚNICA por cotação — ao re-salvar, remove a anterior (não conta p/ o limite nem polui)
     if (trim((string)($_POST['fornecedor_nome'] ?? '')) === '__CARTA__') {
         $old = $pdo->prepare("SELECT arquivo FROM cotacao_anexo WHERE cotacao_id=? AND fornecedor_nome='__CARTA__'"); $old->execute([$cid]);

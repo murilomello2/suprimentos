@@ -6,6 +6,7 @@
  */
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
+if (!function_exists('cot_pode_gerir')) { function cot_pode_gerir($pdo,$me,$cid){ $p=user_perms($pdo,$me); if(empty($p['autorizado']))return false; if(!empty($p['perm_admin'])||(($p['papel']??'')==='gerente'))return true; if($me===null||$me==='')return false; try{$r=$pdo->prepare('SELECT criado_por,colaboradores FROM cotacao WHERE id=?');$r->execute([(int)$cid]);$r=$r->fetch();}catch(Throwable $e){return false;} if(!$r)return false; if((string)($r['criado_por']??'')===(string)$me)return true; foreach((array)(json_decode((string)($r['colaboradores']??''),true)?:[]) as $b) if(trim((string)$b)===trim((string)$me))return true; return false; } }
 require_once __DIR__ . '/../includes/mailer.php';
 define('EMAIL_CFG_FILE', __DIR__ . '/../data/.email.json');
 function email_cfg() { $j = @json_decode(@file_get_contents(EMAIL_CFG_FILE), true); return is_array($j) ? $j : []; }
@@ -70,8 +71,7 @@ try {
             $assunto = trim((string)($in['assunto'] ?? '')); $corpo = (string)($in['corpo'] ?? '');
             if ($assunto === '' || trim($corpo) === '') throw new Exception('assunto e corpo obrigatórios');
             // permissão de edição na obra da cotação
-            if ($cid) { $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
-                if (!can_edit_obra($perms, max(1, $obra))) { http_response_code(403); echo json_encode(['error' => 'Sem permissão de edição.']); exit; } }
+            if ($cid && !cot_pode_gerir($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error' => 'Sem permissão para enviar e-mail desta cotação (só admin, gerente, quem criou ou um colaborador).']); exit; }
 
             // carta em PDF (anexo __CARTA__, gerado no cliente ao "Salvar na cotação") — vai anexada em todo e-mail desta cotação
             $anexos = [];

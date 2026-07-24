@@ -1674,12 +1674,14 @@ function render(){
 /* ===== SELEÇÃO EM LOTE no radar (conferência de status — 21/jul/2026) =====
    Comprador não-admin/não-gerente só seleciona (e o servidor só grava) itens onde ELE é o responsável. */
 let RSEL=new Map(), RVIS=[];
-function rselPode(i){
+// pode editar status/fornecedor/observação de um ITEM do radar = admin | gerente | RESPONSÁVEL do item.
+// NÃO depende de "Edita obras" (decisão 23/jul: edição de obra é só p/ o menu Obras/estrutura, não p/ o comprador).
+function podeEditarItem(i){
   if(IS_ADMIN||(((EU&&EU.papel)||'')==='gerente')) return true;
-  if(!CAN_EDIT) return false;
   const eu=nrmResp((EU&&EU.nome)||'').toLowerCase();
-  return !!eu && nrmResp(i.responsavel).toLowerCase()===eu;
+  return !!eu && nrmResp(i&&i.responsavel).toLowerCase()===eu;
 }
+function rselPode(i){ return podeEditarItem(i); }
 function rselToggle(k,on){
   if(on){ const [ob,ord]=k.split(':'); RSEL.set(k,{obra_id:Number(ob),ordem:Number(ord)}); }
   else RSEL.delete(k);
@@ -1801,6 +1803,8 @@ async function saveField(ordem,campo,valor){
 let EDITC=false, EDITO=false, EDITQ=false, EDITD=false, EDITR=false; // modos "Editar" (cronograma/orçamento/quantitativo/dicionário/resumo)
 let IS_ADMIN=false;                       // fail-closed; vira true só quando getCurrentUser confirma perm_admin
 let CAN_EDIT=false;                       // editor geral da obra (status/fornecedor/observação)
+let CAN_FORN=false;                       // cadastrar/editar FORNECEDOR (lista-mestre): admin/gerente/comprador — não depende de edição de obra
+let CAN_COT=false;                         // criar/gerir cotação: admin/gerente/comprador — dinâmica de suprimentos (não é edição de obra)
 let CAN_CRONO=false, CAN_ORC=false, CAN_QUANT=false, CAN_DIC=false, CAN_RESP=false; // permissões específicas (vínculos + dicionário + responsáveis em lote)
 let EU=null;                             // usuário logado + permissões efetivas
 function openModal(o,ob){CUR=byOrdem(o,ob);if(!CUR)return;TAB='Resumo';EDITC=EDITO=EDITQ=EDITD=EDITR=false;drawModal();document.getElementById('ov').classList.add('open');hydrateCur();}
@@ -3200,10 +3204,10 @@ function resumoTab(i){
       ${ro}
       <div class="fld"><label>Observações</label><textarea disabled>${esc(i.observacoes||'')}</textarea></div>
       <div style="margin-top:4px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        ${CAN_EDIT?`<button class="btn-prim" onclick="EDITR=true;drawModal()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">edit</span> Editar</button>`
-                  :`<span class="muted" style="font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">lock</span> Você tem acesso somente leitura.</span>`}
+        ${(CAN_EDIT||podeEditarItem(i))?`<button class="btn-prim" onclick="EDITR=true;drawModal()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">edit</span> Editar</button>`
+                  :`<span class="muted" style="font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">lock</span> Você tem acesso somente leitura${(EU&&EU.papel==='comprador')?' — este item está sob responsabilidade de '+esc(i.responsavel||'ninguém'):''}.</span>`}
         ${i.cotacao?`<button class="btn-ghost" onclick="cotAbrir(${i.cotacao.id})" title="${esc(i.cotacao.titulo||'')}"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--verde)">request_quote</span> Ver mapa de cotação</button><span class="muted" style="font-size:11.5px">· ${i.cotacao.respostas}/${i.cotacao.convidados} responderam${i.cotacao.melhor?' · melhor '+BRL(i.cotacao.melhor):''}${i.cotacao.n>1?' · '+i.cotacao.n+' cotações':''}</span>`:''}
-        ${CAN_EDIT?`<button class="btn-ghost" onclick="cotIniciar(${i.ordem},${i.obra_id||1})" title="Abre uma cotação já com os itens do dicionário deste serviço (editáveis)"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--dourado)">request_quote</span> ${i.cotacao?'Nova cotação':'Iniciar cotação'}</button>`:''}
+        ${CAN_COT?`<button class="btn-ghost" onclick="cotIniciar(${i.ordem},${i.obra_id||1})" title="Abre uma cotação já com os itens do dicionário deste serviço (editáveis)"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--dourado)">request_quote</span> ${i.cotacao?'Nova cotação':'Iniciar cotação'}</button>`:''}
       </div>
       ${IS_ADMIN?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;gap:8px">
         <button class="btn-ghost" onclick="desdobrarItem()"><span class="material-icons" style="font-size:15px">call_split</span> Desdobrar em Material + MO</button>
@@ -3746,7 +3750,7 @@ function cotRender(){
        ${inboxNovoTotal?`<span class="dchip" style="background:var(--pend);color:#fff" title="e-mails de fornecedores ainda não processados — clique em Buscar respostas">📨 ${inboxNovoTotal} não processada(s)</span>`:''}
        ${CAN_EDIT?`<button class="btn-ghost" style="padding:7px 12px" onclick="cotBuscarRespostasLista(this)" title="ler a caixa suprimentos@ agora (enquanto o cron de hora em hora não roda)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mark_email_unread</span> Buscar respostas</button>`:''}
        ${IS_ADMIN?`<button class="btn-ghost" style="padding:7px 12px" onclick="cotReprocessarObras()" title="preencher a obra das cotações sem obra, pela solicitação vinculada (cadastro único)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_fix_high</span> Reprocessar obras</button>`:''}
-       ${CAN_EDIT?`<button class="btn-prim" style="padding:7px 14px" onclick="cotNovo()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">add</span> Nova cotação</button>`:''}
+       ${CAN_COT?`<button class="btn-prim" style="padding:7px 14px" onclick="cotNovo()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">add</span> Nova cotação</button>`:''}
      </span>
    </div></div><div class="wrap" style="overflow-x:auto"><table style="table-layout:fixed;width:100%;font-size:12px"><colgroup><col style="width:25%"><col style="width:10%"><col style="width:12%"><col style="width:9%"><col style="width:5%"><col style="width:6.5%"><col style="width:10%"><col style="width:8%"><col style="width:11%"><col style="width:8%"><col style="width:3%"></colgroup><thead><tr>${th('Cotação','titulo')}${th('Obra','obra_nome')}${th('Cat./Tipo','categoria')}<th title="Nº da solicitação de compra / nº do pedido de compra">SC/PC</th>${th('Itens','n_itens','style="text-align:center"')}${th('Prop.','n_propostas','style="text-align:center" title="propostas recebidas / convidados"')}${th('Melhor','melhor_oferta','style="text-align:right" title="melhor oferta"')}${th('Criada','created_at')}${th('Criador','criado_nome')}${th('Status','status')}<th></th></tr></thead><tbody>`;
   const _ell='overflow:hidden;text-overflow:ellipsis;white-space:nowrap';   // trunca c/ reticências (table-layout:fixed)
@@ -5539,11 +5543,11 @@ function fornRender(){
     <select onchange="FORN.f.tipo=this.value;fornLoad()"><option value="">Todos os tipos</option>${FORN.tipos.map(t=>`<option value="${esc(t)}" ${t===FORN.f.tipo?'selected':''}>${esc(t)}</option>`).join('')}</select>
     <input placeholder="Filtrar por itens…" value="${esc(FORN.f.itens)}" oninput="FORN.f.itens=this.value;fornDeb()" style="min-width:130px">
     <span class="muted" style="font-size:12px">${FORN.total} fornecedor(es)</span>
-    ${CAN_EDIT?'<button class="btn-prim" style="margin-left:auto;padding:7px 12px" onclick="fornNovo()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Novo</button>':''}
+    ${CAN_FORN?'<button class="btn-prim" style="margin-left:auto;padding:7px 12px" onclick="fornNovo()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Novo</button>':''}
   </div></div><div class="wrap"><table><thead><tr><th>Nome</th><th>Categoria</th><th>Cidade</th><th>Contato</th><th>Telefone</th><th>Itens</th><th>Tipo</th><th></th></tr></thead><tbody>`;
   for(const f of FORN.list){
     html+=`<tr><td><b>${esc(f.nome)}</b>${f.email?`<div class="muted" style="font-size:11px">${esc(f.email)}</div>`:''}</td><td class="muted">${esc(f.categoria||'')}</td><td class="muted">${esc(f.cidade||'')}</td><td>${esc(f.contato||'')}</td><td>${esc(f.telefone||'')}</td><td class="muted" style="font-size:11px">${esc((f.itens||'').slice(0,42))}</td><td>${esc(f.tipo||'')}</td>
-      <td>${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 8px" onclick="fornNovo(${f.id})"><span class="material-icons" style="font-size:15px">edit</span></button>`:''}</td></tr>`;
+      <td>${CAN_FORN?`<button class="btn-ghost" style="padding:2px 8px" onclick="fornNovo(${f.id})"><span class="material-icons" style="font-size:15px">edit</span></button>`:''}</td></tr>`;
   }
   if(!FORN.list.length) html+='<tr><td colspan="8" class="empty">Nenhum fornecedor. Importe do sistema antigo (Excel) ou cadastre um novo.</td></tr>';
   w.innerHTML=html+'</tbody></table></div>';
@@ -5560,7 +5564,7 @@ function fornRenderEdit(){
       ${F('Cidade','cidade')} ${F('Contato','contato')} ${F('Telefone','telefone')} ${F('WhatsApp','whatsapp')} ${F('E-mail','email')} ${F('CNPJ','cnpj')}
     </div>
     ${cotFld('Itens que fornece','<input id="fe_itens" value="'+esc(f.itens||'')+'" placeholder="Ex.: forro, gesso, revestimentos">','margin-top:8px')}
-    <div style="margin-top:14px;display:flex;gap:8px"><button class="btn-prim" onclick="fornSalvar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar</button>${f.id?`<button class="btn-ghost" style="color:var(--pend)" onclick="fornExcluir(${f.id})">Excluir</button>`:''}</div></div>`;
+    <div style="margin-top:14px;display:flex;gap:8px"><button class="btn-prim" onclick="fornSalvar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar</button>${f.id&&(IS_ADMIN||((EU&&EU.papel)||'')==='gerente')?`<button class="btn-ghost" style="color:var(--pend)" onclick="fornExcluir(${f.id})">Excluir</button>`:''}</div></div>`;
 }
 async function fornSalvar(){
   const g=id=>val('fe_'+id); const nome=g('nome').trim(); if(!nome){toast('Nome obrigatório');return;}
@@ -5873,6 +5877,10 @@ async function getCurrentUser(){
   catch(e){ EU={bitrix_id:bid,via,autorizado:true,perm_admin:1,editar_escopo:'todas',menus:MENUS.map(m=>m[0])}; IS_ADMIN=true; }
   CAN_EDIT = IS_ADMIN || (EU && (EU.editar_escopo==='todas'
               || (EU.editar_escopo==='sel' && (EU.obras_editar||[]).map(Number).includes(1))));
+  // fornecedor é LISTA-MESTRE compartilhada: liberado por PAPEL (compradores reclamavam do botão sumido
+  // porque estavam sem edição de obra — coisa que não deveria mandar no cadastro de fornecedor)
+  CAN_FORN = IS_ADMIN || ['gerente','comprador'].includes((EU&&EU.papel)||'') || CAN_EDIT;
+  CAN_COT  = IS_ADMIN || ['gerente','comprador'].includes((EU&&EU.papel)||'') || CAN_EDIT;   // criar cotação = dinâmica de suprimentos
   // permissões específicas: exigem ser editor da obra (CAN_EDIT) + a flag; admin tem tudo
   CAN_CRONO = IS_ADMIN || (CAN_EDIT && !!(EU && EU.perm_crono));
   CAN_ORC   = IS_ADMIN || (CAN_EDIT && !!(EU && EU.perm_orcamento));

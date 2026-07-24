@@ -50,8 +50,8 @@ try {
         } catch (Throwable $e) {}
     }
     $is_admin = !empty($perms['perm_admin']);
+    $is_gerente = (($perms['papel'] ?? '') === 'gerente');
     if ($ESCOPO === 'catalogo' && !$is_admin) $ESCOPO = 'obra';   // só admin muda a lista-base; os demais caem em por-obra
-    $editor   = $is_admin || can_edit_obra($perms, $OBRA);
     $FG = [
         'status'=>'geral','fornecedor'=>'geral','observacoes'=>'geral',
         'crono_marco_override'=>'crono','data_necessaria_override'=>'crono',
@@ -66,9 +66,12 @@ try {
     $negados = [];
     foreach (array_keys($campos) as $k) {
         $g  = $FG[$k] ?? 'admin';
-        $ok = $is_admin
-            || ($g === 'geral' && $editor)
-            || (isset($PERM_FLAG[$g]) && $editor && !empty($perms[$PERM_FLAG[$g]]));
+        // DECISÃO 23/jul: edição de obra (can_edit_obra) NÃO gateia dinâmica de comprador. geral (status/forn/obs)
+        // = liberado a qualquer autorizado e a TRAVA DE RESPONSABILIDADE (abaixo) restringe ao responsável do item.
+        // vínculos (crono/orç/quant) = a PERMISSÃO ESPECÍFICA é o gate. grupo/tipo/nome/lead = só admin.
+        $ok = $is_admin || $is_gerente
+            || ($g === 'geral')
+            || (isset($PERM_FLAG[$g]) && !empty($perms[$PERM_FLAG[$g]]));
         if (!$ok) $negados[$g] = true;
     }
     if ($negados) {

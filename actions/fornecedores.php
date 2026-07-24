@@ -19,7 +19,11 @@ require_once __DIR__ . '/../includes/db.php';
 function forn_editor($pdo, $me) {
     $p = user_perms($pdo, $me);
     if (empty($p['autorizado'])) return null;
-    if (!empty($p['perm_admin']) || (($p['editar_escopo'] ?? 'nenhuma') !== 'nenhuma')) return $p;
+    // fornecedor é LISTA-MESTRE compartilhada — cadastrar/editar liberado por PAPEL (admin/gerente/comprador),
+    // NÃO pelo escopo de edição de obra (compradores com 'nenhuma' ficavam sem o botão + 403; decisão 23/jul)
+    if (!empty($p['perm_admin'])) return $p;
+    if (in_array(($p['papel'] ?? ''), ['gerente', 'comprador'], true)) return $p;
+    if (($p['editar_escopo'] ?? 'nenhuma') !== 'nenhuma') return $p;
     return null;
 }
 function forn_add_categoria($pdo, $nome) {
@@ -117,6 +121,8 @@ try {
     }
 
     if ($acao === 'fornecedor_excluir') {
+        // EXCLUIR da lista-mestre é mais destrutivo que cadastrar: só admin/gerente (comprador cadastra/edita, não apaga)
+        if (empty($perms['perm_admin']) && (($perms['papel'] ?? '') !== 'gerente')) { http_response_code(403); echo json_encode(['error'=>'Excluir fornecedor é só para administrador/gerente.'], JSON_UNESCAPED_UNICODE); exit; }
         $id = (int)($in['id'] ?? 0); if (!$id) throw new Exception('id obrigatório');
         $pdo->prepare("DELETE FROM cot_fornecedor WHERE id=?")->execute([$id]);
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;

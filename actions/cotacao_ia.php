@@ -10,6 +10,7 @@
  */
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
+if (!function_exists('cot_pode_gerir')) { function cot_pode_gerir($pdo,$me,$cid){ $p=user_perms($pdo,$me); if(empty($p['autorizado']))return false; if(!empty($p['perm_admin'])||(($p['papel']??'')==='gerente'))return true; if($me===null||$me==='')return false; try{$r=$pdo->prepare('SELECT criado_por,colaboradores FROM cotacao WHERE id=?');$r->execute([(int)$cid]);$r=$r->fetch();}catch(Throwable $e){return false;} if(!$r)return false; if((string)($r['criado_por']??'')===(string)$me)return true; foreach((array)(json_decode((string)($r['colaboradores']??''),true)?:[]) as $b) if(trim((string)$b)===trim((string)$me))return true; return false; } }
 define('ORACLE_LIB_ONLY', 1);
 require_once __DIR__ . '/oracle.php';   // reusa oracle_cfg() (chave/modelo) e oracle_post() (curl → OpenAI)
 
@@ -95,8 +96,7 @@ try {
     if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }
     if (($in['acao'] ?? '') !== 'preencher') throw new Exception('ação inválida');
     $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
-    $obra = (int)$pdo->query("SELECT COALESCE(obra_id,1) FROM cotacao WHERE id=" . $cid)->fetchColumn();
-    if (!can_edit_obra($perms, max(1, $obra))) { http_response_code(403); echo json_encode(['error' => 'Sem permissão de edição.']); exit; }
+    if (!cot_pode_gerir($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error' => 'Sem permissão para editar esta cotação (só admin, gerente, quem criou ou um colaborador).']); exit; }
 
     $cfg = oracle_cfg(); $key = $cfg['key'] ?? '';
     if (!$key) { echo json_encode(['error' => 'IA não configurada — o admin precisa cadastrar a chave da OpenAI em Radar IA.']); exit; }

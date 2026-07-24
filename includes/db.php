@@ -698,6 +698,21 @@ function can_edit_obra($perms, $obra_id) {
         && in_array((int)$obra_id, array_map('intval', $perms['obras_editar'] ?? []), true)) return true;
     return false;
 }
+// Pode GERIR (editar) uma cotação = admin | gerente de suprimentos | quem CRIOU | COLABORADOR compartilhado.
+// REGRA ÚNICA da dinâmica de cotação (23/jul) — NÃO usa can_edit_obra (edição de obra é só p/ o menu Obras/estrutura).
+// Reusada por cotacao_ia/email/inbox; cotacoes.php (cot_can_manage) e cotacao_anexo.php replicam a mesma lógica.
+function cot_pode_gerir($pdo, $me, $cotacao_id) {
+    $perms = user_perms($pdo, $me);
+    if (empty($perms['autorizado'])) return false;
+    if (!empty($perms['perm_admin']) || (($perms['papel'] ?? '') === 'gerente')) return true;
+    if ($me === null || $me === '') return false;
+    try { $r = $pdo->prepare("SELECT criado_por, colaboradores FROM cotacao WHERE id=?"); $r->execute([(int)$cotacao_id]); $r = $r->fetch(); }
+    catch (Throwable $e) { return false; }
+    if (!$r) return false;
+    if ((string)($r['criado_por'] ?? '') === (string)$me) return true;
+    foreach ((array)(json_decode((string)($r['colaboradores'] ?? ''), true) ?: []) as $b) if (trim((string)$b) === trim((string)$me)) return true;
+    return false;
+}
 // NB: o enforcement por campo (mapa campo->grupo + checagem) é INLINE no actions/item_update.php,
 // pra ser resiliente a deploy parcial (não depende deste arquivo chegar atualizado no FTP).
 /** Normaliza NOME DE PESSOA: colapsa espaços múltiplos (inclusive NBSP) e faz trim.

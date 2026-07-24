@@ -29,10 +29,11 @@ try {
     if ($obra < 1) throw new Exception('obra obrigatória');
     $chk = $pdo->prepare("SELECT COUNT(*) FROM obra WHERE id=?"); $chk->execute([$obra]);
     if (!(int)$chk->fetchColumn()) throw new Exception('obra não encontrada');
-    // ESCOPO por obra (admin e editar_escopo='todas' passam; 'sel' preso a obras_editar)
-    if (empty($perms['perm_admin']) && !can_edit_obra($perms, $obra)) {
+    // atribuir responsável = CAPACIDADE (perm_responsaveis), não edição de obra: admin | gerente | perm_responsaveis
+    // (decisão 23/jul — can_edit_obra é só p/ o menu Obras/estrutura, não p/ a dinâmica de suprimentos)
+    if (empty($perms['perm_admin']) && (($perms['papel'] ?? '') !== 'gerente') && empty($perms['perm_responsaveis'])) {
         http_response_code(403);
-        echo json_encode(['error'=>'Sem permissão de edição nesta obra.']); exit;
+        echo json_encode(['error'=>'Sem permissão para atribuir responsáveis (precisa da permissão específica, ou ser admin/gerente).']); exit;
     }
 
     // ---- PREENCHER VAZIOS com o padrão do serviço ----

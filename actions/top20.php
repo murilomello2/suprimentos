@@ -183,6 +183,16 @@ try {
             $pdo->exec("UPDATE neg_grupo SET categoria='material' WHERE categoria IS NULL OR categoria=''");
         } catch (Throwable $e2) {}
     }
+    // coluna 'modo' de consideração: 'consumo' (espalha nos meses) × 'data_final' (valor cheio no mês de fechar).
+    // self-heal + DEFAULT por categoria: Serviços & Equipamentos (elevador/grua/MO/esquadria) nascem 'data_final'.
+    try { $pdo->query("SELECT modo FROM neg_grupo LIMIT 1"); }
+    catch (Throwable $e) {
+        try {
+            $pdo->exec("ALTER TABLE neg_grupo ADD COLUMN modo VARCHAR(16) DEFAULT 'consumo'");
+            $pdo->exec("UPDATE neg_grupo SET modo='data_final' WHERE categoria='servico'");
+            $pdo->exec("UPDATE neg_grupo SET modo='consumo' WHERE modo IS NULL OR modo=''");
+        } catch (Throwable $e2) {}
+    }
 
     // ---------- POST: gestão dos grupos (ADMIN) ----------
     if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
@@ -195,12 +205,14 @@ try {
             $ids = array_values(array_unique(array_map('intval', (array)($in['servicos'] ?? []))));
             // campo ausente = PRESERVA a categoria atual (front antigo em cache não pode mover grupo de aba)
             $cat = array_key_exists('categoria', $in) ? (($in['categoria'] === 'servico') ? 'servico' : 'material') : null;
+            $modo = array_key_exists('modo', $in) ? (($in['modo'] === 'data_final') ? 'data_final' : 'consumo') : null;
             $ordem = (int)($in['ordem'] ?? 0);
             $id = (int)($in['id'] ?? 0);
-            if ($id) $pdo->prepare("UPDATE neg_grupo SET nome=?, servicos=?, categoria=COALESCE(?, categoria), ordem=?, updated_by=?, updated_at=? WHERE id=?")
-                          ->execute([$nome, json_encode($ids), $cat, $ordem, (string)($in['me'] ?? ''), date('c'), $id]);
-            else { $pdo->prepare("INSERT INTO neg_grupo (nome, categoria, ordem, servicos, updated_by, updated_at) VALUES (?,?,?,?,?,?)")
-                        ->execute([$nome, $cat ?? 'material', $ordem, json_encode($ids), (string)($in['me'] ?? ''), date('c')]); $id = (int)$pdo->lastInsertId(); }
+            if ($id) $pdo->prepare("UPDATE neg_grupo SET nome=?, servicos=?, categoria=COALESCE(?, categoria), modo=COALESCE(?, modo), ordem=?, updated_by=?, updated_at=? WHERE id=?")
+                          ->execute([$nome, json_encode($ids), $cat, $modo, $ordem, (string)($in['me'] ?? ''), date('c'), $id]);
+            else { $modoNew = $modo ?? (($cat === 'servico') ? 'data_final' : 'consumo');   // novo grupo herda o modo padrão da aba
+                   $pdo->prepare("INSERT INTO neg_grupo (nome, categoria, modo, ordem, servicos, updated_by, updated_at) VALUES (?,?,?,?,?,?,?)")
+                        ->execute([$nome, $cat ?? 'material', $modoNew, $ordem, json_encode($ids), (string)($in['me'] ?? ''), date('c')]); $id = (int)$pdo->lastInsertId(); }
             echo json_encode(['ok'=>true, 'id'=>$id]); exit;
         }
         if ($acao === 'excluir_grupo') {
@@ -268,9 +280,10 @@ try {
     $horizonte = t20_mes_add($mesAtual, 11);
     $meses = []; for ($k = 0; $k < 12; $k++) $meses[] = t20_mes_add($mesAtual, $k);
 
-    // serviço -> grupos que o contêm
-    $svGrupo = [];
-    foreach ($grupos as $g) foreach ($g['servicos'] as $sid) $svGrupo[(int)$sid][] = (int)$g['id'];
+    // serviço -> grupos que o contêm  +  modo de consideração por grupo (consumo | data_final)
+    $svGrupo = []; $grupoModo = [];
+    foreach ($grupos as $g) { $grupoModo[(int)$g['id']] = (($g['modo'] ?? 'consumo') === 'data_final') ? 'data_final' : 'consumo';
+        foreach ($g['servicos'] as $sid) $svGrupo[(int)$sid][] = (int)$g['id']; }
 
     $DET_G = isset($_GET['detalhe']) ? (int)$_GET['detalhe'] : 0;
     $DET_M = isset($_GET['mes']) ? (string)$_GET['mes'] : '';
@@ -337,16 +350,26 @@ try {
             if ($qu === 'kg') { if ($qv !== null) $qv /= 1000.0; $qu = 't'; }   // consolida aço em toneladas
             if ($qu === '' && $qv !== null) $qu = '?';
 
+            // FIM DE COTAÇÃO do item (data em obra − lead) — âncora do modo 'data_final'
+            $fimCot = $mi ? date('Y-m', strtotime(substr($mi, 0, 10) . ' -' . (int)$r['lead_dias'] . ' days')) : null;
+            $ni = ($st === 'Não Iniciado' || $st === '') ? 1 : 0;   // p/ o sinal de status na célula
             foreach ($svGrupo[$sid] as $gid) {
-                foreach ($aloc as $mk => $fr) {
-                    if (!isset($matriz[$gid][$mk])) $matriz[$gid][$mk] = ['verba'=>0.0, 'quant'=>[]];
+                if (($grupoModo[$gid] ?? 'consumo') === 'data_final') {
+                    // VALOR CHEIO num único mês = fim de cotação (não espalha, não desconta %); passado→agora, além do horizonte→12+
+                    $mk = $fimCot ?: 'sem';
+                    if ($mk !== 'sem') { if ($mk < $mesAtual) $mk = $mesAtual; if ($mk > $horizonte) $mk = '12+'; }
+                    $cells = [$mk => 1.0]; $cCons = 0; $cFonte = 'data final'; $cJan = ($mk === 'sem' ? 'sem data' : 'fecha até ' . $mk);
+                } else { $cells = $aloc; $cCons = $consumido; $cFonte = $pctFonte; $cJan = $janela; }
+                foreach ($cells as $mk => $fr) {
+                    if (!isset($matriz[$gid][$mk])) $matriz[$gid][$mk] = ['verba'=>0.0, 'quant'=>[], 'n'=>0, 'ni'=>0];
                     $matriz[$gid][$mk]['verba'] += $verba * $fr;
+                    $matriz[$gid][$mk]['n'] += 1; $matriz[$gid][$mk]['ni'] += $ni;
                     if ($qv !== null) $matriz[$gid][$mk]['quant'][$qu] = ($matriz[$gid][$mk]['quant'][$qu] ?? 0) + $qv * $fr;
                     if ($DET_G === $gid && ($DET_M === '' || $DET_M === $mk)) {
                         $detItens[] = ['obra'=>$ob['nome'], 'item'=>$r['nome'], 'status'=>$st,
                             'quant_total'=>$qv !== null ? round($qv, 2) : null, 'unidade'=>$qu ?: null,
-                            'verba_total'=>round($verba, 2), 'janela'=>$janela, 'fonte'=>$fonte, 'mes'=>$mk,
-                            'consumido'=>round($consumido * 100), 'pct_fonte'=>$pctFonte,
+                            'verba_total'=>round($verba, 2), 'janela'=>$cJan, 'fonte'=>$cFonte, 'mes'=>$mk,
+                            'consumido'=>round($cCons * 100), 'pct_fonte'=>$cFonte === 'data final' ? 'data final' : $pctFonte,
                             'alocado_quant'=>$qv !== null ? round($qv * $fr, 2) : null, 'alocado_verba'=>round($verba * $fr, 2),
                             'fracao'=>round($fr, 4)];
                     }
@@ -367,6 +390,7 @@ try {
     echo json_encode([
         'grupos' => array_map(fn($g) => ['id'=>(int)$g['id'], 'nome'=>$g['nome'], 'ordem'=>(int)$g['ordem'],
                                           'categoria'=>($g['categoria'] ?? '') === 'servico' ? 'servico' : 'material',
+                                          'modo'=>($g['modo'] ?? 'consumo') === 'data_final' ? 'data_final' : 'consumo',
                                           'n_servicos'=>count($g['servicos']), 'servicos'=>$g['servicos']], $grupos),
         'meses' => $meses, 'mes_atual' => $mesAtual, 'incluir_finalizados' => $incluirFin,
         'matriz' => $matriz,

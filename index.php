@@ -5740,14 +5740,15 @@ async function obrasExtrairCrono(id){ const b=document.getElementById('obfExtrai
     if(b){b.disabled=false;b.innerHTML='<span class="material-icons" style="font-size:14px;vertical-align:-3px">auto_awesome</span> Extrair de novo';}
   }catch(e){toast('Falha: '+e.message); if(b){b.disabled=false;b.innerHTML='<span class="material-icons" style="font-size:14px;vertical-align:-3px">auto_awesome</span> Extrair do cronograma';}} }
 /* ========== TOP 20 — volumes consolidados p/ negociação (grupos × 12 meses) ========== */
-let T20={data:null,modo:'quant',fin:false,tab:'material',cat:null,cfgSel:null};
-function t20Tab(t){ T20.tab=t; const m=document.getElementById('t20TabMat'),s=document.getElementById('t20TabSrv');
+let T20={data:null,modo:'quant',fin:false,tab:'material',cat:null,cfgSel:null,grupoFiltro:null,exp:new Set(),expData:{}};
+function t20Tab(t){ T20.tab=t; T20.grupoFiltro=null; T20.exp=new Set(); const m=document.getElementById('t20TabMat'),s=document.getElementById('t20TabSrv');
   if(m)m.style.fontWeight=t==='material'?'700':'400'; if(s)s.style.fontWeight=t==='servico'?'700':'400';
   if(m)m.style.background=t==='material'?'#fff':''; if(s)s.style.background=t==='servico'?'#fff':'';
   t20Render(); }
 async function t20Init(){ if(T20.data) t20Render(); else t20Load(); }
 async function t20Load(){
   const w=document.getElementById('t20wrap'); if(w&&!T20.data) w.innerHTML='<div class="empty">Consolidando todas as obras…</div>';
+  T20.exp=new Set(); T20.expData={};   // recarregou → dados de expansão viram stale
   try{ T20.data=await (await fetch('actions/top20.php?_='+Date.now()+(T20.fin?'&fin=1':''),{cache:'no-store'})).json(); }
   catch(e){ if(w)w.innerHTML='<div class="empty">Falha ao carregar.</div>'; return; }
   if(T20.data&&T20.data.error){ w.innerHTML='<div class="empty">'+esc(T20.data.error)+'</div>'; T20.data=null; return; }
@@ -5761,31 +5762,64 @@ function t20Q(q){ const ks=Object.keys(q||{}); if(!ks.length) return ['','']; co
 function t20MesLbl(m){ if(m==='12+')return '12+'; if(m==='sem')return 'sem data'; const N=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']; return N[(+m.split('-')[1])-1]+'/'+m.split('-')[0].slice(2); }
 function t20Render(){
   const w=document.getElementById('t20wrap'); if(!w||!T20.data) return;
-  const d=T20.data, meses=d.meses||[], M=d.matriz||{};
+  const d=T20.data, meses=d.meses||[], M=d.matriz||{}, mesAtual=d.mes_atual||'';
   const lbl=document.getElementById('t20CatLbl'); if(lbl)lbl.textContent=T20.tab==='servico'?'· SERVIÇOS & EQUIPAMENTOS':'· MATERIAIS';
   const tot=g=>{ let v=0; const gm=M[g.id]||{}; for(const k in gm) v+=gm[k].verba||0; return v; };
-  const gs=(d.grupos||[]).filter(g=>(g.categoria||'material')===T20.tab).sort((a,b)=>tot(b)-tot(a));
-  if(!gs.length){ w.innerHTML='<div class="empty">Nenhum grupo na aba '+(T20.tab==='servico'?'Serviços &amp; Equipamentos':'Materiais')+'.'+(IS_ADMIN?' Use <b>Configurar grupos</b> p/ mover um grupo p/ cá ou criar um novo.':'')+'</div>'; return; }
-  let h='<div class="wrap" style="overflow-x:auto"><table class="mtable" style="border:none;min-width:1150px"><thead><tr><th class="svc-h" style="text-align:left;min-width:220px">Grupo de negociação</th>';
+  const todos=(d.grupos||[]).filter(g=>(g.categoria||'material')===T20.tab).sort((a,b)=>tot(b)-tot(a));
+  let gs=T20.grupoFiltro?todos.filter(g=>g.id===T20.grupoFiltro):todos;
+  // barra: FILTRAR por 1 grupo (ver só a tabelinha dele)
+  const bar='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap"><span class="dmini">Filtrar grupo:</span>'
+    +'<select onchange="T20.grupoFiltro=this.value?Number(this.value):null;t20Render()" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;max-width:360px">'
+    +'<option value="">Todos os grupos ('+todos.length+')</option>'+todos.map(g=>'<option value="'+g.id+'" '+(T20.grupoFiltro===g.id?'selected':'')+'>'+esc(g.nome)+(g.modo==='data_final'?' — por data final':'')+'</option>').join('')+'</select>'
+    +(T20.grupoFiltro?'<button class="btn-ghost" style="padding:3px 9px;font-size:12px" onclick="T20.grupoFiltro=null;t20Render()">✕ limpar</button>':'')
+    +'<span class="dmini" style="margin-left:auto">clique na linha do grupo p/ <b>expandir</b> os itens</span></div>';
+  if(!gs.length){ w.innerHTML=bar+'<div class="empty">Nenhum grupo na aba '+(T20.tab==='servico'?'Serviços &amp; Equipamentos':'Materiais')+'.'+(IS_ADMIN?' Use <b>Configurar grupos</b> p/ mover um grupo p/ cá ou criar um novo.':'')+'</div>'; return; }
+  const ncols=meses.length+5;
+  let h=bar+'<div class="wrap" style="overflow-x:auto"><table class="mtable" style="border:none;min-width:1150px"><thead><tr><th class="svc-h" style="text-align:left;min-width:240px">Grupo de negociação</th>';
   meses.forEach(m=>h+='<th style="min-width:64px">'+t20MesLbl(m)+'</th>');
   h+='<th style="min-width:56px" title="início além de 12 meses">12+</th><th style="min-width:56px" title="itens sem data no cronograma">sem data</th><th style="min-width:92px;background:#eafaf0">TOTAL quant.</th><th style="min-width:104px;background:#eafaf0">TOTAL R$</th></tr></thead><tbody>';
   gs.forEach(g=>{
-    const gm=M[g.id]||{}; let tv=0; const tq={};
-    let row='<tr><td class="svc-c" style="text-align:left"><b>'+esc(g.nome)+'</b><small>'+g.n_servicos+' serviços</small></td>';
+    const gm=M[g.id]||{}; let tv=0; const tq={}; const df=g.modo==='data_final'; const open=T20.exp.has(g.id);
+    const badge=df?'<span style="font-size:8.5px;font-weight:800;padding:1px 5px;border-radius:5px;background:#fdf1dd;color:#a4761c;margin-left:6px" title="valor CHEIO da obra no mês de fechar a cotação (não distribui)">◷ DATA FINAL</span>':'';
+    let row='<tr><td class="svc-c" style="text-align:left;cursor:pointer" onclick="t20Expand('+g.id+')"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--muted)">'+(open?'expand_more':'chevron_right')+'</span><b>'+esc(g.nome)+'</b>'+badge+'<small>'+g.n_servicos+' serviços · '+(df?'por data final':'por consumo')+'</small></td>';
     [...meses,'12+','sem'].forEach(mk=>{
       const c=gm[mk];
       if(!c){ row+='<td class="t20c">—</td>'; return; }
       tv+=c.verba||0; for(const u in (c.quant||{})) tq[u]=(tq[u]||0)+c.quant[u];
       const qr=t20Q(c.quant);
       const val=T20.modo==='quant'?(qr[0]||'<span class="muted" style="font-size:10px">só R$</span>'):BRL(c.verba);
-      row+='<td class="t20c t20click" title="'+esc((qr[1]?qr[1]+' · ':'')+'')+BRL(c.verba)+' — clique p/ ver a conta" onclick="t20Drill('+g.id+',\''+mk+'\')">'+val+'</td>';
+      const alerta=(c.ni>0 && /^\d{4}-\d{2}$/.test(mk) && mk<=mesAtual);   // Não Iniciado em mês já vencido/atual = hora de fechar
+      const dot=alerta?' <span title="'+c.ni+' item(ns) Não Iniciado neste mês — hora de fechar" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--pend);vertical-align:1px"></span>':'';
+      row+='<td class="t20c t20click" style="'+(alerta?'background:#fff4f4;':'')+'" title="'+esc((qr[1]?qr[1]+' · ':'')+BRL(c.verba)+' · '+c.n+' item(ns)'+(c.ni?' ('+c.ni+' não iniciado)':''))+' — clique p/ a conta" onclick="event.stopPropagation();t20Drill('+g.id+',\''+mk+'\')">'+val+dot+'</td>';
     });
     const tqr=t20Q(tq);
     row+='<td style="background:#f2faf5;font-weight:700;text-align:center" title="'+esc(tqr[1])+'">'+(tqr[0]||'—')+'</td><td style="background:#f2faf5;font-weight:800;text-align:center">'+BRL(tv)+'</td></tr>';
     h+=row;
+    if(open) h+='<tr class="t20exp"><td colspan="'+ncols+'" style="background:#fbfdfb;padding:0;border-bottom:2px solid #e6efe9">'+t20ExpBox(g.id)+'</td></tr>';
   });
-  h+='</tbody></table></div><div class="note t20-noprint">Célula = o que <b>falta consumir</b>: o % já executado do marco (cronograma vivo) sai da conta; o restante distribui do mês atual até o fim do grande marco (fase inteira — estrutura, fundação…, nunca uma tarefa pontual). Itens <b>Finalizado</b> e <b>Não se aplica</b> ficam fora'+(T20.fin?' — <b>incluídos agora</b>':'')+'. kg consolidado em <b>toneladas</b>. Unidades diferentes nunca se somam (célula mostra a principal; tooltip mostra todas).</div>';
+  h+='</tbody></table></div><div class="note t20-noprint"><b>Por consumo</b> = o que falta consumir, espalhado nos meses (o % já executado sai da conta). <b>◷ Por data final</b> = valor cheio da obra no mês de <b>fechar a cotação</b> (data em obra − lead), sem espalhar — pra elevador, grua, esquadria, M.O. O <b>ponto vermelho</b> = item Não Iniciado num mês que já venceu. Finalizado/Não se aplica ficam fora'+(T20.fin?' — <b>incluídos agora</b>':'')+'. kg em <b>toneladas</b>.</div>';
   w.innerHTML=h;
+}
+async function t20Expand(gid){
+  if(T20.exp.has(gid)){ T20.exp.delete(gid); t20Render(); return; }
+  T20.exp.add(gid); t20Render();   // mostra "carregando"
+  if(T20.expData[gid]===undefined){
+    try{ const d=await (await fetch('actions/top20.php?detalhe='+gid+'&_='+Date.now()+(T20.fin?'&fin=1':''))).json(); T20.expData[gid]=d.detalhe||[]; }
+    catch(e){ T20.expData[gid]=[]; }
+    if(T20.exp.has(gid)) t20Render();
+  }
+}
+function t20StCor(s){ return {'Finalizado':'#1F6B3B','Em Andamento':'#2b6cb0','Cotação Iniciada':'#a4761c','Com Pendências':'#c0392b','Não se aplica':'#8a9299','Não Iniciado':'#8a9299'}[s]||'#8a9299'; }
+function t20ExpBox(gid){
+  const its=T20.expData[gid];
+  if(its===undefined) return '<div class="dmini" style="padding:11px 14px">Carregando os itens…</div>';
+  if(!its.length) return '<div class="dmini" style="padding:11px 14px">Sem itens neste grupo (no recorte atual).</div>';
+  const rows=its.map(x=>'<tr><td style="text-align:left">'+esc(x.item)+'</td><td style="text-align:left">'+esc(x.obra)+'</td><td style="white-space:nowrap">'+t20MesLbl(x.mes)+'</td>'
+    +'<td style="text-align:left;white-space:nowrap"><span style="color:'+t20StCor(x.status)+';font-weight:700">'+esc(x.status||'—')+'</span></td>'
+    +'<td class="muted" style="text-align:left;font-size:11px">'+esc(x.janela||'')+(x.pct_fonte==='data final'?'':(x.consumido?' · andou '+x.consumido+'%':''))+'</td>'
+    +'<td class="r">'+(x.alocado_quant!=null?Number(x.alocado_quant).toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+esc(x.unidade||''):'—')+'</td>'
+    +'<td class="r"><b>'+BRL(x.alocado_verba)+'</b></td></tr>').join('');
+  return '<div style="padding:8px 14px 12px"><table class="dtable" style="width:100%"><thead><tr><th style="text-align:left">Item</th><th style="text-align:left">Obra</th><th>Mês</th><th style="text-align:left">Status</th><th style="text-align:left">Janela / fecha</th><th class="r">Quant.</th><th class="r">Verba</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 async function t20Drill(gid,mes){
   const g=(T20.data.grupos||[]).find(x=>x.id===gid);
@@ -5808,7 +5842,7 @@ function t20CfgRender(selId){
   const gs=(T20.data&&T20.data.grupos)||[];
   let ov=document.getElementById('t20Cf'); if(!ov){ov=document.createElement('div');ov.id='t20Cf';ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto';document.body.appendChild(ov);} ov.onclick=e=>{if(e.target===ov)ov.remove();};
   const g=gs.find(x=>x.id===selId)||gs[0];
-  T20.cfgSel=g?{id:g.id,nome:g.nome,ordem:g.ordem,categoria:g.categoria||'material',servicos:(g.servicos||[]).slice()}:null;
+  T20.cfgSel=g?{id:g.id,nome:g.nome,ordem:g.ordem,categoria:g.categoria||'material',modo:g.modo||'consumo',servicos:(g.servicos||[]).slice()}:null;
   T20.cfgFiltro=''; T20.cfgSoSel=false;   // reset do filtro/toggle ao trocar de grupo
   t20CfgDraw();
 }
@@ -5818,6 +5852,7 @@ function t20CfgDraw(){
   const nSel=(cur&&cur.servicos||[]).length;
   const right=cur?('<div style="display:grid;grid-template-columns:1fr 200px;gap:8px;margin-bottom:6px"><label><span style="font-size:10px;font-weight:700;color:var(--muted)">NOME DO GRUPO</span><input id="t20gNome" value="'+esc(cur.nome)+'" oninput="if(T20.cfgSel)T20.cfgSel.nome=this.value" style="width:100%;padding:6px 8px;box-sizing:border-box"></label>'
    +'<label><span style="font-size:10px;font-weight:700;color:var(--muted)">ABA</span><select id="t20gCat" onchange="if(T20.cfgSel)T20.cfgSel.categoria=this.value" style="width:100%;padding:6px 8px;box-sizing:border-box"><option value="material"'+(cur.categoria!=='servico'?' selected':'')+'>Materiais</option><option value="servico"'+(cur.categoria==='servico'?' selected':'')+'>Serviços &amp; Equipamentos</option></select></label></div>'
+   +'<label style="display:block;margin-bottom:6px"><span style="font-size:10px;font-weight:700;color:var(--muted)">CONSIDERAÇÃO NO TOP 20</span><select id="t20gModo" onchange="if(T20.cfgSel)T20.cfgSel.modo=this.value" style="width:100%;padding:6px 8px;box-sizing:border-box"><option value="consumo"'+((cur.modo||"consumo")!=="data_final"?" selected":"")+'>Por consumo — distribui o valor nos meses conforme o cronograma (aço, concreto, tinta, piso, porcelanato…)</option><option value="data_final"'+((cur.modo||"consumo")==="data_final"?" selected":"")+'>Por data final — valor CHEIO da obra no mês de fechar a cotação (elevador, grua, esquadria, mão de obra…)</option></select></label>'
    +'<div style="display:flex;gap:8px;margin:6px 0;align-items:center;flex-wrap:wrap"><div class="search" style="flex:1;min-width:180px"><span class="material-icons" style="color:var(--muted)">search</span><input id="t20CfgFiltro" value="'+esc(T20.cfgFiltro||'')+'" placeholder="filtrar serviços do catálogo…" oninput="T20.cfgFiltro=this.value;t20CfgSvcRender()"></div>'
    +'<label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;white-space:nowrap" title="mostrar só os serviços marcados neste grupo"><input type="checkbox" '+(T20.cfgSoSel?'checked':'')+' onchange="T20.cfgSoSel=this.checked;t20CfgSvcRender()"> só considerados <b id="t20CfgCount" style="color:var(--verde-d)">('+nSel+')</b></label></div>'
    +'<div id="t20CfgSvcs" style="max-height:44vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px"></div>'
@@ -5843,10 +5878,11 @@ function t20CfgTog(id,on){ const c=T20.cfgSel; if(!c)return; const i=c.servicos.
   const cnt=document.getElementById('t20CfgCount'); if(cnt)cnt.textContent='('+c.servicos.length+')';
   if(T20.cfgSoSel) t20CfgSvcRender();   // no modo "só considerados", desmarcar tira da lista na hora
 }
-function t20CfgNovo(){ T20.cfgSel={id:0,nome:'Novo grupo',ordem:99,categoria:T20.tab,servicos:[]}; t20CfgDraw(); }
+function t20CfgNovo(){ T20.cfgSel={id:0,nome:'Novo grupo',ordem:99,categoria:T20.tab,modo:T20.tab==='servico'?'data_final':'consumo',servicos:[]}; t20CfgDraw(); }
 async function t20CfgSalvar(){ const c=T20.cfgSel; if(!c)return; const nome=(document.getElementById('t20gNome')||{}).value||c.nome;
   const categoria=(document.getElementById('t20gCat')||{}).value||c.categoria||'material';
-  try{ const r=await (await fetch('actions/top20.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_grupo',me:EU&&EU.bitrix_id,id:c.id||null,nome,categoria,servicos:c.servicos,ordem:c.ordem||0})})).json();
+  const modo=(document.getElementById('t20gModo')||{}).value||c.modo||'consumo';
+  try{ const r=await (await fetch('actions/top20.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_grupo',me:EU&&EU.bitrix_id,id:c.id||null,nome,categoria,modo,servicos:c.servicos,ordem:c.ordem||0})})).json();
     if(r&&r.error){toast(r.error);return;} toast('Grupo salvo'); const ov=document.getElementById('t20Cf'); if(ov)ov.remove(); T20.data=null; t20Load();
   }catch(e){toast('Falha ao salvar');} }
 async function t20CfgExcluir(){ const c=T20.cfgSel; if(!c||!c.id)return; if(!confirm('Excluir o grupo "'+c.nome+'"?'))return;
@@ -5881,12 +5917,14 @@ async function getCurrentUser(){
   // porque estavam sem edição de obra — coisa que não deveria mandar no cadastro de fornecedor)
   CAN_FORN = IS_ADMIN || ['gerente','comprador'].includes((EU&&EU.papel)||'') || CAN_EDIT;
   CAN_COT  = IS_ADMIN || ['gerente','comprador'].includes((EU&&EU.papel)||'') || CAN_EDIT;   // criar cotação = dinâmica de suprimentos
-  // permissões específicas: exigem ser editor da obra (CAN_EDIT) + a flag; admin tem tudo
-  CAN_CRONO = IS_ADMIN || (CAN_EDIT && !!(EU && EU.perm_crono));
-  CAN_ORC   = IS_ADMIN || (CAN_EDIT && !!(EU && EU.perm_orcamento));
-  CAN_QUANT = IS_ADMIN || (CAN_EDIT && !!(EU && EU.perm_quant));
-  CAN_DIC   = IS_ADMIN || (CAN_EDIT && !!(EU && EU.perm_dicionario));
-  CAN_RESP  = IS_ADMIN || !!(EU && EU.perm_responsaveis);   // atribuir responsável em lote (independe de editar_escopo)
+  // permissões específicas de vínculo/curadoria: valem pela PRÓPRIA flag (a permissão já É o grão fino) —
+  // NÃO exigem "Edita obras" (decisão 23/jul: editar_escopo é só p/ o menu Obras/estrutura). Gerente e admin têm tudo.
+  const _ger = ((EU&&EU.papel)||'')==='gerente';
+  CAN_CRONO = IS_ADMIN || _ger || !!(EU && EU.perm_crono);
+  CAN_ORC   = IS_ADMIN || _ger || !!(EU && EU.perm_orcamento);
+  CAN_QUANT = IS_ADMIN || _ger || !!(EU && EU.perm_quant);
+  CAN_DIC   = IS_ADMIN || _ger || !!(EU && EU.perm_dicionario);
+  CAN_RESP  = IS_ADMIN || _ger || !!(EU && EU.perm_responsaveis);   // atribuir responsável em lote (independe de editar_escopo)
   applyMenus(); updateWhoami();
 }
 function updateWhoami(){

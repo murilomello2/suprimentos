@@ -64,6 +64,28 @@ function obras_crono_match($obraNome, $byId) {
     return $best;
 }
 
+/** TODOS os cabeçalhos de cronograma (inclui inativos) — p/ mapear header->obra do Planejamento com CERTEZA. */
+function crono_headers_all() {
+    try {
+        require_once __DIR__ . '/../includes/supabase.php';
+        return (array)sb_get('obra_cronogramas?select=id,obra_id,project_name,nome,is_active,percent_complete,project_finish,status_date,updated_at&order=updated_at.desc');
+    } catch (Throwable $e) { return []; }
+}
+
+/** Marcos vinculados na mão (crono_marco_override) desta obra que NÃO existem no cronograma novo (ficariam órfãos). */
+function crono_orfaos_no_novo($pdo, $obraId, $novoHeader) {
+    $q = $pdo->prepare("SELECT DISTINCT crono_marco_override FROM radar_item WHERE obra_id=? AND crono_marco_override IS NOT NULL AND crono_marco_override<>''");
+    $q->execute([(int)$obraId]);
+    $marcos = array_filter(array_map('strval', $q->fetchAll(PDO::FETCH_COLUMN)));
+    if (!$marcos || !function_exists('crono_tasks')) return [];
+    $tasks = crono_tasks($novoHeader);
+    $names = []; foreach ((array)$tasks as $t) { $n = crono_norm((string)($t['nome'] ?? '')); if ($n !== '') $names[$n] = true; }
+    if (!$names) return ['__sem_tarefas__'];   // não deu p/ ler o XML novo → sinaliza (não conclui "tudo órfão")
+    $orf = [];
+    foreach ($marcos as $m) { $mn = crono_norm($m); if ($mn !== '' && !isset($names[$mn])) $orf[] = $m; }
+    return $orf;
+}
+
 /** Preenche % físico + datas AO VIVO em cada ficha (com fallback no snapshot do banco). */
 function obras_aplicar_crono($pdo, &$obras) {
     [$crBy, $fresh] = obras_crono_live();
@@ -174,12 +196,44 @@ try {
     }
 
     if ($method === 'GET' && isset($_GET['cronogramas'])) {   // lista os cronogramas ativos p/ o admin ligar na mão os ambíguos (VS2/VS4/...)
+        if (!empty($_GET['refresh'])) @unlink(CRONO_OBRAS_CACHE);   // fura o cache de 30 min p/ pegar os XMLs novos
         [$crBy, ] = obras_crono_live();
         $out = [];
         foreach ($crBy as $oid => $r) $out[] = ['obra_id' => $oid, 'id' => (string)($r['id'] ?? ''), 'nome' => (string)($r['project_name'] ?? ($r['nome'] ?? '')),
             'pct' => $r['percent_complete'], 'fim' => (string)($r['project_finish'] ?? ''), 'medicao' => (string)($r['status_date'] ?? '')];
         usort($out, fn($a, $b) => strcasecmp($a['nome'], $b['nome']));
         echo json_encode(['ok' => true, 'cronogramas' => $out], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    // VERIFICA cronogramas atualizados: p/ cada obra do radar, o cabeçalho ligado ainda é o ATIVO? Se o Planejamento
+    // subiu um XML novo (novo ativo, antigo inativo), re-aponta pro novo (vínculos são por NOME → carregam sozinhos).
+    if ($method === 'GET' && isset($_GET['verificar_cronogramas'])) {
+        $perms = user_perms($pdo, $_GET['me'] ?? null);
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
+        @unlink(CRONO_OBRAS_CACHE);
+        $all = crono_headers_all();
+        if (!$all) { echo json_encode(['ok'=>true, 'atualizacoes'=>[], 'erro_fonte'=>'não consegui ler os cronogramas do Planejamento agora (Supabase). Tente de novo.'], JSON_UNESCAPED_UNICODE); exit; }
+        $hdrById = []; $hdr2oid = []; $ativoPorOid = [];
+        foreach ($all as $r) { $hid = (string)($r['id'] ?? ''); $oid = (string)($r['obra_id'] ?? ''); if ($hid === '') continue;
+            $hdrById[$hid] = $r; if ($oid !== '') $hdr2oid[$hid] = $oid;
+            if (!empty($r['is_active']) && $oid !== '' && !isset($ativoPorOid[$oid])) $ativoPorOid[$oid] = $r; }   // 1º ativo = mais recente (order desc)
+        $obras = $pdo->query("SELECT id, nome, cronograma_id FROM obra WHERE cronograma_id IS NOT NULL AND cronograma_id<>'' AND id>=2 ORDER BY nome")->fetchAll();
+        $out = [];
+        foreach ($obras as $o) {
+            $cur = (string)$o['cronograma_id'];
+            $oidCerto = $hdr2oid[$cur] ?? null;               // obra do Planejamento do cabeçalho ATUAL = casamento com CERTEZA
+            $novo = null; $mesmaObra = false;
+            if ($oidCerto !== null && isset($ativoPorOid[$oidCerto])) { $novo = $ativoPorOid[$oidCerto]; $mesmaObra = true; }
+            elseif (($m = obras_crono_match((string)$o['nome'], $ativoPorOid)) !== null) { $novo = $ativoPorOid[$m]; $mesmaObra = false; }   // incerto: casa por nome
+            if (!$novo || (string)($novo['id'] ?? '') === $cur) continue;   // sem novo ou já está no ativo → nada a fazer
+            $orf = crono_orfaos_no_novo($pdo, (int)$o['id'], (string)$novo['id']);
+            $out[] = ['obra_id'=>(int)$o['id'], 'obra'=>$o['nome'],
+                'atual_id'=>$cur, 'atual_nome'=>(string)($hdrById[$cur]['nome'] ?? $hdrById[$cur]['project_name'] ?? '(cabeçalho fora da lista)'),
+                'novo_id'=>(string)$novo['id'], 'novo_nome'=>(string)($novo['nome'] ?? $novo['project_name'] ?? ''),
+                'novo_pct'=>$novo['percent_complete'], 'novo_medicao'=>(string)($novo['status_date'] ?? ''), 'novo_fim'=>(string)($novo['project_finish'] ?? ''),
+                'mesma_obra'=>$mesmaObra, 'orfaos'=>array_values($orf)];
+        }
+        echo json_encode(['ok'=>true, 'atualizacoes'=>$out], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($method === 'GET' && isset($_GET['lista'])) {
@@ -201,6 +255,20 @@ try {
     }
 
     $acao = $in['acao'] ?? '';
+
+    // RE-APONTA o cronograma do RADAR de uma obra pro cabeçalho novo (XML reprogramado). Vínculos por NOME
+    // carregam sozinhos; só as datas atualizam. Devolve a conferência de órfãos (marcos que sumiram no XML novo).
+    if ($acao === 'atualizar_cronograma') {
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores.']); exit; }
+        $obraId = (int)($in['obra_id'] ?? 0); $novo = trim((string)($in['cronograma_id'] ?? ''));
+        if ($obraId < 2 || $novo === '') throw new Exception('obra_id (>=2) e cronograma_id obrigatórios');
+        $ex = $pdo->prepare("SELECT cronograma_id FROM obra WHERE id=?"); $ex->execute([$obraId]);
+        $antigo = (string)($ex->fetchColumn() ?: '');
+        $orf = crono_orfaos_no_novo($pdo, $obraId, $novo);   // confere ANTES (mesmo aplicando) — informativo
+        $pdo->prepare("UPDATE obra SET cronograma_id=? WHERE id=?")->execute([$novo, $obraId]);
+        @unlink(CRONO_OBRAS_CACHE);
+        echo json_encode(['ok'=>true, 'obra_id'=>$obraId, 'antigo'=>$antigo, 'novo'=>$novo, 'orfaos'=>array_values($orf)], JSON_UNESCAPED_UNICODE); exit;
+    }
 
     if ($acao === 'seed') {   // semeia as obras do conector, resolvendo o de-para (só insere as novas; não mexe nas já curadas)
         if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores semeiam.']); exit; }

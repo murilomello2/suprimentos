@@ -5593,7 +5593,56 @@ function obrStatusChip(s){ const c={'Em Andamento':'var(--verde)','Iniciando':'v
 function obrCarResumo(o){ const p=[]; if(+o.torres)p.push(o.torres+(+o.torres===1?' torre':' torres')); if(+o.pavimentos)p.push(o.pavimentos+' pav'); if(+o.unidades)p.push(o.unidades+' un'); return p.join(' · '); }
 function obrasRender(){ const w=document.getElementById('obrasWrap'); if(!w)return;
   const tab=(t,lbl,ic)=>`<button class="btn-ghost" style="padding:7px 14px;border-radius:9px 9px 0 0;${OBRAS_M.tab===t?'background:#fff;border-bottom:2px solid var(--verde);font-weight:700;color:var(--verde-d)':'color:var(--muted)'}" onclick="OBRAS_M.tab='${t}';obrasRender()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">${ic}</span> ${lbl}</button>`;
-  w.innerHTML=`<div style="display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px">${tab('ficha','Ficha das Obras','apartment')}${tab('depara','De-para & Configuração','link')}</div>`+(OBRAS_M.tab==='ficha'?obrasTabFicha():obrasTabDepara());
+  w.innerHTML=`<div style="display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px;align-items:center">${tab('ficha','Ficha das Obras','apartment')}${tab('depara','De-para & Configuração','link')}${IS_ADMIN?'<button class="btn-ghost" style="margin-left:auto;padding:6px 12px" onclick="obrasVerificarCrono()" title="Detecta obras cujo cronograma do Planejamento foi reprogramado (XML novo) e re-aponta — mantendo os vínculos"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--verde)">sync</span> Verificar cronogramas</button>':''}</div>`+(OBRAS_M.tab==='ficha'?obrasTabFicha():obrasTabDepara());
+}
+/* ===== Verificar/atualizar cronogramas reprogramados (XML novo do Planejamento) — 24/jul/2026 ===== */
+async function obrasVerificarCrono(){
+  let ov=document.getElementById('vcOv'); if(!ov){ov=document.createElement('div');ov.id='vcOv';ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';ov.onclick=e=>{if(e.target===ov)ov.remove();};document.body.appendChild(ov);}
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:820px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()"><div class="dempty">Consultando o Planejamento…</div></div>';
+  let d; try{ d=await (await fetch('actions/obras.php?verificar_cronogramas=1&me='+encodeURIComponent(EU&&EU.bitrix_id)+'&_='+Date.now())).json(); }catch(e){ d={error:'Falha ao consultar'}; }
+  obrasVcRender(d);
+}
+function obrasVcRender(d){
+  const ov=document.getElementById('vcOv'); if(!ov)return;
+  const box='<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:820px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22);max-height:86vh;overflow:auto" onclick="event.stopPropagation()">';
+  const head='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><b style="font-size:16px"><span class="material-icons" style="font-size:18px;vertical-align:-4px;color:var(--verde)">sync</span> Cronogramas reprogramados</b><span class="material-icons" style="cursor:pointer;color:var(--muted)" onclick="document.getElementById(\'vcOv\').remove()">close</span></div>';
+  if(d.error){ ov.innerHTML=box+head+'<div class="dempty">'+esc(d.error)+'</div></div>'; return; }
+  if(d.erro_fonte){ ov.innerHTML=box+head+'<div class="dempty">'+esc(d.erro_fonte)+'</div></div>'; return; }
+  const ups=d.atualizacoes||[];
+  if(!ups.length){ ov.innerHTML=box+head+'<div class="dempty" style="padding:24px">✅ Tudo em dia — nenhuma obra tem cronograma novo do Planejamento pra atualizar.</div></div>'; return; }
+  const certas=ups.filter(u=>u.mesma_obra && !(u.orfaos||[]).length);
+  const card=u=>{
+    const orf=u.orfaos||[]; const semTarefas=orf[0]==='__sem_tarefas__';
+    const tag=u.mesma_obra?'<span style="font-size:9px;font-weight:800;padding:1px 6px;border-radius:5px;background:#e6f4ea;color:var(--verde-d)">✅ MESMA OBRA</span>':'<span style="font-size:9px;font-weight:800;padding:1px 6px;border-radius:5px;background:#fdf1dd;color:#a4761c" title="casei por nome — confira antes de aplicar">⚠️ CONFERIR (por nome)</span>';
+    const av=semTarefas?'<div style="font-size:11px;color:#a4761c;margin-top:3px">⚠️ não consegui ler o XML novo agora — a conferência de vínculos não rodou</div>'
+      :(orf.length?'<div style="font-size:11px;color:var(--pend);margin-top:3px">⚠️ '+orf.length+' vínculo(s) sumiriam no XML novo (nome mudou): '+esc(orf.slice(0,4).join(', '))+(orf.length>4?'…':'')+' — vão ficar sem data até você remarcar</div>':'<div style="font-size:11px;color:var(--verde-d);margin-top:3px">✓ todos os vínculos existem no XML novo — nada quebra</div>');
+    return '<div style="border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:9px">'
+      +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:14px">'+esc(u.obra)+'</b>'+tag+'<span class="muted" style="font-size:11px">'+(u.novo_pct!=null?u.novo_pct+'% · medição '+esc(u.novo_medicao||'—'):'')+'</span>'
+      +'<button class="btn-prim" style="margin-left:auto;padding:5px 12px;font-size:12.5px" onclick="obrasCronoAtualizar('+u.obra_id+',\''+esc(u.novo_id)+'\',\''+esc(u.obra.replace(/\x27/g,""))+'\')">Atualizar</button></div>'
+      +'<div style="font-size:12px;margin-top:5px;color:#556"><span class="muted">de:</span> '+esc(u.atual_nome)+' <span class="muted">→ para:</span> <b>'+esc(u.novo_nome)+'</b></div>'+av+'</div>';
+  };
+  const btnTodas=certas.length>1?'<button class="btn-prim" style="padding:6px 13px" onclick="obrasCronoAtualizarTodas()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">done_all</span> Atualizar as '+certas.length+' certas (sem órfão)</button>':'';
+  window._vcData=ups;
+  ov.innerHTML=box+head
+    +'<div class="dmini" style="margin:2px 0 10px">Vínculos são por <b>nome de tarefa</b> → ao atualizar, tudo carrega e só as <b>datas</b> mudam. As <b>✅ mesma obra + sem órfão</b> são seguras.</div>'
+    +(btnTodas?'<div style="margin-bottom:10px">'+btnTodas+'</div>':'')
+    +ups.map(card).join('')+'</div>';
+}
+async function obrasCronoAtualizar(obraId,novoId,nome){
+  try{ const r=await (await fetch('actions/obras.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'atualizar_cronograma',me:EU&&EU.bitrix_id,obra_id:obraId,cronograma_id:novoId})})).json();
+    if(r.error){toast(r.error);return;}
+    const orf=(r.orfaos||[]).filter(x=>x!=='__sem_tarefas__');
+    toast((nome||'Obra')+': cronograma atualizado'+(orf.length?' · ⚠️ '+orf.length+' vínculo(s) sem par':' · vínculos ok'));
+    obrasVerificarCrono();   // recarrega a lista (a obra atualizada some)
+    OBRAS_M.list=[]; try{ if(typeof T20!=='undefined'){T20.data=null;} }catch(e){}   // força recarga do Top 20 na próxima abertura
+  }catch(e){toast('Falha ao atualizar');}
+}
+async function obrasCronoAtualizarTodas(){
+  const certas=(window._vcData||[]).filter(u=>u.mesma_obra && !(u.orfaos||[]).length);
+  if(!certas.length) return;
+  if(!confirm('Atualizar '+certas.length+' obra(s) para o cronograma novo? (todas são a mesma obra e sem vínculo órfão)'))return;
+  let ok=0; for(const u of certas){ try{ const r=await (await fetch('actions/obras.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'atualizar_cronograma',me:EU&&EU.bitrix_id,obra_id:u.obra_id,cronograma_id:u.novo_id})})).json(); if(!r.error)ok++; }catch(e){} }
+  toast(ok+' obra(s) atualizada(s)'); try{ if(typeof T20!=='undefined')T20.data=null; }catch(e){} obrasVerificarCrono();
 }
 /* ===== SELO ILUSTRADO DA OBRA (SVG gerado dos dados: torres/pav/subsolos/áreas comuns) ===== */
 function seloAmen(txt){ const t=(txt||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');

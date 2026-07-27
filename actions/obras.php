@@ -195,6 +195,18 @@ try {
         echo json_encode(['ok' => true, 'apagada' => $rid], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    if ($method === 'GET' && isset($_GET['crono_debug'])) {   // (admin) TODOS os headers (ativos+inativos) que casam um filtro de nome — diagnóstico
+        $perms = user_perms($pdo, $_GET['me'] ?? null);
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
+        $f = crono_norm((string)$_GET['crono_debug']);
+        $all = crono_headers_all();
+        $hit = [];
+        foreach ($all as $r) { $nm = crono_norm(((string)($r['project_name'] ?? '')) . ' ' . ((string)($r['nome'] ?? '')));
+            if ($f === '' || strpos($nm, $f) !== false) $hit[] = ['id'=>(string)$r['id'], 'obra_id'=>(string)($r['obra_id'] ?? ''), 'nome'=>(string)($r['nome'] ?? $r['project_name'] ?? ''),
+                'is_active'=>!empty($r['is_active']), 'pct'=>$r['percent_complete'], 'medicao'=>(string)($r['status_date'] ?? ''), 'updated_at'=>(string)($r['updated_at'] ?? '')]; }
+        echo json_encode(['ok'=>true, 'n'=>count($all), 'match'=>$hit], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($method === 'GET' && isset($_GET['cronogramas'])) {   // lista os cronogramas ativos p/ o admin ligar na mão os ambíguos (VS2/VS4/...)
         if (!empty($_GET['refresh'])) @unlink(CRONO_OBRAS_CACHE);   // fura o cache de 30 min p/ pegar os XMLs novos
         [$crBy, ] = obras_crono_live();
@@ -232,6 +244,18 @@ try {
                 'novo_id'=>(string)$novo['id'], 'novo_nome'=>(string)($novo['nome'] ?? $novo['project_name'] ?? ''),
                 'novo_pct'=>$novo['percent_complete'], 'novo_medicao'=>(string)($novo['status_date'] ?? ''), 'novo_fim'=>(string)($novo['project_finish'] ?? ''),
                 'mesma_obra'=>$mesmaObra, 'orfaos'=>array_values($orf)];
+        }
+        // ?auto=1 (verificação automática diária): re-aponta SOZINHO as que são a MESMA obra com CERTEZA e SEM órfão;
+        // as demais (casadas por nome, ou com marco que sumiu) ficam pra conferência manual do admin.
+        if (!empty($_GET['auto'])) {
+            $aplicadas = []; $pendentes = [];
+            foreach ($out as $u) {
+                $seguro = $u['mesma_obra'] && empty($u['orfaos']);   // orfaos=[] (sem órfão e não '__sem_tarefas__')
+                if ($seguro) { $pdo->prepare("UPDATE obra SET cronograma_id=? WHERE id=?")->execute([$u['novo_id'], $u['obra_id']]); $aplicadas[] = $u; }
+                else $pendentes[] = $u;
+            }
+            @unlink(CRONO_OBRAS_CACHE);
+            echo json_encode(['ok'=>true, 'auto'=>true, 'aplicadas'=>$aplicadas, 'pendentes'=>$pendentes], JSON_UNESCAPED_UNICODE); exit;
         }
         echo json_encode(['ok'=>true, 'atualizacoes'=>$out], JSON_UNESCAPED_UNICODE); exit;
     }

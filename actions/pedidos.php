@@ -108,6 +108,7 @@ function ped_pedido($numero, $coligadaCod = null) {
         $fnome = trim((string)($r['fornecedor_nome'] ?? '')); $ffant = trim((string)($r['fornecedor_fantasia'] ?? ''));
         $itens[] = ['seq' => (int)($r['seq'] ?? 0), 'codprd' => $r['codprd'] ?? '', 'produto' => $r['produto'] ?? '',
             'qtd' => $qt, 'und' => $r['und'] ?? '', 'preco_unit' => $pu, 'total' => round($lt, 2),
+            'observacao' => trim((string)($r['item_observacao'] ?? '')),   // descrição detalhada digitada à mão
             'fornecedor_cod' => $r['fornecedor_cod'] ?? '', 'fornecedor_nome' => $fnome,
             'fornecedor_fantasia' => $ffant, 'fornecedor_cnpj' => trim((string)($r['fornecedor_cnpj'] ?? ''))];
         if (!empty($r['fornecedor_cod'])) $forn[(string)$r['fornecedor_cod']] = $ffant ?: ($fnome ?: (string)$r['fornecedor_cod']);
@@ -117,7 +118,7 @@ function ped_pedido($numero, $coligadaCod = null) {
         'coligada' => (trim((string)($r0['coligada'] ?? '')) ?: coligada_nome($r0['coligada_cod'] ?? '')),
         'coligada_cod' => $r0['coligada_cod'] ?? '', 'ccusto_cod' => $r0['ccusto_cod'] ?? '',
         'data' => $r0['pedido_data'] ?? '', 'status' => $r0['pedido_status'] ?? '',
-        'solic_numeros' => trim((string)($r0['solic_numeros'] ?? '')),
+        'solic_numeros' => trim((string)($r0['solic_numeros'] ?? '')), 'usuario' => trim((string)($r0['pedido_usuario'] ?? '')),
         'fornecedores' => array_values($forn), 'fornecedores_cod' => array_keys($forn),
         'itens' => $itens, 'total' => round($total, 2), 'n_itens' => count($itens),
     ];

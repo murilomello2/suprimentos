@@ -3470,6 +3470,15 @@ function bpSort(campo){
 async function bpBuscar(pagina){
   const w=document.getElementById('bpWrap'); if(!w) return;
   bpObraPick();
+  // texto digitado que não casou com nenhuma obra: avisa em vez de buscar TUDO calado
+  const txt=(document.getElementById('bpObraTxt')||{}).value||'';
+  if(txt.trim() && !BP.obraKey){
+    const hits=(BP.obras||[]).filter(o=>o.label.toLowerCase().indexOf(txt.trim().toLowerCase())>=0);
+    w.innerHTML='<div class="empty">'+(hits.length
+      ? 'A obra <b>'+esc(txt)+'</b> está ambígua — escolha uma:<br><span class="dmini">'+hits.slice(0,12).map(o=>esc(o.label)).join(' · ')+(hits.length>12?' …':'')+'</span>'
+      : 'Nenhuma obra chamada <b>'+esc(txt)+'</b>.<br><span class="dmini">Apague o campo para ver todas.</span>')+'</div>';
+    return;
+  }
   const q=val('bpQ'), obra=BP.obraKey||'', per=val('bpPeriodo'), st=val('bpStatus'), us=val('bpUsuario');
   w.innerHTML='<div class="dempty">Consultando os pedidos no TOTVS…</div>';
   let d; try{ d=await (await fetch('actions/busca_pedidos.php?q='+encodeURIComponent(q)+'&obra='+encodeURIComponent(obra||'')

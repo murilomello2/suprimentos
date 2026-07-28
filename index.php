@@ -4300,37 +4300,57 @@ async function cotDetectarPedidosColigada(c){ const CAN_EDIT=cotEditavel(); cons
 }
 function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
   const d=COT.cur,c=d.cotacao,itens=d.itens||[],props=d.propostas||[],m=d.mapa||{},best=m.melhor_por_item||{},w=document.getElementById('cotwrap');
-  const podeGerir=CAN_EDIT;   // CAN_EDIT já sombreado = admin OU criador (só o dono edita/exclui)
-  let html=`<div class="panel" style="margin-bottom:12px;padding:16px 20px"><div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap">
-      <button class="btn-ghost" onclick="cotLoad()" style="margin-top:2px"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button>
-      <div style="min-width:0"><div style="font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted)">Descrição da cotação</div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px"><b style="font-size:18px">${esc(c.titulo)}</b> ${cotStChip(c.status)}${(c.apelido||CAN_EDIT)?`<span ${CAN_EDIT?'onclick="cotApelidoEditar()"':''} title="${CAN_EDIT?'clique para dar/editar um apelido (ex.: Pregos) — assim você acha fácil na lista':'apelido'}" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;padding:3px 10px;border-radius:8px;${CAN_EDIT?'cursor:pointer;':''}${c.apelido?'background:#eef6f0;color:var(--verde-d)':'background:#fff;color:var(--verde-d);border:1px dashed var(--verde)'}"><span class="material-icons" style="font-size:13px">sell</span>${c.apelido?esc(c.apelido):'dar um apelido'}${CAN_EDIT?'<span class="material-icons" style="font-size:12px;opacity:.7">edit</span>':''}</span>`:''}${c.servico_id
-        ?`<span onclick="cotVerItemRadar()" title="Esta cotação NASCEU do item do radar “${esc(c.servico_nome||'')}” — clique p/ abrir o item (verba, curadoria, cronograma). Feche o popup e você volta pra cá." style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:800;padding:4px 11px;border-radius:8px;background:#eef6f0;border:1.5px solid var(--verde);color:var(--verde-d);cursor:pointer"><span class="material-icons" style="font-size:14px">radar</span> do RADAR: ${esc(c.servico_nome||('item #'+c.servico_id))} <span class="material-icons" style="font-size:13px;opacity:.7">open_in_new</span></span>`
-        :`<span title="cotação criada do zero — sem vínculo a nenhum item do radar" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:700;padding:4px 11px;border-radius:8px;background:#f2f3f4;border:1px solid #d7dbde;color:#6a737b"><span class="material-icons" style="font-size:14px">edit_note</span> criada do zero — sem vínculo ao radar</span>`}<span class="muted" style="font-size:12px"><span id="cotObraWrap">${cotObraLabel(c,podeGerir)}</span>${c.categoria?' · '+esc(c.categoria):''}${c.tipo_servico?' · '+esc(c.tipo_servico):''}</span></div></div>
-      <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
-        ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cartaGerar(${c.id})" title="${(c.num_solicitacao&&!c.servico_id)?'Carta de cotação (material) desta cotação':'Carta convite desta cotação'} — PDF / Word"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> ${(d.cartas_geradas&&d.cartas_geradas.length)?'Ver/editar carta':'Gerar carta'}</button>${(d.cartas_geradas&&d.cartas_geradas.length)?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="carta salva em ${D(String(d.cartas_geradas[0].created_at).slice(0,10))}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">description</span> carta salva</span>`:''}`:''}
-        <button class="btn-ghost" style="padding:6px 12px" onclick="cotUmaPagina()" title="Resumo do mapa em uma página, pronto pra imprimir/PDF"><span class="material-icons" style="font-size:15px;vertical-align:-3px">description</span> Mapa em uma página</button>
-        ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotEmailAbrir(${c.id})" title="montar o e-mail de cotação para os fornecedores convidados"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mail</span> E-mail</button>`:''}
-        ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px;color:var(--verde-d)" onclick="cotPropIAAbrir()" title="a IA lê um PDF/print de proposta, identifica o fornecedor e preenche os preços"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Proposta via IA</button>`:''}
-        ${CAN_EDIT?`<button class="btn-prim" style="padding:6px 12px" onclick="cotProposta()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Cadastrar proposta</button>`:''}
-        ${CAN_EDIT?`<button class="btn-ghost" style="padding:6px 12px" onclick="cotFinalizar()">${c.status==='finalizada'?'Reabrir':'Finalizar'}</button>`:''}
-        <button class="btn-ghost" style="padding:6px 12px" onclick="cotHistOpen()" title="Histórico de alterações desta cotação — quem mudou o quê, data e hora"><span class="material-icons" style="font-size:15px;vertical-align:-3px">history</span> Histórico</button>
-        ${(IS_ADMIN||((EU&&EU.papel)||'')==='gerente'||(c.criado_por!=null&&c.criado_por!==''&&EU&&String(c.criado_por)===String(EU.bitrix_id)))?`<button class="btn-ghost" style="padding:6px 12px${(c.colaboradores||[]).length?';border-color:var(--verde);color:var(--verde-d)':''}" onclick="cotColabOpen()" title="${(c.colaboradores||[]).length?('Colaboradores: '+esc((c.colaboradores_nomes||[]).join(', '))):'Compartilhar a edição com outra pessoa (ex.: criador de férias)'}"><span class="material-icons" style="font-size:15px;vertical-align:-3px">group_add</span> Compartilhar${(c.colaboradores||[]).length?' ('+(c.colaboradores||[]).length+')':''}</button>`:''}
-        ${podeGerir?`<button class="btn-ghost" style="padding:6px 12px;color:var(--pend)" onclick="cotExcluir()" title="Excluir esta cotação (admin ou quem criou)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">delete</span> Excluir</button>`:''}
-      </span></div>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;padding:16px 0 2px">
-      ${cotKpi('inbox', props.length+'/'+(d.convidados||[]).length, 'propostas recebidas')}
-      ${cotKpi('emoji_events', (m.melhor_oferta?BRL(m.melhor_oferta):'—'), 'melhor fornecedor'+(m.fornecedor_destaque?' · <b style=\'color:var(--txt)\'>'+esc(m.fornecedor_destaque)+'</b>':''))}
-      ${cotKpi('savings', (c.verba?BRL(c.verba):'—')+(cotVerbaInfoBtn(c)?' '+cotVerbaInfoBtn(c):'')+(CAN_EDIT?` <span class="material-icons" onclick="cotVerbaEditar()" title="editar / puxar a verba" style="font-size:15px;cursor:pointer;color:var(--muted);vertical-align:-2px">edit</span>`:''), 'verba prevista'+(c.verba_origem?' · '+esc({curada:'curada ✓',auto:'auto 🤖',definida:'definida'}[c.verba_origem]||c.verba_origem):''))}
-    </div>
-    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:10px;padding-top:9px;border-top:1px solid var(--line)">
-      ${!c.multi_coligada?`<div style="display:flex;align-items:center;gap:6px"><span class="muted" style="font-size:11px;font-weight:700">Nº Solicitação</span><input id="cotDetSC" value="${esc(c.num_solicitacao||'')}" placeholder="—" style="width:120px;padding:3px 7px;font-size:12px" ${CAN_EDIT?'':'disabled'}></div>
-      <div style="display:flex;align-items:center;gap:6px"><span class="muted" style="font-size:11px;font-weight:700">Nº Pedido de compra</span><input id="cotDetPC" value="${esc(c.num_pedido||'')}" placeholder="${!c.servico_id?'obrigatório p/ finalizar':'—'}" style="width:150px;padding:3px 7px;font-size:12px" ${CAN_EDIT?'':'disabled'}></div>
-      ${c.num_pedido?`<button class="btn-ghost" style="padding:4px 11px;color:var(--verde-d)" onclick="cotPedidoVer('${esc(String(c.num_pedido)).replace(/'/g,'')}')" title="ver o pedido no TOTVS: fornecedor, itens, preços e total"><span class="material-icons" style="font-size:14px;vertical-align:-3px">receipt_long</span> Ver pedido</button>`:''}
-      ${CAN_EDIT?`<button class="btn-ghost" style="padding:4px 11px" onclick="cotNumerosSalvar()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">save</span> Salvar nºs</button>`:''}`:`<span class="muted" style="font-size:11.5px"><span class="material-icons" style="font-size:14px;vertical-align:-3px">south</span> Nº da <b>solicitação</b> e do <b>pedido</b> por coligada abaixo</span>`}
-      ${c.multi_coligada?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="a cotação atravessa mais de uma coligada — cada uma tem sua SC e seu PC abaixo">🏢 ${(c.coligadas_itens||[]).length} coligadas</span>`:''}
-      ${!c.servico_id?`<span class="dchip" style="background:#8a9299;font-size:10px" title="cotação criada do zero, sem vínculo ao radar de aquisições">avulsa</span>`:'<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="cotação vinculada a um item do radar">do radar</span>'}
-    </div>${c.multi_coligada?cotPCColigadas(c):''}<div id="cotPedDetect" style="margin-top:8px"></div></div>`;
+  const podeGerir=CAN_EDIT;   // admin | gerente | criador | colaborador
+  const podeCompartilhar=IS_ADMIN||((EU&&EU.papel)||'')==='gerente'||(c.criado_por!=null&&c.criado_por!==''&&EU&&String(c.criado_por)===String(EU.bitrix_id));
+  const dtCriada=c.created_at?cotFmtDT(c.created_at):'';
+  const btn=(ic,lbl,fn,tt,cor)=>'<button class="btn-ghost" style="padding:6px 11px;font-size:12.5px'+(cor?';color:'+cor:'')+'" onclick="'+fn+'" title="'+(tt||lbl)+'"><span class="material-icons" style="font-size:15px;vertical-align:-3px">'+ic+'</span> '+lbl+'</button>';
+  const sep='<span style="width:1px;height:22px;background:var(--line);margin:0 3px"></span>';
+  const apelidoChip=(c.apelido||CAN_EDIT)
+    ? '<span '+(CAN_EDIT?'onclick="cotApelidoEditar()"':'')+' title="'+(CAN_EDIT?'apelido curto p/ achar fácil na lista (ex.: Pregos)':'apelido')+'" style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:7px;'+(CAN_EDIT?'cursor:pointer;':'')+(c.apelido?'background:#eef6f0;color:var(--verde-d)':'background:#fff;color:#8a9299;border:1px dashed #cfd6da')+'"><span class="material-icons" style="font-size:12px">sell</span>'+(c.apelido?esc(c.apelido):'apelido')+'</span>'
+    : '';
+  const origem=c.servico_id
+    ? '<span onclick="cotVerItemRadar()" title="Nasceu do item do radar &ldquo;'+esc(c.servico_nome||'')+'&rdquo; — clique p/ abrir (verba, curadoria, cronograma)" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:var(--verde-d);font-weight:700"><span class="material-icons" style="font-size:13px">radar</span>do radar: '+esc(c.servico_nome||('item #'+c.servico_id))+'<span class="material-icons" style="font-size:12px;opacity:.6">open_in_new</span></span>'
+    : '<span title="cotação criada do zero — sem vínculo a item do radar" style="display:inline-flex;align-items:center;gap:4px;color:#8a9299"><span class="material-icons" style="font-size:13px">edit_note</span>criada do zero</span>';
+  const meta=[
+    '<span style="display:inline-flex;align-items:center;gap:4px"><span class="material-icons" style="font-size:13px;color:var(--muted)">apartment</span><span id="cotObraWrap">'+cotObraLabel(c,podeGerir)+'</span></span>',
+    (c.categoria||c.tipo_servico)?'<span>'+esc([c.categoria,c.tipo_servico].filter(Boolean).join(' · '))+'</span>':'',
+    c.criado_nome?'<span style="display:inline-flex;align-items:center;gap:4px" title="quem criou esta cotação"><span class="material-icons" style="font-size:13px;color:var(--muted)">person</span>'+esc(c.criado_nome)+'</span>':'',
+    dtCriada?'<span title="criada em">'+esc(dtCriada)+'</span>':'',
+    origem
+  ].filter(Boolean).join('<span style="color:#d7dbde">&bull;</span>');
+  let html='<div class="panel" style="margin-bottom:12px;padding:16px 20px">'
+   +'<div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">'
+   +'<button class="btn-ghost" onclick="cotLoad()" style="margin-top:3px;padding:5px 10px" title="voltar à lista"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button>'
+   +'<div style="min-width:0;flex:1">'
+   +'<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><b style="font-size:21px;letter-spacing:-.2px">'+esc(c.titulo)+'</b>'+cotStChip(c.status)+apelidoChip+'</div>'
+   +'<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:5px;font-size:11.5px;color:var(--muted)">'+meta+'</div>'
+   +'</div></div>'
+   +'<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:11px;border-top:1px solid var(--line)">'
+   +(CAN_EDIT?'<button class="btn-prim" style="padding:7px 13px;font-size:12.5px" onclick="cotProposta()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Cadastrar proposta</button>':'')
+   +(CAN_EDIT?btn('auto_awesome','Proposta via IA','cotPropIAAbrir()','a IA lê um PDF/print de proposta, identifica o fornecedor e preenche os preços','var(--verde-d)'):'')
+   +(CAN_EDIT?btn(c.status==='finalizada'?'lock_open':'flag',c.status==='finalizada'?'Reabrir':'Finalizar','cotFinalizar()',c.status==='finalizada'?'reabrir a cotação':'encerrar a concorrência'):'')
+   +sep
+   +(CAN_EDIT?btn('mail','E-mail','cotEmailAbrir('+c.id+')','montar o e-mail de cotação para os fornecedores convidados'):'')
+   +(CAN_EDIT?btn('description','Carta','cartaGerar('+c.id+')',(c.num_solicitacao&&!c.servico_id)?'Carta de cotação (material) — SC, itens e preço a preencher':'Carta convite (serviço) — escopo e obrigações'):'')
+   +btn('summarize','Mapa em 1 página','cotUmaPagina()','resumo do mapa em uma página, pronto pra imprimir/PDF')
+   +sep
+   +btn('history','Histórico','cotHistOpen()','quem alterou o quê nesta cotação, com data e hora')
+   +(podeCompartilhar?btn('group_add','Compartilhar'+((c.colaboradores||[]).length?' ('+(c.colaboradores||[]).length+')':''),'cotColabOpen()',(c.colaboradores||[]).length?('Colaboradores: '+esc((c.colaboradores_nomes||[]).join(', '))):'dar acesso de edição a outra pessoa (ex.: férias do criador)'):'')
+   +(podeGerir?'<span style="margin-left:auto">'+btn('delete','Excluir','cotExcluir()','excluir esta cotação','var(--pend)')+'</span>':'')
+   +'</div>'
+   +'<div style="display:flex;gap:12px;flex-wrap:wrap;padding:14px 0 2px">'
+   +cotKpi('inbox', props.length+'/'+(d.convidados||[]).length, 'propostas recebidas')
+   +cotKpi('emoji_events', (m.melhor_oferta?BRL(m.melhor_oferta):'—'), 'melhor fornecedor'+(m.fornecedor_destaque?' &middot; <b style="color:var(--tx)">'+esc(m.fornecedor_destaque)+'</b>':''))
+   +cotKpi('savings', (c.verba?BRL(c.verba):'—')+(cotVerbaInfoBtn(c)?' '+cotVerbaInfoBtn(c):'')+(CAN_EDIT?' <span class="material-icons" onclick="cotVerbaEditar()" title="editar a verba prevista" style="font-size:13px;cursor:pointer;color:var(--verde);vertical-align:-2px">edit</span>':''), 'verba prevista')
+   +'</div>'
+   +'<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">'
+   +'<span style="font-size:10px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Documentos</span>'
+   +(!c.multi_coligada?'<div style="display:flex;align-items:center;gap:6px"><span class="muted" style="font-size:11px;font-weight:700">SC</span><input id="cotDetSC" value="'+esc(c.num_solicitacao||'')+'" placeholder="—" '+(CAN_EDIT?'':'disabled')+' style="width:96px;padding:4px 8px;font-size:12px"></div>':'')
+   +'<div style="display:flex;align-items:center;gap:6px"><span class="muted" style="font-size:11px;font-weight:700">Pedido de compra</span><input id="cotDetPC" value="'+esc(c.num_pedido||'')+'" placeholder="—" '+((CAN_EDIT&&!c.multi_coligada)?'':'disabled')+' style="width:110px;padding:4px 8px;font-size:12px"></div>'
+   +(c.num_pedido?'<button class="btn-ghost" style="padding:4px 11px;color:var(--verde-d)" onclick="cotPedidoVer(\''+esc(String(c.num_pedido)).replace(/'/g,'')+'\',\'\','+(Number(c.obra_id)||0)+')" title="ver o pedido no TOTVS (filtrado pela obra desta cotação): fornecedor, itens e total"><span class="material-icons" style="font-size:14px;vertical-align:-3px">receipt_long</span> Ver pedido</button>':'')
+   +((CAN_EDIT&&!c.multi_coligada)?'<button class="btn-ghost" style="padding:4px 11px" onclick="cotNumerosSalvar()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">save</span> Salvar nºs</button>':'')
+   +(c.multi_coligada?'<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="a cotação atravessa mais de uma coligada — cada uma tem seu pedido">multi-coligada: 1 PC por coligada</span>':'')
+   +'</div>'+(c.multi_coligada?cotPCColigadas(c):'')+'<div id="cotPedDetect" style="margin-top:8px"></div></div>';
   html+=cotItensPanel(d);
   // ---- Concorrência (fornecedores convidados) + anexos POR fornecedor (anexar antes de cadastrar proposta) ----
   const conv=d.convidados||[], anx=d.anexos||[], meB=(EU&&EU.bitrix_id)||'';
@@ -4770,23 +4790,41 @@ async function cotApelidoEditar(){ const c=COT.cur.cotacao;
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'apelido_salvar',me:EU&&EU.bitrix_id,cotacao_id:c.id,apelido:v.trim()})})).json();
     if(r&&r.error){toast(r.error);return;} c.apelido=r.apelido||''; toast(c.apelido?'Apelido salvo':'Apelido removido'); cotOpen(c.id); }catch(e){toast('Falha: '+e.message);} }
 /* "Fotinha" do pedido de compra (dados do TOTVS via Supabase): fornecedor(es), itens, preços unit e total */
-async function cotPedidoVer(numero,coligadaCod){
+async function cotPedidoVer(numero,coligadaCod,obraId){
+  // ⚠️ o nº do PC NÃO é único entre coligadas — SEMPRE mandar a coligada (ou a obra, que o servidor resolve).
   numero=String(numero||'').split(',')[0].trim(); if(!numero){toast('Sem nº de pedido');return;}
   let ov=document.getElementById('pedOverlay'); if(!ov){ ov=document.createElement('div'); ov.id='pedOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }
   ov.onclick=()=>ov.remove();
   const shell=b=>`<div style="background:#fff;border-radius:14px;padding:18px;max-width:740px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">${b}</div>`;
+  const close=`<span class="material-icons" onclick="document.getElementById('pedOverlay').remove()" style="cursor:pointer;color:var(--muted)">close</span>`;
   ov.innerHTML=shell(`<div class="dempty">Buscando o pedido ${esc(numero)} no TOTVS…</div>`);
-  try{ const r=await (await fetch('actions/pedidos.php?numero='+encodeURIComponent(numero)+(coligadaCod?'&coligada_cod='+encodeURIComponent(coligadaCod):'')+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
-    const close=`<span class="material-icons" onclick="document.getElementById('pedOverlay').remove()" style="cursor:pointer;color:var(--muted)">close</span>`;
+  try{ const r=await (await fetch('actions/pedidos.php?numero='+encodeURIComponent(numero)
+      +(coligadaCod?'&coligada_cod='+encodeURIComponent(coligadaCod):'')
+      +(obraId?'&obra_id='+encodeURIComponent(obraId):'')
+      +'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
     if(r.error){ ov.innerHTML=shell(`<div style="display:flex;justify-content:space-between;align-items:center"><b>Pedido ${esc(numero)}</b>${close}</div><div class="empty" style="margin-top:10px">${esc(r.error)}</div>`); return; }
+    // DESAMBIGUAÇÃO: mesmo nº de PC em várias coligadas (ou não achado na coligada da obra) → escolher, NUNCA misturar
+    if(r.desambiguar){ const d=r.desambiguar, ops=d.opcoes||[];
+      const aviso=d.nao_encontrado_na_coligada
+        ? `Não achei o PC <b>${esc(numero)}</b> na coligada da obra (<b>${esc(d.coligada||d.coligada_cod)}</b>). Ele existe em ${ops.length} outra(s) — confira se o número está certo:`
+        : `O nº <b>${esc(numero)}</b> existe em <b>${ops.length} coligadas</b> (o número de PC se repete entre obras). Escolha a obra certa:`;
+      ov.innerHTML=shell(`<div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:15px">Pedido ${esc(numero)}</b>${close}</div>
+        <div style="margin:8px 0 10px;font-size:12.5px;color:#6b5d1f;background:#fff9e6;border:1px solid #efe3b0;border-radius:8px;padding:9px 12px">${aviso}</div>
+        ${ops.map(o=>`<div style="border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin-bottom:7px;display:flex;align-items:center;gap:9px;flex-wrap:wrap;cursor:pointer" onclick="cotPedidoVer('${esc(numero)}','${esc(o.coligada_cod)}')">
+            <b style="font-size:13px">${esc(o.coligada||o.coligada_cod)}</b>
+            <span class="muted" style="font-size:11px">${o.n_itens} item(ns)${o.ccusto_cod?' · c.custo '+esc(o.ccusto_cod):''}</span>
+            <span class="muted" style="font-size:11px">${esc((o.fornecedores||[]).join(', '))}</span>
+            <b style="margin-left:auto;color:var(--verde-d)">${BRL(o.total)}</b></div>`).join('')}`);
+      return; }
     const p=r.pedido, forn=(p.fornecedores||[]).join(', ')||'—';
     ov.innerHTML=shell(`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><b style="font-size:15px"><span class="material-icons" style="font-size:17px;vertical-align:-3px;color:var(--verde-d)">receipt_long</span> Pedido de compra ${esc(p.numero)}</b>${close}</div>
-      <div class="muted" style="font-size:11.5px;margin-bottom:10px">${esc(p.coligada||'')}${p.data?' · '+D(String(p.data).slice(0,10)):''}${p.status?' · TOTVS '+esc(p.status):''} · ${p.n_itens} item(ns) · Fornecedor(es): ${esc(forn)}</div>
-      <div style="overflow-x:auto"><table class="mtable" style="border:none"><thead><tr><th class="svc-h" style="text-align:left">Item</th><th style="text-align:right">Qtde</th><th style="text-align:right">Preço unit.</th><th style="text-align:right">Total</th></tr></thead><tbody>
-      ${p.itens.map(it=>`<tr><td class="svc-c" style="text-align:left;font-size:12px">${esc(it.produto)}<small>${it.codprd?esc(it.codprd)+' · ':''}forn. ${esc(it.fornecedor_cod||'—')}</small></td><td style="text-align:right">${cotNum(it.qtd)} ${esc(it.und||'')}</td><td style="text-align:right">${BRLp(it.preco_unit)}</td><td style="text-align:right"><b>${BRL(it.total)}</b></td></tr>`).join('')}
-      <tr style="background:#f7faf8"><td class="svc-c" style="text-align:left;font-weight:800">TOTAL</td><td></td><td></td><td style="text-align:right;font-weight:800;color:var(--verde-d)">${BRL(p.total)}</td></tr>
+      <div class="muted" style="font-size:11.5px;margin-bottom:10px"><b>${esc(p.coligada||'')}</b>${p.ccusto_cod?' · c.custo '+esc(p.ccusto_cod):''}${p.data?' · '+D(String(p.data).slice(0,10)):''}${p.status?' · TOTVS '+esc(p.status):''} · ${p.n_itens} item(ns)${p.solic_numeros?' · SC '+esc(String(p.solic_numeros).replace(/^0+/,'')):''}</div>
+      <div style="margin-bottom:9px;font-size:12.5px"><span class="muted">Fornecedor(es):</span> <b>${esc(forn)}</b></div>
+      <div style="overflow-x:auto"><table class="mtable" style="border:none"><thead><tr><th class="svc-h" style="text-align:left">Item</th><th style="text-align:left">Fornecedor</th><th style="text-align:right">Qtde</th><th style="text-align:right">Preço unit.</th><th style="text-align:right">Total</th></tr></thead><tbody>
+      ${p.itens.map(it=>`<tr><td class="svc-c" style="text-align:left;font-size:12px">${esc(it.produto)}<small>${it.codprd?esc(it.codprd):''}</small></td><td style="text-align:left;font-size:11.5px">${esc(it.fornecedor_fantasia||it.fornecedor_nome||('cód. '+(it.fornecedor_cod||'—')))}${it.fornecedor_nome&&it.fornecedor_fantasia&&it.fornecedor_nome!==it.fornecedor_fantasia?`<small>${esc(it.fornecedor_nome)}</small>`:''}</td><td style="text-align:right">${cotNum(it.qtd)} ${esc(it.und||'')}</td><td style="text-align:right">${BRLp(it.preco_unit)}</td><td style="text-align:right"><b>${BRL(it.total)}</b></td></tr>`).join('')}
+      <tr style="background:#f7faf8"><td class="svc-c" style="text-align:left;font-weight:800">TOTAL</td><td></td><td></td><td></td><td style="text-align:right;font-weight:800;color:var(--verde-d)">${BRL(p.total)}</td></tr>
       </tbody></table></div>
-      <div class="dmini" style="margin-top:8px">Dados do TOTVS (somente leitura). O total usa preço unit × qtde quando o valor líquido ainda não foi gravado no TOTVS.</div>`);
+      <div class="dmini" style="margin-top:8px">Dados do TOTVS (somente leitura), filtrados pela coligada desta obra. O total usa preço unit × qtde quando o valor líquido ainda não foi gravado no TOTVS.</div>`);
   }catch(e){ ov.innerHTML=shell('<div class="empty">Falha ao buscar o pedido.</div>'); }
 }
 async function cotExcluirProposta(pid){ if(!confirm('Excluir esta proposta?'))return;

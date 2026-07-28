@@ -99,7 +99,7 @@ function obras_aplicar_crono($pdo, &$obras) {
         $o['crono_inicio']    = (string)($cr['project_start']  ?? ($o['crono_inicio']  ?? ''));
         $o['crono_fim']       = (string)($cr['project_finish'] ?? ($o['crono_fim']     ?? ''));
         $o['crono_medicao']   = (string)($cr['status_date']    ?? ($o['crono_medicao'] ?? ''));
-        $o['cronograma_nome'] = (string)($cr['project_name']   ?? ($cr['nome'] ?? ($o['cronograma_nome'] ?? '')));
+        $o['cronograma_nome'] = (string)($cr['nome'] ?? ($cr['project_name'] ?? ($o['cronograma_nome'] ?? '')));   // nome do ARQUIVO (o project_name pode ter revisão antiga e confundir)
         $o['crono_obra_id']   = $oid;
         $o['crono_live']      = true;
         $o['crono_updated']   = (string)($cr['updated_at'] ?? '');
@@ -211,7 +211,10 @@ try {
         if (!empty($_GET['refresh'])) @unlink(CRONO_OBRAS_CACHE);   // fura o cache de 30 min p/ pegar os XMLs novos
         [$crBy, ] = obras_crono_live();
         $out = [];
-        foreach ($crBy as $oid => $r) $out[] = ['obra_id' => $oid, 'id' => (string)($r['id'] ?? ''), 'nome' => (string)($r['project_name'] ?? ($r['nome'] ?? '')),
+        // NOME DO ARQUIVO primeiro (`nome`): é o que o Planejamento sobe e o Murilo reconhece. O `project_name`
+        // pode ter numeração ANTIGA e confundir (ex.: header novo com project_name "…Stanza R01 - REPROG JUL/2026"
+        // enquanto o arquivo é "STANZA_CRONOGRAMA_REPROG_JUL2026.xml" — mesmo XML, dois nomes).
+        foreach ($crBy as $oid => $r) $out[] = ['obra_id' => $oid, 'id' => (string)($r['id'] ?? ''), 'nome' => (string)($r['nome'] ?? ($r['project_name'] ?? '')),
             'pct' => $r['percent_complete'], 'fim' => (string)($r['project_finish'] ?? ''), 'medicao' => (string)($r['status_date'] ?? '')];
         usort($out, fn($a, $b) => strcasecmp($a['nome'], $b['nome']));
         echo json_encode(['ok' => true, 'cronogramas' => $out], JSON_UNESCAPED_UNICODE); exit;

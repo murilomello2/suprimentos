@@ -651,7 +651,12 @@
           <span class="material-icons" style="color:var(--muted)">search</span>
           <input id="bpQ" placeholder="item, fornecedor ou nº do pedido (ex.: martelete)…" onkeydown="if(event.key==='Enter')bpBuscar(1)">
         </div>
-        <select id="bpObra" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;max-width:230px"><option value="">Todas as obras</option></select>
+        <div style="position:relative">
+          <input id="bpObraTxt" list="bpObraList" placeholder="Todas as obras" autocomplete="off" oninput="bpObraPick()" onfocus="this.select()"
+                 style="padding:7px 26px 7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;width:200px">
+          <datalist id="bpObraList"></datalist>
+          <span id="bpObraX" onclick="bpObraLimpar()" title="limpar" style="display:none;position:absolute;right:7px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--muted);font-size:15px;line-height:1">&times;</span>
+        </div>
         <select id="bpPeriodo" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
           <option value="30d">Últimos 30 dias</option><option value="3m" selected>Últimos 3 meses</option>
           <option value="ano">Este ano</option><option value="tudo">Tudo</option></select>
@@ -3432,16 +3437,31 @@ async function excluirItemCatalogo(){
 /* ===================== BUSCA DE PEDIDOS DE COMPRA (consulta TOTVS) =====================
    "Com quem estamos comprando martelete?" — busca por item/fornecedor/nº, filtra por obra e
    período, lista os PCs (30/página) e abre o pedido completo no popup que já existe. */
-let BP={data:null, carregou:false, sort:'data', dir:'desc'};
+let BP={data:null, carregou:false, sort:'data', dir:'desc', obras:[], obraPorLabel:{}, obraKey:''};
 async function bpInit(){
   if(!BP.carregou){ BP.carregou=true;
-    try{ const d=await (await fetch('actions/obras.php?lista&me='+encodeURIComponent((EU&&EU.bitrix_id)||'')+'&_='+Date.now())).json();
-      const sel=document.getElementById('bpObra'); if(sel&&d.obras){
-        const obs=d.obras.filter(o=>(o.compra_coligada_cod||o.coligada_cod)).sort((a,b)=>a.nome.localeCompare(b.nome));
-        sel.innerHTML='<option value="">Todas as obras</option>'+obs.map(o=>'<option value="'+o.id+'">'+esc(o.nome)+'</option>').join('');
-      } }catch(e){}
+    // a lista vem dos PRÓPRIOS PEDIDOS (não da ficha de obras): assim não falta nenhuma obra que
+    // tenha PC, e ainda aparecem as áreas da sede da CAPRETZ (Administrativo, Marketing…).
+    try{ const d=await (await fetch('actions/busca_pedidos.php?obras=1&me='+encodeURIComponent((EU&&EU.bitrix_id)||'')+'&_='+Date.now())).json();
+      BP.obras=(d.obras||[]);
+      BP.obraPorLabel={}; BP.obras.forEach(o=>{ BP.obraPorLabel[o.label.toLowerCase()]=o.chave; });
+      const dl=document.getElementById('bpObraList');
+      if(dl) dl.innerHTML=BP.obras.map(o=>'<option value="'+esc(o.label)+'">'+o.n+' item(ns)</option>').join('');
+    }catch(e){}
   }
 }
+/* casa o que foi digitado com a obra; texto vazio = todas. Sem casar exato, tenta o único que contém. */
+function bpObraPick(){
+  const el=document.getElementById('bpObraTxt'); if(!el) return;
+  const t=(el.value||'').trim().toLowerCase();
+  const x=document.getElementById('bpObraX'); if(x) x.style.display=t?'block':'none';
+  if(!t){ BP.obraKey=''; return; }
+  if(BP.obraPorLabel && BP.obraPorLabel[t]){ BP.obraKey=BP.obraPorLabel[t]; el.style.color=''; return; }
+  const hits=(BP.obras||[]).filter(o=>o.label.toLowerCase().indexOf(t)>=0);
+  if(hits.length===1){ BP.obraKey=hits[0].chave; el.style.color=''; }
+  else { BP.obraKey=''; el.style.color=hits.length?'':'#c0392b'; }
+}
+function bpObraLimpar(){ const el=document.getElementById('bpObraTxt'); if(el){el.value='';el.style.color='';} BP.obraKey=''; const x=document.getElementById('bpObraX'); if(x)x.style.display='none'; bpBuscar(1); }
 function bpSort(campo){
   if(BP.sort===campo) BP.dir=(BP.dir==='asc'?'desc':'asc');
   else { BP.sort=campo; BP.dir=(campo==='data'||campo==='valor'||campo==='numero'||campo==='itens')?'desc':'asc'; }
@@ -3449,9 +3469,10 @@ function bpSort(campo){
 }
 async function bpBuscar(pagina){
   const w=document.getElementById('bpWrap'); if(!w) return;
-  const q=val('bpQ'), obra=val('bpObra'), per=val('bpPeriodo'), st=val('bpStatus'), us=val('bpUsuario');
+  bpObraPick();
+  const q=val('bpQ'), obra=BP.obraKey||'', per=val('bpPeriodo'), st=val('bpStatus'), us=val('bpUsuario');
   w.innerHTML='<div class="dempty">Consultando os pedidos no TOTVS…</div>';
-  let d; try{ d=await (await fetch('actions/busca_pedidos.php?q='+encodeURIComponent(q)+'&obra_id='+encodeURIComponent(obra||'')
+  let d; try{ d=await (await fetch('actions/busca_pedidos.php?q='+encodeURIComponent(q)+'&obra='+encodeURIComponent(obra||'')
       +'&periodo='+encodeURIComponent(per)+'&status='+encodeURIComponent(st||'')+'&usuario='+encodeURIComponent(us||'')
       +'&sort='+encodeURIComponent(BP.sort)+'&dir='+encodeURIComponent(BP.dir)+'&pagina='+(pagina||1)
       +'&me='+encodeURIComponent((EU&&EU.bitrix_id)||'')+'&_='+Date.now())).json(); }

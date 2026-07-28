@@ -27,6 +27,14 @@ function bp_get($query) {
     return json_decode((string)$res, true) ?: [];
 }
 
+/** Status do pedido no TOTVS -> texto legível (tabela oficial passada pelo Murilo, 28/jul). */
+function bp_status_label($s) {
+    static $M = ['A'=>'Pendente', 'B'=>'Baixado', 'C'=>'Cancelado', 'F'=>'Faturado', 'G'=>'Parcialmente faturado',
+                 'N'=>'Normal', 'Q'=>'Quitado', 'R'=>'Em faturamento', 'U'=>'Em separação'];
+    $k = strtoupper(trim((string)$s));
+    return $M[$k] ?? ($k === '' ? '—' : 'Status não identificado');
+}
+
 /** coligada_cod -> nome da OBRA (pela ficha). Coligada 1 = CAPREM (compra guarda-chuva de várias obras). */
 function bp_mapa_obras($pdo) {
     $map = [];
@@ -48,7 +56,9 @@ try {
     $q       = trim((string)($_GET['q'] ?? ''));
     $obraId  = (int)($_GET['obra_id'] ?? 0);
     $periodo = (string)($_GET['periodo'] ?? '3m');
-    $ordem   = (string)($_GET['ordem'] ?? 'recente');
+    $sort    = (string)($_GET['sort'] ?? 'data');     // coluna clicada: numero|obra|fornecedor|itens|data|valor|status
+    $dir     = strtolower((string)($_GET['dir'] ?? 'desc')) === 'asc' ? 'asc' : 'desc';
+    $status  = strtoupper(trim((string)($_GET['status'] ?? '')));
     $pagina  = max(1, (int)($_GET['pagina'] ?? 1));
 
     // ---- filtros da query ao TOTVS ----
@@ -63,13 +73,17 @@ try {
     }
     if ($de !== '')  $f[] = 'pedido_data=gte.' . rawurlencode($de);
     if ($ate !== '') $f[] = 'pedido_data=lte.' . rawurlencode($ate);
+    if ($status !== '') $f[] = 'pedido_status=eq.' . rawurlencode($status);   // filtro de status (A/B/C/F/G/N/Q/R/U)
 
     // obra → coligada (a ficha manda: compra_coligada_cod, senão coligada_cod)
     $coligadaFiltro = '';
     if ($obraId > 0) {
-        $st = $pdo->prepare("SELECT nome, coligada_cod, compra_coligada_cod FROM obra_ficha WHERE id=? OR radar_obra_id=? LIMIT 1");
-        $st->execute([$obraId, $obraId]);
-        if ($o = $st->fetch()) $coligadaFiltro = trim((string)($o['compra_coligada_cod'] ?: $o['coligada_cod']));
+        // ⚠️ NUNCA "id=? OR radar_obra_id=?": os dois espaços de id colidem (ficha 9=Itaara × radar 9=Vitrius)
+        // e o OR pegava a obra ERRADA. A tela manda o id da FICHA → ela manda; radar_obra_id só como fallback.
+        $st = $pdo->prepare("SELECT nome, coligada_cod, compra_coligada_cod FROM obra_ficha WHERE id=? LIMIT 1");
+        $st->execute([$obraId]); $o = $st->fetch();
+        if (!$o) { $st = $pdo->prepare("SELECT nome, coligada_cod, compra_coligada_cod FROM obra_ficha WHERE radar_obra_id=? LIMIT 1"); $st->execute([$obraId]); $o = $st->fetch(); }
+        if ($o) $coligadaFiltro = trim((string)($o['compra_coligada_cod'] ?: $o['coligada_cod']));
         if ($coligadaFiltro !== '') $f[] = 'coligada_cod=eq.' . rawurlencode($coligadaFiltro);
     }
 
@@ -109,13 +123,24 @@ try {
         if (count($ped[$k]['amostra']) < 3) $ped[$k]['amostra'][] = (string)($r['produto'] ?? '');
     }
     $lista = [];
-    foreach ($ped as $p) { $p['fornecedores'] = array_keys($p['fornecedores']); $p['total'] = round($p['total'], 2); $lista[] = $p; }
+    foreach ($ped as $p) {
+        $p['fornecedores'] = array_keys($p['fornecedores']); $p['total'] = round($p['total'], 2);
+        $p['status_label'] = bp_status_label($p['status']);
+        $lista[] = $p;
+    }
 
-    // ---- ordenação ----
-    if ($ordem === 'numero')      usort($lista, fn($a, $b) => strcmp($b['numero'], $a['numero']));
-    elseif ($ordem === 'obra')    usort($lista, fn($a, $b) => (strcasecmp($a['obra'] ?: 'zzz', $b['obra'] ?: 'zzz')) ?: strcmp($b['data'], $a['data']));
-    elseif ($ordem === 'valor')   usort($lista, fn($a, $b) => $b['total'] <=> $a['total']);
-    else                          usort($lista, fn($a, $b) => (strcmp($b['data'], $a['data'])) ?: strcmp($b['numero'], $a['numero']));
+    // ---- ORDENAÇÃO por coluna, sobre a LISTA INTEIRA (não só a página) — depois é que pagina ----
+    $cmp = [
+        'numero'     => fn($a, $b) => ((int)ltrim($a['numero'], '0')) <=> ((int)ltrim($b['numero'], '0')),
+        'obra'       => fn($a, $b) => strcasecmp($a['obra'] ?: $a['coligada'], $b['obra'] ?: $b['coligada']),
+        'fornecedor' => fn($a, $b) => strcasecmp($a['fornecedores'][0] ?? '', $b['fornecedores'][0] ?? ''),
+        'itens'      => fn($a, $b) => $a['n_itens'] <=> $b['n_itens'],
+        'data'       => fn($a, $b) => strcmp($a['data'], $b['data']) ?: (((int)ltrim($a['numero'], '0')) <=> ((int)ltrim($b['numero'], '0'))),
+        'valor'      => fn($a, $b) => $a['total'] <=> $b['total'],
+        'status'     => fn($a, $b) => strcasecmp($a['status_label'], $b['status_label']),
+    ];
+    $fn = $cmp[$sort] ?? $cmp['data'];
+    usort($lista, $dir === 'asc' ? $fn : fn($a, $b) => -$fn($a, $b));
 
     $total = count($lista);
     $paginas = max(1, (int)ceil($total / BP_POR_PAGINA));
@@ -124,6 +149,7 @@ try {
 
     echo json_encode(['ok' => true, 'pedidos' => $page, 'total' => $total, 'pagina' => $pagina, 'paginas' => $paginas,
         'por_pagina' => BP_POR_PAGINA, 'itens_lidos' => count($rows), 'truncado' => $truncado,
+        'sort' => $sort, 'dir' => $dir, 'status' => $status,
         'periodo' => ['de' => $de, 'ate' => $ate]], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     http_response_code(500);

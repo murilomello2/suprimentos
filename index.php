@@ -655,9 +655,11 @@
         <select id="bpPeriodo" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
           <option value="30d">Últimos 30 dias</option><option value="3m" selected>Últimos 3 meses</option>
           <option value="ano">Este ano</option><option value="tudo">Tudo</option></select>
-        <select id="bpOrdem" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
-          <option value="recente">Mais recentes</option><option value="numero">Maior nº de pedido</option>
-          <option value="obra">Obra</option><option value="valor">Maior valor</option></select>
+        <select id="bpStatus" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+          <option value="">Todos os status</option>
+          <option value="A">Pendente</option><option value="U">Em separação</option><option value="R">Em faturamento</option>
+          <option value="G">Parcialmente faturado</option><option value="F">Faturado</option><option value="Q">Quitado</option>
+          <option value="B">Baixado</option><option value="N">Normal</option><option value="C">Cancelado</option></select>
         <button class="btn-prim" style="padding:7px 14px" onclick="bpBuscar(1)"><span class="material-icons" style="font-size:16px;vertical-align:-3px">search</span> Buscar</button>
       </div>
     </div>
@@ -3429,10 +3431,9 @@ async function excluirItemCatalogo(){
 /* ===================== BUSCA DE PEDIDOS DE COMPRA (consulta TOTVS) =====================
    "Com quem estamos comprando martelete?" — busca por item/fornecedor/nº, filtra por obra e
    período, lista os PCs (30/página) e abre o pedido completo no popup que já existe. */
-let BP={data:null, carregou:false};
+let BP={data:null, carregou:false, sort:'data', dir:'desc'};
 async function bpInit(){
   if(!BP.carregou){ BP.carregou=true;
-    // popula o seletor de obras (mesma fonte do resto do sistema)
     try{ const d=await (await fetch('actions/obras.php?lista&me='+encodeURIComponent((EU&&EU.bitrix_id)||'')+'&_='+Date.now())).json();
       const sel=document.getElementById('bpObra'); if(sel&&d.obras){
         const obs=d.obras.filter(o=>(o.compra_coligada_cod||o.coligada_cod)).sort((a,b)=>a.nome.localeCompare(b.nome));
@@ -3440,39 +3441,52 @@ async function bpInit(){
       } }catch(e){}
   }
 }
+// clique no cabeçalho: 1º clique ordena, clique de novo inverte. Reordena a busca TODA (servidor), não só a página.
+function bpSort(campo){
+  if(BP.sort===campo) BP.dir=(BP.dir==='asc'?'desc':'asc');
+  else { BP.sort=campo; BP.dir=(campo==='data'||campo==='valor'||campo==='numero'||campo==='itens')?'desc':'asc'; }
+  bpBuscar(1);
+}
 async function bpBuscar(pagina){
   const w=document.getElementById('bpWrap'); if(!w) return;
-  const q=val('bpQ'), obra=val('bpObra'), per=val('bpPeriodo'), ord=val('bpOrdem');
+  const q=val('bpQ'), obra=val('bpObra'), per=val('bpPeriodo'), st=val('bpStatus');
   w.innerHTML='<div class="dempty">Consultando os pedidos no TOTVS…</div>';
   let d; try{ d=await (await fetch('actions/busca_pedidos.php?q='+encodeURIComponent(q)+'&obra_id='+encodeURIComponent(obra||'')
-      +'&periodo='+encodeURIComponent(per)+'&ordem='+encodeURIComponent(ord)+'&pagina='+(pagina||1)
+      +'&periodo='+encodeURIComponent(per)+'&status='+encodeURIComponent(st||'')
+      +'&sort='+encodeURIComponent(BP.sort)+'&dir='+encodeURIComponent(BP.dir)+'&pagina='+(pagina||1)
       +'&me='+encodeURIComponent((EU&&EU.bitrix_id)||'')+'&_='+Date.now())).json(); }
   catch(e){ w.innerHTML='<div class="empty">Falha ao consultar o TOTVS.</div>'; return; }
   if(d.error){ w.innerHTML='<div class="empty">'+esc(d.error)+'</div>'; return; }
   BP.data=d; bpRender();
 }
+function bpStCor(l){ return {'Pendente':'#a4761c','Em separação':'#2b6cb0','Em faturamento':'#2b6cb0','Parcialmente faturado':'#a4761c','Faturado':'#1F6B3B','Quitado':'#1F6B3B','Baixado':'#6a737b','Normal':'#6a737b','Cancelado':'#c0392b'}[l]||'#8a9299'; }
 function bpRender(){
   const w=document.getElementById('bpWrap'), d=BP.data; if(!w||!d) return;
   const ps=d.pedidos||[];
-  if(!ps.length){ w.innerHTML='<div class="empty">Nenhum pedido encontrado com esses filtros.<br><span class="dmini">Tente ampliar o período ou usar outra palavra (o sistema busca na descrição do item, no fornecedor e no nº do pedido).</span></div>'; return; }
+  if(!ps.length){ w.innerHTML='<div class="empty">Nenhum pedido encontrado com esses filtros.<br><span class="dmini">Tente ampliar o período, tirar o filtro de status ou usar outra palavra (busca na descrição do item, no fornecedor e no nº do pedido).</span></div>'; return; }
   const totalV=ps.reduce((a,p)=>a+(p.total||0),0);
+  // cabeçalho clicável: seta indica a coluna e o sentido
+  const th=(campo,lbl,al)=>{ const on=d.sort===campo, ar=on?(d.dir==='asc'?' ▲':' ▼'):'';
+    return '<th style="text-align:'+(al||'left')+';cursor:pointer;white-space:nowrap;'+(on?'color:var(--verde-d)':'')+'" onclick="bpSort(\''+campo+'\')" title="clique p/ ordenar (ordena TODOS os '+d.total+' pedidos, não só esta página)">'+lbl+'<span style="font-size:9px">'+ar+'</span></th>'; };
   let h='<div class="panel" style="padding:0;overflow:hidden">'
    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 16px;border-bottom:1px solid var(--line);background:#fbfdfb">'
    +'<b style="font-size:13px">'+d.total+' pedido(s)</b>'
    +'<span class="muted" style="font-size:11.5px">página '+d.pagina+' de '+d.paginas+' · '+ps.length+' nesta página · '+BRL(totalV)+' somados aqui</span>'
    +(d.truncado?'<span class="dchip" style="background:#fff9e6;color:#6b5d1f;font-size:10px" title="a consulta bateu no teto de leitura — estreite o período ou a busca">resultado parcial</span>':'')
-   +'</div><div style="overflow-x:auto"><table class="dtable" style="width:100%">'
-   +'<thead><tr><th style="text-align:left">Pedido</th><th style="text-align:left">Obra</th><th style="text-align:left">Fornecedor</th>'
-   +'<th style="text-align:left">Itens</th><th>Data</th><th class="r">Valor total</th><th></th></tr></thead><tbody>';
+   +'<span class="muted" style="font-size:11px;margin-left:auto">ordenado por <b>'+esc(d.sort)+'</b> '+(d.dir==='asc'?'crescente':'decrescente')+'</span>'
+   +'</div><div style="overflow-x:auto"><table class="dtable" style="width:100%"><thead><tr>'
+   +th('numero','Pedido')+th('obra','Obra')+th('fornecedor','Fornecedor')+th('itens','Itens')
+   +th('status','Status')+th('data','Data','center')+th('valor','Valor total','right')+'<th></th></tr></thead><tbody>';
   ps.forEach(p=>{
     const forn=(p.fornecedores||[]).join(', ')||'—';
     const amostra=(p.amostra||[]).join(' · ');
     h+='<tr>'
-      +'<td style="text-align:left;white-space:nowrap"><b>'+esc(String(p.numero).replace(/^0+/,''))+'</b>'+(p.status?'<small>TOTVS '+esc(p.status)+'</small>':'')+'</td>'
+      +'<td style="text-align:left;white-space:nowrap"><b>'+esc(String(p.numero).replace(/^0+/,''))+'</b></td>'
       +'<td style="text-align:left;font-size:11.5px">'+(p.obra?esc(p.obra):'<span class="muted">'+esc(p.coligada||'—')+'</span>')+'</td>'
       +'<td style="text-align:left;font-size:11.5px">'+esc(forn)+'</td>'
-      +'<td style="text-align:left;font-size:11px;color:var(--muted);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(amostra)+'">'+p.n_itens+' item(ns)'+(amostra?' · '+esc(amostra):'')+'</td>'
-      +'<td style="white-space:nowrap">'+(p.data?D(String(p.data).slice(0,10)):'—')+'</td>'
+      +'<td style="text-align:left;font-size:11px;color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(amostra)+'">'+p.n_itens+' item(ns)'+(amostra?' · '+esc(amostra):'')+'</td>'
+      +'<td style="text-align:left;white-space:nowrap"><span style="font-size:11px;font-weight:700;color:'+bpStCor(p.status_label)+'">'+esc(p.status_label||'—')+'</span></td>'
+      +'<td style="white-space:nowrap;text-align:center">'+(p.data?D(String(p.data).slice(0,10)):'—')+'</td>'
       +'<td class="r"><b>'+BRL(p.total)+'</b></td>'
       +'<td style="white-space:nowrap"><button class="btn-ghost" style="padding:3px 9px" onclick="cotPedidoVer(\''+esc(p.numero)+'\',\''+esc(p.coligada_cod)+'\')" title="ver o pedido completo: itens, preço unitário e total"><span class="material-icons" style="font-size:15px;vertical-align:-3px">visibility</span></button></td>'
       +'</tr>';
@@ -3487,7 +3501,7 @@ function bpRender(){
     if(d.pagina<d.paginas) nav+=btn(d.pagina+1,'próxima ›');
     h+=nav+'</div>';
   }
-  h+='</div><div class="note">Consulta ao TOTVS (somente leitura). O filtro de obra usa a <b>coligada</b> do pedido; as obras que compram pela <b>CAPREM</b> aparecem agrupadas (o pedido não traz o centro de custo da obra).</div>';
+  h+='</div><div class="note">Consulta ao TOTVS (somente leitura). <b>Clique no cabeçalho</b> de qualquer coluna p/ ordenar — a ordenação vale para <b>todos os pedidos</b> da busca, não só a página atual. O filtro de obra usa a <b>coligada</b> do pedido; as obras que compram pela <b>CAPREM</b> aparecem agrupadas (o pedido não traz o centro de custo da obra).</div>';
   w.innerHTML=h;
 }
 /* ===================== DASHBOARDS ===================== */

@@ -17,3 +17,6 @@ tools/
 *.xlsx
 ~$*
 data/anexos/
+data/.api_keys.json
+data/.api_radar_*.json
+data/.bp_obras.json

@@ -21,7 +21,8 @@ require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/coligadas.php';
 require_once __DIR__ . '/../includes/supabase.php';
 
-define('BP_MAX_LINHAS', 6000);   // teto de itens lidos por consulta (protege o Supabase e a memória)
+define('BP_MAX_LINHAS', 30000);  // teto de itens lidos por consulta (protege o Supabase e a memória)
+define('BP_PAGINA_API', 5000);   // o PostgREST corta em 1000/req por padrão -> paginamos até o teto acima
 define('BP_POR_PAGINA', 30);
 
 function bp_get($query) {
@@ -30,6 +31,17 @@ function bp_get($query) {
     [$code, $res, $err] = sb_http('GET', $url, $headers);
     if ($code !== 200 && $code !== 206) throw new Exception('TOTVS HTTP ' . $code . ' — ' . substr((string)($res ?: $err), 0, 160));
     return json_decode((string)$res, true) ?: [];
+}
+
+/** Lê o recorte inteiro paginando (sem isso, "todas as obras" vinha cortado e a contagem mentia). */
+function bp_get_tudo($query) {
+    $out = [];
+    for ($off = 0; $off < BP_MAX_LINHAS; $off += BP_PAGINA_API) {
+        $lote = bp_get($query . '&limit=' . BP_PAGINA_API . '&offset=' . $off);
+        $out = array_merge($out, $lote);
+        if (count($lote) < BP_PAGINA_API) break;
+    }
+    return $out;
 }
 
 /** Status do pedido no TOTVS -> texto legível (tabela oficial passada pelo Murilo, 28/jul). */
@@ -60,7 +72,7 @@ function bp_mapa_razao($pdo) {
 
 /** Encurta a razão social quando a obra não tem ficha (tira o juridiquês). */
 function bp_curto($razao) {
-    $r = preg_replace('/\s+(EMPREENDIMENTOS?|EMPREEND\.?)\s+IMOBILI.*/iu', '', (string)$razao);
+    $r = preg_replace('/\s+(EMPREENDIMENTOS?|EMPREEND\.?)\s+IMOB.*/iu', '', (string)$razao);
     $r = preg_replace('/\s+(SPE\s+)?LTDA\.?$/iu', '', $r);
     return trim($r) !== '' ? trim($r) : (string)$razao;
 }
@@ -129,7 +141,7 @@ try {
     }
 
     $sel = 'select=pedido_numero,pedido_data,pedido_status,coligada_cod,coligada,ccusto_cod,fornecedor_cod,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,preco_unit,valor_total,solic_numeros,solic_colidmov,pedido_usuario,item_observacao,obra_efetiva_nome,obra_efetiva_fonte,obra_cod,ccusto_nome';
-    $rows = bp_get($sel . ($f ? '&' . implode('&', $f) : '') . '&order=pedido_data.desc&limit=' . BP_MAX_LINHAS);
+    $rows = bp_get_tudo($sel . ($f ? '&' . implode('&', $f) : '') . '&order=pedido_data.desc');
     $truncado = count($rows) >= BP_MAX_LINHAS;
 
     $mapaRazao = bp_mapa_razao($pdo);

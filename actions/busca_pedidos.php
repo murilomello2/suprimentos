@@ -7,9 +7,14 @@
  *   -> { pedidos:[{numero, coligada, coligada_cod, obra, data, status, fornecedores[], n_itens, total, solic}],
  *        total, pagina, paginas, por_pagina, truncado }
  *
- * COMO A OBRA É RESOLVIDA: o PC do TOTVS traz a COLIGADA (não a obra). 16 obras têm coligada própria
- * (mapeamento 1:1 pela ficha). As que compram pela CAPREM (coligada 1) ficam agrupadas — o ccusto_cod do
- * PC é contábil (6.20.0001…), não o centro de custo da obra, então não dá p/ separá-las com o dado atual.
+ * COMO A OBRA É RESOLVIDA (29/jul): o próprio TOTVS já entrega pronto, via DAX do Murilo —
+ *   `obra_efetiva_nome`  = razão social da obra REAL do pedido
+ *   `obra_efetiva_fonte` = COLIGADA (a obra é a própria coligada) | RATEIO_CAPRETZ (compra da CAPRETZ
+ *                          rateada p/ uma obra — ex.: CAPRETZ comprando p/ o Cajá)
+ *   `obra_cod`           = centro de custo da obra (vem da solicitação)
+ * Aqui só traduzimos a razão social p/ o nome amigável do cockpit (obra_ficha.coligada_nome -> nome) e,
+ * quando é rateio, mostramos "CAPRETZ/<obra>" — assim dá p/ distinguir compra DA CAPRETZ (sede) de
+ * compra da CAPRETZ PARA uma obra. Nada de adivinhação por coligada: o dado é do TOTVS.
  */
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
@@ -35,52 +40,39 @@ function bp_status_label($s) {
     return $M[$k] ?? ($k === '' ? '—' : 'Status não identificado');
 }
 
-/** coligada_cod -> nome da OBRA (pela ficha). Coligada 1 = CAPREM (compra guarda-chuva de várias obras). */
-function bp_mapa_obras($pdo) {
+/** Normaliza razão social p/ casar TOTVS × ficha (sem acento/pontuação, maiúsculo). */
+function bp_nz($x) {
+    $x = strtoupper(@iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', (string)$x));
+    return trim(preg_replace('/\s+/', ' ', preg_replace('/[^A-Z0-9 ]/', ' ', $x)));
+}
+
+/** razão social (obra_efetiva_nome do TOTVS) -> nome amigável da obra no cockpit. */
+function bp_mapa_razao($pdo) {
     $map = [];
     try {
-        foreach ($pdo->query("SELECT nome, coligada_cod, compra_coligada_cod FROM obra_ficha") as $o) {
-            $cc = trim((string)($o['compra_coligada_cod'] ?: $o['coligada_cod']));
-            if ($cc === '' || $cc === '1') continue;              // 1 = CAPREM: várias obras, não identifica
-            if (!isset($map[$cc])) $map[$cc] = $o['nome'];
+        foreach ($pdo->query("SELECT nome, coligada_nome FROM obra_ficha WHERE coligada_nome IS NOT NULL AND coligada_nome<>''") as $o) {
+            $k = bp_nz($o['coligada_nome']);
+            if ($k !== '' && !isset($map[$k])) $map[$k] = $o['nome'];
         }
     } catch (Throwable $e) {}
     return $map;
 }
 
-/** CENTRO DE CUSTO (ex.: '040') -> nome da obra, só das que compram pela CAPREM (coligada 1). */
-function bp_mapa_ccusto($pdo) {
-    $map = [];
-    try {
-        foreach ($pdo->query("SELECT nome, centro_custo, coligada_cod, compra_coligada_cod FROM obra_ficha") as $o) {
-            $cc = trim((string)($o['compra_coligada_cod'] ?: $o['coligada_cod']));
-            $cu = ltrim(trim((string)($o['centro_custo'] ?? '')), '0');
-            if ($cc !== '1' || $cu === '') continue;
-            $map[$cu] = $o['nome'];
-        }
-    } catch (Throwable $e) {}
-    return $map;
+/** Encurta a razão social quando a obra não tem ficha (tira o juridiquês). */
+function bp_curto($razao) {
+    $r = preg_replace('/\s+(EMPREENDIMENTOS?|EMPREEND\.?)\s+IMOBILI.*/iu', '', (string)$razao);
+    $r = preg_replace('/\s+(SPE\s+)?LTDA\.?$/iu', '', $r);
+    return trim($r) !== '' ? trim($r) : (string)$razao;
 }
 
-/** Resolve a OBRA dos pedidos da CAPREM indo PC -> SOLICITAÇÃO (solic_colidmov) -> centro de custo -> de-para.
- *  Devolve [colidmov => centro_custo]. Consulta em lotes (in=) pra não estourar a URL. */
-function bp_cc_por_colidmov($colidmovs) {
-    $out = [];
-    $lista = array_values(array_unique(array_filter(array_map('strval', $colidmovs), fn($v) => trim($v) !== '')));
-    foreach (array_chunk($lista, 60) as $lote) {
-        $in = implode(',', array_map(fn($v) => '"' . str_replace('"', '', $v) . '"', $lote));
-        try {
-            $url = SOLIC_SUPABASE_URL . '/rest/v1/solicitacoes_fila?select=colidmov,obra&colidmov=in.(' . rawurlencode($in) . ')&limit=200';
-            $headers = ['apikey: ' . SOLIC_SUPABASE_KEY, 'Authorization: Bearer ' . SOLIC_SUPABASE_KEY, 'Accept: application/json'];
-            [$code, $res, ] = sb_http('GET', $url, $headers);
-            if ($code !== 200 && $code !== 206) continue;
-            foreach ((array)(json_decode((string)$res, true) ?: []) as $r) {
-                $cm = trim((string)($r['colidmov'] ?? '')); $ob = ltrim(trim((string)($r['obra'] ?? '')), '0');
-                if ($cm !== '' && $ob !== '') $out[$cm] = $ob;
-            }
-        } catch (Throwable $e) {}
-    }
-    return $out;
+/** Nome da obra a exibir: usa o obra_efetiva_nome do TOTVS (já resolve o rateio da CAPRETZ no DAX).
+ *  RATEIO_CAPRETZ => "CAPRETZ/<obra>" (compra da CAPRETZ rateada p/ a obra); senão o nome da obra. */
+function bp_obra_label($razao, $fonte, $mapaRazao) {
+    $razao = trim((string)$razao);
+    if ($razao === '') return '';
+    $amigavel = $mapaRazao[bp_nz($razao)] ?? bp_curto($razao);
+    if (strtoupper(trim((string)$fonte)) === 'RATEIO_CAPRETZ') return 'CAPRETZ/' . $amigavel;
+    return $amigavel;
 }
 
 try {
@@ -112,20 +104,18 @@ try {
     if ($status !== '') $f[] = 'pedido_status=eq.' . rawurlencode($status);   // filtro de status (A/B/C/F/G/N/Q/R/U)
     if ($usuario !== '') $f[] = 'pedido_usuario=eq.' . rawurlencode($usuario);   // quem CRIOU o pedido no TOTVS
 
-    // obra → coligada (a ficha manda: compra_coligada_cod, senão coligada_cod)
-    $coligadaFiltro = ''; $ccustoFiltro = '';
+    // obra: casa pela RAZÃO SOCIAL que o TOTVS já resolve (obra_efetiva_nome) — cobre inclusive o
+    // rateio da CAPRETZ (pedido da CAPRETZ p/ o Cajá vira "CAJA EMPREENDIMENTO…", não "CAPRETZ").
     if ($obraId > 0) {
-        // ⚠️ NUNCA "id=? OR radar_obra_id=?": os dois espaços de id colidem (ficha 9=Itaara × radar 9=Vitrius)
-        // e o OR pegava a obra ERRADA. A tela manda o id da FICHA → ela manda; radar_obra_id só como fallback.
-        $st = $pdo->prepare("SELECT nome, coligada_cod, compra_coligada_cod, centro_custo FROM obra_ficha WHERE id=? LIMIT 1");
+        // ⚠️ NUNCA "id=? OR radar_obra_id=?": os dois espaços de id colidem (ficha 9=Itaara × radar 9=Vitrius).
+        $st = $pdo->prepare("SELECT nome, coligada_nome, coligada_cod, compra_coligada_cod FROM obra_ficha WHERE id=? LIMIT 1");
         $st->execute([$obraId]); $o = $st->fetch();
-        if (!$o) { $st = $pdo->prepare("SELECT nome, coligada_cod, compra_coligada_cod, centro_custo FROM obra_ficha WHERE radar_obra_id=? LIMIT 1"); $st->execute([$obraId]); $o = $st->fetch(); }
+        if (!$o) { $st = $pdo->prepare("SELECT nome, coligada_nome, coligada_cod, compra_coligada_cod FROM obra_ficha WHERE radar_obra_id=? LIMIT 1"); $st->execute([$obraId]); $o = $st->fetch(); }
         if ($o) {
-            $coligadaFiltro = trim((string)($o['compra_coligada_cod'] ?: $o['coligada_cod']));
-            // obra que compra pela CAPREM: a coligada sozinha não basta — separa pelo CENTRO DE CUSTO (via solicitação)
-            if ($coligadaFiltro === '1') $ccustoFiltro = ltrim(trim((string)($o['centro_custo'] ?? '')), '0');
+            $razao = trim((string)($o['coligada_nome'] ?? ''));
+            if ($razao !== '') $f[] = 'obra_efetiva_nome=eq.' . rawurlencode($razao);
+            else { $cc = trim((string)($o['compra_coligada_cod'] ?: $o['coligada_cod'])); if ($cc !== '') $f[] = 'coligada_cod=eq.' . rawurlencode($cc); }
         }
-        if ($coligadaFiltro !== '') $f[] = 'coligada_cod=eq.' . rawurlencode($coligadaFiltro);
     }
 
     // busca ampla: nº do pedido OU fornecedor (razão/fantasia) OU descrição do item
@@ -138,29 +128,31 @@ try {
         $f[] = 'or=(' . implode(',', $ors) . ')';
     }
 
-    $sel = 'select=pedido_numero,pedido_data,pedido_status,coligada_cod,coligada,ccusto_cod,fornecedor_cod,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,preco_unit,valor_total,solic_numeros,solic_colidmov,pedido_usuario,item_observacao';
+    $sel = 'select=pedido_numero,pedido_data,pedido_status,coligada_cod,coligada,ccusto_cod,fornecedor_cod,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,preco_unit,valor_total,solic_numeros,solic_colidmov,pedido_usuario,item_observacao,obra_efetiva_nome,obra_efetiva_fonte,obra_cod,ccusto_nome';
     $rows = bp_get($sel . ($f ? '&' . implode('&', $f) : '') . '&order=pedido_data.desc&limit=' . BP_MAX_LINHAS);
     $truncado = count($rows) >= BP_MAX_LINHAS;
 
+    $mapaRazao = bp_mapa_razao($pdo);
     // usuários presentes no recorte (alimenta o filtro "quem criou" da tela)
     $uSet = [];
     foreach ($rows as $r) { $u = trim((string)($r['pedido_usuario'] ?? '')); if ($u !== '') $uSet[$u] = true; }
     $usuariosLista = array_keys($uSet); sort($usuariosLista, SORT_NATURAL | SORT_FLAG_CASE);
 
     // ---- agrega item → PEDIDO (chave: coligada + número; o nº se repete entre coligadas) ----
-    $mapaObras = bp_mapa_obras($pdo);
     $ped = [];
     foreach ($rows as $r) {
         $cc = (string)($r['coligada_cod'] ?? ''); $pn = (string)($r['pedido_numero'] ?? '');
         if ($pn === '') continue;
         $k = $cc . '|' . $pn;
         if (!isset($ped[$k])) {
-            $obraNome = $mapaObras[$cc] ?? ($cc === '1' ? 'CAPREM (várias obras)' : '');
+            $obraNome = bp_obra_label($r['obra_efetiva_nome'] ?? '', $r['obra_efetiva_fonte'] ?? '', $mapaRazao);
             $ped[$k] = ['numero' => $pn, 'coligada_cod' => $cc,
                 'coligada' => (trim((string)($r['coligada'] ?? '')) ?: coligada_nome($cc)),
                 'obra' => $obraNome, 'data' => (string)($r['pedido_data'] ?? ''), 'status' => (string)($r['pedido_status'] ?? ''),
                 'ccusto_cod' => (string)($r['ccusto_cod'] ?? ''), 'solic' => trim((string)($r['solic_numeros'] ?? '')),
-                'colidmov' => trim((string)($r['solic_colidmov'] ?? '')), 'centro_custo' => '',
+                'colidmov' => trim((string)($r['solic_colidmov'] ?? '')),
+                'centro_custo' => trim((string)($r['obra_cod'] ?? '')), 'obra_fonte' => trim((string)($r['obra_efetiva_fonte'] ?? '')),
+                'obra_razao' => trim((string)($r['obra_efetiva_nome'] ?? '')), 'ccusto_nome' => trim((string)($r['ccusto_nome'] ?? '')),
                 'usuario' => trim((string)($r['pedido_usuario'] ?? '')), 'obs' => [],
                 'fornecedores' => [], 'n_itens' => 0, 'total' => 0.0, 'amostra' => []];
         }
@@ -177,31 +169,8 @@ try {
         if ($ob !== '' && count($ped[$k]['obs']) < 3 && !in_array($ob, $ped[$k]['obs'], true)) $ped[$k]['obs'][] = $ob;
         if (($ped[$k]['usuario'] ?? '') === '' && trim((string)($r['pedido_usuario'] ?? '')) !== '') $ped[$k]['usuario'] = trim((string)$r['pedido_usuario']);
     }
-    // ---- CAPREM (coligada 1): descobre a OBRA pelo CENTRO DE CUSTO da solicitação que gerou o PC ----
-    // (o Murilo: "vê qual SC gerou o pedido, olha a obra dela no de-para e traz CAPREM/Cajá")
-    $ccMap = bp_mapa_ccusto($pdo);
-    $capremKeys = [];
-    foreach ($ped as $k => $p) if ($p['coligada_cod'] === '1') $capremKeys[] = $k;
-    if ($capremKeys) {
-        $cms = [];
-        foreach ($capremKeys as $k) if (($ped[$k]['colidmov'] ?? '') !== '') $cms[] = $ped[$k]['colidmov'];
-        $ccPorCm = $cms ? bp_cc_por_colidmov($cms) : [];
-        foreach ($capremKeys as $k) {
-            $cm = $ped[$k]['colidmov'] ?? '';
-            $cu = ($cm !== '' && isset($ccPorCm[$cm])) ? $ccPorCm[$cm] : '';
-            if ($cu !== '') {
-                $ped[$k]['centro_custo'] = $cu;
-                $ped[$k]['obra'] = isset($ccMap[$cu]) ? ('CAPREM/' . $ccMap[$cu]) : ('CAPREM · c.custo ' . $cu);
-            } else {
-                $ped[$k]['obra'] = 'CAPREM (obra não identificada)';   // SC fora da fila (só guarda as pendentes)
-            }
-        }
-    }
-
     $lista = [];
     foreach ($ped as $p) {
-        // filtro por obra CAPREM: só passa quem casou o centro de custo da ficha
-        if ($ccustoFiltro !== '' && ltrim((string)($p['centro_custo'] ?? ''), '0') !== $ccustoFiltro) continue;
         $p['fornecedores'] = array_keys($p['fornecedores']); $p['total'] = round($p['total'], 2);
         $p['status_label'] = bp_status_label($p['status']);
         $lista[] = $p;

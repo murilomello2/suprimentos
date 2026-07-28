@@ -3438,7 +3438,7 @@ async function bpInit(){
     try{ const d=await (await fetch('actions/obras.php?lista&me='+encodeURIComponent((EU&&EU.bitrix_id)||'')+'&_='+Date.now())).json();
       const sel=document.getElementById('bpObra'); if(sel&&d.obras){
         const obs=d.obras.filter(o=>(o.compra_coligada_cod||o.coligada_cod)).sort((a,b)=>a.nome.localeCompare(b.nome));
-        sel.innerHTML='<option value="">Todas as obras</option>'+obs.map(o=>'<option value="'+o.id+'">'+esc((String(o.compra_coligada_cod||'')==='1'?'CAPREM/':'')+o.nome)+'</option>').join('');
+        sel.innerHTML='<option value="">Todas as obras</option>'+obs.map(o=>'<option value="'+o.id+'">'+esc(o.nome)+'</option>').join('');
       } }catch(e){}
   }
 }
@@ -3492,7 +3492,7 @@ function bpRender(){
     const obsTxt=(p.obs||[]).join(' · ');
     h+='<tr>'
       +'<td style="text-align:left;'+cut+'"><b>'+esc(String(p.numero).replace(/^0+/,''))+'</b></td>'
-      +'<td style="text-align:left;font-size:11px;'+cut+'" title="'+esc(p.obra||p.coligada||'')+'">'+(p.obra?esc(p.obra):'<span class="muted">'+esc(p.coligada||'—')+'</span>')+'</td>'
+      +'<td style="text-align:left;font-size:11px;'+cut+'" title="'+esc((p.obra||p.coligada||'')+(p.obra_fonte==='RATEIO_CAPRETZ'?' — compra da CAPRETZ rateada p/ esta obra':'')+(p.centro_custo?' · c.custo '+p.centro_custo:'')+(p.ccusto_nome?' ('+p.ccusto_nome+')':''))+'">'+(p.obra?esc(p.obra):'<span class="muted">'+esc(p.coligada||'—')+'</span>')+'</td>'
       +'<td style="text-align:left;font-size:11px;'+cut+'" title="'+esc(forn)+'">'+esc(forn)+'</td>'
       +'<td style="text-align:left;font-size:11px;overflow:hidden" title="'+esc(itensTxt+(obsTxt?(' — '+obsTxt):''))+'">'
         +'<div style="'+cut+'">'+esc(itensTxt||(p.n_itens+' item(ns)'))+'</div>'
@@ -3515,7 +3515,7 @@ function bpRender(){
     if(d.pagina<d.paginas) nav+=btn(d.pagina+1,'próxima ›');
     h+=nav+'</div>';
   }
-  h+='</div><div class="note">Consulta ao TOTVS (somente leitura). A busca cobre <b>descrição do item, observação digitada, fornecedor, nº do pedido e usuário</b>. <b>Clique no cabeçalho</b> p/ ordenar todos os pedidos da busca. Texto longo aparece truncado — passe o mouse pra ver inteiro, ou clique no 👁 pro pedido completo.</div>';
+  h+='</div><div class="note">Consulta ao TOTVS (somente leitura). A busca cobre <b>descrição do item, observação digitada, fornecedor, nº do pedido e usuário</b>. <b>Clique no cabeçalho</b> p/ ordenar todos os pedidos da busca. Texto longo aparece truncado — passe o mouse pra ver inteiro, ou clique no 👁 pro pedido completo. A <b>obra</b> vem do TOTVS já resolvida: <b>CAPRETZ/&lt;obra&gt;</b> = compra da CAPRETZ rateada para aquela obra; <b>CAPRETZ</b> sozinho = compra da própria CAPRETZ.</div>';
   w.innerHTML=h;
 }
 /* ===================== DASHBOARDS ===================== */

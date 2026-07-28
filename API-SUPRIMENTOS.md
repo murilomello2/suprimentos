@@ -129,8 +129,7 @@ Aparece preenchido quando o item já tem cotação. É o que permite montar o bo
   "propostas_recebidas": 3,
   "melhor_oferta": 5111.14,
   "quantas_cotacoes": 1,
-  "detalhe_url": "api.php?recurso=cotacao&id=78",
-  "abrir_no_cockpit": "https://appdemo.capremconstrutora.com.br/suprimentos/#cotacao-78"
+  "detalhe_url": "api.php?recurso=cotacao&id=78"
 }
 ```
 

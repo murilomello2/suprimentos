@@ -42,6 +42,72 @@ require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/cronograma.php';
 require_once __DIR__ . '/../includes/solic.php';
 
+
+/* Rede de segurança contra DEPLOY PARCIAL: se o FTP entregar esta action antes do includes/solic.php,
+   a tela cairia com "undefined function". As definições canônicas vivem em includes/solic.php; estas
+   só entram em cena enquanto o include não chega, e somem sozinhas quando ele chega. */
+if (!function_exists('solic_cobertura')) {
+    function solic_cobertura($pdo) {
+        $cov = [];
+        $add = function ($col, $num, $seq, $codprd, $prod, $status, $cid, $ctit) use (&$cov) {
+            $col = trim((string)$col); $num = trim((string)$num);
+            if ($col === '' || $num === '') return;
+            $seq = trim((string)$seq); $codprd = trim((string)$codprd);
+            $k = $col . '|' . $num;
+            $mk = $seq !== '' ? ('s:' . $seq) : ($codprd !== '' ? ('c:' . $codprd) : ('p:' . sol_norm($prod)));
+            if (!isset($cov[$k])) $cov[$k] = [];
+            $cur = $cov[$k][$mk] ?? null;
+            if ($cur === null || ($cur['status'] !== 'coberto' && $status === 'coberto'))
+                $cov[$k][$mk] = ['status' => $status, 'cid' => (int)$cid, 'ctit' => $ctit];
+        };
+        try {
+            $cotPed = [];
+            foreach ($pdo->query("SELECT cotacao_id, coligada, num_pedido FROM cotacao_pedido WHERE num_pedido IS NOT NULL AND num_pedido<>''") as $r)
+                $cotPed[(int)$r['cotacao_id']][trim((string)$r['coligada'])] = trim((string)$r['num_pedido']);
+            $cotNCol = [];
+            foreach ($pdo->query("SELECT cotacao_id, COUNT(DISTINCT solic_coligada) n FROM cotacao_item WHERE solic_coligada IS NOT NULL AND solic_coligada<>'' GROUP BY cotacao_id") as $r)
+                $cotNCol[(int)$r['cotacao_id']] = (int)$r['n'];
+            foreach ($pdo->query("SELECT ci.cotacao_id cid, ci.solic_coligada col, ci.solic_numero num, ci.solic_seq seq, ci.solic_codprd codprd, ci.descricao prod, c.status st, c.num_pedido hdr, c.titulo ctit
+                                  FROM cotacao_item ci JOIN cotacao c ON c.id=ci.cotacao_id
+                                  WHERE ci.solic_coligada IS NOT NULL AND ci.solic_coligada<>'' AND ci.solic_numero IS NOT NULL AND ci.solic_numero<>''") as $r) {
+                $cid = (int)$r['cid']; $colPc = $cotPed[$cid][trim((string)$r['col'])] ?? '';
+                $isMulti = ($cotNCol[$cid] ?? 1) > 1;
+                $effPc = $colPc !== '' ? $colPc : ($isMulti ? '' : trim((string)$r['hdr']));
+                $status = (($r['st'] === 'finalizada') || $effPc !== '') ? 'coberto' : 'cotando';
+                $add($r['col'], $r['num'], $r['seq'], $r['codprd'], $r['prod'], $status, $cid, $r['ctit']);
+            }
+            foreach ($pdo->query("SELECT c.id cid, o.coligada col, o.numero num, ci.descricao prod, c.status st, c.num_pedido pc, c.titulo ctit
+                                  FROM solic_overlay o JOIN cotacao c ON c.id=o.cotacao_id JOIN cotacao_item ci ON ci.cotacao_id=c.id
+                                  WHERE o.cotacao_id IS NOT NULL AND (ci.solic_coligada IS NULL OR ci.solic_coligada='')") as $r) {
+                $status = (($r['st'] === 'finalizada') || trim((string)$r['pc']) !== '') ? 'coberto' : 'cotando';
+                $add($r['col'], $r['num'], '', '', $r['prod'], $status, (int)$r['cid'], $r['ctit']);
+            }
+        } catch (Throwable $e) { return []; }
+        return $cov;
+    }
+    function solic_item_cobertura(array &$itens, array $cmap) {
+        $nameCount = [];
+        foreach ($itens as $c) { $nn = sol_norm($c['produto'] ?? ''); $nameCount[$nn] = ($nameCount[$nn] ?? 0) + 1; }
+        $nCob = 0; $nAny = 0; $cots = [];
+        foreach ($itens as &$it) {
+            $sq = trim((string)($it['seq'] ?? '')); $cp = trim((string)($it['codprd'] ?? '')); $nn = sol_norm($it['produto'] ?? '');
+            $m = ($sq !== '') ? ($cmap['s:' . $sq] ?? null) : null;
+            if ($m === null && $cp !== '') $m = $cmap['c:' . $cp] ?? null;
+            if ($m === null && ($nameCount[$nn] ?? 0) <= 1) $m = $cmap['p:' . $nn] ?? null;
+            if ($m) { $it['cot'] = $m['status']; $it['cot_cid'] = $m['cid']; $it['cot_ctit'] = $m['ctit'];
+                      if (!empty($m['cid'])) $cots[$m['cid']] = $m['ctit']; }
+            else { $it['cot'] = 'vazio'; }
+            if ($it['cot'] === 'coberto') $nCob++;
+            if ($it['cot'] !== 'vazio')   $nAny++;
+        }
+        unset($it);
+        $nI = count($itens);
+        $lista = []; foreach ($cots as $cid => $tit) $lista[] = ['id' => $cid, 'titulo' => $tit];
+        return ['cobertura' => ($nI > 0 && $nCob === $nI) ? 'total' : ($nAny > 0 ? 'parcial' : 'vazio'),
+                'n_cobertos' => $nCob, 'n_tocados' => $nAny, 'cotacoes' => $lista];
+    }
+}
+
 define('API_VERSAO',      '1.0');
 define('API_CHAVES_FILE', __DIR__ . '/../data/.api_keys.json');
 define('API_CACHE_DIR',   __DIR__ . '/../data');
@@ -137,13 +203,17 @@ function api_sc_status_label($s) {
                  'pedido_criado' => 'Pedido criado', 'cancelado' => 'Cancelado'];
     return $M[$s] ?? $s;
 }
+/** Nome da obra da SC quando não existe de-para — mesma regra da tela (actions/solicitacoes.php). */
+function api_obra_sc_default($coligada, $obraCod) {
+    static $CC = ['001'=>'Comercial Americana','010'=>'Sede','015'=>'MKT','020'=>'SAT','032'=>'Licel',
+                  '033'=>'Obras SAT','036'=>'Piamonte','039'=>'Contrap. Piamonte','040'=>'Cajá','041'=>'Espazo','042'=>'Prades'];
+    if (stripos((string)$coligada, 'CAPRETZ') !== false && isset($CC[$obraCod])) return $CC[$obraCod];
+    $n = preg_replace('/\s+(EMPREENDIMENTO|EMPREENDIMENTOS).*/i', '', (string)$coligada);
+    return trim($n) ?: (string)$coligada;
+}
 function api_cobertura_label($c) {
     static $M = ['vazio' => 'Sem cotação', 'parcial' => 'Parcialmente cotada', 'total' => 'Totalmente cotada'];
     return $M[$c] ?? $c;
-}
-function api_url_cockpit() {
-    $host = $_SERVER['HTTP_HOST'] ?? 'appdemo.capremconstrutora.com.br';
-    return 'https://' . $host . '/suprimentos/';
 }
 
 /* ─────────────────────────── obras ─────────────────────────── */
@@ -292,7 +362,6 @@ function api_radar_linha($r, $obra, $tasks, $cotIdx, $hoje) {
             'melhor_oferta'       => api_num($u['melhor']),
             'quantas_cotacoes'    => (int)$cot['n'],
             'detalhe_url'         => 'api.php?recurso=cotacao&id=' . (int)$u['id'],
-            'abrir_no_cockpit'    => api_url_cockpit() . '#cotacao-' . (int)$u['id'],
         ];
     }
     return [
@@ -523,7 +592,7 @@ function api_solicitacoes($pdo) {
             'coligada'        => $s['coligada'],
             'centro_custo'    => $s['obra_cod'],
             'obra_id'         => $fic['obra_id'] ?? null,
-            'obra'            => $o['nome_comercial'] ?? null,
+            'obra'            => ($o['nome_comercial'] ?? '') ?: api_obra_sc_default($s['coligada'], $s['obra_cod']),
             'comprador'       => $o['comprador_nome'] ?? null,
             'emissao'         => $s['emissao'],
             'dias_em_aberto'  => $dias,

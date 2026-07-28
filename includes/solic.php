@@ -3,6 +3,9 @@
  * Leitura da fila de SOLICITAÇÕES DE COMPRA (Supabase alimentado pelo Power Automate/TOTVS).
  * Tabela `solicitacoes_fila` — item a item, SOMENTE LEITURA (anon/RLS). A chave nunca vai ao front.
  * Solicitação = agrupamento por (coligada, numero). Só há PENDENTES na fila.
+ *
+ * A COBERTURA de cotação por item mora aqui (solic_cobertura/solic_item_cobertura) porque a tela de
+ * Solicitações e a API de leitura (actions/api.php) precisam da mesma resposta — não pode divergir.
  */
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/supabase.php'; // reusa sb_http (curl genérico)

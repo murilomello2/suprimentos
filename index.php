@@ -3564,7 +3564,11 @@ function dashInit(){
   dashActive(); dashLoad();
 }
 function dashActive(){ DASH_TABS.forEach(t=>{ const b=document.getElementById('dtab-'+t[0]); if(b) b.classList.toggle('on',t[0]===DASH.tab); }); }
-function dashTab(t){ DASH.tab=t; DASH.gfiltro=null; DASH.cfiltro=null; dashActive(); renderDash(); }
+function dashTab(t){ DASH.tab=t; DASH.gfiltro=null; DASH.cfiltro=null;
+  // os filtros de obra/status são POR PAINEL: a lista de obras do gerente e a do comprador não
+  // são as mesmas, e carregar a escolha de um pro outro deixava a tela vazia sem explicação.
+  DASH.cobra=''; DASH.cstatus='';
+  dashActive(); renderDash(); }
 async function dashLoad(){
   const w=document.getElementById('dwrap');
   w.innerHTML='<div class="dempty">Carregando dados das obras…</div>';

@@ -317,25 +317,43 @@ try {
     }
 
     /* MESMA COMPRA REPARTIDA ENTRE OBRAS.
-       Um serviço contratado uma vez e dividido entre várias obras vira N pedidos idênticos, um por
-       obra (ex.: cerca de R$ 152.000 dividida entre as 7 obras do Vilas = 7 PCs de R$ 21.714,30).
-       Sem marcação isso parece pedido duplicado. Aqui só CONSTATAMOS a coincidência — mesmo
-       fornecedor, mesmo valor, mesma data, obras diferentes — e deixamos o usuário ler a observação
-       para confirmar que é rateio. Obra igual NÃO conta (aí seria de fato repetição). */
-    $grp = [];
+       Um serviço contratado uma vez e dividido entre obras vira N pedidos idênticos, um por obra
+       (ex.: cerca de R$ 152.000 dividida entre as 7 obras do Vilas = 7 PCs de R$ 21.714,30). Sem
+       marcação isso parece pedido duplicado.
+       Chave = fornecedor + valor. A data NÃO entra na chave porque as obras não emitem no mesmo dia
+       (o PC 311 do Vilas saiu em 28/07 e os outros cinco em 27/07 — pela data ele ficava de fora).
+       Mas a data também não pode ser ignorada: o mesmo prestador cobra o mesmo valor de obras
+       diferentes em MESES diferentes, e aí não é rateio. Então agrupamos por proximidade: pedidos da
+       mesma chave separados por mais de JANELA dias viram grupos distintos.
+       Só marcamos quando são OBRAS DIFERENTES — obra repetida seria repetição de verdade. */
+    define('BP_RATEIO_JANELA_DIAS', 15);
+    $porChave = [];
     foreach ($lista as $i => $p) {
         $forn = implode(',', (array)$p['fornecedores']);
-        if ($forn === '' || !$p['total']) continue;
-        $k = $forn . '|' . number_format((float)$p['total'], 2, '.', '') . '|' . substr((string)$p['data'], 0, 10);
-        $grp[$k][] = $i;
+        $dt   = substr((string)$p['data'], 0, 10);
+        if ($forn === '' || !$p['total'] || $dt === '') continue;
+        $porChave[$forn . '|' . number_format((float)$p['total'], 2, '.', '')][] = ['i' => $i, 't' => strtotime($dt)];
     }
-    foreach ($grp as $idxs) {
-        $obras = [];
-        foreach ($idxs as $i) $obras[(string)$lista[$i]['obra']] = 1;
-        if (count($idxs) < 2 || count($obras) < 2) continue;   // só marca quando são OBRAS diferentes
-        $n = count($idxs); $pos = 0;
-        foreach ($idxs as $i) { $lista[$i]['repartido_n'] = $n; $lista[$i]['repartido_i'] = ++$pos;
-                                $lista[$i]['repartido_obras'] = array_keys($obras); }
+    foreach ($porChave as $itens) {
+        if (count($itens) < 2) continue;
+        usort($itens, fn($a, $b) => $a['t'] <=> $b['t']);
+        $bloco = [];
+        $fechar = function ($bloco) use (&$lista) {
+            $obras = [];
+            foreach ($bloco as $x) $obras[(string)$lista[$x['i']]['obra']] = 1;
+            if (count($bloco) < 2 || count($obras) < 2) return;
+            $n = count($bloco); $pos = 0;
+            foreach ($bloco as $x) {
+                $lista[$x['i']]['repartido_n'] = $n;
+                $lista[$x['i']]['repartido_i'] = ++$pos;
+                $lista[$x['i']]['repartido_obras'] = array_keys($obras);
+            }
+        };
+        foreach ($itens as $it) {
+            if ($bloco && ($it['t'] - end($bloco)['t']) > BP_RATEIO_JANELA_DIAS * 86400) { $fechar($bloco); $bloco = []; }
+            $bloco[] = $it;
+        }
+        $fechar($bloco);
     }
 
     // ---- ORDENAÇÃO por coluna, sobre a LISTA INTEIRA (não só a página) — depois é que pagina ----

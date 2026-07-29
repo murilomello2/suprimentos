@@ -554,10 +554,11 @@ function api_solicitacoes($pdo) {
     $sol  = solic_agrupar($rows);
     $cov  = solic_cobertura($pdo);
 
-    // de-para (coligada + centro de custo) → nome comercial da obra + comprador
+    // de-para (coligada + centro de custo) → obra + comprador, com o nome já reconciliado com o
+    // cadastro da obra (a mesma obra chegava a aparecer como "PEDRA AZUL" aqui e "Diamond" no radar)
     $map = [];
-    foreach ($pdo->query("SELECT coligada, obra_cod, nome_comercial, comprador_nome, radar_obra_id FROM solic_obra") as $o)
-        $map[$o['coligada'] . '|' . $o['obra_cod']] = $o;
+    if (function_exists('solic_obra_map')) $map = solic_obra_map($pdo);
+    else foreach ($pdo->query("SELECT * FROM solic_obra") as $o) $map[$o['coligada'].'|'.$o['obra_cod']] = $o;   // deploy parcial
 
     $ov = [];
     foreach ($pdo->query("SELECT coligada, numero, status, observacoes, cotacao_id FROM solic_overlay") as $o)
@@ -575,7 +576,7 @@ function api_solicitacoes($pdo) {
     $out = [];
     foreach ($sol as $s) {
         $k    = $s['coligada'] . '|' . $s['obra_cod'];
-        $o    = $map[$k] ?? null;
+        $o    = function_exists('solic_obra_de') ? solic_obra_de($map,$s['coligada'],$s['obra_cod']) : ($map[$k] ?? null);
         $ovr  = $ov[$s['coligada'] . '|' . $s['numero']] ?? null;
         $itens = $s['itens'];
         $cb   = solic_item_cobertura($itens, $cov[$s['coligada'] . '|' . $s['numero']] ?? []);

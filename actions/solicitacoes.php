@@ -107,7 +107,11 @@ try {
         $rows = solic_fila_all();
         $sol = solic_agrupar($rows);
         // mapas do cockpit
-        $obraMap = []; foreach ($pdo->query("SELECT * FROM solic_obra") as $o) $obraMap[$o['coligada'].'|'.$o['obra_cod']] = $o;
+        // nome já reconciliado com o cadastro da obra (ver solic_obra_map em includes/solic.php):
+        // se ninguém personalizou o nome comercial e existe vínculo com o radar, o nome do RADAR vence —
+        // era por isso que a mesma obra era "PEDRA AZUL" aqui e "Diamond" no radar.
+        $obraMap = function_exists('solic_obra_map') ? solic_obra_map($pdo) : [];
+        if (!$obraMap) { foreach ($pdo->query("SELECT * FROM solic_obra") as $o) $obraMap[$o['coligada'].'|'.$o['obra_cod']] = $o; }
         $ovMap = []; foreach ($pdo->query("SELECT * FROM solic_overlay") as $v) $ovMap[$v['coligada'].'|'.$v['numero']] = $v;
 
         if (isset($_GET['obras'])) {
@@ -117,7 +121,7 @@ try {
                 if (!isset($pares[$k])) $pares[$k] = ['coligada'=>$s['coligada'],'obra_cod'=>$s['obra_cod'],'n'=>0];
                 $pares[$k]['n']++; }
             $out = [];
-            foreach ($pares as $k => $p) { $o = $obraMap[$k] ?? null;
+            foreach ($pares as $k => $p) { $o = function_exists('solic_obra_de') ? solic_obra_de($obraMap,$p['coligada'],$p['obra_cod']) : ($obraMap[$k] ?? null);
                 $out[] = ['coligada'=>$p['coligada'],'obra_cod'=>$p['obra_cod'],'n'=>$p['n'],
                     'nome_comercial'=>$o['nome_comercial'] ?? sol_nome_default($p['coligada'],$p['obra_cod']),
                     'cnpj'=>$o['cnpj'] ?? '', 'endereco'=>$o['endereco'] ?? '',
@@ -148,7 +152,8 @@ try {
         // LISTA + DASHBOARD
         $lista = []; $dash = ['total'=>0,'b'=>['r'=>0,'a'=>0,'l'=>0,'c'=>0],'por_obra'=>[],'por_comprador'=>[],'por_status'=>[]];
         foreach ($sol as $s) {
-            $k = $s['coligada'].'|'.$s['obra_cod']; $o = $obraMap[$k] ?? null;
+            $k = $s['coligada'].'|'.$s['obra_cod'];
+            $o = function_exists('solic_obra_de') ? solic_obra_de($obraMap,$s['coligada'],$s['obra_cod']) : ($obraMap[$k] ?? null);
             $nomeObra = $o['nome_comercial'] ?? sol_nome_default($s['coligada'], $s['obra_cod']);
             $compNome = $o['comprador_nome'] ?? ''; $compId = $o['comprador_id'] ?? '';
             $ov = $ovMap[$s['coligada'].'|'.$s['numero']] ?? null;

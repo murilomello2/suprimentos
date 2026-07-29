@@ -129,6 +129,90 @@ function solic_item_cobertura(array &$itens, array $cmap) {
             'n_cobertos' => $nCob, 'n_tocados' => $nAny, 'cotacoes' => $lista];
 }
 
+/** Nome comercial PADRÃO de uma obra da SC (o que o de-para pré-preenche quando ninguém digitou nada). */
+if (!function_exists('solic_nome_default')) {
+    function solic_nome_default($coligada, $obraCod) {
+        static $CC = ['001'=>'Comercial Americana','010'=>'Sede','015'=>'MKT','020'=>'SAT','032'=>'Licel',
+                      '033'=>'Obras SAT','036'=>'Piamonte','039'=>'Contrap. Piamonte','040'=>'Cajá','041'=>'Espazo','042'=>'Prades'];
+        if (stripos((string)$coligada, 'CAPRETZ') !== false && isset($CC[$obraCod])) return $CC[$obraCod];
+        $n = preg_replace('/\s+(EMPREENDIMENTO|EMPREENDIMENTOS).*/i', '', (string)$coligada);
+        return trim($n) ?: (string)$coligada;
+    }
+}
+
+/**
+ * De-para (coligada|centro de custo) -> dados da obra, JÁ COM O NOME RECONCILIADO COM O RADAR.
+ *
+ * Duas coisas que o Murilo apontou e que esta função resolve:
+ *  (1) A MESMA obra aparecia com nomes diferentes conforme a tela — "PEDRA AZUL" nas Solicitações e
+ *      "Diamond" no Radar. O de-para existe e aponta certo (radar_obra_id), só que o nome_comercial
+ *      tinha sido salvo com o valor auto-preenchido (a razão social sem o juridiquês). Agora, quando
+ *      o nome_comercial é EXATAMENTE o valor padrão (ninguém personalizou), o nome do RADAR vence.
+ *      Se alguém digitou um nome próprio, esse nome é respeitado.
+ *  (2) A mesma obra aparece em VÁRIAS linhas porque o TOTVS emite SC em mais de um centro de custo da
+ *      mesma coligada (PEDRA AZUL 001 e 002, LEGACY 001 e 002...). Aí só uma das linhas costuma ter o
+ *      vínculo com o radar. Fora da CAPRETZ a coligada JÁ É a obra, então as irmãs herdam o vínculo.
+ *      ⚠️ Na CAPRETZ (coligada 1) NÃO herda: lá é o centro de custo que separa Cajá, Prades, Licel, Sede.
+ */
+function solic_obra_map($pdo) {
+    $radar = [];
+    try { foreach ($pdo->query("SELECT id, nome FROM obra") as $o) $radar[(int)$o['id']] = $o['nome']; } catch (Throwable $e) {}
+
+    $linhas = [];
+    try { foreach ($pdo->query("SELECT * FROM solic_obra") as $o) $linhas[] = $o; } catch (Throwable $e) { return []; }
+
+    // vínculo de radar por COLIGADA (só p/ quem não é CAPRETZ), p/ as linhas irmãs herdarem
+    $porColigada = [];
+    foreach ($linhas as $o) {
+        $col = trim((string)$o['coligada']);
+        if ($col === '' || stripos($col, 'CAPRETZ') !== false) continue;
+        $rid = (int)($o['radar_obra_id'] ?? 0);
+        if ($rid && isset($radar[$rid]) && !isset($porColigada[$col])) $porColigada[$col] = $rid;
+    }
+
+    $map = [];
+    foreach ($linhas as $o) {
+        $col = trim((string)$o['coligada']); $cc = (string)$o['obra_cod'];
+        $rid = (int)($o['radar_obra_id'] ?? 0);
+        $herdado = false;
+        if ((!$rid || !isset($radar[$rid])) && isset($porColigada[$col])) { $rid = $porColigada[$col]; $herdado = true; }
+
+        $nome    = trim((string)($o['nome_comercial'] ?? ''));
+        $padrao  = solic_nome_default($col, $cc);
+        $usaRadar = $rid && isset($radar[$rid]) && ($nome === '' || $nome === $padrao);
+        if ($usaRadar) $nome = $radar[$rid];
+
+        $o['nome_comercial']  = $nome ?: $padrao;
+        $o['radar_obra_id']   = $rid ?: null;
+        $o['radar_herdado']   = $herdado;          // veio de uma linha irmã da mesma coligada
+        $o['nome_do_radar']   = $usaRadar;         // o nome exibido é o do cadastro da obra
+        $map[$col . '|' . $cc] = $o;
+    }
+
+    // Entrada CORINGA por coligada ("<coligada>|*"). Serve para os centros de custo que aparecem na fila
+    // do TOTVS mas NÃO têm linha salva no de-para (é o caso do 002/003 de quase toda obra): sem isso a
+    // SC ficava órfã, sem obra e sem comprador. Fora da CAPRETZ a coligada já é a obra, então dá p/ herdar.
+    foreach ($porColigada as $col => $rid) {
+        if (!isset($radar[$rid])) continue;
+        $base = null;
+        foreach ($map as $k => $v) if (strpos($k, $col . '|') === 0 && (int)($v['radar_obra_id'] ?? 0) === $rid) { $base = $v; break; }
+        $map[$col . '|*'] = [
+            'coligada' => $col, 'obra_cod' => '', 'nome_comercial' => $radar[$rid],
+            'cnpj' => $base['cnpj'] ?? '', 'endereco' => $base['endereco'] ?? '',
+            'comprador_id' => $base['comprador_id'] ?? '', 'comprador_nome' => $base['comprador_nome'] ?? '',
+            'radar_obra_id' => $rid, 'radar_herdado' => true, 'nome_do_radar' => true, 'coringa' => true,
+        ];
+    }
+    return $map;
+}
+
+/** Resolve o de-para de um par (coligada, centro de custo), caindo no coringa da coligada quando não há
+ *  linha própria. Use SEMPRE isto em vez de $map[$col.'|'.$cc] direto. */
+function solic_obra_de($map, $coligada, $obraCod) {
+    $col = trim((string)$coligada);
+    return $map[$col . '|' . $obraCod] ?? $map[$col . '|*'] ?? null;
+}
+
 /** Agrupa a fila (linhas item-a-item) em SOLICITAÇÕES por (coligada, numero). */
 function solic_agrupar($rows) {
     $sol = [];

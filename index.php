@@ -440,6 +440,7 @@
         <span style="width:1px;height:22px;background:var(--line);align-self:center"></span>
         <label class="muted" style="font-size:12px;align-self:center">Colorir <select id="mcolor" onchange="renderMatriz()" style="margin-left:4px"><option value="status">Status</option><option value="prazo">Prazo de cotação</option></select></label>
         <label class="muted" style="font-size:12px;align-self:center">Organizar <select id="morder" onchange="renderMatriz()" style="margin-left:4px"><option value="grupo">Por grupo</option><option value="prazo">Por prazo (urgente 1º)</option><option value="nome">Por nome</option></select></label>
+        <label class="muted" style="font-size:12px;align-self:center" title="ordena as COLUNAS: a obra que fecha primeiro vem na frente — lê a tela como uma linha do tempo">Obras <select id="mobraord" onchange="renderMatriz()" style="margin-left:4px"><option value="">Ordem manual</option><option value="prazo">Por data de fechar</option></select></label>
         <div class="search"><span class="material-icons" style="color:var(--muted)">search</span>
           <input id="mq" placeholder="Filtrar serviço…" oninput="renderMatriz()"></div>
       </div>
@@ -1488,7 +1489,21 @@ function renderMatriz(){
   let agrupado=true;
   if(orderBy==='prazo'){ servicos.sort((a,b)=>earliest(a).localeCompare(earliest(b))); agrupado=false; }
   else if(orderBy==='nome'){ servicos.sort((a,b)=>a.nome.localeCompare(b.nome,'pt')); agrupado=false; }
+  /* COLUNAS COMO LINHA DO TEMPO (pedido do Murilo): com "Obras › Por data de fechar", a obra que precisa
+     fechar primeiro vira a 1ª coluna. A data é POR SERVIÇO × OBRA, então a chave de cada obra é a MENOR
+     data de fim de cotação entre os serviços VISÍVEIS — filtre um item (ex.: "elevad") e a ordem passa a
+     ser exatamente a fila daquele item. Obra sem data vai pro fim. */
+  if(gv('mobraord')==='prazo'){
+    const keyObra=o=>{ let min=null;
+      for(const sv of servicos){ const it=idx[sv.ordem+'|'+o]; const f=it&&it.fim_cotacao;
+        if(f && (min===null || f<min)) min=f; }
+      return min||'9999-99-99'; };
+    const chave={}; obras.forEach(o=>chave[o]=keyObra(o));
+    obras=obras.slice().sort((a,b)=>chave[a].localeCompare(chave[b])||a.localeCompare(b,'pt'));
+    MAT_OBRA_ORDER=null;   // a ordem por data manda enquanto estiver ligada (o arrastar volta a valer ao desligar)
+  }
   MAT_SVCS_CUR=servicos;   // p/ expandir/recolher todos
+  MAT_OBRAS_CUR=obras;     // reatribui: a ordem pode ter mudado acima
   const mc=document.getElementById('mctrl');
   if(mc) mc.innerHTML=(servicos.length&&obras.length)?`<div class="bar" style="gap:6px;flex-wrap:wrap;align-items:center;padding:0">
     <button class="btn-ghost" style="padding:4px 10px" onclick="matExpandAll(true)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">unfold_more</span> Expandir serviços</button>
@@ -1498,7 +1513,15 @@ function renderMatriz(){
     <span class="muted" style="font-size:11px">— arraste os nomes das obras p/ reordenar · clique no ▸ de um serviço p/ ver quantitativo / verba / responsável / status</span></div>`:'';
   if(!servicos.length||!obras.length){document.getElementById('mwrap').innerHTML='<div class="empty">Sem dados para os filtros.</div>';return;}
   let html='<table class="mtable"><thead><tr><th class="svc-h">Serviço</th>'+
-    obras.map((o,oi)=>`<th class="mo-th" draggable="true" ondragstart="matDragStart(event,${oi})" ondragover="event.preventDefault();this.classList.add('mo-drag')" ondragleave="this.classList.remove('mo-drag')" ondrop="matDrop(event,${oi})" title="arraste p/ reordenar">${esc(o)}</th>`).join('')+'</tr></thead><tbody>';
+    obras.map((o,oi)=>{
+      let sub='';
+      if(gv('mobraord')==='prazo'){ let min=null;
+        for(const sv of servicos){ const it=idx[sv.ordem+'|'+o]; const f=it&&it.fim_cotacao; if(f&&(min===null||f<min)) min=f; }
+        if(min) sub=`<div style="font-size:9.5px;font-weight:600;color:${min<today?'var(--pend)':'var(--muted)'};margin-top:1px">fecha ${D(min)}</div>`;
+        else sub='<div style="font-size:9.5px;color:var(--muted);margin-top:1px">sem data</div>';
+      }
+      return `<th class="mo-th" draggable="true" ondragstart="matDragStart(event,${oi})" ondragover="event.preventDefault();this.classList.add('mo-drag')" ondragleave="this.classList.remove('mo-drag')" ondrop="matDrop(event,${oi})" title="arraste p/ reordenar">${esc(o)}${sub}</th>`;
+    }).join('')+'</tr></thead><tbody>';
   let grupo=null, grpCol=false;
   for(const s of servicos){
     if(agrupado && s.grupo!==grupo){ grupo=s.grupo; grpCol=MAT_COLLAPSED.has(grupo);
@@ -6290,10 +6313,86 @@ async function t20Expand(gid){
   }
 }
 function t20StCor(s){ return {'Finalizado':'#1F6B3B','Em Andamento':'#2b6cb0','Cotação Iniciada':'#a4761c','Com Pendências':'#c0392b','Não se aplica':'#8a9299','Não Iniciado':'#8a9299'}[s]||'#8a9299'; }
+/* FILA DE FECHAMENTO — a visão certa para o que se compra DE UMA VEZ (elevador, grua, esquadria, M.O.).
+   Aqui a grade de meses não diz nada: o que importa é "qual obra eu preciso fechar primeiro, com quantas
+   unidades e quanto de verba". Então vira uma grade IGUAL À DA MATRIZ — uma linha por item, uma coluna por
+   obra — só que as obras ordenadas pela DATA DE FECHAR, da mais próxima para a mais distante. */
+function t20Fila(gid){
+  const its=T20.expData[gid]||[];
+  const hoje=today;
+  const prox=[...new Set(its.map(x=>x.obra))];
+  const dataObra={};   // obra -> menor data de fechar entre os itens do grupo
+  its.forEach(x=>{ if(!x.fim) return; if(!dataObra[x.obra]||x.fim<dataObra[x.obra]) dataObra[x.obra]=x.fim; });
+  const obras=prox.sort((a,b)=>((dataObra[a]||'9999-99-99').localeCompare(dataObra[b]||'9999-99-99'))||a.localeCompare(b,'pt'));
+  const itens=[...new Set(its.map(x=>x.item))];
+  const cel={}; its.forEach(x=>{ cel[x.item+'|'+x.obra]=x; });
+
+  const cor=x=>{ const st=x.status||'Não Iniciado';
+    if(st==='Finalizado') return ['#e8f5ee','#1F6B3B'];
+    if(st==='Não se aplica') return ['#f4f5f6','#8a9299'];
+    if(x.fim && x.fim<hoje) return ['#fdeaea','#c0392b'];                 // já devia ter fechado
+    if(x.fim && (new Date(x.fim)-new Date(hoje))/864e5<=60) return ['#fdf4e3','#a4761c'];   // fecha nos próximos 60d
+    return ['#eef4fb','#2b5fa8']; };
+
+  let h='<div style="padding:10px 14px 14px">'
+    +'<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:9px">'
+    +'<span class="material-icons" style="font-size:17px;color:var(--dourado)">timeline</span>'
+    +'<b style="font-size:13.5px">Fila de fechamento</b>'
+    +'<span class="dmini">as obras estão em ordem de <b>quem precisa fechar primeiro</b></span></div>'
+    +'<div style="overflow-x:auto"><table class="mtable" style="border:none;min-width:'+Math.max(760,180+obras.length*132)+'px"><thead><tr>'
+    +'<th class="svc-h" style="text-align:left;min-width:176px">Item</th>';
+  obras.forEach(o=>{ const d=dataObra[o];
+    const atrasada=d&&d<hoje;
+    h+='<th style="min-width:126px;line-height:1.25">'+esc(o)
+      +'<div style="font-size:9.5px;font-weight:700;color:'+(atrasada?'var(--pend)':'var(--muted)')+';margin-top:2px">'+(d?('fecha '+D(d)):'sem data')+'</div></th>'; });
+  h+='<th style="min-width:118px;background:#eafaf0">TOTAL</th></tr></thead><tbody>';
+
+  itens.forEach(it=>{
+    h+='<tr><td class="svc-c" style="text-align:left"><b>'+esc(it)+'</b></td>';
+    let tv=0; const tq={};
+    obras.forEach(o=>{ const x=cel[it+'|'+o];
+      if(!x){ h+='<td class="t20c" style="color:#cfd6da">—</td>'; return; }
+      const [bg,fg]=cor(x);
+      tv+=Number(x.verba_total||0);
+      if(x.quant_total!=null){ const u=x.unidade||'un'; tq[u]=(tq[u]||0)+Number(x.quant_total); }
+      h+='<td class="t20c" style="background:'+bg+';padding:6px 5px;vertical-align:top" title="'+esc(it+' · '+o+' · '+(x.status||'')+(x.responsavel?' · '+x.responsavel:''))+'">'
+        +'<div style="font-weight:800;font-size:11.5px;color:'+fg+'">'+(x.fim?D(x.fim):'sem data')+'</div>'
+        +'<div style="font-size:11px;margin-top:2px">'+(x.quant_total!=null?(Number(x.quant_total).toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+esc(x.unidade||'')):'<span style="color:#aab">qtd —</span>')+'</div>'
+        +'<div style="font-size:11px;font-weight:700">'+BRL(x.verba_total)+'</div>'
+        +'<div style="font-size:9.5px;color:'+fg+';margin-top:2px">'+esc(x.status||'')+'</div>'
+        +(x.responsavel?'<div style="font-size:9.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(x.responsavel)+'</div>':'')
+        +'</td>'; });
+    const qs=Object.entries(tq).map(([u,v])=>v.toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+u).join(' · ');
+    h+='<td style="background:#f2faf5;text-align:center;vertical-align:top;padding:6px 5px">'
+      +(qs?'<div style="font-size:11px;font-weight:700">'+esc(qs)+'</div>':'')
+      +'<div style="font-size:12px;font-weight:800">'+BRL(tv)+'</div></td></tr>';
+  });
+
+  // rodapé: total do grupo + o que fecha nos próximos 90 dias
+  const abertos=its.filter(x=>x.status!=='Finalizado'&&x.status!=='Não se aplica');
+  const vencidos=abertos.filter(x=>x.fim&&x.fim<hoje);
+  const d90=abertos.filter(x=>x.fim&&x.fim>=hoje&&(new Date(x.fim)-new Date(hoje))/864e5<=90);
+  const som=a=>a.reduce((t,x)=>t+Number(x.verba_total||0),0);
+  h+='</tbody></table></div>'
+    +'<div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:10px">'
+    +t20Pill('var(--pend)','#fdeaea',vencidos.length+' já venceram',BRL(som(vencidos)))
+    +t20Pill('#a4761c','#fdf4e3',d90.length+' fecham em 90 dias',BRL(som(d90)))
+    +t20Pill('var(--verde-d)','#eafaf0',abertos.length+' em aberto',BRL(som(abertos)))
+    +'</div>'
+    +'<div class="dmini" style="margin-top:8px">Cada célula é a compra INTEIRA daquela obra — este grupo fecha de uma vez, não espalha por mês de consumo.</div>'
+    +'</div>';
+  return h;
+}
+function t20Pill(cor,bg,tit,sub){ return '<div style="background:'+bg+';border-radius:9px;padding:7px 12px;min-width:150px">'
+  +'<div style="font-size:12px;font-weight:800;color:'+cor+'">'+esc(tit)+'</div>'
+  +'<div style="font-size:11.5px;font-weight:700;color:#33404a">'+sub+'</div></div>'; }
+
 function t20ExpBox(gid){
   const its=T20.expData[gid];
   if(its===undefined) return '<div class="dmini" style="padding:11px 14px">Carregando os itens…</div>';
   if(!its.length) return '<div class="dmini" style="padding:11px 14px">Sem itens neste grupo (no recorte atual).</div>';
+  const g=((T20.data&&T20.data.grupos)||[]).find(x=>x.id===gid);
+  if(g && g.modo==='data_final' && its.some(x=>x.fim)) return t20Fila(gid);
   const rows=its.map(x=>'<tr><td style="text-align:left">'+esc(x.item)+'</td><td style="text-align:left">'+esc(x.obra)+'</td><td style="white-space:nowrap">'+t20MesLbl(x.mes)+'</td>'
     +'<td style="text-align:left;white-space:nowrap"><span style="color:'+t20StCor(x.status)+';font-weight:700">'+esc(x.status||'—')+'</span></td>'
     +'<td class="muted" style="text-align:left;font-size:11px">'+esc(x.janela||'')+(x.pct_fonte==='data final'?'':(x.consumido?' · andou '+x.consumido+'%':''))+'</td>'

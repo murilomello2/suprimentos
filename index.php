@@ -3547,7 +3547,9 @@ function bpRender(){
     const itensTxt=(p.amostra||[]).join(' · ');
     const obsTxt=(p.obs||[]).join(' · ');
     h+='<tr>'
-      +'<td style="text-align:left;'+cut+'"><b>'+esc(String(p.numero).replace(/^0+/,''))+'</b></td>'
+      +'<td style="text-align:left;'+cut+'"><b>'+esc(String(p.numero).replace(/^0+/,''))+'</b>'
+        +(p.repartido_n?'<div style="font-size:9px;font-weight:800;color:#a4761c;letter-spacing:.2px" title="'+esc('Mesmo fornecedor, mesmo valor e mesma data em '+p.repartido_n+' obras ('+(p.repartido_obras||[]).join(' · ')+'). Normalmente e uma compra unica repartida entre obras — confira a observacao do item.')+'">⇄ '+p.repartido_i+'/'+p.repartido_n+' OBRAS</div>':'')
+      +'</td>'
       +'<td style="text-align:left;font-size:11px;'+cut+'" title="'+esc((p.obra||p.coligada||'')+(p.obra_fonte==='RATEIO_CAPRETZ'?' — compra da CAPRETZ rateada p/ esta obra':'')+(p.centro_custo?' · c.custo '+p.centro_custo:'')+(p.ccusto_nome?' ('+p.ccusto_nome+')':''))+'">'+(p.obra?esc(p.obra):'<span class="muted">'+esc(p.coligada||'—')+'</span>')+'</td>'
       +'<td style="text-align:left;font-size:11px;'+cut+'" title="'+esc(forn)+'">'+esc(forn)+'</td>'
       +'<td style="text-align:left;font-size:11px;overflow:hidden" title="'+esc(itensTxt+(obsTxt?(' — '+obsTxt):''))+'">'
@@ -3571,7 +3573,7 @@ function bpRender(){
     if(d.pagina<d.paginas) nav+=btn(d.pagina+1,'próxima ›');
     h+=nav+'</div>';
   }
-  h+='</div><div class="note">Consulta ao TOTVS (somente leitura). A busca cobre <b>descrição do item, observação digitada, fornecedor, nº do pedido e usuário</b>. <b>Clique no cabeçalho</b> p/ ordenar todos os pedidos da busca. Texto longo aparece truncado — passe o mouse pra ver inteiro, ou clique no 👁 pro pedido completo. A <b>obra</b> vem do TOTVS já resolvida: <b>CAPRETZ/&lt;obra&gt;</b> = compra da CAPRETZ rateada para aquela obra; <b>CAPRETZ</b> sozinho = compra da própria CAPRETZ.</div>';
+  h+='</div><div class="note">Consulta ao TOTVS (somente leitura). A busca cobre <b>descrição do item, observação digitada, fornecedor, nº do pedido e usuário</b>. <b>Clique no cabeçalho</b> p/ ordenar todos os pedidos da busca. Texto longo aparece truncado — passe o mouse pra ver inteiro, ou clique no 👁 pro pedido completo. <b>⇄ n/N obras</b> = o mesmo fornecedor, valor e data aparecem em N obras — quase sempre uma compra única repartida (a observação do item costuma dizer o valor cheio). A <b>obra</b> vem do TOTVS já resolvida: <b>CAPRETZ/&lt;obra&gt;</b> = compra da CAPRETZ rateada para aquela obra; <b>CAPRETZ</b> sozinho = compra da própria CAPRETZ.</div>';
   w.innerHTML=h;
 }
 /* ===================== DASHBOARDS ===================== */

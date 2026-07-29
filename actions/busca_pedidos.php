@@ -316,6 +316,28 @@ try {
         $lista[] = $p;
     }
 
+    /* MESMA COMPRA REPARTIDA ENTRE OBRAS.
+       Um serviço contratado uma vez e dividido entre várias obras vira N pedidos idênticos, um por
+       obra (ex.: cerca de R$ 152.000 dividida entre as 7 obras do Vilas = 7 PCs de R$ 21.714,30).
+       Sem marcação isso parece pedido duplicado. Aqui só CONSTATAMOS a coincidência — mesmo
+       fornecedor, mesmo valor, mesma data, obras diferentes — e deixamos o usuário ler a observação
+       para confirmar que é rateio. Obra igual NÃO conta (aí seria de fato repetição). */
+    $grp = [];
+    foreach ($lista as $i => $p) {
+        $forn = implode(',', (array)$p['fornecedores']);
+        if ($forn === '' || !$p['total']) continue;
+        $k = $forn . '|' . number_format((float)$p['total'], 2, '.', '') . '|' . substr((string)$p['data'], 0, 10);
+        $grp[$k][] = $i;
+    }
+    foreach ($grp as $idxs) {
+        $obras = [];
+        foreach ($idxs as $i) $obras[(string)$lista[$i]['obra']] = 1;
+        if (count($idxs) < 2 || count($obras) < 2) continue;   // só marca quando são OBRAS diferentes
+        $n = count($idxs); $pos = 0;
+        foreach ($idxs as $i) { $lista[$i]['repartido_n'] = $n; $lista[$i]['repartido_i'] = ++$pos;
+                                $lista[$i]['repartido_obras'] = array_keys($obras); }
+    }
+
     // ---- ORDENAÇÃO por coluna, sobre a LISTA INTEIRA (não só a página) — depois é que pagina ----
     $cmp = [
         'numero'     => fn($a, $b) => ((int)ltrim($a['numero'], '0')) <=> ((int)ltrim($b['numero'], '0')),

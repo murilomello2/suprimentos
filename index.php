@@ -3549,7 +3549,8 @@ function bpRender(){
   w.innerHTML=h;
 }
 /* ===================== DASHBOARDS ===================== */
-let DASH={tab:null, D:null, oppByObra:{}};
+let DASH={tab:null, D:null, oppByObra:{}, cots:null, sols:null, carregandoF:false,
+         gfiltro:null, csub:'radar', cobra:'', cstatus:''};
 const DASH_TABS=[['comprador','Comprador','person'],['gerente','Gerente de Compras','groups'],['diretor','Diretor','insights']];   // aba "Oportunidades" DELETADA (23/jul, pedido do Murilo — não servia; a tela Oportunidades do MENU continua)
 function dashAllowed(){ const papel=(EU&&EU.papel)||''; if(IS_ADMIN||papel==='diretor') return DASH_TABS.map(t=>t[0]);
   let a; if(papel==='gerente') a=['gerente','comprador']; else a=['comprador'];
@@ -3563,7 +3564,7 @@ function dashInit(){
   dashActive(); dashLoad();
 }
 function dashActive(){ DASH_TABS.forEach(t=>{ const b=document.getElementById('dtab-'+t[0]); if(b) b.classList.toggle('on',t[0]===DASH.tab); }); }
-function dashTab(t){ DASH.tab=t; dashActive(); renderDash(); }
+function dashTab(t){ DASH.tab=t; DASH.gfiltro=null; DASH.cfiltro=null; dashActive(); renderDash(); }
 async function dashLoad(){
   const w=document.getElementById('dwrap');
   w.innerHTML='<div class="dempty">Carregando dados das obras…</div>';
@@ -3584,8 +3585,27 @@ async function dashLoad(){
   if(need.length){ w.innerHTML='<div class="dempty">Analisando cobertura e oportunidades…</div>';
     await Promise.all(need.map(async id=>{ try{ DASH.oppByObra[id]=await (await fetch('actions/oportunidades.php?obra='+id+'&_='+Date.now())).json(); }catch(e){ DASH.oppByObra[id]={gaps:[],resumo:{}}; } })); }
   DASH.D=dashCompute(); renderDash();
+  dashLoadFunil();
 }
-function dashRefresh(){ DASH.items=null; DASH.oppByObra={}; dashLoad(); }
+/* Cotações e Solicitações são as duas pontas do funil (radar -> SC -> cotação). São pesadas — a de
+   solicitações vai ao TOTVS — então carregam UMA vez, em paralelo, e a tela se redesenha quando chegam.
+   Servem tanto ao painel do gerente quanto à aba "Solicitações" do comprador. */
+async function dashLoadFunil(){
+  if(DASH.carregandoF || (DASH.cots && DASH.sols)) return;
+  DASH.carregandoF=true;
+  const me=encodeURIComponent((EU&&EU.bitrix_id)||'');
+  try{
+    const [c,x]=await Promise.all([
+      DASH.cots?Promise.resolve(null):fetch('actions/cotacoes.php?me='+me+'&_='+Date.now()).then(r=>r.json()).catch(()=>null),
+      DASH.sols?Promise.resolve(null):fetch('actions/solicitacoes.php?me='+me+'&_='+Date.now()).then(r=>r.json()).catch(()=>null),
+    ]);
+    if(c&&c.cotacoes) DASH.cots=c.cotacoes;
+    if(x&&x.solicitacoes) DASH.sols=x.solicitacoes;
+  }catch(e){}
+  DASH.carregandoF=false;
+  renderDash();
+}
+function dashRefresh(){ DASH.items=null; DASH.oppByObra={}; DASH.cots=null; DASH.sols=null; DASH.gfiltro=null; dashLoad(); }
 function renderDash(){
   const w=document.getElementById('dwrap'), D=DASH.D; if(!w)return;
   if(!D){ w.innerHTML='<div class="dempty">Sem dados.</div>'; return; }
@@ -3673,22 +3693,103 @@ function stCor(s){ return ST_COR[s]||'#8a9299'; }
 
 /* ---------- 1) COMPRADOR ---------- */
 function renderDashComprador(D){
-  /* PAINEL PESSOAL do comprador. CARDS CLICÁVEIS (pedido 23/jul): clicar num card FILTRA a tabela de baixo
-     ("Detalhar ›" no rodapé de cada card; ativo = borda verde + "✕ limpar filtro"; clicar de novo desfiltra). */
+  /* PAINEL PESSOAL do comprador.
+     - DUAS ABAS: o que está com ele no RADAR e as SOLICITAÇÕES DE COMPRA da(s) obra(s) dele.
+     - FILTROS por obra e por status valem para as duas abas, e são aplicados ANTES dos cards,
+       para o número do card sempre bater com a tabela de baixo.
+     - CARDS CLICÁVEIS: clicar num card filtra a tabela ("Detalhar ›"; clicar de novo desfaz). */
   const base=(DASH.items&&DASH.items.length)?DASH.items:(MAT||[]);
   const papel=(EU&&EU.papel)||'';
   const podeEscolher=IS_ADMIN||papel==='gerente'||papel==='diretor';
   const eu=((EU&&EU.nome)||'').trim();
   const nomes=[...new Set(base.map(i=>nrmResp(i.responsavel)).filter(Boolean))].sort();
   const alvo=(DASH.comprador||eu||nomes[0]||'').trim();
-  const meus=base.filter(i=>nrmResp(i.responsavel)===nrmResp(alvo));
   const val=i=>Number(i.verba||0), lvl=i=>alertLevel(i);
   const dDiff=f=>f?Math.round((new Date(f+'T00:00:00')-new Date(D.hoje+'T00:00:00'))/864e5):null;
-  const M=v=>v>=1e6?('R$ '+(v/1e6).toFixed(1).replace('.',',')+' mi'):(v>=1e3?('R$ '+Math.round(v/1e3)+' mil'):('R$ '+Math.round(v)));
-  const sel=podeEscolher
-    ?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span class="dmini">Painel de:</span><select onchange="DASH.comprador=this.value;DASH.cfiltro=null;renderDash()" style="padding:5px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px">${nomes.map(n=>`<option ${n===alvo?'selected':''}>${esc(n)}</option>`).join('')}</select></div>`
-    :`<div class="dmini" style="margin-bottom:10px">Painel pessoal de <b>${esc(alvo||'—')}</b></div>`;
-  if(!meus.length) return sel+`<div class="dempty">Nenhum item do radar está atribuído a <b>${esc(alvo||'você')}</b>.<br><span class="dmini">O responsável de cada item é definido no Radar (coluna Responsável) ou em Configurações › Responsáveis.</span></div>`;
+  const M=v=>v>=1e6?('R$ '+(v/1e6).toFixed(1).replace('.',',')+' mi'):(v>=1e3?('R$ '+Math.round(v/1e3)+' mil'):('R$ '+Math.round(v||0)));
+
+  const meusTodos=base.filter(i=>nrmResp(i.responsavel)===nrmResp(alvo));
+  const sols=DASH.sols||[];
+  const minhasSC=sols.filter(x=>nrmResp(x.comprador_nome)===nrmResp(alvo));
+
+  const sub=DASH.csub==='sc'?'sc':'radar';
+  const selPainel=podeEscolher
+    ?`<div style="display:flex;align-items:center;gap:8px"><span class="dmini">Painel de:</span><select onchange="DASH.comprador=this.value;DASH.cfiltro=null;DASH.cobra='';renderDash()" style="padding:5px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px">${nomes.map(n=>`<option ${n===alvo?'selected':''}>${esc(n)}</option>`).join('')}</select></div>`
+    :`<div class="dmini">Painel pessoal de <b>${esc(alvo||'—')}</b></div>`;
+
+  /* ---- abas ---- */
+  const aba=(k,ic,lbl,n)=>`<button class="dtab ${sub===k?'on':''}" style="padding:6px 13px;font-size:12.5px" onclick="dashCSub('${k}')"><span class="material-icons" style="font-size:15px">${ic}</span> ${lbl}${n!=null?` <b>${n}</b>`:''}</button>`;
+  const abas=`<div style="display:flex;gap:6px;flex-wrap:wrap">${aba('radar','radar','Radar de aquisições',meusTodos.length)}${aba('sc','inbox','Solicitações de compra',DASH.sols?minhasSC.length:null)}</div>`;
+
+  /* ---- filtros (obra + status), dependentes da aba ---- */
+  const obrasRadar=[...new Set(meusTodos.map(i=>i.obra_nome).filter(Boolean))].sort();
+  const obrasSC=[...new Set(minhasSC.map(x=>x.nome_obra).filter(Boolean))].sort();
+  const obrasOpc=sub==='sc'?obrasSC:obrasRadar;
+  const statusOpc=sub==='sc'
+    ? [['pendente','Pendente'],['em_cotacao','Em cotação'],['cotacoes_recebidas','Cotações recebidas'],['pedido_criado','Pedido criado'],['cancelado','Cancelado']]
+    : STATUSES.map(x=>[x,x]);
+  const selEstilo='padding:5px 9px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;max-width:190px';
+  const filtros=`<div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center">
+    <select onchange="DASH.cobra=this.value;renderDash()" style="${selEstilo}"><option value="">Todas as obras</option>${obrasOpc.map(o=>`<option ${DASH.cobra===o?'selected':''}>${esc(o)}</option>`).join('')}</select>
+    <select onchange="DASH.cstatus=this.value;renderDash()" style="${selEstilo}"><option value="">Todos os status</option>${statusOpc.map(o=>`<option value="${esc(o[0])}" ${DASH.cstatus===o[0]?'selected':''}>${esc(o[1])}</option>`).join('')}</select>
+    ${(DASH.cobra||DASH.cstatus)?`<button class="btn-ghost" style="padding:4px 10px;font-size:11.5px;color:var(--pend);font-weight:700" onclick="DASH.cobra='';DASH.cstatus='';renderDash()">✕ limpar filtros</button>`:''}
+  </div>`;
+  const topo=`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:11px">${selPainel}${filtros}</div>${abas}<div style="height:10px"></div>`;
+
+  /* ═══════════════ ABA SOLICITAÇÕES ═══════════════ */
+  if(sub==='sc'){
+    if(!DASH.sols) { dashLoadFunil(); return topo+'<div class="dempty">Carregando as solicitações do TOTVS…</div>'; }
+    let lista=minhasSC;
+    if(DASH.cobra)   lista=lista.filter(x=>x.nome_obra===DASH.cobra);
+    if(DASH.cstatus) lista=lista.filter(x=>x.status===DASH.cstatus);
+    if(!minhasSC.length) return topo+`<div class="dempty">Nenhuma solicitação de compra está com <b>${esc(alvo||'você')}</b>.<br><span class="dmini">O comprador da SC vem do de-para da obra (Solicitações › atribuição de obra), não do item do radar.</span></div>`;
+
+    const semCot=lista.filter(x=>x.cobertura==='vazio');
+    const parcial=lista.filter(x=>x.cobertura==='parcial');
+    const velhas=lista.filter(x=>(x.dias||0)>=15&&x.cobertura==='vazio');
+    const FSC={
+      todas:{t:'Todas as minhas solicitações', list:lista.slice().sort((a,b)=>(b.dias||0)-(a.dias||0))},
+      semcot:{t:'Sem nenhuma cotação — precisam começar', list:semCot.slice().sort((a,b)=>(b.dias||0)-(a.dias||0))},
+      parcial:{t:'Parcialmente cotadas — faltam itens', list:parcial.slice().sort((a,b)=>(b.dias||0)-(a.dias||0))},
+      velhas:{t:'Paradas há 15 dias ou mais, sem cotação', list:velhas.slice().sort((a,b)=>(b.dias||0)-(a.dias||0))},
+    };
+    const at=FSC[DASH.cfiltro]?DASH.cfiltro:'todas';
+    const cardSC=(k,v,l)=>`<div class="dkpi" onclick="dashCFiltro('${k}')" style="cursor:pointer;${at===k?'border:1.5px solid var(--verde);box-shadow:0 0 0 2px #e6f4ea':''}"><div class="v">${v}</div><div class="l">${l}</div>
+      <div style="margin-top:6px;font-size:10.5px;font-weight:800;color:${at===k?'var(--verde-d)':'var(--verde)'}">${at===k?'▼ NA TABELA':'DETALHAR ›'}</div></div>`;
+    const cur=FSC[at], capped=cur.list.slice(0,60);
+    const cobChip=c=>({vazio:['#8a9299','sem cotação'],parcial:['var(--dourado)','parcial'],total:['var(--ok)','cotada']}[c]||['#8a9299','—']);
+    return topo+`
+    <div class="dkpis">
+      ${cardSC('todas',`${lista.length}`,`solicitações comigo`)}
+      ${cardSC('semcot',`<span class="gold">${semCot.length}</span>`,`sem cotação ainda`)}
+      ${cardSC('parcial',`${parcial.length}`,`parcialmente cotadas`)}
+      ${cardSC('velhas',`<span class="red">${velhas.length}</span>`,`paradas há 15+ dias`)}
+    </div>
+    <div class="dcard wide" style="margin-top:10px">${cotSecHead('inbox',cur.t,cur.list.length+' registro(s)','')}
+      <div style="overflow-x:auto"><table class="dtable"><thead><tr><th>SC</th><th>Obra</th><th class="r">Aberta há</th><th class="r">Itens</th><th>Situação</th><th>Status</th><th>Primeiro item</th><th></th></tr></thead><tbody>
+      ${capped.map(x=>{const cc=cobChip(x.cobertura);
+        return `<tr><td><b>${esc(String(x.numero||'').replace(/^0+/,''))}</b></td>
+        <td style="white-space:nowrap">${esc(x.nome_obra||'—')}</td>
+        <td class="r"><b style="color:${(x.dias||0)>=30?'var(--pend)':((x.dias||0)>=15?'#c77f1a':'inherit')}">${x.dias!=null?x.dias+'d':'—'}</b></td>
+        <td class="r">${x.n_itens||0}${x.cot_cob?` <span class="dmini">(${x.cot_cob} cotados)</span>`:''}</td>
+        <td><span class="dchip" style="background:${cc[0]};font-size:9.5px">${cc[1]}</span></td>
+        <td>${esc(SOL_ST_LBL(x.status))}</td>
+        <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(x.primeiro||'')}">${esc(x.primeiro||'')}</td>
+        <td class="r">${(x.cotacoes&&x.cotacoes.length)?x.cotacoes.map(c=>`<button class="btn-ghost" style="padding:2px 7px;font-size:11px;color:var(--verde-d);font-weight:700" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${c.id}),200)">#${c.id}</button>`).join(''):'<span class="dmini">—</span>'}</td></tr>`;}).join('')
+        ||'<tr><td colspan="8" class="dempty" style="padding:18px">nada neste recorte 🎉</td></tr>'}
+      </tbody></table></div>
+      ${cur.list.length>60?`<div class="dmini" style="margin-top:6px">mostrando 60 de ${cur.list.length}</div>`:''}
+      <div class="dmini" style="margin-top:6px">A fila do TOTVS só traz SC <b>pendente</b>: o que sumiu daqui já foi atendido ou cancelado lá.</div>
+    </div>`;
+  }
+
+  /* ═══════════════ ABA RADAR ═══════════════ */
+  let meus=meusTodos;
+  if(DASH.cobra)   meus=meus.filter(i=>i.obra_nome===DASH.cobra);
+  if(DASH.cstatus) meus=meus.filter(i=>(i.status||'Não Iniciado')===DASH.cstatus);
+  if(!meusTodos.length) return topo+`<div class="dempty">Nenhum item do radar está atribuído a <b>${esc(alvo||'você')}</b>.<br><span class="dmini">O responsável de cada item é definido no Radar (coluna Responsável) ou em Configurações › Responsáveis.</span></div>`;
+  if(!meus.length) return topo+`<div class="dempty">Nenhum item de <b>${esc(alvo)}</b> passa nos filtros escolhidos.<br><span class="dmini">Limpe o filtro de obra ou de status para ver tudo.</span></div>`;
+
   const abertos=meus.filter(i=>i.status!=='Finalizado'&&i.status!=='Não se aplica');
   const atras=abertos.filter(i=>['critico','atrasado'].includes(lvl(i)));
   const v7=abertos.filter(i=>{const d=dDiff(i.fim_cotacao); return d!==null&&d>=0&&d<=7;});
@@ -3699,7 +3800,6 @@ function renderDashComprador(D){
   const byPrio=(a,b)=>(((nivelOrd[lvl(a)]??3)-(nivelOrd[lvl(b)]??3)))||(val(b)-val(a));
   const byPrazo=(a,b)=>((a.fim_cotacao||'9999').localeCompare(b.fim_cotacao||'9999'))||(val(b)-val(a));
   const byVerba=(a,b)=>val(b)-val(a);
-  // definição de cada card → título + lista + ordenação
   const FDEF={
     abertos:{t:'Todos os meus itens abertos', list:abertos.slice().sort(byPrio)},
     atrasados:{t:'Atrasados / vencidos — maior verba primeiro', list:atras.slice().sort(byVerba)},
@@ -3715,10 +3815,11 @@ function renderDashComprador(D){
   const cur=FDEF[ativo]||null;
   const listaBase=cur?cur.list:abertos.slice().sort(byPrio).slice(0,15);
   const capped=cur?cur.list.slice(0,60):listaBase;
-  const titulo=cur?`${cur.t} — ${cur.list.length} item(ns)`:'🎯 Ações prioritárias — atacar nesta ordem (atrasado primeiro · maior verba primeiro)';
-  const acaoDe=i=>{const s=i.status||'Não Iniciado'; if(/cota/i.test(s))return'Cobrar propostas'; if(/proposta/i.test(s))return'Aprovar fornecedor'; if(/negocia/i.test(s))return'Fechar negociação'; if(/pend/i.test(s))return'Resolver pendência'; return'Iniciar cotação';};
+  const titulo=cur?`${cur.t} — ${cur.list.length} item(ns)`:'Ações prioritárias — atacar nesta ordem (atrasado primeiro · maior verba primeiro)';
+  const acaoDe=i=>{const st=i.status||'Não Iniciado'; if(/cota/i.test(st))return'Cobrar propostas'; if(/proposta/i.test(st))return'Aprovar fornecedor'; if(/negocia/i.test(st))return'Fechar negociação'; if(/pend/i.test(st))return'Resolver pendência'; return'Iniciar cotação';};
   const chipNivel=i=>{const l=lvl(i); return l==='critico'?'<span class="dchip" style="background:var(--pend)">VENCIDO</span>':(l==='atrasado'?'<span class="dchip" style="background:#e67e22">atrasado</span>':(l==='proximo'?'<span class="dchip" style="background:var(--dourado);color:#333">próximo</span>':''));};
-  return sel+`
+  const nFiltro=(DASH.cobra||DASH.cstatus)?`<span class="dmini"> · recorte de ${meus.length} de ${meusTodos.length} itens</span>`:'';
+  return topo+`
   <div class="dkpis">
     ${card('abertos',`${abertos.length}`,`itens ABERTOS comigo<br><span class="dmini">${meus.length} no total (com finalizados)</span>`)}
     ${card('atrasados',`<span class="red">${atras.length}</span>`,`atrasados / vencidos<br><span class="dmini">${M(verbaAtras)} expostos</span>`)}
@@ -3727,7 +3828,7 @@ function renderDashComprador(D){
     ${card('cotacao',`${emCotItens.length}`,`em cotação agora`)}
     ${card('verba',`${M(verbaTot)}`,`verba sob minha gestão`)}
   </div>
-  <div class="dcard wide" style="margin-top:10px"><h3>${titulo}</h3>
+  <div class="dcard wide" style="margin-top:10px">${cotSecHead('flag',titulo,'','')}${nFiltro}
     <div style="overflow-x:auto"><table class="dtable"><thead><tr><th></th><th>Item</th><th>Obra</th><th>Próxima ação</th><th>Prazo</th><th>Status</th><th class="r">Verba</th></tr></thead><tbody>
     ${capped.map(i=>`<tr style="cursor:pointer" onclick="openModal(${Number(i.ordem)||0},${Number(i.obra_id)||1})" title="clique p/ abrir o item">
       <td>${chipNivel(i)}</td><td><b>${esc(i.nome)}</b></td><td style="white-space:nowrap"><span class="dgm" style="background:${obraCor(i.obra_id)}"></span>${esc(i.obra_nome||'')}</td>
@@ -3738,37 +3839,176 @@ function renderDashComprador(D){
     ${!cur&&abertos.length>15?`<div class="dmini" style="margin-top:6px">mostrando os 15 mais prioritários de ${abertos.length} abertos — clique num card acima pra detalhar um recorte</div>`:''}
   </div>`;
 }
+function dashCSub(k){ DASH.csub=k; DASH.cfiltro=null; DASH.cobra=''; DASH.cstatus=''; renderDash(); if(k==='sc') dashLoadFunil(); }
+function SOL_ST_LBL(s){ return {pendente:'Pendente',em_cotacao:'Em cotação',cotacoes_recebidas:'Cotações recebidas',pedido_criado:'Pedido criado',cancelado:'Cancelado'}[s]||s||'—'; }
 function dashCFiltro(k){ DASH.cfiltro=(DASH.cfiltro===k?null:k); renderDash(); }
 function D2(s){ if(!s)return'—'; const p=String(s).split('-'); return p.length===3?p[2]+'/'+p[1]:s; }
 
 /* ---------- 2) GERENTE DE COMPRAS ---------- */
 function renderDashGerente(D){
-  const cobPct=(()=>{ let cov=0,tot=0; Object.values(DASH.oppByObra).forEach(d=>{ if(d.resumo){cov+=d.resumo.coberto||0;tot+=d.resumo.total||0;} }); return tot?Math.round(100*cov/tot):null; })();
-  const g=D.gatilhos;
+  /* PAINEL DO GERENTE v2 — o gerente não toca item a item: ele cuida de PESSOAS e do FUNIL.
+     Por isso a tela mudou de eixo. Sai o retrato do radar (que o Diretor já dá), entram
+     "quem está com o quê" e "onde o processo travou" — com os mesmos cards clicáveis do comprador. */
+  const base=(DASH.items&&DASH.items.length)?DASH.items:(MAT||[]);
+  const val=i=>Number(i.verba||0), lvl=i=>alertLevel(i);
+  const hojeD=new Date(D.hoje+'T00:00:00');
+  const dDiff=f=>f?Math.round((new Date(f+'T00:00:00')-hojeD)/864e5):null;
+  const diasDe=iso=>{ if(!iso)return null; const t=new Date(String(iso).slice(0,10)+'T00:00:00'); return isNaN(t)?null:Math.round((hojeD-t)/864e5); };
+  const M=v=>v>=1e6?('R$ '+(v/1e6).toFixed(1).replace('.',',')+' mi'):(v>=1e3?('R$ '+Math.round(v/1e3)+' mil'):('R$ '+Math.round(v||0)));
+  const byVerba=(a,b)=>val(b)-val(a);
+
+  /* filtro de obra vale para o painel inteiro */
+  const obrasTodas=[...new Set(base.map(i=>i.obra_nome).filter(Boolean))].sort();
+  const fObra=DASH.cobra||'';
+  const itens=fObra?base.filter(i=>i.obra_nome===fObra):base;
+
+  const abertos=itens.filter(i=>i.status!=='Finalizado'&&i.status!=='Não se aplica');
+  const atras=abertos.filter(i=>['critico','atrasado'].includes(lvl(i)));
+  const semDono=abertos.filter(i=>!nrmResp(i.responsavel));
+
+  const cots0=DASH.cots||[], sols0=DASH.sols||[];
+  const cots=fObra?cots0.filter(c=>(c.obra_nome||'')===fObra):cots0;
+  const sols=fObra?sols0.filter(x=>(x.nome_obra||'')===fObra):sols0;
+  const carregando=(!DASH.cots||!DASH.sols);
+
+  /* ---- EQUIPE: uma linha por comprador ---- */
+  const eq={};
+  abertos.forEach(i=>{ const r=nrmResp(i.responsavel); if(!r)return;
+    const e=(eq[r]=eq[r]||{nome:r,abertos:0,atras:0,exposto:0,d7:0,cots:0,decidir:0,scs:0});
+    e.abertos++;
+    if(['critico','atrasado'].includes(lvl(i))){ e.atras++; e.exposto+=val(i); }
+    const d=dDiff(i.fim_cotacao); if(d!==null&&d>=0&&d<=7) e.d7++;
+  });
+  cots.forEach(c=>{ const r=nrmResp(c.criado_nome); if(!r||!eq[r])return;
+    if(c.status!=='finalizada') eq[r].cots++;
+    if(c.status==='aguardando'&&Number(c.n_propostas)>0) eq[r].decidir++;
+  });
+  sols.forEach(x=>{ const r=nrmResp(x.comprador_nome); if(!r||!eq[r])return; if(x.cobertura==='vazio') eq[r].scs++; });
+  const time=Object.values(eq).sort((a,b)=>b.exposto-a.exposto||b.abertos-a.abertos);
+
+  /* ---- FUNIL: onde travou ---- */
+  const cotParadas=cots.filter(c=>c.status!=='finalizada'&&!Number(c.n_propostas)).map(c=>({...c,dias:diasDe(c.created_at)})).sort((a,b)=>(b.dias||0)-(a.dias||0));
+  const cotDecidir=cots.filter(c=>c.status==='aguardando'&&Number(c.n_propostas)>0).map(c=>({...c,dias:diasDe(c.created_at)})).sort((a,b)=>(b.dias||0)-(a.dias||0));
+  const scParadas=sols.filter(x=>x.cobertura==='vazio'&&x.status!=='cancelado').slice().sort((a,b)=>(b.dias||0)-(a.dias||0));
+  const scVelhas=scParadas.filter(x=>(x.dias||0)>=15);
+  const semConvidado=cots.filter(c=>c.status!=='finalizada'&&!Number(c.n_convidados)).length;
+
+  const FG={
+    equipe:{t:'A equipe — carga de cada comprador', tipo:'equipe', list:time, ic:'groups'},
+    atrasados:{t:'Atrasados / vencidos de toda a equipe', tipo:'itens', list:atras.slice().sort(byVerba), ic:'warning'},
+    semdono:{t:'Itens abertos SEM responsável — precisam de dono', tipo:'itens', list:semDono.slice().sort(byVerba), ic:'person_off'},
+    cotparada:{t:'Cotações sem nenhuma proposta — a concorrência não andou', tipo:'cots', list:cotParadas, ic:'hourglass_empty'},
+    cotdecidir:{t:'Cotações com proposta na mesa esperando decisão', tipo:'cots', list:cotDecidir, ic:'gavel'},
+    scparada:{t:'Solicitações de compra ainda sem cotação', tipo:'scs', list:scParadas, ic:'inbox'},
+  };
+  const ativo=FG[DASH.gfiltro]?DASH.gfiltro:'equipe';
+  const cur=FG[ativo];
+  const card=(key,v,l)=>`<div class="dkpi" onclick="dashGFiltro('${key}')" title="${ativo===key?'já é o recorte da tabela abaixo':'clique p/ detalhar na tabela abaixo'}" style="cursor:pointer;${ativo===key?'border:1.5px solid var(--verde);box-shadow:0 0 0 2px #e6f4ea':''}">
+    <div class="v">${v}</div><div class="l">${l}</div>
+    <div style="margin-top:6px;font-size:10.5px;font-weight:800;letter-spacing:.2px;color:${ativo===key?'var(--verde-d)':'var(--verde)'}">${ativo===key?'▼ NA TABELA':'DETALHAR ›'}</div></div>`;
+
+  const chipNivel=i=>{const l=lvl(i); return l==='critico'?'<span class="dchip" style="background:var(--pend)">VENCIDO</span>':(l==='atrasado'?'<span class="dchip" style="background:#e67e22">atrasado</span>':(l==='proximo'?'<span class="dchip" style="background:var(--dourado);color:#333">próximo</span>':''));};
+  const acaoDe=i=>{const st=i.status||'Não Iniciado'; if(/cota/i.test(st))return'Cobrar propostas'; if(/proposta/i.test(st))return'Aprovar fornecedor'; if(/negocia/i.test(st))return'Fechar negociação'; if(/pend/i.test(st))return'Resolver pendência'; return'Iniciar cotação';};
+  const cotSt=st=>({aberta:['#8a9299','em cotação'],aguardando:['var(--dourado)','aguardando'],finalizada:['var(--ok)','fechada']}[st]||['#8a9299',st||'—']);
+
+  let tabela='';
+  if(cur.tipo==='equipe'){
+    tabela = time.length ? `<table class="dtable"><thead><tr><th>Comprador</th><th class="r">Abertos</th><th class="r">Atrasados</th><th class="r">Exposto</th><th class="r">Vencem ≤7d</th><th class="r">Cotações</th><th class="r">A decidir</th><th class="r">SC sem cotação</th><th></th></tr></thead><tbody>
+      ${time.map(e=>`<tr>
+        <td><b>${esc(e.nome)}</b></td>
+        <td class="r">${e.abertos}</td>
+        <td class="r">${e.atras?`<b style="color:var(--pend)">${e.atras}</b>`:'<span class="dmini">0</span>'}</td>
+        <td class="r">${e.exposto?`<b>${M(e.exposto)}</b>`:'<span class="dmini">—</span>'}</td>
+        <td class="r">${e.d7||'<span class="dmini">0</span>'}</td>
+        <td class="r">${carregando?'<span class="dmini">…</span>':(e.cots||'<span class="dmini">0</span>')}</td>
+        <td class="r">${carregando?'<span class="dmini">…</span>':(e.decidir?`<b style="color:var(--dourado)">${e.decidir}</b>`:'<span class="dmini">0</span>')}</td>
+        <td class="r">${carregando?'<span class="dmini">…</span>':(e.scs||'<span class="dmini">0</span>')}</td>
+        <td class="r"><button class="btn-ghost" data-n="${esc(e.nome)}" style="padding:3px 9px;font-size:11.5px;color:var(--verde-d);font-weight:700" onclick="dashVerComprador(this.dataset.n)" title="abrir o painel pessoal deste comprador">painel ›</button></td>
+      </tr>`).join('')}</tbody></table>
+      ${semDono.length?`<div class="dmini" style="margin-top:7px">⚠️ ${semDono.length} item(ns) aberto(s) ainda <b>sem responsável</b> — não aparecem no painel de ninguém.</div>`:''}`
+      : '<div class="dempty" style="padding:18px">Nenhum item do radar tem responsável atribuído neste recorte.</div>';
+  } else if(cur.tipo==='itens'){
+    const capped=cur.list.slice(0,60);
+    tabela = `<table class="dtable"><thead><tr><th></th><th>Item</th><th>Obra</th><th>Responsável</th><th>Próxima ação</th><th>Prazo</th><th class="r">Verba</th></tr></thead><tbody>
+      ${capped.map(i=>`<tr style="cursor:pointer" onclick="openModal(${Number(i.ordem)||0},${Number(i.obra_id)||1})" title="clique p/ abrir o item">
+        <td>${chipNivel(i)}</td><td><b>${esc(i.nome)}</b></td>
+        <td style="white-space:nowrap"><span class="dgm" style="background:${obraCor(i.obra_id)}"></span>${esc(i.obra_nome||'')}</td>
+        <td>${nrmResp(i.responsavel)?esc(i.responsavel):'<span class="dchip" style="background:var(--pend);font-size:9.5px">sem dono</span>'}</td>
+        <td>${acaoDe(i)}</td><td style="white-space:nowrap">${D2(i.fim_cotacao)}</td>
+        <td class="r"><b>${val(i)?M(val(i)):'—'}</b></td></tr>`).join('')
+        ||'<tr><td colspan="7" class="dempty" style="padding:18px">nada neste recorte 🎉</td></tr>'}
+      </tbody></table>${cur.list.length>60?`<div class="dmini" style="margin-top:6px">mostrando 60 de ${cur.list.length}</div>`:''}`;
+  } else if(cur.tipo==='cots'){
+    if(carregando) tabela='<div class="dempty" style="padding:18px">Carregando as cotações…</div>';
+    else { const capped=cur.list.slice(0,60);
+      tabela = `<table class="dtable"><thead><tr><th>Cotação</th><th>Obra</th><th>Responsável</th><th class="r">Parada há</th><th class="r">Convidados</th><th class="r">Propostas</th><th class="r">Melhor oferta</th><th></th></tr></thead><tbody>
+      ${capped.map(c=>{const st=cotSt(c.status);
+        return `<tr><td><b>${esc(c.apelido||c.titulo||('#'+c.id))}</b> <span class="dmini">#${c.id}</span><br><span class="dchip" style="background:${st[0]};font-size:9.5px">${st[1]}</span></td>
+        <td style="white-space:nowrap">${esc(c.obra_nome||'—')}</td>
+        <td>${esc(c.criado_nome||'—')}</td>
+        <td class="r">${c.dias!=null?`<b style="color:${c.dias>=21?'var(--pend)':(c.dias>=10?'#c77f1a':'inherit')}">${c.dias}d</b>`:'<span class="dmini">—</span>'}</td>
+        <td class="r">${Number(c.n_convidados)?c.n_convidados:'<span class="dchip" style="background:var(--pend);font-size:9.5px">nenhum</span>'}</td>
+        <td class="r">${Number(c.n_propostas)||'<span class="dmini">0</span>'}</td>
+        <td class="r">${c.melhor_oferta?`<b>${M(Number(c.melhor_oferta))}</b>`:'<span class="dmini">—</span>'}</td>
+        <td class="r"><button class="btn-ghost" style="padding:3px 8px;color:var(--verde-d);font-weight:700;font-size:11.5px" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${c.id}),200)">abrir ›</button></td></tr>`;}).join('')
+        ||'<tr><td colspan="8" class="dempty" style="padding:18px">nenhuma cotação neste recorte 🎉</td></tr>'}
+      </tbody></table>${cur.list.length>60?`<div class="dmini" style="margin-top:6px">mostrando 60 de ${cur.list.length}</div>`:''}`; }
+  } else {
+    if(carregando) tabela='<div class="dempty" style="padding:18px">Carregando as solicitações do TOTVS…</div>';
+    else { const capped=cur.list.slice(0,60);
+      tabela = `<table class="dtable"><thead><tr><th>SC</th><th>Obra</th><th>Comprador</th><th class="r">Aberta há</th><th class="r">Itens</th><th>Primeiro item</th></tr></thead><tbody>
+      ${capped.map(x=>`<tr><td><b>${esc(String(x.numero||'').replace(/^0+/,''))}</b></td>
+        <td style="white-space:nowrap">${esc(x.nome_obra||'—')}</td>
+        <td>${x.comprador_nome?esc(x.comprador_nome):'<span class="dchip" style="background:var(--pend);font-size:9.5px">sem comprador</span>'}</td>
+        <td class="r"><b style="color:${(x.dias||0)>=30?'var(--pend)':((x.dias||0)>=15?'#c77f1a':'inherit')}">${x.dias!=null?x.dias+'d':'—'}</b></td>
+        <td class="r">${x.n_itens||0}</td>
+        <td style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(x.primeiro||'')}">${esc(x.primeiro||'')}</td></tr>`).join('')
+        ||'<tr><td colspan="6" class="dempty" style="padding:18px">nenhuma solicitação parada 🎉</td></tr>'}
+      </tbody></table>${cur.list.length>60?`<div class="dmini" style="margin-top:6px">mostrando 60 de ${cur.list.length}</div>`:''}
+      <div class="dmini" style="margin-top:6px">A fila do TOTVS só traz SC <b>pendente</b>: o que sumiu daqui já foi atendido ou cancelado lá.</div>`; }
+  }
+
+  const g=D.gatilhos, nd=carregando?'…':'';
+  const selObra=`<div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+    <select onchange="DASH.cobra=this.value;renderDash()" style="padding:5px 9px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;max-width:210px"><option value="">Todas as obras</option>${obrasTodas.map(o=>`<option ${fObra===o?'selected':''}>${esc(o)}</option>`).join('')}</select>
+    ${fObra?`<button class="btn-ghost" style="padding:4px 10px;font-size:11.5px;color:var(--pend);font-weight:700" onclick="DASH.cobra='';renderDash()">✕ limpar</button>`:''}</div>`;
+
   return `
-  <div class="dkpis">
-    <div class="dkpi"><div class="v">${D.totalItens}</div><div class="l">itens no radar</div></div>
-    <div class="dkpi"><div class="v ${D.pctComData>=80?'':'gold'}">${D.pctComData}%</div><div class="l">com data definida</div></div>
-    <div class="dkpi"><div class="v red">${D.criticos}</div><div class="l">críticos</div></div>
-    <div class="dkpi"><div class="v gold">${BRL(D.expostoAtraso)}</div><div class="l">valor exposto (atraso)</div></div>
-    <div class="dkpi"><div class="v blue">${cobPct!=null?cobPct+'%':'—'}</div><div class="l">cobertura da verba</div></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:11px">
+    <div class="dmini">Painel da <b>equipe de Suprimentos</b>${fObra?` · obra <b>${esc(fObra)}</b>`:''}</div>${selObra}
   </div>
-  <div class="dgrid">
-    <div class="dcard"><h3>Ranking de compradores (por exposição)</h3>${D.compradores.length?dashBars(D.compradores.slice(0,6).map(c=>({label:c.nome,v:c.exposta,color:c.risco>66?'var(--pend)':(c.risco>33?'var(--dourado)':'var(--verde)'),sub:c.criticos?c.criticos+' crít.':''})),BRL):'<div class="dmini">sem responsáveis atribuídos</div>'}</div>
-    <div class="dcard"><h3>Semáforo por obra</h3><table class="dtable"><thead><tr><th>Obra</th><th class="r">Itens</th><th class="r">Críticos</th><th class="r">Risco</th></tr></thead><tbody>
-      ${D.porObra.map(o=>`<tr><td><span class="dgm" style="background:${o.cor}"></span> ${esc(o.nome)}</td><td class="r">${o.itens}</td><td class="r">${o.criticos}</td><td class="r"><span class="dgm" style="background:${o.risco>66?'var(--pend)':(o.risco>33?'var(--dourado)':'var(--ok)')}"></span></td></tr>`).join('')}</tbody></table></div>
-    <div class="dcard"><h3>Linha do tempo de gatilhos</h3>
+  <div class="dkpis">
+    ${card('equipe',`${time.length}`,`compradores com carga<br><span class="dmini">${abertos.length} itens abertos</span>`)}
+    ${card('atrasados',`<span class="red">${atras.length}</span>`,`atrasados / vencidos<br><span class="dmini">${M(atras.reduce((a,i)=>a+val(i),0))} expostos</span>`)}
+    ${card('semdono',`${semDono.length?`<span class="gold">${semDono.length}</span>`:'0'}`,`itens sem responsável<br><span class="dmini">${semDono.length?'ninguém está olhando':'todos têm dono'}</span>`)}
+    ${card('cotparada',`${nd||cotParadas.length}`,`cotações sem proposta<br><span class="dmini">${nd||(semConvidado?semConvidado+' sem nenhum convidado':'a concorrência travou')}</span>`)}
+    ${card('cotdecidir',`${nd||`<span class="gold">${cotDecidir.length}</span>`}`,`esperando decisão<br><span class="dmini">${nd||'já tem proposta na mesa'}</span>`)}
+    ${card('scparada',`${nd||scParadas.length}`,`solicitações sem cotação<br><span class="dmini">${nd||(scVelhas.length?scVelhas.length+' há 15+ dias':'nenhuma parada')}</span>`)}
+  </div>
+
+  <div class="dcard wide" style="margin-top:10px">
+    ${cotSecHead(cur.ic, cur.t, cur.tipo==='equipe'?'':(cur.list.length+' registro(s)'), '')}
+    <div style="overflow-x:auto">${tabela}</div>
+  </div>
+
+  <div class="dgrid" style="margin-top:10px">
+    <div class="dcard">${cotSecHead('speed','Quando os prazos vencem','','')}
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center">
-        <div><div style="font-size:20px;font-weight:800;color:var(--pend)">${g.atras.n}</div><div class="dmini">Atrasados</div><div class="dmini">${BRL(g.atras.v)}</div></div>
-        <div><div style="font-size:20px;font-weight:800;color:#c77f1a">${g.d7.n}</div><div class="dmini">≤ 7 dias</div><div class="dmini">${BRL(g.d7.v)}</div></div>
-        <div><div style="font-size:20px;font-weight:800;color:var(--dourado)">${g.d15.n}</div><div class="dmini">8–15 dias</div><div class="dmini">${BRL(g.d15.v)}</div></div>
-        <div><div style="font-size:20px;font-weight:800;color:var(--verde)">${g.d30.n}</div><div class="dmini">15+ dias</div><div class="dmini">${BRL(g.d30.v)}</div></div>
-      </div></div>
-    <div class="dcard wide"><h3>O que precisa de atuação hoje</h3><div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Item</th><th>Obra</th><th>Responsável</th><th>Nível</th><th>Próxima ação</th></tr></thead><tbody>
-      ${D.atuacao.slice(0,10).map(a=>`<tr><td>${esc(a.nome)}</td><td>${esc(a.obra)}</td><td>${esc(a.resp)}</td><td>${nivelChip(a.nivel)}</td><td>${esc(a.acao)}</td></tr>`).join('')||'<tr><td colspan="5" class="dmini">Nada urgente. 👍</td></tr>'}
-      </tbody></table></div></div>
+        <div><div style="font-size:20px;font-weight:800;color:var(--pend)">${g.atras.n}</div><div class="dmini">Atrasados</div><div class="dmini">${M(g.atras.v)}</div></div>
+        <div><div style="font-size:20px;font-weight:800;color:#c77f1a">${g.d7.n}</div><div class="dmini">≤ 7 dias</div><div class="dmini">${M(g.d7.v)}</div></div>
+        <div><div style="font-size:20px;font-weight:800;color:var(--dourado)">${g.d15.n}</div><div class="dmini">8–15 dias</div><div class="dmini">${M(g.d15.v)}</div></div>
+        <div><div style="font-size:20px;font-weight:800;color:var(--verde)">${g.d30.n}</div><div class="dmini">15+ dias</div><div class="dmini">${M(g.d30.v)}</div></div>
+      </div>
+      <div class="dmini" style="margin-top:9px">Prazo = data em obra menos o lead. Item sem cronograma não entra nesta conta (e por isso não acende alerta).</div></div>
+    <div class="dcard">${cotSecHead('apartment','Obras que mais preocupam','por valor exposto','')}
+      <table class="dtable"><thead><tr><th>Obra</th><th class="r">Itens</th><th class="r">Críticos</th><th class="r">Exposto</th></tr></thead><tbody>
+      ${D.porObra.slice(0,8).map(o=>`<tr><td><span class="dgm" style="background:${o.cor}"></span> ${esc(o.nome)}</td><td class="r">${o.itens}</td><td class="r">${o.criticos?`<b style="color:var(--pend)">${o.criticos}</b>`:'0'}</td><td class="r">${o.exposta?M(o.exposta):'<span class="dmini">—</span>'}</td></tr>`).join('')}
+      </tbody></table></div>
   </div>`;
 }
+function dashGFiltro(k){ DASH.gfiltro=k; renderDash(); }
+/* leva o gerente ao painel PESSOAL do comprador escolhido */
+function dashVerComprador(nome){ DASH.comprador=nome; DASH.cfiltro=null; DASH.cobra=''; DASH.cstatus=''; DASH.csub='radar'; DASH.tab='comprador'; dashActive(); renderDash(); }
 
 /* ---------- 3) DIRETOR ---------- */
 function renderDashDiretor(D){

@@ -6318,68 +6318,74 @@ function t20StCor(s){ return {'Finalizado':'#1F6B3B','Em Andamento':'#2b6cb0','C
    unidades e quanto de verba". Então vira uma grade IGUAL À DA MATRIZ — uma linha por item, uma coluna por
    obra — só que as obras ordenadas pela DATA DE FECHAR, da mais próxima para a mais distante. */
 function t20Fila(gid){
-  const its=T20.expData[gid]||[];
-  const hoje=today;
-  const prox=[...new Set(its.map(x=>x.obra))];
-  const dataObra={};   // obra -> menor data de fechar entre os itens do grupo
-  its.forEach(x=>{ if(!x.fim) return; if(!dataObra[x.obra]||x.fim<dataObra[x.obra]) dataObra[x.obra]=x.fim; });
-  const obras=prox.sort((a,b)=>((dataObra[a]||'9999-99-99').localeCompare(dataObra[b]||'9999-99-99'))||a.localeCompare(b,'pt'));
-  const itens=[...new Set(its.map(x=>x.item))];
-  const cel={}; its.forEach(x=>{ cel[x.item+'|'+x.obra]=x; });
-
+  const its=T20.expData[gid]||[], hoje=today;
   const cor=x=>{ const st=x.status||'Não Iniciado';
     if(st==='Finalizado') return ['#e8f5ee','#1F6B3B'];
     if(st==='Não se aplica') return ['#f4f5f6','#8a9299'];
-    if(x.fim && x.fim<hoje) return ['#fdeaea','#c0392b'];                 // já devia ter fechado
-    if(x.fim && (new Date(x.fim)-new Date(hoje))/864e5<=60) return ['#fdf4e3','#a4761c'];   // fecha nos próximos 60d
+    if(!x.fim) return ['#f7f8f9','#8a9299'];
+    if(x.fim<hoje) return ['#fdeaea','#c0392b'];                                  // já devia ter fechado
+    if((new Date(x.fim)-new Date(hoje))/864e5<=60) return ['#fdf4e3','#a4761c'];  // fecha em até 60 dias
     return ['#eef4fb','#2b5fa8']; };
+  const qtd=x=>x.quant_total!=null?Number(x.quant_total).toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+(x.unidade||''):null;
+
+  // UMA TABELA POR ITEM. Cada item tem a SUA fila de obras — juntar tudo numa ordem só fazia o cabeçalho
+  // ("Licel fecha 24/05/24") contradizer a célula ("28/12/25"), porque a data é por item × obra.
+  const porItem={}; its.forEach(x=>{ (porItem[x.item]=porItem[x.item]||[]).push(x); });
+  const itens=Object.keys(porItem).sort((a,b)=>{
+    const ma=Math.min(...porItem[a].map(x=>x.fim?+new Date(x.fim):Infinity));
+    const mb=Math.min(...porItem[b].map(x=>x.fim?+new Date(x.fim):Infinity));
+    return ma-mb || a.localeCompare(b,'pt'); });
 
   let h='<div style="padding:10px 14px 14px">'
-    +'<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:9px">'
-    +'<span class="material-icons" style="font-size:17px;color:var(--dourado)">timeline</span>'
+    +'<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:10px">'
+    +'<span class="material-icons" style="font-size:18px;color:var(--dourado)">timeline</span>'
     +'<b style="font-size:13.5px">Fila de fechamento</b>'
-    +'<span class="dmini">as obras estão em ordem de <b>quem precisa fechar primeiro</b></span></div>'
-    +'<div style="overflow-x:auto"><table class="mtable" style="border:none;min-width:'+Math.max(760,180+obras.length*132)+'px"><thead><tr>'
-    +'<th class="svc-h" style="text-align:left;min-width:176px">Item</th>';
-  obras.forEach(o=>{ const d=dataObra[o];
-    const atrasada=d&&d<hoje;
-    h+='<th style="min-width:126px;line-height:1.25">'+esc(o)
-      +'<div style="font-size:9.5px;font-weight:700;color:'+(atrasada?'var(--pend)':'var(--muted)')+';margin-top:2px">'+(d?('fecha '+D(d)):'sem data')+'</div></th>'; });
-  h+='<th style="min-width:118px;background:#eafaf0">TOTAL</th></tr></thead><tbody>';
+    +'<span class="dmini">este grupo fecha de uma vez — as obras vêm na ordem de <b>quem precisa fechar primeiro</b></span></div>';
 
   itens.forEach(it=>{
-    h+='<tr><td class="svc-c" style="text-align:left"><b>'+esc(it)+'</b></td>';
-    let tv=0; const tq={};
-    obras.forEach(o=>{ const x=cel[it+'|'+o];
-      if(!x){ h+='<td class="t20c" style="color:#cfd6da">—</td>'; return; }
-      const [bg,fg]=cor(x);
-      tv+=Number(x.verba_total||0);
+    const linhas=porItem[it].slice().sort((a,b)=>((a.fim||'9999-99-99').localeCompare(b.fim||'9999-99-99'))||a.obra.localeCompare(b.obra,'pt'));
+    let tv=0; const tq={}; let nVenc=0;
+    linhas.forEach(x=>{ tv+=Number(x.verba_total||0);
       if(x.quant_total!=null){ const u=x.unidade||'un'; tq[u]=(tq[u]||0)+Number(x.quant_total); }
-      h+='<td class="t20c" style="background:'+bg+';padding:6px 5px;vertical-align:top" title="'+esc(it+' · '+o+' · '+(x.status||'')+(x.responsavel?' · '+x.responsavel:''))+'">'
-        +'<div style="font-weight:800;font-size:11.5px;color:'+fg+'">'+(x.fim?D(x.fim):'sem data')+'</div>'
-        +'<div style="font-size:11px;margin-top:2px">'+(x.quant_total!=null?(Number(x.quant_total).toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+esc(x.unidade||'')):'<span style="color:#aab">qtd —</span>')+'</div>'
-        +'<div style="font-size:11px;font-weight:700">'+BRL(x.verba_total)+'</div>'
-        +'<div style="font-size:9.5px;color:'+fg+';margin-top:2px">'+esc(x.status||'')+'</div>'
-        +(x.responsavel?'<div style="font-size:9.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(x.responsavel)+'</div>':'')
-        +'</td>'; });
+      if(x.fim&&x.fim<hoje&&x.status!=='Finalizado'&&x.status!=='Não se aplica') nVenc++; });
     const qs=Object.entries(tq).map(([u,v])=>v.toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+u).join(' · ');
-    h+='<td style="background:#f2faf5;text-align:center;vertical-align:top;padding:6px 5px">'
-      +(qs?'<div style="font-size:11px;font-weight:700">'+esc(qs)+'</div>':'')
-      +'<div style="font-size:12px;font-weight:800">'+BRL(tv)+'</div></td></tr>';
+
+    h+='<div style="margin-bottom:14px">'
+      +'<div style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:5px">'
+      +'<b style="font-size:13px">'+esc(it)+'</b>'
+      +(qs?'<span class="dchip" style="background:#eef4fb;color:#2b5fa8;font-size:10.5px">'+esc(qs)+'</span>':'')
+      +'<span class="dchip" style="background:#eafaf0;color:var(--verde-d);font-size:10.5px">'+BRL(tv)+'</span>'
+      +(nVenc?'<span class="dchip" style="background:var(--pend);font-size:10.5px">'+nVenc+' já venceram</span>':'')
+      +'<span class="dmini">'+linhas.length+' obra(s)</span></div>'
+      +'<div style="overflow-x:auto"><table class="mtable" style="border:none;min-width:'+Math.max(560,linhas.length*128)+'px"><thead><tr>';
+    linhas.forEach(x=>{ const atras=x.fim&&x.fim<hoje&&x.status!=='Finalizado'&&x.status!=='Não se aplica';
+      h+='<th style="min-width:122px;line-height:1.3">'+esc(x.obra)
+        +'<div style="font-size:10px;font-weight:800;color:'+(atras?'var(--pend)':'var(--verde-d)')+';margin-top:2px">'+(x.fim?D(x.fim):'sem data')+'</div></th>'; });
+    h+='<th style="min-width:112px;background:#eafaf0">TOTAL</th></tr></thead><tbody><tr>';
+    linhas.forEach(x=>{ const [bg,fg]=cor(x);
+      h+='<td class="t20c" style="background:'+bg+';padding:7px 6px;vertical-align:top" title="'+esc(it+' · '+x.obra+' · '+(x.status||'')+(x.data_em_obra?' · em obra '+x.data_em_obra:''))+'">'
+        +'<div style="font-size:11.5px;font-weight:700">'+(qtd(x)||'<span style="color:#aab">qtd —</span>')+'</div>'
+        +'<div style="font-size:12px;font-weight:800;margin-top:1px">'+(Number(x.verba_total)?BRL(x.verba_total):'<span style="color:#aab">verba —</span>')+'</div>'
+        +'<div style="font-size:10px;font-weight:700;color:'+fg+';margin-top:3px">'+esc(x.status||'')+'</div>'
+        +(x.responsavel?'<div style="font-size:9.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(x.responsavel)+'">'+esc(x.responsavel)+'</div>':'<div style="font-size:9.5px;color:var(--pend)">sem responsável</div>')
+        +'</td>'; });
+    h+='<td style="background:#f2faf5;text-align:center;vertical-align:top;padding:7px 6px">'
+      +(qs?'<div style="font-size:11.5px;font-weight:700">'+esc(qs)+'</div>':'')
+      +'<div style="font-size:12.5px;font-weight:800">'+BRL(tv)+'</div></td></tr></tbody></table></div></div>';
   });
 
-  // rodapé: total do grupo + o que fecha nos próximos 90 dias
   const abertos=its.filter(x=>x.status!=='Finalizado'&&x.status!=='Não se aplica');
   const vencidos=abertos.filter(x=>x.fim&&x.fim<hoje);
   const d90=abertos.filter(x=>x.fim&&x.fim>=hoje&&(new Date(x.fim)-new Date(hoje))/864e5<=90);
+  const semData=abertos.filter(x=>!x.fim);
   const som=a=>a.reduce((t,x)=>t+Number(x.verba_total||0),0);
-  h+='</tbody></table></div>'
-    +'<div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:10px">'
+  h+='<div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:4px">'
     +t20Pill('var(--pend)','#fdeaea',vencidos.length+' já venceram',BRL(som(vencidos)))
     +t20Pill('#a4761c','#fdf4e3',d90.length+' fecham em 90 dias',BRL(som(d90)))
     +t20Pill('var(--verde-d)','#eafaf0',abertos.length+' em aberto',BRL(som(abertos)))
+    +(semData.length?t20Pill('#6a737b','#f2f4f5',semData.length+' sem data',BRL(som(semData))):'')
     +'</div>'
-    +'<div class="dmini" style="margin-top:8px">Cada célula é a compra INTEIRA daquela obra — este grupo fecha de uma vez, não espalha por mês de consumo.</div>'
+    +'<div class="dmini" style="margin-top:9px">Cada célula é a compra INTEIRA daquela obra. <b>Vermelho</b> já passou da data de fechar · <b>âmbar</b> fecha em até 60 dias · <b>azul</b> mais à frente · <b>verde</b> fechado. Item sem data no cronograma não acende alerta — é ausência de informação, não folga.</div>'
     +'</div>';
   return h;
 }

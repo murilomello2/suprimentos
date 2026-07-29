@@ -563,8 +563,10 @@
       <button class="btn-ghost" id="cfgtab-resp" onclick="cfgTab('resp')" style="padding:6px 14px">🛒 Responsáveis</button>
       <button class="btn-ghost" id="cfgtab-receitas" onclick="cfgTab('receitas')" style="padding:6px 14px">📚 Aprendizado (receitas)</button>
       <button class="btn-ghost" id="cfgtab-email" onclick="cfgTab('email')" style="padding:6px 14px">📧 E-mail (disparo)</button>
+      <button class="btn-ghost" id="cfgtab-acessos" onclick="cfgTab('acessos')" style="padding:6px 14px">👁 Acessos</button>
     </div>
     <div id="cfg-email" style="display:none"><div class="wrap" id="cfgEmailWrap"></div></div>
+    <div id="cfg-acessos" style="display:none"><div class="wrap" id="cfgAcessosWrap"></div></div>
     <div id="cfg-users">
       <div class="panel">
         <h3>O que cada papel faz</h3>
@@ -992,6 +994,7 @@ function showView(v){
   if(v==='config') renderConfig();
   if(v==='radar') fitRadarHeight();
   if(v==='audit') renderAudit();
+  accPing(v);   // registra o uso da tela (fire-and-forget; ver accPing)
   if(v==='updates') renderUpdates();
 }
 
@@ -6557,18 +6560,127 @@ function cfgTab(t){
   document.getElementById('cfgtab-receitas').style.display = IS_ADMIN?'':'none';
   document.getElementById('cfgtab-resp').style.display = canR?'':'none';
   const eb=document.getElementById('cfgtab-email'); if(eb) eb.style.display = IS_ADMIN?'':'none';
-  const permitida={users:IS_ADMIN, receitas:IS_ADMIN, resp:canR, email:IS_ADMIN};
+  const ac=document.getElementById('cfgtab-acessos'); if(ac) ac.style.display = IS_ADMIN?'':'none';
+  const permitida={users:IS_ADMIN, receitas:IS_ADMIN, resp:canR, email:IS_ADMIN, acessos:IS_ADMIN};
   if(!permitida[t]) t = IS_ADMIN?'users':(canR?'resp':'users');
   document.getElementById('cfg-users').style.display = t==='users'?'':'none';
   document.getElementById('cfg-receitas').style.display = t==='receitas'?'':'none';
   document.getElementById('cfg-resp').style.display = t==='resp'?'':'none';
   const ce=document.getElementById('cfg-email'); if(ce) ce.style.display = t==='email'?'':'none';
+  const ca=document.getElementById('cfg-acessos'); if(ca) ca.style.display = t==='acessos'?'':'none';
   const ab=document.getElementById('cfgAddBtn'); if(ab) ab.style.display = (t==='users'&&IS_ADMIN)?'':'none';
   const lb=document.getElementById('cfgLoteBtn'); if(lb) lb.style.display = (t==='users'&&IS_ADMIN)?'':'none';
-  ['users','resp','receitas','email'].forEach(x=>{ const b=document.getElementById('cfgtab-'+x); if(b){ b.style.background = x===t?'var(--verde)':''; b.style.color = x===t?'#fff':''; } });
+  ['users','resp','receitas','email','acessos'].forEach(x=>{ const b=document.getElementById('cfgtab-'+x); if(b){ b.style.background = x===t?'var(--verde)':''; b.style.color = x===t?'#fff':''; } });
   if(t==='receitas') renderReceitas();
   if(t==='resp') renderRespLote();
   if(t==='email') cfgEmailLoad();
+  if(t==='acessos') cfgAcessosLoad();
+}
+
+/* ===================== CONTROLE DE ACESSOS =====================
+   O cockpit não registrava NADA de uso até hoje. O ping abaixo é o que passa a alimentar a aba
+   "Acessos" em Configurações. Regras que ele respeita, por ordem de importância:
+   1) NUNCA atrapalhar a navegação — é fire-and-forget, erro é engolido, ninguém espera resposta;
+   2) não repetir a mesma tela em sequência (trocar de aba dentro da tela não conta de novo);
+   3) o servidor agrega por (usuário × tela × dia), então o volume fica pequeno de propósito. */
+let ACC_ULTIMA='';
+function accPing(tela){
+  if(!tela || tela===ACC_ULTIMA) return;
+  ACC_ULTIMA=tela;
+  const me=(EU&&EU.bitrix_id)||''; if(!me) return;
+  try{ fetch('actions/acessos.php',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({acao:'ping',me,tela}),keepalive:true}).catch(()=>{}); }catch(e){}
+}
+
+const ACC_DIAS_LBL={7:'últimos 7 dias',30:'últimos 30 dias',90:'últimos 90 dias'};
+let ACC={dias:30, data:null, aberto:null};
+async function cfgAcessosLoad(){
+  const w=document.getElementById('cfgAcessosWrap'); if(!w) return;
+  w.innerHTML='<div class="dempty">Carregando o uso do sistema…</div>';
+  try{ ACC.data=await (await fetch('actions/acessos.php?relatorio=1&dias='+ACC.dias+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||'')+'&_='+Date.now())).json(); }
+  catch(e){ w.innerHTML='<div class="empty">Falha ao carregar os acessos.</div>'; return; }
+  if(ACC.data&&ACC.data.error){ w.innerHTML='<div class="empty">'+esc(ACC.data.error)+'</div>'; return; }
+  cfgAcessosRender();
+}
+function accDiasSel(n){ ACC.dias=n; cfgAcessosLoad(); }
+function accToggle(bid){ ACC.aberto=(ACC.aberto===bid?null:bid); cfgAcessosRender(); }
+function accQuando(iso){
+  if(!iso) return '—';
+  const d=new Date(iso); if(isNaN(d)) return '—';
+  const dias=Math.floor((new Date(today+'T00:00:00')-new Date(String(iso).slice(0,10)+'T00:00:00'))/864e5);
+  const hora=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  if(dias<=0) return 'hoje '+hora;
+  if(dias===1) return 'ontem '+hora;
+  return D(String(iso).slice(0,10))+' · há '+dias+'d';
+}
+function cfgAcessosRender(){
+  const w=document.getElementById('cfgAcessosWrap'), d=ACC.data; if(!w||!d) return;
+  const U=d.usuarios||[], N=d.nunca_entraram||[], T=d.telas||[], S=d.serie||[];
+  const btn=(n)=>`<button class="btn-ghost" style="padding:5px 12px;font-size:12.5px;${ACC.dias===n?'background:var(--verde);color:#fff;font-weight:700':''}" onclick="accDiasSel(${n})">${ACC_DIAS_LBL[n]}</button>`;
+
+  // sem NENHUM dado = a medição acabou de começar. Dizer isso é mais útil que mostrar zeros.
+  if(!d.total_aberturas){
+    w.innerHTML=`<div style="display:flex;gap:6px;margin-bottom:11px">${btn(7)}${btn(30)}${btn(90)}</div>
+      <div class="dempty" style="padding:26px">Ainda não há nenhum acesso registrado.<br>
+      <span class="dmini">O cockpit não guardava uso até agora — a contagem começa a partir de hoje, conforme as pessoas forem entrando. Volte aqui em alguns dias.</span></div>`;
+    return;
+  }
+
+  const dashUsa=U.filter(u=>u.usa_dashboard>0).length;
+  const topTela=T[0]?T[0].label:'—';
+  const kpi=(v,l,cor)=>`<div class="dkpi"><div class="v" ${cor?`style="color:${cor}"`:''}>${v}</div><div class="l">${l}</div></div>`;
+
+  let h=`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:11px">${btn(7)}${btn(30)}${btn(90)}
+    <span class="dmini" style="margin-left:auto">medindo desde ${d.medindo_desde?D(d.medindo_desde):'—'}</span></div>
+  <div class="dkpis">
+    ${kpi(d.pessoas_ativas+' de '+d.cadastrados,'pessoas que entraram')}
+    ${kpi(d.total_aberturas,'telas abertas')}
+    ${kpi(dashUsa+' de '+d.pessoas_ativas, 'abriram o Dashboard', dashUsa===d.pessoas_ativas?'var(--ok)':'var(--dourado)')}
+    ${kpi(N.length, 'nunca entraram', N.length?'var(--pend)':'var(--ok)')}
+    ${kpi(esc(topTela),'tela mais usada')}
+  </div>`;
+
+  // telas mais usadas
+  h+=`<div class="dcard wide" style="margin-top:12px">${cotSecHead('bar_chart','Telas mais abertas','no período','')}
+    ${dashBars(T.map(t=>({label:t.label, v:t.n, color:t.tela==='dashboards'?'var(--dourado)':'var(--verde)', sub:t.pct+'%'})))}
+    <div class="dmini" style="margin-top:8px">Em dourado o <b>Dashboards</b> — é a tela em que as pessoas caem ao entrar, então ela naturalmente aparece alto. O que diz se está sendo <i>usada</i> é a coluna "% no Dashboard" da tabela abaixo: se a pessoa abre o painel e sai direto pro Radar, o número dela fica baixo.</div></div>`;
+
+  // por pessoa
+  h+=`<div class="dcard wide" style="margin-top:12px">${cotSecHead('person','Quem está usando','clique numa linha p/ ver as telas dela','')}
+    <div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Pessoa</th><th>Papel</th><th class="r">Telas abertas</th><th class="r">Dias ativos</th><th class="r">% no Dashboard</th><th>Último acesso</th></tr></thead><tbody>`;
+  U.forEach(u=>{
+    const ab=ACC.aberto===u.bitrix_id;
+    h+=`<tr style="cursor:pointer" onclick="accToggle('${esc(u.bitrix_id)}')">
+      <td><span class="material-icons" style="font-size:14px;vertical-align:-3px;color:var(--muted)">${ab?'expand_more':'chevron_right'}</span> <b>${esc(u.nome)}</b></td>
+      <td><span class="dchip" style="background:#eef4fb;color:#2b5fa8;font-size:10px">${esc(u.papel||'—')}</span></td>
+      <td class="r">${u.aberturas}</td>
+      <td class="r">${u.dias_ativos}</td>
+      <td class="r"><b style="color:${u.pct_dashboard>=20?'var(--ok)':(u.usa_dashboard?'#c77f1a':'var(--pend)')}">${u.usa_dashboard?u.pct_dashboard+'%':'nunca abriu'}</b></td>
+      <td style="white-space:nowrap">${esc(accQuando(u.ultimo_em))}</td></tr>`;
+    if(ab) h+=`<tr><td colspan="6" style="background:#fbfdfb;padding:9px 16px">
+      ${dashBars((u.telas||[]).map(t=>({label:t.label, v:t.n, color:t.tela==='dashboards'?'var(--dourado)':'var(--verde)', sub:t.pct+'%'})))}</td></tr>`;
+  });
+  h+=`</tbody></table></div></div>`;
+
+  // nunca entraram — a informação mais acionável da tela
+  if(N.length){
+    h+=`<div class="dcard wide" style="margin-top:12px">${cotSecHead('person_off','Cadastrados que não entraram no período',N.length+' pessoa(s)','')}
+      <div style="display:flex;gap:7px;flex-wrap:wrap">${N.map(u=>`<span class="dchip" style="background:${u.ativo?'var(--pend)':'#8a9299'};font-size:11px" title="${u.ativo?'usuário ativo que não usou o sistema':'usuário inativo'}">${esc(u.nome)}${u.ativo?'':' (inativo)'}</span>`).join('')}</div>
+      <div class="dmini" style="margin-top:8px">Usuário ativo que nunca abriu nenhuma tela: ou não sabe que o cockpit existe, ou não achou o link. Inativos aparecem em cinza e são esperados.</div></div>`;
+  }
+
+  // movimento por dia
+  if(S.length>1){
+    const max=Math.max(...S.map(x=>x.aberturas))||1;
+    h+=`<div class="dcard wide" style="margin-top:12px">${cotSecHead('show_chart','Movimento por dia','telas abertas · pessoas distintas','')}
+      <div style="display:flex;align-items:flex-end;gap:3px;height:92px;overflow-x:auto;padding-top:4px">
+      ${S.map(x=>`<div title="${D(x.dia)} — ${x.aberturas} tela(s), ${x.pessoas} pessoa(s)" style="min-width:11px;flex:1;background:var(--verde);border-radius:3px 3px 0 0;height:${Math.max(3,Math.round(100*x.aberturas/max))}%"></div>`).join('')}
+      </div>
+      <div style="display:flex;justify-content:space-between" class="dmini"><span>${D(S[0].dia)}</span><span>${D(S[S.length-1].dia)}</span></div></div>`;
+  }
+
+  h+=`<div class="note">Registro de <b>uso de tela</b>: guarda que a pessoa abriu a tela X no dia Y, quantas vezes e a que horas — não o que ela fez dentro. Fica ${180} dias e some. Só administrador vê esta aba.</div>`;
+  w.innerHTML=h;
 }
 /* ===== Configurações › E-mail (disparo): conta SMTP + envio-teste ===== */
 async function cfgEmailLoad(){ const w=document.getElementById('cfgEmailWrap'); if(!w)return; w.innerHTML='<div class="dempty">Carregando…</div>';

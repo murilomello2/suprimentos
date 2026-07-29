@@ -304,7 +304,7 @@ try {
         }
 
         $q = $pdo->prepare("SELECT s.id sid, COALESCE(NULLIF(r.nome_override,''), s.nome) nome, s.termos_cronograma, s.lead_dias,
-                                   r.status, r.quantitativo_valor, r.quantitativo_unidade,
+                                   r.status, r.responsavel, r.quantitativo_valor, r.quantitativo_unidade,
                                    r.verba_override, r.verba_estim, r.crono_marco_override, r.data_necessaria_override
                             FROM servico s JOIN radar_item r ON r.servico_id=s.id AND r.obra_id=?");
         $q->execute([$oid]);
@@ -351,7 +351,8 @@ try {
             if ($qu === '' && $qv !== null) $qu = '?';
 
             // FIM DE COTAÇÃO do item (data em obra − lead) — âncora do modo 'data_final'
-            $fimCot = $mi ? date('Y-m', strtotime(substr($mi, 0, 10) . ' -' . (int)$r['lead_dias'] . ' days')) : null;
+            $fimData = $mi ? date('Y-m-d', strtotime(substr($mi, 0, 10) . ' -' . (int)$r['lead_dias'] . ' days')) : null;
+            $fimCot  = $fimData ? substr($fimData, 0, 7) : null;
             $ni = ($st === 'Não Iniciado' || $st === '') ? 1 : 0;   // p/ o sinal de status na célula
             foreach ($svGrupo[$sid] as $gid) {
                 if (($grupoModo[$gid] ?? 'consumo') === 'data_final') {
@@ -366,7 +367,10 @@ try {
                     $matriz[$gid][$mk]['n'] += 1; $matriz[$gid][$mk]['ni'] += $ni;
                     if ($qv !== null) $matriz[$gid][$mk]['quant'][$qu] = ($matriz[$gid][$mk]['quant'][$qu] ?? 0) + $qv * $fr;
                     if ($DET_G === $gid && ($DET_M === '' || $DET_M === $mk)) {
-                        $detItens[] = ['obra'=>$ob['nome'], 'item'=>$r['nome'], 'status'=>$st,
+                        $detItens[] = ['obra'=>$ob['nome'], 'obra_id'=>(int)$ob['id'], 'servico_id'=>(int)$sid,
+                            'item'=>$r['nome'], 'status'=>$st,
+                            'fim'=>$fimData, 'data_em_obra'=>$mi ? substr($mi,0,10) : null,
+                            'responsavel'=>trim((string)($r['responsavel'] ?? '')),
                             'quant_total'=>$qv !== null ? round($qv, 2) : null, 'unidade'=>$qu ?: null,
                             'verba_total'=>round($verba, 2), 'janela'=>$cJan, 'fonte'=>$cFonte, 'mes'=>$mk,
                             'consumido'=>round($cCons * 100), 'pct_fonte'=>$cFonte === 'data final' ? 'data final' : $pctFonte,

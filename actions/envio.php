@@ -195,6 +195,59 @@ function env_desmembra_obra($label) {
     return ['tipo' => 'obra', 'nome' => $l];
 }
 
+
+/**
+ * DETALHE DE UM PEDIDO — todos os itens, com quantidade, unidade, preco e a observacao inteira.
+ *
+ * A fila carrega so um resumo (4 produtos, 500 caracteres de observacao) porque sao milhares de
+ * linhas. Mas para DECIDIR ("isso e regularizacao?", "isso ainda vale?") o comprador precisa ver o
+ * pedido inteiro — e a observacao longa e justamente onde mora o "(lancar)". Entao o detalhe e uma
+ * consulta sob demanda, de um pedido so.
+ */
+function env_pedido_detalhe($pdo, $coligada, $numero) {
+    $col = trim((string)$coligada); $num = ltrim(trim((string)$numero), '0');
+    if ($col === '' || $num === '') return null;
+    $itens = []; $cab = null;
+    $q = 'select=pedido_numero,pedido_data,pedido_status,coligada_cod,coligada,ccusto_cod,ccusto_nome,'
+       . 'fornecedor_cod,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,preco_unit,valor_total,'
+       . 'item_observacao,solic_numeros,pedido_usuario,obra_efetiva_nome,obra_efetiva_fonte,'
+       . 'status_aprovacao,etapa_aprovacao,aprovador'
+       . '&coligada_cod=eq.' . rawurlencode($col)
+       . '&pedido_numero=eq.' . rawurlencode($num);
+    bp_varrer($q, function ($linhas) use (&$itens, &$cab) {
+        foreach ($linhas as $l) {
+            if ($cab === null) $cab = $l;
+            $itens[] = ['produto' => (string)($l['produto'] ?? ''), 'qtd' => (float)($l['qtd'] ?? 0),
+                        'und' => (string)($l['und'] ?? ''), 'preco' => (float)($l['preco_unit'] ?? 0),
+                        'total' => (float)($l['valor_total'] ?? 0),
+                        'obs' => trim((string)($l['item_observacao'] ?? '')),
+                        'sc' => trim((string)($l['solic_numeros'] ?? ''))];
+        }
+    });
+    if ($cab === null) return null;
+    $mapaRazao = bp_mapa_razao($pdo);
+    $ap = bp_aprov($cab['status_aprovacao'] ?? '', $cab['etapa_aprovacao'] ?? '', $cab['aprovador'] ?? '');
+    $obs = implode(' | ', array_values(array_unique(array_filter(array_map(fn($i) => $i['obs'], $itens)))));
+    return [
+        'numero' => $num, 'coligada_cod' => $col, 'coligada' => (string)($cab['coligada'] ?? ''),
+        'data' => (string)($cab['pedido_data'] ?? ''), 'status' => (string)($cab['pedido_status'] ?? ''),
+        'obra' => bp_obra_label($cab['obra_efetiva_nome'] ?? '', $cab['obra_efetiva_fonte'] ?? '', $mapaRazao,
+                                $cab['coligada_cod'] ?? '', $cab['ccusto_cod'] ?? '', $cab['ccusto_nome'] ?? ''),
+        'ccusto' => trim(((string)($cab['ccusto_cod'] ?? '')) . ' ' . ((string)($cab['ccusto_nome'] ?? ''))),
+        'fornecedor' => trim((string)($cab['fornecedor_fantasia'] ?? '')) ?: trim((string)($cab['fornecedor_nome'] ?? '')),
+        'fornecedor_razao' => trim((string)($cab['fornecedor_nome'] ?? '')),
+        'fornecedor_cod' => ltrim(trim((string)($cab['fornecedor_cod'] ?? '')), '0'),
+        'comprador' => trim((string)($cab['pedido_usuario'] ?? '')),
+        'aprovacao' => bp_aprov_label($ap['k'], $ap['etapa']), 'aprov_k' => $ap['k'],
+        'aprov_por' => $ap['por'], 'aprov_obs' => $ap['obs'],
+        'scs' => implode(', ', array_values(array_unique(array_filter(array_map(fn($i) => $i['sc'], $itens))))),
+        'observacao' => $obs,
+        'regulariza' => env_sinal_regularizacao($obs . ' ' . implode(' ', array_map(fn($i) => $i['produto'], $itens))),
+        'itens' => $itens,
+        'valor' => array_sum(array_map(fn($i) => $i['total'], $itens)),
+    ];
+}
+
 /**
  * Monta a fila. Devolve ENVELOPES (= e-mails que vão sair), não pedidos soltos: o comprador manda
  * "3 anexos se for a mesma obra", então a unidade de trabalho da tela é o e-mail, não o PC.
@@ -373,6 +426,11 @@ try {
         $perms = user_perms($pdo, $_GET['me'] ?? null);
         if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }
 
+        if (isset($_GET['pedido'])) {
+            $p = explode('|', (string)$_GET['pedido']);
+            $d = env_pedido_detalhe($pdo, $p[0] ?? '', $p[1] ?? '');
+            echo json_encode($d ?: ['error' => 'pedido nao encontrado'], JSON_UNESCAPED_UNICODE); exit;
+        }
         if (isset($_GET['historico'])) {
             $lim = max(1, min(500, (int)($_GET['limite'] ?? 100)));
             $h = $pdo->query("SELECT * FROM envio_registro ORDER BY enviado_em DESC LIMIT $lim")->fetchAll();
@@ -500,9 +558,10 @@ try {
         if (!$fichaId) throw new Exception('Escolha a obra.');
         $tipo = ($in['tipo'] ?? 'fornecedor') === 'obra' ? 'obra' : 'fornecedor';
 
-        $cfg = @json_decode(@file_get_contents(__DIR__ . '/../data/.email.json'), true);
-        if (!is_array($cfg) || empty($cfg['user']) || empty($cfg['senha']))
-            throw new Exception('A conta de envio ainda nao esta configurada (Configuracoes > E-mail (disparo)).');
+        /* Pedido sai de pedidos@caprem.com.br, nao da conta das cotacoes. */
+        $cfg = ec_conta_efetiva();
+        if (empty($cfg['user']) || empty($cfg['senha']))
+            throw new Exception('A conta de envio de PEDIDOS ainda nao esta configurada (Configuracoes > E-mail do pedido > Conta de envio).');
 
         $pcs = array_values(array_filter(array_map('trim', explode(',', (string)($in['pcs'] ?? '9001,9002')))));
         $c = ec_compor($pdo, $fichaId, $tipo, [
@@ -547,7 +606,7 @@ try {
 
         $cfgS = ['host' => $cfg['host'] ?? '', 'port' => (int)($cfg['port'] ?? 465),
                  'user' => $cfg['user'], 'senha' => $cfg['senha'],
-                 'from' => $cfg['user'], 'from_name' => 'Caprem - Suprimentos (teste)'];
+                 'from' => $cfg['user'], 'from_name' => (trim((string)($cfg['nome'] ?? '')) ?: 'Caprem - Suprimentos') . ' (teste)'];
         /* smtp_send devolve um PAR [ok, mensagem] — tratar como booleano faria todo envio parecer
            bem-sucedido, porque array nao-vazio e truthy. */
         $ok = false; $erro = '';
@@ -558,6 +617,7 @@ try {
 
         /* De proposito NAO grava em envio_registro: o livro-caixa e so de envio real. */
         echo json_encode(['ok' => (bool)$ok, 'erro' => $erro, 'para' => $para,
+                          'de' => $cfg['user'], 'conta' => $cfg['fonte'],
                           'assunto' => '[TESTE] ' . $c['assunto'], 'anexos' => count($anexos),
                           'faltando' => $c['faltando']], JSON_UNESCAPED_UNICODE); exit;
     }

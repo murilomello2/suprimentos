@@ -158,6 +158,45 @@ function ec_resolver($pdo, $fichaId) {
     return $cache[(int)$fichaId];
 }
 
+
+/**
+ * CONTA DE ENVIO DOS PEDIDOS — separada da conta das cotacoes, de proposito.
+ *
+ * A aba "E-mail (disparo)" guarda suprimentos@capremconstrutora.com.br, que dispara COTACAO. Pedido
+ * de compra sai de pedidos@caprem.com.br e sempre saiu: o fornecedor conhece esse remetente, as
+ * respostas dele (confirmacao, nota, prazo) precisam voltar para a caixa certa, e o historico de
+ * 3.083 e-mails de pedido esta la. Misturar as duas trocaria o remetente na cara do fornecedor.
+ *
+ * A senha vive num arquivo dot-prefixado em data/ (403 pelo .htaccess), nunca no banco e nunca no
+ * JSON que vai para o navegador — a leitura devolve so o host, a porta, o usuario e se ha senha.
+ */
+define('EC_CONTA_FILE', __DIR__ . '/../data/.email_pedidos.json');
+
+function ec_conta() {
+    $j = @json_decode(@file_get_contents(EC_CONTA_FILE), true);
+    return is_array($j) ? $j : [];
+}
+
+/** A conta EFETIVA do disparo de pedidos: a propria; sem ela, cai na conta geral. */
+function ec_conta_efetiva() {
+    $c = ec_conta();
+    if (trim((string)($c['user'] ?? '')) !== '' && trim((string)($c['senha'] ?? '')) !== '') {
+        $c['fonte'] = 'pedidos'; return $c;
+    }
+    $g = @json_decode(@file_get_contents(__DIR__ . '/../data/.email.json'), true);
+    if (is_array($g)) { $g['fonte'] = 'geral'; return $g; }
+    return ['fonte' => 'nenhuma'];
+}
+
+function ec_conta_publica() {
+    $c = ec_conta(); $g = ec_conta_efetiva();
+    return ['host' => $c['host'] ?? 'mail.caprem.com.br', 'port' => (int)($c['port'] ?? 465),
+            'imap_port' => (int)($c['imap_port'] ?? 993), 'user' => $c['user'] ?? '',
+            'nome' => $c['nome'] ?? 'Caprem - Suprimentos',
+            'configurada' => (trim((string)($c['user'] ?? '')) !== '' && trim((string)($c['senha'] ?? '')) !== ''),
+            'fonte' => $g['fonte'], 'fonte_user' => $g['user'] ?? ''];
+}
+
 /**
  * COMPÕE o e-mail de um pedido. Vive AQUI, no servidor, e não no JavaScript da tela, de propósito:
  * a prévia que o administrador vê precisa ser literalmente o mesmo texto que o disparo vai mandar.
@@ -280,6 +319,7 @@ try {
     if ($metodo === 'GET') {
         $perms = user_perms($pdo, $_GET['me'] ?? null);
         if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error'=>'Não autorizado.']); exit; }
+        if (isset($_GET['conta'])) { echo json_encode(ec_conta_publica(), JSON_UNESCAPED_UNICODE); exit; }
         if (isset($_GET['previa'])) {
             /* A prévia da tela de Envio manda os PCs e o fornecedor DE VERDADE; a de Configurações
                não manda nada e cai no exemplo. Mesmo compositor nos dois casos. */
@@ -323,6 +363,20 @@ try {
             $n++;
         }
         echo json_encode(['ok'=>true, 'salvos'=>$n]); exit;
+    }
+
+    if ($acao === 'conta') {
+        $c = ec_conta();
+        $c['host'] = trim((string)($in['host'] ?? '')) ?: 'mail.caprem.com.br';
+        $c['port'] = (int)($in['port'] ?? 465) ?: 465;
+        $c['imap_port'] = (int)($in['imap_port'] ?? 993) ?: 993;
+        $c['user'] = trim((string)($in['user'] ?? ''));
+        $c['nome'] = trim((string)($in['nome'] ?? '')) ?: 'Caprem - Suprimentos';
+        $nova = (string)($in['senha'] ?? '');
+        if ($nova !== '') $c['senha'] = $nova;          // vazio MANTEM a atual
+        @file_put_contents(EC_CONTA_FILE, json_encode($c, JSON_UNESCAPED_UNICODE));
+        @chmod(EC_CONTA_FILE, 0600);
+        echo json_encode(['ok' => true] + ec_conta_publica()); exit;
     }
 
     if ($acao === 'aviso_salvar') {

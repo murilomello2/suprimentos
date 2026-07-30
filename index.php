@@ -7060,6 +7060,104 @@ async function envMarcoSalvar(){ const v=((document.getElementById('envMarcoD')|
     ENV.d=null; envCarregar(); }catch(e){ toast('Falha: '+e.message); }
 }
 
+
+/* ---- CONTA DE ENVIO DOS PEDIDOS ----
+   Separada da conta das cotacoes de proposito. A aba "E-mail (disparo)" guarda
+   suprimentos@capremconstrutora.com.br, que dispara COTACAO. Pedido de compra sempre saiu de
+   pedidos@caprem.com.br: o fornecedor conhece esse remetente, as respostas dele (confirmacao, nota,
+   prazo) precisam voltar para a caixa certa, e o historico de 3.083 e-mails de pedido esta la.
+   O primeiro teste saiu pela conta errada justamente por nao existir esta separacao. */
+async function pmConta(){ const w=document.getElementById('pmContaWrap'); if(!w) return;
+  let c; try{ c=await (await fetch('actions/envio_config.php?conta=1&me='+pmMe()+'&_='+Date.now())).json(); }
+  catch(e){ w.innerHTML='<div class="empty">Falha ao carregar.</div>'; return; }
+  const okc=!!c.configurada;
+  let h=cotSecHead('alternate_email','Conta que envia os PEDIDOS',
+    'diferente da conta que dispara cotacoes — o fornecedor conhece este remetente',
+    '<span class="dchip" style="background:'+(okc?'var(--ok)':'var(--pend)')+'">'+(okc?'configurada':'falta configurar')+'</span>');
+  if(!okc) h+='<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:9px 12px;border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:11px">'
+    + 'Enquanto esta conta nao existir, o teste sai por <b>'+esc(c.fonte_user||'(conta das cotacoes)')+'</b> — '
+    + 'que nao e o remetente que os fornecedores conhecem.</div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 100px 110px;gap:10px">'
+   + cotFld('Servidor','<input id="pmcHost" value="'+esc(c.host||'mail.caprem.com.br')+'" style="width:100%">')
+   + cotFld('Porta SMTP','<input id="pmcPort" type="number" value="'+esc(c.port||465)+'" style="width:100%">')
+   + cotFld('Porta IMAP','<input id="pmcImap" type="number" value="'+esc(c.imap_port||993)+'" style="width:100%">')+'</div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:9px">'
+   + cotFld('Usuario (remetente dos pedidos)','<input id="pmcUser" value="'+esc(c.user||'')+'" placeholder="pedidos@caprem.com.br" style="width:100%">')
+   + cotFld('Nome que aparece para o fornecedor','<input id="pmcNome" value="'+esc(c.nome||'Caprem - Suprimentos')+'" style="width:100%">')+'</div>';
+  h+='<div style="margin-top:9px;max-width:420px">'+cotFld('Senha (vazio mantem a atual)','<input id="pmcSenha" type="password" autocomplete="new-password" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" style="width:100%">')+'</div>';
+  h+='<div style="margin-top:11px"><button class="btn-prim" onclick="pmContaSalvar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar conta dos pedidos</button></div>';
+  h+='<div class="dmini" style="margin-top:10px;color:var(--muted)">A senha fica num arquivo do servidor protegido (403), nunca no banco e nunca no que chega ao navegador.</div>';
+  w.innerHTML=h;
+}
+async function pmContaSalvar(){ const g=x=>((document.getElementById(x)||{}).value||'').trim();
+  if(!g('pmcUser')){ toast('Informe o e-mail remetente'); return; }
+  try{ const r=await (await fetch('actions/envio_config.php',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({acao:'conta',me:(EU&&EU.bitrix_id),host:g('pmcHost'),port:Number(g('pmcPort'))||465,
+         imap_port:Number(g('pmcImap'))||993,user:g('pmcUser'),nome:g('pmcNome'),senha:g('pmcSenha')})})).json();
+    if(r.error){ toast(r.error); return; } toast('Conta dos pedidos salva'); pmConta();
+  }catch(e){ toast('Falha: '+e.message); } }
+
+/* ---- VER O PEDIDO INTEIRO ----
+   A fila carrega so um resumo (4 produtos, observacao cortada) porque sao milhares de linhas. Mas
+   para DECIDIR se arquiva, o comprador precisa ver os itens e principalmente a observacao completa —
+   e onde mora o "(lancar)". Entao o detalhe e uma consulta sob demanda, de um pedido so. */
+async function envVerPedido(col,num){
+  dlgAbrir('Pedido de compra','Carregando...','<div class="dempty">Buscando os itens no TOTVS...</div>');
+  let d; try{ d=await (await fetch('actions/envio.php?pedido='+encodeURIComponent(col+'|'+num)+'&me='+envMe()+'&_='+Date.now())).json(); }
+  catch(e){ dlgAbrir('Pedido de compra','Falha','<div class="empty">'+esc(e.message)+'</div>'); return; }
+  if(d.error){ dlgAbrir('Pedido de compra','Nao encontrado','<div class="empty">'+esc(d.error)+'</div>'); return; }
+  const COR={aprovado:'var(--ok)',reprovado:'#c0392b',pendente:'var(--dourado)',sem:'var(--muted)'};
+  let h='<div class="bar" style="gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+   + '<span class="dchip" style="background:'+(COR[d.aprov_k]||'var(--muted)')+'">'+esc(d.aprovacao)+'</span>'
+   + (d.aprov_por?'<span class="dmini">por '+esc(d.aprov_por)+'</span>':'')
+   + (d.regulariza?'<span class="dchip" style="background:var(--dourado)">sinal de regularizacao</span>':'')
+   + '</div>';
+  h+='<table cellpadding="0" cellspacing="0" style="font-size:13px;margin-bottom:12px">';
+  [['Obra',d.obra],['Fornecedor',d.fornecedor+(d.fornecedor_cod?(' (cod '+d.fornecedor_cod+')'):'')],
+   ['Centro de custo',d.ccusto],['Emitido em',(d.data||'').split('T')[0].split('-').reverse().join('/')],
+   ['Comprador',d.comprador],['Solicitacoes',d.scs||'—'],['Valor total',BRL(d.valor)]].forEach(x=>{
+    if(!x[1]) return;
+    h+='<tr><td style="padding:1px 12px 1px 0;color:#666;white-space:nowrap">'+x[0]+':</td><td style="padding:1px 0"><b>'+esc(String(x[1]))+'</b></td></tr>'; });
+  h+='</table>';
+  if(d.observacao) h+='<div class="dmini" style="margin-bottom:3px">Observacao dos itens</div>'
+   + '<div style="border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:12.5px;background:'
+   + (d.regulariza?'#fdf9ec':'#f8faf9')+';margin-bottom:12px;white-space:pre-wrap;max-height:170px;overflow:auto">'+esc(d.observacao)+'</div>';
+  h+='<div class="dmini" style="margin-bottom:3px">Itens ('+d.itens.length+')</div>';
+  h+='<div style="overflow:auto;max-height:300px;border:1px solid var(--line);border-radius:8px">'
+   + '<table class="dtable" style="width:100%;font-size:12.5px"><thead><tr>'
+   + '<th style="text-align:left">Produto</th><th style="text-align:right">Qtd</th><th>Und</th>'
+   + '<th style="text-align:right">Unit.</th><th style="text-align:right">Total</th></tr></thead><tbody>';
+  d.itens.forEach(i=>{ h+='<tr><td>'+esc(i.produto)+'</td><td style="text-align:right">'+QNUM(i.qtd)+'</td>'
+   + '<td style="text-align:center">'+esc(i.und)+'</td><td style="text-align:right">'+BRL(i.preco)+'</td>'
+   + '<td style="text-align:right">'+BRL(i.total)+'</td></tr>'; });
+  h+='</tbody></table></div>';
+  h+='<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Fechar</button>'
+   + '<button class="btn-ghost" style="padding:5px 13px" onclick="envArqUm(\''+esc(col)+'\',\''+esc(num)+'\')">'
+   + '<span class="material-icons" style="font-size:15px;vertical-align:-3px">inventory_2</span> Arquivar este pedido</button></div>';
+  dlgAbrir('Pedido '+esc(num)+' &middot; '+esc(d.coligada||('coligada '+col)), esc(d.fornecedor||'Pedido de compra'), h);
+}
+
+/* Arquiva UM pedido (serve tanto para a fila quanto para a lista de bloqueados). */
+function envArqUm(col,num){
+  dlgAbrir('Envio de Pedidos','Arquivar o pedido '+esc(num),
+    '<div style="max-width:520px"><div class="dmini" style="margin-bottom:10px">'
+   + 'Some da tela e das contagens, mas <b>nada e apagado</b>: o pedido continua no TOTVS e volta pela aba <b>Arquivados</b>.</div>'
+   + cotFld('Motivo (fica com o seu nome)','<input id="envArq1" placeholder="ex.: material ja entregue, pedido so para lancamento" style="width:100%">')
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" onclick="envArqUmSalvar(\''+esc(col)+'\',\''+esc(num)+'\')">Arquivar</button></div></div>');
+}
+async function envArqUmSalvar(col,num){
+  const m=((document.getElementById('envArq1')||{}).value||'').trim();
+  if(!m){ toast('Escreva o motivo'); return; }
+  try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({acao:'decidir',me:(EU&&EU.bitrix_id),me_nome:(EU&&EU.nome)||'',
+                            decisao:'arquivado',coligada:col,numero:num,motivo:m})})).json();
+    if(r.error){ toast(r.error); return; }
+    closeModal(true); toast('Pedido arquivado'); ENV.d=null; envCarregar();
+  }catch(e){ toast('Falha: '+e.message); } }
+
 /* ---- ARQUIVAR: tirar da tela sem apagar nada ----
    Pedido antigo aprovado nao e mais para enviar, mas tirar um a um seriam milhares de cliques — e
    apagar de verdade destruiria a resposta de "por que este pedido aprovado nunca saiu?". Entao
@@ -7159,6 +7257,7 @@ function envEnvCard(e){
    + 'Se for isso, mande so para a obra - foi assim que 6 pedidos vazaram para o fornecedor.</div>';
 
   h+='<div class="bar" style="gap:7px;margin-top:9px;justify-content:flex-end">'
+   + (e.pedidos||[]).slice(0,3).map(p=>'<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px" onclick="envVerPedido(\''+p.coligada_cod+'\',\''+p.numero+'\')" title="ver os itens deste pedido">PC '+esc(p.numero)+'</button>').join('')
    + '<button class="btn-ghost" style="padding:5px 12px" onclick="envVerEmail(\''+e.chave+'\')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">visibility</span> Ver o e-mail</button>'
    + '<button class="btn-ghost" style="padding:5px 12px" onclick="envDecidir(\''+e.chave+'\',\'so_obra\')">So para a obra</button>'
    + '<button class="btn-ghost" style="padding:5px 12px" onclick="envDecidir(\''+e.chave+'\',\'arquivado\')" title="tira da tela sem apagar nada">Arquivar</button>'
@@ -7178,7 +7277,12 @@ function envBloq(){ const bs=(ENV.d.bloqueados||[]);
   if(!bs.length) return '<div class="panel"><div class="dempty">Nada bloqueado. Todo pedido aprovado tem obra, endereco e destinatario.</div></div>';
   const grupos={}; bs.forEach(b=>{ (grupos[b.bloqueio]=grupos[b.bloqueio]||[]).push(b); });
   const res=ENV.d.bloq_resumo||{};
-  let h='';
+  /* Arquivar em lote tambem aqui: boa parte do que trava sao pedidos antigos que nao vao mais sair,
+     e obrigar a voltar na aba Fila para arquiva-los seria um passo a toa. */
+  let h='<div class="panel" style="padding:10px 14px;margin-bottom:10px"><div class="bar" style="justify-content:space-between;flex-wrap:wrap;gap:8px">'
+   + '<div class="dmini">Use <b>Ver</b> para conferir os itens e a observacao antes de decidir. <b>Arquivar</b> tira da tela sem apagar nada.</div>'
+   + '<button class="btn-ghost" onclick="envArqLoteForm()" style="padding:6px 13px"><span class="material-icons" style="font-size:16px;vertical-align:-4px">inventory_2</span> Arquivar antigos em lote</button>'
+   + '</div></div>';
   Object.keys(grupos).forEach(k=>{ const meta=ENV_BLOQ[k]||[k,'block',''], lista=grupos[k];
     const r=res[k]||{total:lista.length,mostrando:lista.length,valor:0};
     h+='<div class="panel" style="margin-bottom:10px;border-left:4px solid #c0392b">'
@@ -7186,11 +7290,15 @@ function envBloq(){ const bs=(ENV.d.bloqueados||[]);
          '<span class="dchip" style="background:var(--muted)">'+BRLc(r.valor||0)+' parados</span>');
     h+='<div style="overflow-x:auto"><table class="dtable" style="width:100%;font-size:12.5px"><thead><tr>'
      + '<th style="text-align:left">Pedido</th><th style="text-align:left">Obra (como o TOTVS manda)</th>'
-     + '<th style="text-align:left">Fornecedor</th><th style="text-align:right">Valor</th><th style="text-align:right">Parado ha</th></tr></thead><tbody>';
+     + '<th style="text-align:left">Fornecedor</th><th style="text-align:right">Valor</th><th style="text-align:right">Parado ha</th><th></th></tr></thead><tbody>';
     lista.forEach(b=>{ h+='<tr><td><b>'+esc(b.numero)+'</b> <span class="dmini" style="color:var(--muted)">'+esc(b.coligada||('col. '+b.coligada_cod))+'</span></td>'
      + '<td>'+esc(b.obra||'—')+'</td><td>'+esc(b.forn_nome||'—')+'</td>'
      + '<td style="text-align:right">'+BRL(b.valor)+'</td>'
-     + '<td style="text-align:right">'+(b.dias!=null?(b.dias+'d'):'—')+'</td></tr>'; });
+     + '<td style="text-align:right">'+(b.dias!=null?(b.dias+'d'):'—')+'</td>'
+     + '<td style="text-align:right;white-space:nowrap">'
+     + '<button class="btn-ghost" style="padding:2px 8px;font-size:11.5px" onclick="envVerPedido(\''+b.coligada_cod+'\',\''+b.numero+'\')">Ver</button> '
+     + '<button class="btn-ghost" style="padding:2px 8px;font-size:11.5px" onclick="envArqUm(\''+b.coligada_cod+'\',\''+b.numero+'\')">Arquivar</button>'
+     + '</td></tr>'; });
     h+='</tbody></table></div>';
     if(r.total>r.mostrando) h+='<div class="dmini" style="margin-top:7px;color:var(--muted)">Mostrando os '
       + r.mostrando+' mais recentes de <b>'+r.total+'</b>. Os outros '+(r.total-r.mostrando)
@@ -7401,12 +7509,15 @@ function pmRender(){ const w=document.getElementById('cfgPedMailWrap'), d=PM.d; 
   if(PM.sub==='padrao') corpo=pmPadrao();
   else if(PM.sub==='avisos') corpo=pmAvisos();
   else if(PM.sub==='cidade') corpo=pmCidade();
+  else if(PM.sub==='conta') corpo='<div class="panel" id="pmContaWrap"><div class="dempty">Carregando...</div></div>';
   else corpo=pmObra();
+  if(PM.sub==='conta') setTimeout(pmConta,0);
   w.innerHTML='<div class="panel" style="padding-bottom:10px">'
     + cotSecHead('mark_email_read','E-mail do pedido de compra','o texto que sai junto com o PDF — muda para todas as obras de uma vez, ou so para uma','')
     + '<div class="bar" style="gap:6px;margin:2px 0 0">'
     + pmSubBtn('padrao','public','Padrao (todas)') + pmSubBtn('avisos','campaign','Avisos com prazo')
     + pmSubBtn('cidade','location_city','Por cidade') + pmSubBtn('obra','apartment','Por obra')
+    + pmSubBtn('conta','alternate_email','Conta de envio')
     + '</div></div>' + corpo;
 }
 

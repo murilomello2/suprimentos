@@ -124,43 +124,79 @@ function env_dias($data) {
 }
 
 /**
- * Mapa para achar o e-mail do fornecedor. DOIS índices, nessa ordem:
- *   1) CODCFO (totvs_cod) — a chave exata; foi ela que casou 1.160/1.160 no enriquecimento.
- *   2) nome normalizado EXATO — só 330 dos nossos cadastros têm CODCFO, então sem esta segunda
- *      volta um fornecedor que a gente tem e-mail fica bloqueado à toa.
+ * Acha o e-mail do fornecedor. TRES chaves, nesta ordem de confiabilidade:
  *
- * O casamento por nome é EXATO depois de normalizar (bp_nz derruba acento, caixa e pontuação).
- * Nada de aproximado: numa tentativa anterior a normalização agressiva casou "Gerdau" com
- * "E R CONSTRUCOES". Aqui, nome ambíguo (dois cadastros com o mesmo nome normalizado e e-mails
- * diferentes) é descartado — melhor bloquear e alguém resolver do que mandar para o e-mail errado.
+ *   1) CNPJ         — a unica chave que nao depende de como alguem digitou o nome.
+ *   2) CODCFO       — exata, mas so 330 dos nossos cadastros tem esse codigo preenchido.
+ *   3) NOME sem a forma juridica — o TOTVS grava "COMERCIAL ARARENSE" e o nosso cadastro
+ *      "Comercial Ararense Ltda". Comparar os dois crus nao casa nunca; foi o que deixou a
+ *      Comercial Ararense (5 pedidos) bloqueada mesmo tendo e-mail em DOIS cadastros nossos.
+ *
+ * Continua sem NADA de aproximado. Numa tentativa anterior a normalizacao agressiva casou "Gerdau"
+ * com "E R CONSTRUCOES"; aqui so ha igualdade exata depois de tirar acento, caixa, pontuacao e o
+ * sufixo societario. E chave ambigua (dois cadastros, mesmo nome, e-mails DIFERENTES) e descartada:
+ * bloquear e alguem resolver e melhor do que mandar o pedido para o e-mail errado.
  */
-function env_forn_email($pdo) {
-    $porCod = []; $porNome = []; $ambiguo = [];
-    try {
-        foreach ($pdo->query("SELECT totvs_cod, nome, razao_social, email FROM fornecedores") as $f) {
-            $e = trim((string)$f['email']);
-            if ($e === '') continue;
-            $c = ltrim(trim((string)($f['totvs_cod'] ?? '')), '0');
-            if ($c !== '' && !isset($porCod[$c])) $porCod[$c] = ['email' => $e, 'nome' => trim((string)$f['nome'])];
-            foreach ([$f['nome'], $f['razao_social']] as $n) {
-                $k = bp_nz((string)$n);
-                if ($k === '' || strlen($k) < 6) continue;
-                if (isset($porNome[$k]) && strcasecmp($porNome[$k]['email'], $e) !== 0) { $ambiguo[$k] = true; continue; }
-                $porNome[$k] = ['email' => $e, 'nome' => trim((string)$f['nome'])];
-            }
-        }
-        foreach (array_keys($ambiguo) as $k) unset($porNome[$k]);
-    } catch (Throwable $e) {}
-    return ['cod' => $porCod, 'nome' => $porNome];
+function env_nome_forn($s) {
+    $k = bp_nz($s);                                   // MAIUSCULA, sem acento, sem pontuacao
+    $k = preg_replace('/\b(LTDA|EIRELI|EPP|MEI|SPE|CIA|S A|SA|ME)\b/', ' ', $k);
+    $k = trim(preg_replace('/\s+/', ' ', $k));
+    // uma palavra curta e generica demais para ser chave ("TIGRE", "ALUGTEC" ainda passam por tamanho)
+    $tok = $k === '' ? [] : explode(' ', $k);
+    if (count($tok) < 2 && strlen($k) < 8) return '';
+    return $k;
 }
 
-/** Acha o e-mail: código TOTVS primeiro, nome exato depois. */
-function env_forn_acha($mapa, $cod, $nome, $razao = '') {
+function env_cnpj14($s) {
+    $d = preg_replace('/\D+/', '', (string)$s);
+    return strlen($d) === 14 ? $d : '';
+}
+
+function env_forn_email($pdo) {
+    $ix = ['cnpj' => [], 'cod' => [], 'nome' => []];
+    $amb = ['cnpj' => [], 'nome' => []];
+    try {
+        /* A tabela chama-se cot_fornecedor. Escrevi "fornecedores" e o try/catch abaixo engoliu o
+           erro em silencio: o mapa vinha VAZIO, e por isso TODO fornecedor caia em "sem e-mail" —
+           inclusive a Comercial Ararense, que tem e-mail em dois cadastros nossos. */
+        foreach ($pdo->query("SELECT totvs_cod, nome, razao_social, cnpj, email FROM cot_fornecedor") as $f) {
+            $e = trim((string)$f['email']);
+            if ($e === '') continue;
+            $reg = ['email' => $e, 'nome' => trim((string)$f['nome'])];
+
+            $c = ltrim(trim((string)($f['totvs_cod'] ?? '')), '0');
+            if ($c !== '' && !isset($ix['cod'][$c])) $ix['cod'][$c] = $reg;
+
+            $cn = env_cnpj14($f['cnpj'] ?? '');
+            if ($cn !== '') {
+                if (isset($ix['cnpj'][$cn]) && strcasecmp($ix['cnpj'][$cn]['email'], $e) !== 0) $amb['cnpj'][$cn] = true;
+                else $ix['cnpj'][$cn] = $reg;
+            }
+            foreach ([$f['nome'], $f['razao_social']] as $n) {
+                $k = env_nome_forn((string)$n);
+                if ($k === '') continue;
+                if (isset($ix['nome'][$k]) && strcasecmp($ix['nome'][$k]['email'], $e) !== 0) $amb['nome'][$k] = true;
+                else $ix['nome'][$k] = $reg;
+            }
+        }
+        foreach (array_keys($amb['cnpj']) as $k) unset($ix['cnpj'][$k]);
+        foreach (array_keys($amb['nome']) as $k) unset($ix['nome'][$k]);
+    } catch (Throwable $e) { $ix['erro'] = $e->getMessage(); }
+    /* Mapa vazio nao e "ninguem tem e-mail": e sinal de que a consulta falhou. Sem isto o erro
+       aparece como 31 fornecedores sem e-mail, que e um sintoma plausivel e completamente errado. */
+    if (!$ix['cnpj'] && !$ix['cod'] && !$ix['nome'] && empty($ix['erro']))
+        $ix['erro'] = 'nenhum fornecedor com e-mail no cadastro';
+    return $ix;
+}
+
+function env_forn_acha($mapa, $cod, $cnpj, $nome, $razao = '') {
+    $cn = env_cnpj14($cnpj);
+    if ($cn !== '' && isset($mapa['cnpj'][$cn])) return $mapa['cnpj'][$cn] + ['via' => 'CNPJ'];
     $c = ltrim(trim((string)$cod), '0');
     if ($c !== '' && isset($mapa['cod'][$c])) return $mapa['cod'][$c] + ['via' => 'código TOTVS'];
     foreach ([$nome, $razao] as $n) {
-        $k = bp_nz((string)$n);
-        if ($k !== '' && isset($mapa['nome'][$k])) return $mapa['nome'][$k] + ['via' => 'nome exato'];
+        $k = env_nome_forn((string)$n);
+        if ($k !== '' && isset($mapa['nome'][$k])) return $mapa['nome'][$k] + ['via' => 'nome'];
     }
     return null;
 }
@@ -209,7 +245,7 @@ function env_pedido_detalhe($pdo, $coligada, $numero) {
     if ($col === '' || $num === '') return null;
     $itens = []; $cab = null;
     $q = 'select=pedido_numero,pedido_data,pedido_status,coligada_cod,coligada,ccusto_cod,ccusto_nome,'
-       . 'fornecedor_cod,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,preco_unit,valor_total,'
+       . 'fornecedor_cod,fornecedor_cnpj,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,preco_unit,valor_total,'
        . 'item_observacao,solic_numeros,pedido_usuario,obra_efetiva_nome,obra_efetiva_fonte,'
        . 'status_aprovacao,etapa_aprovacao,aprovador'
        . '&coligada_cod=eq.' . rawurlencode($col)
@@ -237,6 +273,7 @@ function env_pedido_detalhe($pdo, $coligada, $numero) {
         'fornecedor' => trim((string)($cab['fornecedor_fantasia'] ?? '')) ?: trim((string)($cab['fornecedor_nome'] ?? '')),
         'fornecedor_razao' => trim((string)($cab['fornecedor_nome'] ?? '')),
         'fornecedor_cod' => ltrim(trim((string)($cab['fornecedor_cod'] ?? '')), '0'),
+        'fornecedor_cnpj' => trim((string)($cab['fornecedor_cnpj'] ?? '')),
         'comprador' => trim((string)($cab['pedido_usuario'] ?? '')),
         'aprovacao' => bp_aprov_label($ap['k'], $ap['etapa']), 'aprov_k' => $ap['k'],
         'aprov_por' => $ap['por'], 'aprov_obs' => $ap['obs'],
@@ -271,7 +308,7 @@ function env_fila($pdo, $filtroObra = '') {
 
     /* SÓ APROVADO ENTRA. Este filtro é a regra 1 — não existe outro caminho para a fila. */
     $q = 'select=pedido_numero,pedido_data,pedido_status,coligada_cod,coligada,ccusto_cod,ccusto_nome,'
-       . 'fornecedor_cod,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,valor_total,item_observacao,'
+       . 'fornecedor_cod,fornecedor_cnpj,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,valor_total,item_observacao,'
        . 'obra_efetiva_nome,obra_efetiva_fonte,pedido_usuario,status_aprovacao,etapa_aprovacao,aprovador'
        . '&status_aprovacao=ilike.aprovado*&pedido_data=gte.' . $desde
        . '&order=pedido_data.desc,pedido_numero.desc';
@@ -292,6 +329,7 @@ function env_fila($pdo, $filtroObra = '') {
                     'forn_nome' => trim((string)($l['fornecedor_fantasia'] ?? '')) !== ''
                                    ? trim((string)$l['fornecedor_fantasia']) : trim((string)($l['fornecedor_nome'] ?? '')),
                     'forn_razao' => trim((string)($l['fornecedor_nome'] ?? '')),
+                    'forn_cnpj' => trim((string)($l['fornecedor_cnpj'] ?? '')),
                     'comprador' => trim((string)($l['pedido_usuario'] ?? '')),
                     'valor' => 0.0, 'itens' => 0, 'produtos' => [], 'obs' => '',
                 ];
@@ -353,12 +391,14 @@ function env_fila($pdo, $filtroObra = '') {
         }
 
         // ---- destinatário ----
-        $fm = env_forn_acha($fornMail, $p['forn_cod'], $p['forn_nome'], $p['forn_razao'] ?? '');
+        $fm = env_forn_acha($fornMail, $p['forn_cod'], $p['forn_cnpj'] ?? '', $p['forn_nome'], $p['forn_razao'] ?? '');
         $p['para'] = $destino === 'obra' ? trim((string)($res['efetivo']['email_nf'] ?? '')) : trim((string)($fm['email'] ?? ''));
         $p['email_via'] = $fm['via'] ?? '';
         if ($destino === 'fornecedor' && $p['para'] === '') {
             $p['bloqueio'] = 'email';
-            $p['bloqueio_txt'] = 'Não temos e-mail de ' . ($p['forn_nome'] ?: 'fornecedor') . ' (código TOTVS ' . ($p['forn_cod'] ?: '—') . ').';
+            $p['bloqueio_txt'] = 'Não temos e-mail de ' . ($p['forn_nome'] ?: 'fornecedor')
+                . ' — procurei por CNPJ ' . (env_cnpj14($p['forn_cnpj'] ?? '') ?: '(não informado)')
+                . ', código TOTVS ' . ($p['forn_cod'] ?: '—') . ' e pelo nome.';
             $bloq[] = $p; continue;
         }
         $p['destino'] = $destino;
@@ -402,6 +442,7 @@ function env_fila($pdo, $filtroObra = '') {
                        'valor' => array_sum(array_map(fn($b) => $b['bloqueio'] === $m ? $b['valor'] : 0, $bloq))];
 
     return ['envelopes' => $env, 'bloqueados' => $amostra, 'bloq_resumo' => $resumo, 'segurados' => $segurados,
+            'aviso_cadastro' => $fornMail['erro'] ?? '',
             'marco' => $marco, 'desde' => $desde,
             'contadores' => [
                 'envelopes' => count($env), 'pedidos' => count($fila),

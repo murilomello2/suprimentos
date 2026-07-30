@@ -6136,7 +6136,10 @@ function fornRender(){
     ${CAN_FORN?'<button class="btn-prim" style="padding:7px 12px" onclick="fornNovo()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Novo</button>':''}
   </div></div><div class="wrap"><table><thead><tr><th>Nome</th><th>Categoria</th><th>Cidade</th><th>Contato</th><th>Telefone</th><th>Itens</th><th>Tipo</th><th></th></tr></thead><tbody>`;
   for(const f of FORN.list){
-    html+=`<tr><td><b>${esc(f.nome)}</b>${f.email?`<div class="muted" style="font-size:11px">${esc(f.email)}</div>`:''}</td><td class="muted">${esc(f.categoria||'')}</td><td class="muted">${esc(f.cidade||'')}</td><td>${esc(f.contato||'')}</td><td>${esc(f.telefone||'')}</td><td class="muted" style="font-size:11px">${esc((f.itens||'').slice(0,42))}</td><td>${esc(f.tipo||'')}</td>
+    /* Selo do TOTVS: o Murilo abriu dois cadastros da Comercial Ararense e nao tinha como saber qual
+       deles o TOTVS conhece — e e o codigo do TOTVS (CODCFO) que casa o pedido com o cadastro. */
+    const selo = f.totvs_cod ? ` <span class="dchip" style="background:var(--verde);font-size:9.5px;vertical-align:1px" title="cadastrado no TOTVS — código ${esc(f.totvs_cod)}">TOTVS ${esc(f.totvs_cod)}</span>` : '';
+    html+=`<tr><td><b>${esc(f.nome)}</b>${selo}${f.email?`<div class="muted" style="font-size:11px">${esc(f.email)}</div>`:''}${f.cnpj?`<div class="muted" style="font-size:10.5px">CNPJ ${esc(f.cnpj)}</div>`:''}</td><td class="muted">${esc(f.categoria||'')}</td><td class="muted">${esc(f.cidade||'')}</td><td>${esc(f.contato||'')}</td><td>${esc(f.telefone||'')}</td><td class="muted" style="font-size:11px">${esc((f.itens||'').slice(0,42))}</td><td>${esc(f.tipo||'')}</td>
       <td>${CAN_FORN?`<button class="btn-ghost" style="padding:2px 8px" onclick="fornNovo(${f.id})"><span class="material-icons" style="font-size:15px">edit</span></button>`:''}</td></tr>`;
   }
   if(!FORN.list.length) html+=`<tr><td colspan="8" class="empty">${temFiltro?'Nenhum fornecedor com esses filtros. <span class="dmini">Tente limpar a categoria ou o tipo.</span>':'Nenhum fornecedor. Importe do sistema antigo (Excel) ou cadastre um novo.'}</td></tr>`;

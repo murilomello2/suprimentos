@@ -81,13 +81,16 @@ function env_schema($pdo) {
 /** A CHAVE de um pedido. Nunca use o número sozinho — ele se repete entre coligadas. */
 function env_chave($coligada, $numero) { return trim((string)$coligada) . '|' . ltrim(trim((string)$numero), '0'); }
 
+/** Este servidor NÃO tem mbstring (nem PHPMailer) — nada de mb_*. bp_nz já derruba acento e caixa. */
+function env_norm($s) { return ' ' . bp_nz($s) . ' '; }
+
 /** Sinais de que o pedido é regularização de material já entregue (o caso "(lançar)"). */
 function env_sinal_regularizacao($txt) {
-    $t = mb_strtolower((string)$txt, 'UTF-8');
-    foreach (['lancar', 'lançar', '(lanc', 'ja entregue', 'já entregue', 'ja recebido', 'já recebido',
-              'regulariza', 'saldo de', 'complemento de nf', 'nf ja', 'nf já', 'material entregue',
-              'entrega realizada', 'ja foi entregue', 'já foi entregue'] as $s)
-        if (mb_strpos($t, $s) !== false) return true;
+    $t = env_norm($txt);
+    foreach (['LANCAR', 'LANCAMENTO', 'JA ENTREGUE', 'JA RECEBIDO', 'REGULARIZA', 'SALDO DE',
+              'COMPLEMENTO DE NF', 'MATERIAL ENTREGUE', 'ENTREGA REALIZADA', 'JA FOI ENTREGUE',
+              'JA COMPRADO', 'MATERIAL JA'] as $s)
+        if (strpos($t, $s) !== false) return true;
     return false;
 }
 
@@ -174,7 +177,7 @@ function env_fila($pdo, $filtroObra = '') {
             $p['itens']++;
             if (count($p['produtos']) < 4) $p['produtos'][] = trim((string)($l['produto'] ?? ''));
             $o = trim((string)($l['item_observacao'] ?? ''));
-            if ($o !== '' && mb_strlen($p['obs']) < 400) $p['obs'] .= ($p['obs'] === '' ? '' : ' | ') . $o;
+            if ($o !== '' && strlen($p['obs']) < 500) $p['obs'] .= ($p['obs'] === '' ? '' : ' | ') . $o;
             unset($p);
         }
     });

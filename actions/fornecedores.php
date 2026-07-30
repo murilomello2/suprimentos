@@ -67,11 +67,12 @@ try {
             $q->execute($a);
             $nome = 'fornecedores-' . date('Y-m-d');
             foreach (['categoria'=>'cat', 'tipo'=>'tipo', 'nome'=>'busca', 'itens'=>'itens', 'cidade'=>'cidade'] as $k => $sfx)
-                if (trim((string)($_GET[$k] ?? '')) !== '') $nome .= '-' . $sfx . '_' . preg_replace('/[^A-Za-z0-9]+/', '', $_GET[$k]);
+                if (trim((string)($_GET[$k] ?? '')) !== '') $nome .= '-' . $sfx . '_' . preg_replace('/[^A-Za-z0-9]+/', '',
+                    (string)@iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', (string)$_GET[$k]));
             header('Content-Type: text/csv; charset=utf-8');
             header('Content-Disposition: attachment; filename="' . $nome . '.csv"');
             $out = fopen('php://output', 'w');
-            fwrite($out, "ï»¿");   // BOM: sem isso o Excel pt-BR abre "AÇO" como "AÃ‡O"
+            fwrite($out, chr(0xEF) . chr(0xBB) . chr(0xBF));   // BOM: sem isso o Excel pt-BR abre "AÇO" como "AÃ‡O"
             // ; é o separador que o Excel em português espera por padrão
             fputcsv($out, ['Nome','Categoria','Tipo','Cidade','Contato','Telefone','WhatsApp','E-mail','CNPJ','Itens'], ';');
             foreach ($q as $r) fputcsv($out, [$r['nome'],$r['categoria'],$r['tipo'],$r['cidade'],$r['contato'],

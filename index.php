@@ -7003,15 +7003,18 @@ function envRender(){ const w=document.getElementById('envWrap'), d=ENV.d; if(!w
    + envAbaBtn('fila','outbox','Fila de envio',c.envelopes||0)
    + envAbaBtn('bloq','block','Bloqueados',c.bloqueados||0)
    + envAbaBtn('seg','pan_tool','Segurados',c.segurados||0)
+   + envAbaBtn('arq','inventory_2','Arquivados',c.arquivados||0)
    + envAbaBtn('hist','history','Historico',null)
    + '</div>';
 
   if(ENV.aba==='fila') h+=envFila();
   else if(ENV.aba==='bloq') h+=envBloq();
   else if(ENV.aba==='seg') h+=envSeg();
+  else if(ENV.aba==='arq') h+='<div class="panel" id="envArqWrap"><div class="dempty">Carregando...</div></div>';
   else h+='<div class="panel" id="envHistWrap"><div class="dempty">Carregando o historico...</div></div>';
   w.innerHTML=h;
   if(ENV.aba==='hist') envHist();
+  if(ENV.aba==='arq') envArq();
 }
 function envAbaBtn(k,ic,lbl,n){ const on=ENV.aba===k;
   return '<button class="btn-ghost" onclick="envAba(\''+k+'\')" style="padding:6px 13px'+(on?';background:var(--verde);color:#fff':'')+'">'
@@ -7057,6 +7060,64 @@ async function envMarcoSalvar(){ const v=((document.getElementById('envMarcoD')|
     ENV.d=null; envCarregar(); }catch(e){ toast('Falha: '+e.message); }
 }
 
+/* ---- ARQUIVAR: tirar da tela sem apagar nada ----
+   Pedido antigo aprovado nao e mais para enviar, mas tirar um a um seriam milhares de cliques — e
+   apagar de verdade destruiria a resposta de "por que este pedido aprovado nunca saiu?". Entao
+   arquiva-se por CRITERIO (data limite + obra opcional), com motivo, e o lote volta inteiro.
+   Diferente de SEGURAR, que deixa o pedido a vista de proposito. */
+function envArqLoteForm(){
+  const obras=[...new Set((ENV.d.envelopes||[]).map(e=>e.obra).concat((ENV.d.bloqueados||[]).map(b=>b.obra)))].filter(Boolean).sort();
+  dlgAbrir('Envio de Pedidos','Arquivar pedidos antigos',
+    '<div style="max-width:560px">'
+   + '<div class="dmini" style="margin-bottom:11px">Some da fila, dos bloqueados e das contagens — mas <b>nao apaga nada</b>. '
+   + 'O pedido continua no TOTVS, e o lote inteiro volta com um clique na aba <b>Arquivados</b>.</div>'
+   + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+   + cotFld('Arquivar tudo aprovado <b>ate</b>','<input type="date" id="envArqAte" style="width:100%">')
+   + cotFld('So desta obra (vazio = todas)','<select id="envArqObra" style="width:100%"><option value="">todas as obras</option>'
+     + obras.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join('')+'</select>')
+   + '</div>'
+   + '<div style="margin-top:9px">'+cotFld('Motivo (identifica o lote e permite desfazer)','<input id="envArqMot" placeholder="ex.: pedidos ja enviados a mao antes do cockpit" style="width:100%">')+'</div>'
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" onclick="envArqLoteSalvar()">Arquivar</button></div></div>');
+}
+async function envArqLoteSalvar(){ const g=x=>((document.getElementById(x)||{}).value||'').trim();
+  const ate=g('envArqAte'), mot=g('envArqMot');
+  if(!ate){ toast('Escolha a data limite'); return; }
+  if(!mot){ toast('Escreva o motivo — ele identifica o lote'); return; }
+  toast('Arquivando...');
+  try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({acao:'arquivar_lote',me:(EU&&EU.bitrix_id),me_nome:(EU&&EU.nome)||'',
+                            ate:ate,obra:g('envArqObra'),motivo:mot})})).json();
+    if(r.error){ toast(r.error); return; }
+    closeModal(true); toast(r.arquivados+' pedido(s) arquivado(s)'); ENV.d=null; envCarregar();
+  }catch(e){ toast('Falha: '+e.message); }
+}
+async function envArq(){ const w=document.getElementById('envArqWrap'); if(!w) return;
+  let d; try{ d=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({acao:'arquivados',me:(EU&&EU.bitrix_id)})})).json(); }
+  catch(e){ w.innerHTML='<div class="empty">Falha ao carregar.</div>'; return; }
+  const l=(d.lotes||[]);
+  let h=cotSecHead('inventory_2','Lotes arquivados','fora da fila, mas nada foi apagado — devolva quando quiser','');
+  if(!l.length){ w.innerHTML=h+'<div class="dempty">Nenhum lote arquivado.</div>'; return; }
+  l.forEach(x=>{ let q=x.em; try{ q=new Date(x.em).toLocaleDateString('pt-BR'); }catch(e){}
+    h+='<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px">'
+     + '<div class="bar" style="justify-content:space-between;gap:10px;flex-wrap:wrap">'
+     + '<div><b style="font-size:13.5px">'+esc(x.motivo||'(sem motivo)')+'</b>'
+     + '<div class="dmini" style="margin-top:3px;color:var(--muted)">'+x.n+' pedido(s) - por '+esc(x.por_nome||'—')+' em '+esc(q)+'</div></div>'
+     + '<button class="btn-ghost" style="padding:4px 11px" onclick="envDesarquivar('+esc(JSON.stringify(x.motivo))+')">Devolver a fila</button>'
+     + '</div></div>'; });
+  w.innerHTML=h;
+}
+async function envDesarquivar(motivo){
+  if(!confirm('Devolver este lote para a fila de envio?')) return;
+  try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({acao:'desarquivar_lote',me:(EU&&EU.bitrix_id),motivo:motivo})})).json();
+    if(r.error){ toast(r.error); return; }
+    toast(r.devolvidos+' pedido(s) de volta na fila'); ENV.d=null; envCarregar();
+  }catch(e){ toast('Falha: '+e.message); }
+}
+
 /* ---- fila: um cartao por E-MAIL ---- */
 function envFila(){ const es=(ENV.d.envelopes||[]);
   if(!es.length) return '<div class="panel"><div class="dempty">Nenhum pedido aprovado esperando envio. '
@@ -7064,8 +7125,10 @@ function envFila(){ const es=(ENV.d.envelopes||[]);
   const liberados=es.filter(e=>!e.alerta).length;
   let h='<div class="panel" style="padding:10px 14px;margin-bottom:10px"><div class="bar" style="justify-content:space-between;flex-wrap:wrap;gap:8px">'
    + '<div class="dmini">Cada cartao abaixo e <b>um e-mail</b>: mesma obra e mesmo fornecedor viajam juntos, como voce ja faz hoje.</div>'
+   + '<span class="bar" style="gap:7px">'
+   + '<button class="btn-ghost" onclick="envArqLoteForm()" style="padding:6px 13px"><span class="material-icons" style="font-size:16px;vertical-align:-4px">inventory_2</span> Arquivar antigos</button>'
    + '<button class="btn-prim" onclick="envEnviarLote()" style="padding:6px 14px"><span class="material-icons" style="font-size:16px;vertical-align:-4px">send</span> Enviar os '+liberados+' sem alerta</button>'
-   + '</div></div>';
+   + '</span></div></div>';
   es.forEach(e=>{ h+=envEnvCard(e); });
   return h;
 }
@@ -7094,6 +7157,7 @@ function envEnvCard(e){
   h+='<div class="bar" style="gap:7px;margin-top:9px;justify-content:flex-end">'
    + '<button class="btn-ghost" style="padding:5px 12px" onclick="envVerEmail(\''+e.chave+'\')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">visibility</span> Ver o e-mail</button>'
    + '<button class="btn-ghost" style="padding:5px 12px" onclick="envDecidir(\''+e.chave+'\',\'so_obra\')">So para a obra</button>'
+   + '<button class="btn-ghost" style="padding:5px 12px" onclick="envDecidir(\''+e.chave+'\',\'arquivado\')" title="tira da tela sem apagar nada">Arquivar</button>'
    + '<button class="btn-ghost" style="padding:5px 12px;color:#a05a00" onclick="envDecidir(\''+e.chave+'\',\'segurar\')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">pan_tool</span> Segurar</button>'
    + '<button class="btn-prim" style="padding:5px 14px" onclick="envEnviar(\''+e.chave+'\')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar</button>'
    + '</div></div>';
@@ -7109,10 +7173,13 @@ const ENV_BLOQ={obra:['Obra nao identificada','apartment','Sem ficha vinculada n
 function envBloq(){ const bs=(ENV.d.bloqueados||[]);
   if(!bs.length) return '<div class="panel"><div class="dempty">Nada bloqueado. Todo pedido aprovado tem obra, endereco e destinatario.</div></div>';
   const grupos={}; bs.forEach(b=>{ (grupos[b.bloqueio]=grupos[b.bloqueio]||[]).push(b); });
+  const res=ENV.d.bloq_resumo||{};
   let h='';
   Object.keys(grupos).forEach(k=>{ const meta=ENV_BLOQ[k]||[k,'block',''], lista=grupos[k];
+    const r=res[k]||{total:lista.length,mostrando:lista.length,valor:0};
     h+='<div class="panel" style="margin-bottom:10px;border-left:4px solid #c0392b">'
-     + cotSecHead(meta[1], meta[0]+' ('+lista.length+')', meta[2], '');
+     + cotSecHead(meta[1], meta[0]+' ('+r.total+')', meta[2],
+         '<span class="dchip" style="background:var(--muted)">'+BRLc(r.valor||0)+' parados</span>');
     h+='<div style="overflow-x:auto"><table class="dtable" style="width:100%;font-size:12.5px"><thead><tr>'
      + '<th style="text-align:left">Pedido</th><th style="text-align:left">Obra (como o TOTVS manda)</th>'
      + '<th style="text-align:left">Fornecedor</th><th style="text-align:right">Valor</th><th style="text-align:right">Parado ha</th></tr></thead><tbody>';
@@ -7120,7 +7187,11 @@ function envBloq(){ const bs=(ENV.d.bloqueados||[]);
      + '<td>'+esc(b.obra||'—')+'</td><td>'+esc(b.forn_nome||'—')+'</td>'
      + '<td style="text-align:right">'+BRL(b.valor)+'</td>'
      + '<td style="text-align:right">'+(b.dias!=null?(b.dias+'d'):'—')+'</td></tr>'; });
-    h+='</tbody></table></div></div>'; });
+    h+='</tbody></table></div>';
+    if(r.total>r.mostrando) h+='<div class="dmini" style="margin-top:7px;color:var(--muted)">Mostrando os '
+      + r.mostrando+' mais recentes de <b>'+r.total+'</b>. Os outros '+(r.total-r.mostrando)
+      + ' tem o mesmo motivo — resolver a causa acima resolve todos de uma vez.</div>';
+    h+='</div>'; });
   return h;
 }
 
@@ -7181,10 +7252,11 @@ async function envVerEmail(ch){ const e=envAchar(ch); if(!e) return;
 
 /* ---- decisoes humanas: sempre com motivo, sempre com nome ---- */
 function envDecidir(ch,dec){ const e=envAchar(ch); if(!e) return;
-  const tit = dec==='segurar' ? 'Segurar estes pedidos' : 'Marcar como regularizacao';
-  const txt = dec==='segurar'
-    ? 'Eles continuam visiveis na aba <b>Segurados</b> ate alguem liberar. Nao somem da fila.'
-    : 'O e-mail vai <b>so para a obra</b>, para lancamento. O fornecedor nao recebe nada - e a trava do material que ja foi entregue.';
+  const TIT={segurar:'Segurar estes pedidos', so_obra:'Marcar como regularizacao', arquivado:'Arquivar estes pedidos'};
+  const TXT={segurar:'Eles continuam visiveis na aba <b>Segurados</b> ate alguem liberar. Nao somem da fila.',
+             so_obra:'O e-mail vai <b>so para a obra</b>, para lancamento. O fornecedor nao recebe nada - e a trava do material que ja foi entregue.',
+             arquivado:'Somem da fila e das contagens, mas <b>nada e apagado</b>: o pedido continua no TOTVS e volta pela aba <b>Arquivados</b>.'};
+  const tit=TIT[dec]||'Decidir', txt=TXT[dec]||'';
   dlgAbrir('Envio de Pedidos - '+esc(e.obra), tit,
     '<div style="max-width:520px"><div class="dmini" style="margin-bottom:10px">'+txt+'</div>'
    + '<div style="border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:12.5px;background:#f8faf9;margin-bottom:10px">'
@@ -7233,6 +7305,50 @@ function envDisparoPendente(n,pedidos){
    + 'e vale trocar a senha antes — ela passou pelo nosso chat.</li></ol>'
    + '<div class="dmini" style="color:var(--muted)">Enquanto isso, use esta tela para conferir a fila e ajustar o texto em Configuracoes &gt; E-mail do pedido.</div>'
    + '<div class="bar" style="justify-content:flex-end;margin-top:14px"><button class="btn-prim" onclick="closeModal(true)">Entendi</button></div></div>');
+}
+
+
+/* ---- ENVIO DE TESTE ----
+   Unico lugar do sistema que dispara e-mail de verdade hoje, e mesmo assim so para um endereco
+   DIGITADO na hora — nunca escolhido de uma lista de fornecedores, para que um clique errado nao
+   alcance ninguem. Nao entra no livro-caixa: se entrasse, "queimaria" o pedido e a regra 4
+   (nunca deixar de enviar um aprovado) quebraria calada la na frente. */
+function pmTesteForm(){ const o=(PM.d.obras||[]).find(x=>String(x.id)===String(PM.obra))||{};
+  dlgAbrir('E-mail do pedido','Enviar um teste',
+    '<div style="max-width:560px">'
+   + '<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:9px 12px;border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:12px">'
+   + 'Vai sair um e-mail <b>de verdade</b> para o endereco abaixo, com o texto ja montado para a obra '
+   + '<b>'+esc(o.nome||'')+'</b> e um PDF de exemplo anexado. O assunto e o corpo saem carimbados como TESTE, '
+   + 'e <b>nada</b> e gravado no historico de envios.</div>'
+   + cotFld('Enviar para (digite o endereco)','<input id="pmTPara" placeholder="voce@empresa.com.br" style="width:100%">')
+   + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:9px">'
+   + cotFld('Nome do fornecedor (aparece no texto)','<input id="pmTForn" placeholder="ex.: Murilo Mello Servicos" style="width:100%">')
+   + cotFld('Numeros de pedido de exemplo','<input id="pmTPcs" value="9001,9002" style="width:100%">')
+   + '</div>'
+   + '<div class="bar" style="gap:16px;margin-top:10px;font-size:13px">'
+   + '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pmTAnexo" checked> Anexar um PDF por pedido</label>'
+   + '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pmTObra"> Usar o texto de <b>lancamento</b> (obra) em vez do de fornecedor</label>'
+   + '</div>'
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" onclick="pmTesteEnviar()">Enviar o teste</button></div></div>');
+}
+async function pmTesteEnviar(){ const g=x=>((document.getElementById(x)||{}).value||'').trim();
+  const para=g('pmTPara');
+  if(!para || para.indexOf('@')<0){ toast('Digite o e-mail de destino'); return; }
+  toast('Enviando o teste...');
+  try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({acao:'teste', me:(EU&&EU.bitrix_id), me_nome:(EU&&EU.nome)||'',
+         obra_id:PM.obra, para:para, fornecedor:g('pmTForn'), pcs:g('pmTPcs'),
+         tipo:((document.getElementById('pmTObra')||{}).checked?'obra':'fornecedor'),
+         com_anexo:((document.getElementById('pmTAnexo')||{}).checked?1:0)})})).json();
+    if(r.error){ toast(r.error); return; }
+    closeModal(true);
+    if(!r.ok){ toast('Nao saiu: '+(r.erro||'falha no servidor de e-mail')); return; }
+    let m='Teste enviado para '+r.para+(r.anexos?(' com '+r.anexos+' anexo(s)'):' sem anexo');
+    toast(m);
+    if((r.faltando||[]).length) setTimeout(()=>toast('Atencao: esta obra ainda nao tem '+r.faltando.join(', ')),2600);
+  }catch(e){ toast('Falha: '+e.message); }
 }
 
 /* Modal generico reaproveitando o overlay que ja existe (o mesmo do card do radar). */
@@ -7369,7 +7485,8 @@ function pmObra(){ const oid=String(PM.obra), c=(PM.d.config.obra||{})[oid]||{},
   h+='<div class="bar" style="gap:10px;align-items:flex-end"><div style="flex:1;max-width:340px">'
    + cotFld('Obra','<select id="pmObraSel" onchange="PM.obra=this.value;PM.previa=null;pmRender()" style="width:100%">'
    + (PM.d.obras||[]).map(x=>'<option value="'+x.id+'"'+(String(x.id)===oid?' selected':'')+'>'+esc(x.nome)+(x.cidade?' — '+esc(x.cidade):'')+'</option>').join('')+'</select>')+'</div>'
-   + '<button class="btn-ghost" onclick="pmPreviaVer()" style="padding:6px 13px"><span class="material-icons" style="font-size:16px;vertical-align:-4px">visibility</span> Ver o e-mail desta obra</button></div>';
+   + '<button class="btn-ghost" onclick="pmPreviaVer()" style="padding:6px 13px"><span class="material-icons" style="font-size:16px;vertical-align:-4px">visibility</span> Ver o e-mail desta obra</button>'
+   + '<button class="btn-ghost" onclick="pmTesteForm()" style="padding:6px 13px"><span class="material-icons" style="font-size:16px;vertical-align:-4px">forward_to_inbox</span> Enviar um teste</button></div>';
   h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:10px">';
   Object.keys(campos).forEach(k=>{ const n=linhas[k]||1, largo=(n>1||k==='endereco'||k==='cc_obra');
     const herda=(k==='horario'&&!(c[k]||'').trim());

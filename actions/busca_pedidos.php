@@ -157,13 +157,13 @@ function bp_obra_label($razao, $fonte, $mapaRazao, $coligadaCod = '', $ccustoCod
 }
 
 /**
- * FLUXO DE APROVAÇÃO (ferramenta Fluir) — normaliza as três colunas que o TOTVS entrega.
+ * FLUXO DE APROVAÇÃO (ferramenta Fluig) — normaliza as três colunas que o TOTVS entrega.
  *
  * status_aprovacao: Aprovado | Pendente | Reprovado | Sem vinculo
  * etapa_aprovacao : quando Pendente, diz COM QUEM está parado ("Aguardando Diretor",
  *                   "Aguardando Suprimentos", "Aguardando Coordenador da Obra/Departamento",
  *                   "Aguardando Gestor de Obras"); nos demais casos só repete o status.
- * aprovador       : ⚠️ NÃO é o nome do aprovador. É o ÚLTIMO REGISTRO do Fluir, e vem de duas formas:
+ * aprovador       : ⚠️ NÃO é o nome do aprovador. É o ÚLTIMO REGISTRO do Fluig, e vem de duas formas:
  *                   "Aprovado por fulano" (quem moveu a última etapa) OU um texto livre que, nos
  *                   reprovados, é a JUSTIFICATIVA ("pedido errado", "QUANTIDADE MUITO ALTA",
  *                   "Dividir o pedido em 2 partes"). Por isso separamos em `por` e `obs`: mostrar
@@ -371,6 +371,9 @@ try {
         $p['aprovacao_etapa']  = $ap['etapa'];
         $p['aprovado_por']     = $ap['por'];
         $p['aprovacao_obs']    = $ap['obs'];
+        // guarda o texto CRU ("Aguardando Diretor"): e ele que o filtro ?etapa= compara no TOTVS.
+        // O rotulo curto ("Diretor") serve so p/ exibir — filtrar por ele nao casaria nada.
+        $p['aprovacao_etapa_raw'] = $p['aprov_etapa_raw'];
         unset($p['aprov_raw'], $p['aprov_etapa_raw'], $p['aprov_reg']);
         $lista[] = $p;
     }
@@ -420,10 +423,14 @@ try {
     $etapasSet = [];
     foreach ($lista as $p) {
         $resumoAprov[$p['aprovacao']] = ($resumoAprov[$p['aprovacao']] ?? 0) + 1;
-        if ($p['aprovacao'] === 'pendente' && $p['aprovacao_etapa'] !== '') $etapasSet[$p['aprovacao_etapa']] = ($etapasSet[$p['aprovacao_etapa']] ?? 0) + 1;
+        if ($p['aprovacao'] === 'pendente' && $p['aprovacao_etapa'] !== '') {
+            $ek = $p['aprovacao_etapa_raw'];
+            if (!isset($etapasSet[$ek])) $etapasSet[$ek] = ['etapa'=>$p['aprovacao_etapa'], 'etapa_raw'=>$ek, 'n'=>0, 'valor'=>0.0];
+            $etapasSet[$ek]['n']++; $etapasSet[$ek]['valor'] += (float)$p['total'];
+        }
     }
-    arsort($etapasSet);
-    $etapasLista = array_map(fn($k, $v) => ['etapa'=>$k, 'n'=>$v], array_keys($etapasSet), array_values($etapasSet));
+    uasort($etapasSet, fn($a, $b) => $b['n'] <=> $a['n']);
+    $etapasLista = array_values(array_map(fn($e) => $e + ['valor'=>round($e['valor'], 2)], $etapasSet));
 
     // ---- ORDENAÇÃO por coluna, sobre a LISTA INTEIRA (não só a página) — depois é que pagina ----
     $cmp = [

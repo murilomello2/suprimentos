@@ -187,6 +187,50 @@ try {
         echo json_encode(['ok'=>true, 'inseridas'=>$n, 'total'=>(int)$pdo->query("SELECT COUNT(*) FROM cot_categoria")->fetchColumn()], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    /* ENRIQUECER COM O TOTVS — preenche razão social, CNPJ e código do fornecedor a partir do que o
+       TOTVS já sabe (pedidos_itens traz fornecedor_cnpj/nome/fantasia/cod de quem tem pedido).
+       ⚠️ REGRA DE OURO: só escreve em campo VAZIO. Nunca sobrescreve CNPJ existente — quando os dois
+       lados discordam é decisão humana (pode ser filial diferente, homônimo ou erro de cadastro).
+       O 'forcar_cnpj' existe só p/ o caso de digitação comprovada (CNPJ com nº de dígitos inválido). */
+    if ($acao === 'enriquecer_totvs') {
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
+        $lista = (array)($in['fornecedores'] ?? []);
+        if (!$lista) throw new Exception('nada recebido');
+        // colunas aditivas (o projeto não tem migration runner; cada módulo cria a sua)
+        foreach ([['razao_social','VARCHAR(255)'], ['totvs_cod','VARCHAR(40)'], ['totvs_compras_2026','INT'], ['totvs_valor_2026','DOUBLE']] as $c) {
+            try { $pdo->query("SELECT {$c[0]} FROM cot_fornecedor LIMIT 1"); }
+            catch (Throwable $e) { try { $pdo->exec("ALTER TABLE cot_fornecedor ADD COLUMN {$c[0]} {$c[1]}"); } catch (Throwable $e2) {} }
+        }
+        $sel = $pdo->prepare("SELECT id, cnpj, razao_social FROM cot_fornecedor WHERE id=? LIMIT 1");
+        $n = 0; $cnpjNovo = 0; $razaoNova = 0; $pulou = 0; $log = [];
+        $pdo->beginTransaction();
+        foreach ($lista as $f) {
+            $id = (int)($f['id'] ?? 0); if (!$id) continue;
+            $sel->execute([$id]); $atual = $sel->fetch();
+            if (!$atual) { $pulou++; continue; }
+            $sets = []; $args = [];
+            $meu = preg_replace('/\D/', '', (string)($atual['cnpj'] ?? ''));
+            $novo = preg_replace('/\D/', '', (string)($f['cnpj'] ?? ''));
+            $forcar = !empty($f['forcar_cnpj']);
+            if ($novo !== '' && ($meu === '' || ($forcar && strlen($meu) !== 14))) {
+                $sets[] = 'cnpj=?'; $args[] = $novo; $cnpjNovo++;
+                $log[] = ['id'=>$id, 'campo'=>'cnpj', 'de'=>$meu, 'para'=>$novo];
+            }
+            if (trim((string)($f['razao_social'] ?? '')) !== '' && trim((string)($atual['razao_social'] ?? '')) === '') {
+                $sets[] = 'razao_social=?'; $args[] = trim((string)$f['razao_social']); $razaoNova++;
+            }
+            foreach (['totvs_cod'=>'totvs_cod', 'compras_2026'=>'totvs_compras_2026', 'valor_2026'=>'totvs_valor_2026'] as $k => $col)
+                if (isset($f[$k]) && $f[$k] !== '' && $f[$k] !== null) { $sets[] = "$col=?"; $args[] = $f[$k]; }
+            if (!$sets) { $pulou++; continue; }
+            $args[] = $id;
+            $pdo->prepare('UPDATE cot_fornecedor SET ' . implode(',', $sets) . ' WHERE id=?')->execute($args);
+            $n++;
+        }
+        $pdo->commit();
+        echo json_encode(['ok'=>true, 'atualizados'=>$n, 'cnpj_preenchido'=>$cnpjNovo, 'razao_preenchida'=>$razaoNova,
+                          'sem_mudanca'=>$pulou, 'log'=>$log], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($acao === 'importar_fornecedores') {
         if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Import é só admin.']); exit; }
         $lista = (array)($in['fornecedores'] ?? []);

@@ -669,7 +669,7 @@
           <option value="G">Parcialmente faturado</option><option value="F">Faturado</option><option value="Q">Quitado</option>
           <option value="B">Baixado</option><option value="N">Normal</option><option value="C">Cancelado</option></select>
         <select id="bpUsuario" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;max-width:170px"><option value="">Todos os usuários</option></select>
-        <select id="bpAprov" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px" title="fluxo de alçadas (Fluir)"><option value="">Toda aprovação</option><option value="aprovado">✓ Aprovados</option><option value="pendente">⏳ Em aprovação</option><option value="reprovado">✕ Reprovados</option><option value="sem">⊘ Sem fluxo</option></select>
+        <select id="bpAprov" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px" title="fluxo de alçadas (Fluig)"><option value="">Toda aprovação</option><option value="aprovado">✓ Aprovados</option><option value="pendente">⏳ Em aprovação</option><option value="reprovado">✕ Reprovados</option><option value="sem">⊘ Sem fluxo</option></select>
         <button class="btn-prim" style="padding:7px 14px" onclick="bpBuscar(1)"><span class="material-icons" style="font-size:16px;vertical-align:-3px">search</span> Buscar</button>
       </div>
     </div>
@@ -3523,7 +3523,7 @@ async function bpBuscar(pagina){
     if(atual&&d.usuarios.indexOf(atual)>=0) su.value=atual; else if(d.usuario) su.value=d.usuario; }
   bpRender();
 }
-/* APROVAÇÃO (Fluir) — a informação que o Murilo quer ver de relance.
+/* APROVAÇÃO (Fluig) — a informação que o Murilo quer ver de relance.
    ✓ verde aprovado · ✕ vermelho reprovado · ⏳ âmbar parado (com QUEM) · ⊘ cinza fora do fluxo.
    O texto miúdo embaixo é o "com quem está" ou o motivo da reprovação — o que exige ação. */
 const BP_APROV={
@@ -3565,6 +3565,35 @@ function bpFiltroAprov(k){
   el.value = (el.value===k ? '' : k);
   BP.etapa=''; bpBuscar(1);
 }
+/* CARDS DE ETAPA — "com quem estao os pedidos parados". So aparecem quando ha algo em aprovacao no
+   recorte. Clicar filtra pela etapa; clicar de novo limpa. Alem da contagem mostram o VALOR parado,
+   que e o que muda a conversa: 39 pedidos no Diretor pode ser troco ou pode ser milhao. */
+function bpEtapaCards(d){
+  const E=d.etapas||[]; if(!E.length) return '';
+  const tot=E.reduce((a,x)=>a+x.n,0), totV=E.reduce((a,x)=>a+Number(x.valor||0),0);
+  const M=v=>v>=1e6?('R$ '+(v/1e6).toFixed(1).replace('.',',')+' mi'):(v>=1e3?('R$ '+Math.round(v/1e3)+' mil'):('R$ '+Math.round(v||0)));
+  const card=(x)=>{ const on=BP.etapa===x.etapa_raw;
+    return '<div onclick="bpFiltroEtapa('+JSON.stringify(x.etapa_raw).replace(/"/g,'&quot;')+')" '
+      +'title="'+esc(x.n+' pedido(s) parado(s) em '+x.etapa+' — '+M(x.valor))+(on?' · clique p/ limpar':' · clique p/ ver so estes')+'" '
+      +'style="cursor:pointer;flex:1;min-width:132px;background:'+(on?'#fdf4e3':'#fbfdfb')+';border:1px solid '+(on?'#a4761c':'var(--line)')+';border-radius:9px;padding:8px 11px">'
+      +'<div style="font-size:19px;font-weight:800;color:#a4761c;line-height:1">'+x.n+'</div>'
+      +'<div style="font-size:11px;font-weight:700;color:#33404a;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(x.etapa)+'</div>'
+      +'<div style="font-size:10.5px;color:var(--muted)">'+M(x.valor)+'</div></div>'; };
+  return '<div style="padding:10px 16px 4px;border-bottom:1px solid var(--line);background:#fbfdfb">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">'
+    +'<span class="material-icons" style="font-size:16px;color:#a4761c">schedule</span>'
+    +'<b style="font-size:12.5px">Parados em aprovacao — com quem estao</b>'
+    +'<span class="dmini">'+tot+' pedido(s) · '+M(totV)+'</span>'
+    +(BP.etapa?'<button class="btn-ghost" style="margin-left:auto;padding:3px 9px;font-size:11px;color:var(--pend);font-weight:700" onclick="bpEtapaLimpar()">limpar etapa</button>':'')
+    +'</div><div style="display:flex;gap:8px;flex-wrap:wrap">'+E.map(card).join('')+'</div></div>';
+}
+function bpEtapaLimpar(){ BP.etapa=''; bpBuscar(1); }
+function bpFiltroEtapa(raw){
+  BP.etapa = (BP.etapa===raw ? '' : raw);
+  // filtrar por etapa ja implica "em aprovacao" — deixar o seletor em outra coisa daria recorte vazio
+  const el=document.getElementById('bpAprov'); if(el && BP.etapa) el.value='';
+  bpBuscar(1);
+}
 function bpRender(){
   const w=document.getElementById('bpWrap'), d=BP.data; if(!w||!d) return;
   const ps=d.pedidos||[];
@@ -3581,6 +3610,7 @@ function bpRender(){
    +bpAprovChips(d)
    +'<span class="muted" style="font-size:11px;margin-left:auto">ordenado por <b>'+esc(d.sort)+'</b> '+(d.dir==='asc'?'↑':'↓')+'</span>'
    +'</div>'
+   +bpEtapaCards(d)
    +'<table class="dtable" style="width:100%;table-layout:fixed">'
    +'<colgroup><col style="width:7%"><col style="width:12%"><col style="width:12%"><col style="width:14%"><col style="width:24%"><col style="width:9%"><col style="width:8%"><col style="width:11%"><col style="width:3%"></colgroup>'
    +'<thead><tr>'+th('numero','Pedido')+th('aprovacao','Aprovação')+th('obra','Obra')+th('fornecedor','Fornecedor')+th('itens','Item / observação')
@@ -3620,7 +3650,7 @@ function bpRender(){
     if(d.pagina<d.paginas) nav+=btn(d.pagina+1,'próxima ›');
     h+=nav+'</div>';
   }
-  h+='</div><div class="note"><b>Aprovação</b> = fluxo de alçadas do Fluir: <b style="color:#1F6B3B">✓ aprovado</b> · <b style="color:#c0392b">✕ reprovado</b> (o texto miúdo é o motivo) · <b style="color:#a4761c">⏳ em aprovação</b> (o texto miúdo é com QUEM está parado) · <b style="color:#8a9299">⊘ sem fluxo</b> (pedido que não passou pelo Fluir). O status de <b>faturamento</b> agora fica embaixo do valor. Consulta ao TOTVS (somente leitura). A busca cobre <b>descrição do item, observação digitada, fornecedor, nº do pedido e usuário</b>. <b>Clique no cabeçalho</b> p/ ordenar todos os pedidos da busca. Texto longo aparece truncado — passe o mouse pra ver inteiro, ou clique no 👁 pro pedido completo. <b>⇄ n/N obras</b> = o mesmo fornecedor, valor e data aparecem em N obras — quase sempre uma compra única repartida (a observação do item costuma dizer o valor cheio). A <b>obra</b> vem do TOTVS já resolvida: <b>CAPRETZ/&lt;obra&gt;</b> = compra da CAPRETZ rateada para aquela obra; <b>CAPRETZ</b> sozinho = compra da própria CAPRETZ.</div>';
+  h+='</div><div class="note"><b>Aprovação</b> = fluxo de alçadas do Fluig: <b style="color:#1F6B3B">✓ aprovado</b> · <b style="color:#c0392b">✕ reprovado</b> (o texto miúdo é o motivo) · <b style="color:#a4761c">⏳ em aprovação</b> (o texto miúdo é com QUEM está parado) · <b style="color:#8a9299">⊘ sem fluxo</b> (pedido que não passou pelo Fluig). O status de <b>faturamento</b> agora fica embaixo do valor. Consulta ao TOTVS (somente leitura). A busca cobre <b>descrição do item, observação digitada, fornecedor, nº do pedido e usuário</b>. <b>Clique no cabeçalho</b> p/ ordenar todos os pedidos da busca. Texto longo aparece truncado — passe o mouse pra ver inteiro, ou clique no 👁 pro pedido completo. <b>⇄ n/N obras</b> = o mesmo fornecedor, valor e data aparecem em N obras — quase sempre uma compra única repartida (a observação do item costuma dizer o valor cheio). A <b>obra</b> vem do TOTVS já resolvida: <b>CAPRETZ/&lt;obra&gt;</b> = compra da CAPRETZ rateada para aquela obra; <b>CAPRETZ</b> sozinho = compra da própria CAPRETZ.</div>';
   w.innerHTML=h;
 }
 /* ===================== DASHBOARDS ===================== */
@@ -5278,7 +5308,7 @@ function bpAprovFaixa(p){
     +'<span class="material-icons" style="font-size:20px;color:'+a.cor+'">'+a.ic+'</span>'
     +'<div><div style="font-weight:800;font-size:13px;color:'+a.cor+'">'+esc(a.t)+'</div>'
     +(linhas.length?'<div style="font-size:11.5px;color:#4a5560;margin-top:2px">'+linhas.join(' · ')+'</div>'
-      :'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+(k==='sem'?'este pedido não passou pelo fluxo de alçadas do Fluir':'sem registro adicional no Fluir')+'</div>')
+      :'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+(k==='sem'?'este pedido não passou pelo fluxo de alçadas do Fluig':'sem registro adicional no Fluig')+'</div>')
     +'</div></div>';
 }
 async function cotPedidoVer(numero,coligadaCod,obraId){

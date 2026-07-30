@@ -156,6 +156,46 @@ function bp_obra_label($razao, $fonte, $mapaRazao, $coligadaCod = '', $ccustoCod
     return $amigavel;
 }
 
+/**
+ * FLUXO DE APROVAÇÃO (ferramenta Fluir) — normaliza as três colunas que o TOTVS entrega.
+ *
+ * status_aprovacao: Aprovado | Pendente | Reprovado | Sem vinculo
+ * etapa_aprovacao : quando Pendente, diz COM QUEM está parado ("Aguardando Diretor",
+ *                   "Aguardando Suprimentos", "Aguardando Coordenador da Obra/Departamento",
+ *                   "Aguardando Gestor de Obras"); nos demais casos só repete o status.
+ * aprovador       : ⚠️ NÃO é o nome do aprovador. É o ÚLTIMO REGISTRO do Fluir, e vem de duas formas:
+ *                   "Aprovado por fulano" (quem moveu a última etapa) OU um texto livre que, nos
+ *                   reprovados, é a JUSTIFICATIVA ("pedido errado", "QUANTIDADE MUITO ALTA",
+ *                   "Dividir o pedido em 2 partes"). Por isso separamos em `por` e `obs`: mostrar
+ *                   "Aprovado por jonathas.vieira" como motivo de uma reprovação pareceria defeito.
+ *                   Está preenchido em só 259 dos 9.128 pedidos (172 "Aprovado por" + 87 justificativas).
+ */
+function bp_aprov($status, $etapa, $aprovador) {
+    $s = strtolower(trim((string)$status));
+    $k = 'sem';
+    if (strpos($s, 'aprovad') === 0)      $k = 'aprovado';
+    elseif (strpos($s, 'reprov') === 0)   $k = 'reprovado';
+    elseif (strpos($s, 'pend') === 0)     $k = 'pendente';
+
+    $et = trim((string)$etapa);
+    if (stripos($et, 'sem vinculo') === 0 || stripos($et, 'sem vínculo') === 0) $et = '';
+    if (strcasecmp($et, 'Aprovado') === 0 || strcasecmp($et, 'Reprovado') === 0) $et = '';
+    $et = trim(preg_replace('/^aguardando\s+/i', '', $et));   // a coluna já diz que está aguardando
+
+    $a = trim((string)$aprovador); $por = ''; $obs = '';
+    if ($a !== '' && $a !== '.') {
+        if (preg_match('/^aprovado\s+por\s+(.+)$/i', $a, $m)) $por = trim($m[1]);
+        else $obs = $a;
+    }
+    return ['k' => $k, 'etapa' => $et, 'por' => $por, 'obs' => $obs];
+}
+function bp_aprov_label($k, $etapa) {
+    if ($k === 'aprovado')  return 'Aprovado';
+    if ($k === 'reprovado') return 'Reprovado';
+    if ($k === 'pendente')  return $etapa !== '' ? ('Aguardando ' . $etapa) : 'Aguardando aprovação';
+    return 'Sem fluxo de aprovação';
+}
+
 try {
     $pdo = db();
     $perms = user_perms($pdo, $_GET['me'] ?? null);
@@ -223,6 +263,15 @@ try {
     if ($de !== '')  $f[] = 'pedido_data=gte.' . rawurlencode($de);
     if ($ate !== '') $f[] = 'pedido_data=lte.' . rawurlencode($ate);
     if ($status !== '') $f[] = 'pedido_status=eq.' . rawurlencode($status);   // filtro de status (A/B/C/F/G/N/Q/R/U)
+    // aprovação: o valor do filtro é a chave curta (aprovado/pendente/reprovado/sem); traduzimos p/ o
+    // texto que o TOTVS grava. 'sem' casa por prefixo porque a coluna vem "Sem vinculo" (sem acento).
+    $aprov = strtolower(trim((string)($_GET['aprovacao'] ?? '')));
+    if ($aprov !== '') {
+        $mapa = ['aprovado' => 'Aprovado', 'pendente' => 'Pendente', 'reprovado' => 'Reprovado', 'sem' => 'Sem vinculo'];
+        if (isset($mapa[$aprov])) $f[] = 'status_aprovacao=eq.' . rawurlencode($mapa[$aprov]);
+    }
+    $etapaF = trim((string)($_GET['etapa'] ?? ''));   // "com quem está parado" (só faz sentido em Pendente)
+    if ($etapaF !== '') $f[] = 'etapa_aprovacao=eq.' . rawurlencode($etapaF);
     if ($usuario !== '') $f[] = 'pedido_usuario=eq.' . rawurlencode($usuario);   // quem CRIOU o pedido no TOTVS
 
     // obra escolhida no filtro (chave vinda de ?obras=1)
@@ -259,7 +308,7 @@ try {
         $f[] = 'or=(' . implode(',', $ors) . ')';
     }
 
-    $sel = 'select=pedido_numero,pedido_data,pedido_status,coligada_cod,coligada,ccusto_cod,fornecedor_cod,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,preco_unit,valor_total,solic_numeros,solic_colidmov,pedido_usuario,item_observacao,obra_efetiva_nome,obra_efetiva_fonte,obra_cod,ccusto_nome';
+    $sel = 'select=pedido_numero,pedido_data,pedido_status,coligada_cod,coligada,ccusto_cod,fornecedor_cod,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,preco_unit,valor_total,solic_numeros,solic_colidmov,pedido_usuario,item_observacao,obra_efetiva_nome,obra_efetiva_fonte,obra_cod,ccusto_nome,status_aprovacao,etapa_aprovacao,aprovador';
     $mapaRazao = bp_mapa_razao($pdo);
 
     // ---- agrega item → PEDIDO (chave: coligada + número; o nº se repete entre coligadas) ----
@@ -283,6 +332,9 @@ try {
                     'centro_custo' => trim((string)($r['obra_cod'] ?? '')), 'obra_fonte' => trim((string)($r['obra_efetiva_fonte'] ?? '')),
                     'obra_razao' => trim((string)($r['obra_efetiva_nome'] ?? '')), 'ccusto_nome' => trim((string)($r['ccusto_nome'] ?? '')),
                     'usuario' => $u, 'obs' => [],
+                    'aprov_raw' => trim((string)($r['status_aprovacao'] ?? '')),
+                    'aprov_etapa_raw' => trim((string)($r['etapa_aprovacao'] ?? '')),
+                    'aprov_reg' => trim((string)($r['aprovador'] ?? '')),
                     'fornecedores' => [], 'n_itens' => 0, 'total' => 0.0, 'amostra' => []];
             }
             // o colidmov pode vir só em ALGUNS itens do pedido — guarda o 1º que aparecer (é a chave p/ achar a SC)
@@ -313,6 +365,13 @@ try {
         if ($soObraDeVerdade && strpos((string)$p['obra'], 'CAPRETZ · ') === 0) continue;
         $p['fornecedores'] = array_keys($p['fornecedores']); $p['total'] = round($p['total'], 2);
         $p['status_label'] = bp_status_label($p['status']);
+        $ap = bp_aprov($p['aprov_raw'], $p['aprov_etapa_raw'], $p['aprov_reg']);
+        $p['aprovacao']        = $ap['k'];
+        $p['aprovacao_label']  = bp_aprov_label($ap['k'], $ap['etapa']);
+        $p['aprovacao_etapa']  = $ap['etapa'];
+        $p['aprovado_por']     = $ap['por'];
+        $p['aprovacao_obs']    = $ap['obs'];
+        unset($p['aprov_raw'], $p['aprov_etapa_raw'], $p['aprov_reg']);
         $lista[] = $p;
     }
 
@@ -356,9 +415,22 @@ try {
         $fechar($bloco);
     }
 
+    // contagem por situação de aprovação do RECORTE INTEIRO (alimenta os chips-filtro da tela)
+    $resumoAprov = ['aprovado'=>0, 'pendente'=>0, 'reprovado'=>0, 'sem'=>0];
+    $etapasSet = [];
+    foreach ($lista as $p) {
+        $resumoAprov[$p['aprovacao']] = ($resumoAprov[$p['aprovacao']] ?? 0) + 1;
+        if ($p['aprovacao'] === 'pendente' && $p['aprovacao_etapa'] !== '') $etapasSet[$p['aprovacao_etapa']] = ($etapasSet[$p['aprovacao_etapa']] ?? 0) + 1;
+    }
+    arsort($etapasSet);
+    $etapasLista = array_map(fn($k, $v) => ['etapa'=>$k, 'n'=>$v], array_keys($etapasSet), array_values($etapasSet));
+
     // ---- ORDENAÇÃO por coluna, sobre a LISTA INTEIRA (não só a página) — depois é que pagina ----
     $cmp = [
         'numero'     => fn($a, $b) => ((int)ltrim($a['numero'], '0')) <=> ((int)ltrim($b['numero'], '0')),
+        // ordem de urgência, não alfabética: reprovado e parado vêm primeiro — é o que exige ação
+        'aprovacao'  => function ($a, $b) { $o = ['reprovado'=>0, 'pendente'=>1, 'sem'=>2, 'aprovado'=>3];
+                                            return ($o[$a['aprovacao']] ?? 9) <=> ($o[$b['aprovacao']] ?? 9); },
         'obra'       => fn($a, $b) => strcasecmp($a['obra'] ?: $a['coligada'], $b['obra'] ?: $b['coligada']),
         'fornecedor' => fn($a, $b) => strcasecmp($a['fornecedores'][0] ?? '', $b['fornecedores'][0] ?? ''),
         'itens'      => fn($a, $b) => $a['n_itens'] <=> $b['n_itens'],
@@ -378,6 +450,7 @@ try {
     echo json_encode(['ok' => true, 'pedidos' => $page, 'total' => $total, 'pagina' => $pagina, 'paginas' => $paginas,
         'por_pagina' => BP_POR_PAGINA, 'itens_lidos' => $lidos, 'truncado' => $truncado,
         'sort' => $sort, 'dir' => $dir, 'status' => $status, 'usuario' => $usuario, 'usuarios' => $usuariosLista,
+        'aprovacao' => $aprov, 'resumo_aprovacao' => $resumoAprov, 'etapas' => $etapasLista,
         'periodo' => ['de' => $de, 'ate' => $ate]], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     http_response_code(500);

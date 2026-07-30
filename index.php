@@ -669,6 +669,7 @@
           <option value="G">Parcialmente faturado</option><option value="F">Faturado</option><option value="Q">Quitado</option>
           <option value="B">Baixado</option><option value="N">Normal</option><option value="C">Cancelado</option></select>
         <select id="bpUsuario" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;max-width:170px"><option value="">Todos os usuários</option></select>
+        <select id="bpAprov" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px" title="fluxo de alçadas (Fluir)"><option value="">Toda aprovação</option><option value="aprovado">✓ Aprovados</option><option value="pendente">⏳ Em aprovação</option><option value="reprovado">✕ Reprovados</option><option value="sem">⊘ Sem fluxo</option></select>
         <button class="btn-prim" style="padding:7px 14px" onclick="bpBuscar(1)"><span class="material-icons" style="font-size:16px;vertical-align:-3px">search</span> Buscar</button>
       </div>
     </div>
@@ -3463,7 +3464,7 @@ async function excluirItemCatalogo(){
 /* ===================== BUSCA DE PEDIDOS DE COMPRA (consulta TOTVS) =====================
    "Com quem estamos comprando martelete?" — busca por item/fornecedor/nº, filtra por obra e
    período, lista os PCs (30/página) e abre o pedido completo no popup que já existe. */
-let BP={data:null, carregou:false, sort:'data', dir:'desc', obras:[], obraPorLabel:{}, obraKey:''};
+let BP={data:null, carregou:false, sort:'data', dir:'desc', obras:[], obraPorLabel:{}, obraKey:'', etapa:''};
 async function bpInit(){
   if(!BP.carregou){ BP.carregou=true;
     // a lista vem dos PRÓPRIOS PEDIDOS (não da ficha de obras): assim não falta nenhuma obra que
@@ -3505,10 +3506,11 @@ async function bpBuscar(pagina){
       : 'Nenhuma obra chamada <b>'+esc(txt)+'</b>.<br><span class="dmini">Apague o campo para ver todas.</span>')+'</div>';
     return;
   }
-  const q=val('bpQ'), obra=BP.obraKey||'', per=val('bpPeriodo'), st=val('bpStatus'), us=val('bpUsuario');
+  const q=val('bpQ'), obra=BP.obraKey||'', per=val('bpPeriodo'), st=val('bpStatus'), us=val('bpUsuario'), ap=val('bpAprov');
   w.innerHTML='<div class="dempty">Consultando os pedidos no TOTVS…</div>';
   let d; try{ d=await (await fetch('actions/busca_pedidos.php?q='+encodeURIComponent(q)+'&obra='+encodeURIComponent(obra||'')
       +'&periodo='+encodeURIComponent(per)+'&status='+encodeURIComponent(st||'')+'&usuario='+encodeURIComponent(us||'')
+      +'&aprovacao='+encodeURIComponent(ap||'')+'&etapa='+encodeURIComponent(BP.etapa||'')
       +'&sort='+encodeURIComponent(BP.sort)+'&dir='+encodeURIComponent(BP.dir)+'&pagina='+(pagina||1)
       +'&me='+encodeURIComponent((EU&&EU.bitrix_id)||'')+'&_='+Date.now())).json(); }
   catch(e){ w.innerHTML='<div class="empty">Falha ao consultar o TOTVS.</div>'; return; }
@@ -3521,7 +3523,48 @@ async function bpBuscar(pagina){
     if(atual&&d.usuarios.indexOf(atual)>=0) su.value=atual; else if(d.usuario) su.value=d.usuario; }
   bpRender();
 }
+/* APROVAÇÃO (Fluir) — a informação que o Murilo quer ver de relance.
+   ✓ verde aprovado · ✕ vermelho reprovado · ⏳ âmbar parado (com QUEM) · ⊘ cinza fora do fluxo.
+   O texto miúdo embaixo é o "com quem está" ou o motivo da reprovação — o que exige ação. */
+const BP_APROV={
+  aprovado :{ic:'check_circle', cor:'#1F6B3B', bg:'#e8f5ee', t:'Aprovado'},
+  reprovado:{ic:'cancel',       cor:'#c0392b', bg:'#fdeaea', t:'Reprovado'},
+  pendente :{ic:'schedule',     cor:'#a4761c', bg:'#fdf4e3', t:'Em aprovação'},
+  sem      :{ic:'remove_circle_outline', cor:'#8a9299', bg:'#f4f5f6', t:'Sem fluxo'}
+};
+function bpAprovCel(p){
+  const a=BP_APROV[p.aprovacao]||BP_APROV.sem;
+  // 2ª linha: quem trava (pendente) ou por que caiu (reprovado). É o que muda a decisão.
+  let sub='';
+  if(p.aprovacao==='pendente'&&p.aprovacao_etapa) sub=p.aprovacao_etapa;
+  else if(p.aprovacao==='reprovado'&&p.aprovacao_obs) sub=p.aprovacao_obs;
+  else if(p.aprovacao==='aprovado'&&p.aprovado_por) sub='por '+p.aprovado_por;
+  const tip=[p.aprovacao_label, p.aprovado_por?('último registro: aprovado por '+p.aprovado_por):'', p.aprovacao_obs?('observação: '+p.aprovacao_obs):'']
+    .filter(Boolean).join(' — ');
+  return '<div title="'+esc(tip)+'" style="display:flex;align-items:flex-start;gap:4px">'
+    +'<span class="material-icons" style="font-size:15px;color:'+a.cor+';flex:none;margin-top:1px">'+a.ic+'</span>'
+    +'<div style="min-width:0"><div style="font-size:11px;font-weight:800;color:'+a.cor+';line-height:1.15">'+esc(a.t)+'</div>'
+    +(sub?'<div style="font-size:9.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2">'+esc(sub)+'</div>':'')
+    +'</div></div>';
+}
 function bpStCor(l){ return {'Pendente':'#a4761c','Em separação':'#2b6cb0','Em faturamento':'#2b6cb0','Parcialmente faturado':'#a4761c','Faturado':'#1F6B3B','Quitado':'#1F6B3B','Baixado':'#6a737b','Normal':'#6a737b','Cancelado':'#c0392b'}[l]||'#8a9299'; }
+/* Chips com a conta do recorte INTEIRO por situação de aprovação; clicar filtra.
+   Reprovado e Em aprovação vêm primeiro por serem os que pedem ação. */
+function bpAprovChips(d){
+  const R=d.resumo_aprovacao||{}, atual=(document.getElementById('bpAprov')||{}).value||'';
+  const ordem=[['reprovado',R.reprovado],['pendente',R.pendente],['aprovado',R.aprovado],['sem',R.sem]];
+  return ordem.filter(([k,n])=>n>0).map(([k,n])=>{ const a=BP_APROV[k], on=atual===k;
+    return '<span onclick="bpFiltroAprov(\''+k+'\')" title="clique p/ '+(on?'limpar':'ver só estes')+'" '
+      +'style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;background:'+a.bg+';color:'+a.cor
+      +';border-radius:20px;padding:2px 9px;font-size:10.5px;font-weight:800;'+(on?'box-shadow:0 0 0 2px '+a.cor:'')+'">'
+      +'<span class="material-icons" style="font-size:12px">'+a.ic+'</span>'+n+' '+esc(a.t.toLowerCase())+'</span>';
+  }).join(' ');
+}
+function bpFiltroAprov(k){
+  const el=document.getElementById('bpAprov'); if(!el) return;
+  el.value = (el.value===k ? '' : k);
+  BP.etapa=''; bpBuscar(1);
+}
 function bpRender(){
   const w=document.getElementById('bpWrap'), d=BP.data; if(!w||!d) return;
   const ps=d.pedidos||[];
@@ -3535,12 +3578,13 @@ function bpRender(){
    +'<b style="font-size:13px">'+d.total+' pedido(s)</b>'
    +'<span class="muted" style="font-size:11.5px">página '+d.pagina+' de '+d.paginas+' · '+BRL(totalV)+' nesta página</span>'
    +(d.truncado?'<span class="dchip" style="background:#fff9e6;color:#6b5d1f;font-size:10px" title="a consulta bateu no teto de leitura — estreite o período ou a busca">resultado parcial</span>':'')
+   +bpAprovChips(d)
    +'<span class="muted" style="font-size:11px;margin-left:auto">ordenado por <b>'+esc(d.sort)+'</b> '+(d.dir==='asc'?'↑':'↓')+'</span>'
    +'</div>'
    +'<table class="dtable" style="width:100%;table-layout:fixed">'
-   +'<colgroup><col style="width:7%"><col style="width:11%"><col style="width:15%"><col style="width:26%"><col style="width:11%"><col style="width:11%"><col style="width:8%"><col style="width:8%"><col style="width:3%"></colgroup>'
-   +'<thead><tr>'+th('numero','Pedido')+th('obra','Obra')+th('fornecedor','Fornecedor')+th('itens','Item / observação')
-   +th('usuario','Usuário')+th('status','Status')+th('data','Data','center')+th('valor','Valor','right')+'<th></th></tr></thead><tbody>';
+   +'<colgroup><col style="width:7%"><col style="width:12%"><col style="width:12%"><col style="width:14%"><col style="width:24%"><col style="width:9%"><col style="width:8%"><col style="width:11%"><col style="width:3%"></colgroup>'
+   +'<thead><tr>'+th('numero','Pedido')+th('aprovacao','Aprovação')+th('obra','Obra')+th('fornecedor','Fornecedor')+th('itens','Item / observação')
+   +th('usuario','Usuário')+th('data','Data','center')+th('valor','Valor','right')+'<th></th></tr></thead><tbody>';
   const cut='overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
   ps.forEach(p=>{
     const forn=(p.fornecedores||[]).join(', ')||'—';
@@ -3550,6 +3594,7 @@ function bpRender(){
       +'<td style="text-align:left;'+cut+'"><b>'+esc(String(p.numero).replace(/^0+/,''))+'</b>'
         +(p.repartido_n?'<div style="font-size:9px;font-weight:800;color:#a4761c;letter-spacing:.2px" title="'+esc('Mesmo fornecedor, mesmo valor e mesma data em '+p.repartido_n+' obras ('+(p.repartido_obras||[]).join(' · ')+'). Normalmente e uma compra unica repartida entre obras — confira a observacao do item.')+'">⇄ '+p.repartido_i+'/'+p.repartido_n+' OBRAS</div>':'')
       +'</td>'
+      +'<td style="text-align:left;padding-right:4px">'+bpAprovCel(p)+'</td>'
       +'<td style="text-align:left;font-size:11px;'+cut+'" title="'+esc((p.obra||p.coligada||'')+(p.obra_fonte==='RATEIO_CAPRETZ'?' — compra da CAPRETZ rateada p/ esta obra':'')+(p.centro_custo?' · c.custo '+p.centro_custo:'')+(p.ccusto_nome?' ('+p.ccusto_nome+')':''))+'">'+(p.obra?esc(p.obra):'<span class="muted">'+esc(p.coligada||'—')+'</span>')+'</td>'
       +'<td style="text-align:left;font-size:11px;'+cut+'" title="'+esc(forn)+'">'+esc(forn)+'</td>'
       +'<td style="text-align:left;font-size:11px;overflow:hidden" title="'+esc(itensTxt+(obsTxt?(' — '+obsTxt):''))+'">'
@@ -3557,9 +3602,11 @@ function bpRender(){
         +(obsTxt?'<div style="'+cut+';color:var(--muted);font-size:10px">'+esc(obsTxt)+'</div>':'')
       +'</td>'
       +'<td style="text-align:left;font-size:11px;'+cut+'" title="quem criou o pedido no TOTVS">'+esc(p.usuario||'—')+'</td>'
-      +'<td style="text-align:left;'+cut+'"><span style="font-size:10.5px;font-weight:700;color:'+bpStCor(p.status_label)+'">'+esc(p.status_label||'—')+'</span></td>'
       +'<td style="text-align:center;font-size:11px;'+cut+'">'+(p.data?D(String(p.data).slice(0,10)):'—')+'</td>'
-      +'<td class="r" style="'+cut+'"><b style="font-size:11.5px">'+BRL(p.total)+'</b></td>'
+      /* faturamento REBAIXADO a subtítulo: continua visível e filtrável, mas quem manda na tela agora
+         é a aprovação — foi o que o Murilo pediu ("o status de faturamento não é o mais importante") */
+      +'<td class="r" style="'+cut+'"><b style="font-size:11.5px">'+BRL(p.total)+'</b>'
+        +'<div style="font-size:9px;font-weight:700;color:'+bpStCor(p.status_label)+'">'+esc(p.status_label||'')+'</div></td>'
       +'<td style="text-align:center"><button class="btn-ghost" style="padding:2px 5px" onclick="cotPedidoVer(\''+esc(p.numero)+'\',\''+esc(p.coligada_cod)+'\')" title="ver o pedido completo"><span class="material-icons" style="font-size:15px;vertical-align:-3px">visibility</span></button></td>'
       +'</tr>';
   });
@@ -3573,7 +3620,7 @@ function bpRender(){
     if(d.pagina<d.paginas) nav+=btn(d.pagina+1,'próxima ›');
     h+=nav+'</div>';
   }
-  h+='</div><div class="note">Consulta ao TOTVS (somente leitura). A busca cobre <b>descrição do item, observação digitada, fornecedor, nº do pedido e usuário</b>. <b>Clique no cabeçalho</b> p/ ordenar todos os pedidos da busca. Texto longo aparece truncado — passe o mouse pra ver inteiro, ou clique no 👁 pro pedido completo. <b>⇄ n/N obras</b> = o mesmo fornecedor, valor e data aparecem em N obras — quase sempre uma compra única repartida (a observação do item costuma dizer o valor cheio). A <b>obra</b> vem do TOTVS já resolvida: <b>CAPRETZ/&lt;obra&gt;</b> = compra da CAPRETZ rateada para aquela obra; <b>CAPRETZ</b> sozinho = compra da própria CAPRETZ.</div>';
+  h+='</div><div class="note"><b>Aprovação</b> = fluxo de alçadas do Fluir: <b style="color:#1F6B3B">✓ aprovado</b> · <b style="color:#c0392b">✕ reprovado</b> (o texto miúdo é o motivo) · <b style="color:#a4761c">⏳ em aprovação</b> (o texto miúdo é com QUEM está parado) · <b style="color:#8a9299">⊘ sem fluxo</b> (pedido que não passou pelo Fluir). O status de <b>faturamento</b> agora fica embaixo do valor. Consulta ao TOTVS (somente leitura). A busca cobre <b>descrição do item, observação digitada, fornecedor, nº do pedido e usuário</b>. <b>Clique no cabeçalho</b> p/ ordenar todos os pedidos da busca. Texto longo aparece truncado — passe o mouse pra ver inteiro, ou clique no 👁 pro pedido completo. <b>⇄ n/N obras</b> = o mesmo fornecedor, valor e data aparecem em N obras — quase sempre uma compra única repartida (a observação do item costuma dizer o valor cheio). A <b>obra</b> vem do TOTVS já resolvida: <b>CAPRETZ/&lt;obra&gt;</b> = compra da CAPRETZ rateada para aquela obra; <b>CAPRETZ</b> sozinho = compra da própria CAPRETZ.</div>';
   w.innerHTML=h;
 }
 /* ===================== DASHBOARDS ===================== */
@@ -5210,6 +5257,30 @@ async function cotApelidoEditar(){ const c=COT.cur.cotacao;
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'apelido_salvar',me:EU&&EU.bitrix_id,cotacao_id:c.id,apelido:v.trim()})})).json();
     if(r&&r.error){toast(r.error);return;} c.apelido=r.apelido||''; toast(c.apelido?'Apelido salvo':'Apelido removido'); cotOpen(c.id); }catch(e){toast('Falha: '+e.message);} }
 /* "Fotinha" do pedido de compra (dados do TOTVS via Supabase): fornecedor(es), itens, preços unit e total */
+/* Faixa de APROVAÇÃO no topo do popup: a mesma leitura da tabela, com espaço p/ o texto inteiro
+   (na tabela o motivo da reprovação vai truncado; aqui cabe). */
+function bpAprovFaixa(p){
+  const raw=(p.aprovacao||'').toLowerCase();
+  let k='sem';
+  if(raw.indexOf('aprovad')===0) k='aprovado'; else if(raw.indexOf('reprov')===0) k='reprovado'; else if(raw.indexOf('pend')===0) k='pendente';
+  const a=BP_APROV[k];
+  let etapa=(p.aprovacao_etapa||'').trim();
+  if(/^sem v/i.test(etapa)||/^aprovado$/i.test(etapa)||/^reprovado$/i.test(etapa)) etapa='';
+  etapa=etapa.replace(/^aguardando\s+/i,'');
+  const reg=(p.aprovacao_reg||'').trim();
+  const m=reg.match(/^aprovado\s+por\s+(.+)$/i);
+  const por=m?m[1]:''; const obs=(!m&&reg&&reg!=='.')?reg:'';
+  const linhas=[];
+  if(k==='pendente'&&etapa) linhas.push('parado em <b>'+esc(etapa)+'</b>');
+  if(por) linhas.push('último registro: aprovado por <b>'+esc(por)+'</b>');
+  if(obs) linhas.push((k==='reprovado'?'motivo: ':'observação: ')+'<b>'+esc(obs)+'</b>');
+  return '<div style="display:flex;align-items:flex-start;gap:8px;background:'+a.bg+';border-radius:9px;padding:9px 12px;margin-bottom:10px">'
+    +'<span class="material-icons" style="font-size:20px;color:'+a.cor+'">'+a.ic+'</span>'
+    +'<div><div style="font-weight:800;font-size:13px;color:'+a.cor+'">'+esc(a.t)+'</div>'
+    +(linhas.length?'<div style="font-size:11.5px;color:#4a5560;margin-top:2px">'+linhas.join(' · ')+'</div>'
+      :'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+(k==='sem'?'este pedido não passou pelo fluxo de alçadas do Fluir':'sem registro adicional no Fluir')+'</div>')
+    +'</div></div>';
+}
 async function cotPedidoVer(numero,coligadaCod,obraId){
   // ⚠️ o nº do PC NÃO é único entre coligadas — SEMPRE mandar a coligada (ou a obra, que o servidor resolve).
   numero=String(numero||'').split(',')[0].trim(); if(!numero){toast('Sem nº de pedido');return;}
@@ -5240,6 +5311,7 @@ async function cotPedidoVer(numero,coligadaCod,obraId){
     const multiForn=(p.fornecedores||[]).length>1;   // 1 fornecedor só? o nome já está no cabeçalho — libera espaço p/ a observação
     ov.innerHTML=shell(`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><b style="font-size:15px"><span class="material-icons" style="font-size:17px;vertical-align:-3px;color:var(--verde-d)">receipt_long</span> Pedido de compra ${esc(p.numero)}</b>${close}</div>
       <div class="muted" style="font-size:11.5px;margin-bottom:10px"><b>${esc(p.coligada||'')}</b>${p.ccusto_cod?' · c.custo '+esc(p.ccusto_cod):''}${p.data?' · '+D(String(p.data).slice(0,10)):''}${p.status?' · TOTVS '+esc(p.status):''} · ${p.n_itens} item(ns)${p.solic_numeros?' · SC '+esc(String(p.solic_numeros).replace(/^0+/,'')):''}${p.usuario?' · criado por <b>'+esc(p.usuario)+'</b>':''}</div>
+      ${bpAprovFaixa(p)}
       <div style="margin-bottom:9px;font-size:12.5px"><span class="muted">Fornecedor(es):</span> <b>${esc(forn)}</b></div>
       <div style="overflow-x:auto"><table class="mtable" style="border:none;table-layout:fixed;width:100%"><thead><tr><th class="svc-h" style="text-align:left;width:${multiForn?'26%':'34%'}">Item</th><th style="text-align:left;width:${multiForn?'28%':'36%'}">Observação</th>${multiForn?'<th style="text-align:left;width:18%">Fornecedor</th>':''}<th style="text-align:right;width:10%">Qtde</th><th style="text-align:right;width:13%">Preço unit.</th><th style="text-align:right;width:13%">Total</th></tr></thead><tbody>
       ${p.itens.map(it=>`<tr><td class="svc-c" style="text-align:left;font-size:12px">${esc(it.produto)}<small>${it.codprd?esc(it.codprd):''}</small></td><td style="text-align:left;font-size:11px;color:#4a5560;white-space:pre-wrap;word-break:break-word;line-height:1.35">${it.observacao?esc(it.observacao):'<span class="muted">—</span>'}</td>${multiForn?`<td style="text-align:left;font-size:11px">${esc(it.fornecedor_fantasia||it.fornecedor_nome||('cód. '+(it.fornecedor_cod||'—')))}</td>`:''}<td style="text-align:right">${cotNum(it.qtd)} ${esc(it.und||'')}</td><td style="text-align:right">${BRLp(it.preco_unit)}</td><td style="text-align:right"><b>${BRL(it.total)}</b></td></tr>`).join('')}

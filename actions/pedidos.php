@@ -119,6 +119,9 @@ function ped_pedido($numero, $coligadaCod = null) {
         'coligada_cod' => $r0['coligada_cod'] ?? '', 'ccusto_cod' => $r0['ccusto_cod'] ?? '',
         'data' => $r0['pedido_data'] ?? '', 'status' => $r0['pedido_status'] ?? '',
         'solic_numeros' => trim((string)($r0['solic_numeros'] ?? '')), 'usuario' => trim((string)($r0['pedido_usuario'] ?? '')),
+        'aprovacao' => trim((string)($r0['status_aprovacao'] ?? '')),
+        'aprovacao_etapa' => trim((string)($r0['etapa_aprovacao'] ?? '')),
+        'aprovacao_reg' => trim((string)($r0['aprovador'] ?? '')),
         'fornecedores' => array_values($forn), 'fornecedores_cod' => array_keys($forn),
         'itens' => $itens, 'total' => round($total, 2), 'n_itens' => count($itens),
     ];

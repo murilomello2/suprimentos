@@ -54,6 +54,31 @@ try {
         if (($_GET['itens'] ?? '') !== '')     { $w[] = 'itens LIKE ?';     $a[] = '%'.$_GET['itens'].'%'; }
         if (($_GET['cidade'] ?? '') !== '')    { $w[] = 'cidade LIKE ?';    $a[] = '%'.$_GET['cidade'].'%'; }
         $where = $w ? ('WHERE ' . implode(' AND ', $w)) : '';
+
+        /* EXPORTAÇÃO CSV — leva TODAS as linhas do recorte atual (os mesmos filtros da tela), não só a
+           página. Pedido do Murilo: filtrar por categoria/tipo/busca e exportar exatamente aquilo.
+           Exige usuário autorizado: a listagem paginada é aberta, mas um dump da base inteira com
+           telefone e e-mail de 1.400 fornecedores é outra coisa. */
+        if (isset($_GET['csv'])) {
+            $perms = user_perms($pdo, $_GET['me'] ?? null);
+            if (empty($perms['autorizado'])) { http_response_code(403); header('Content-Type: application/json'); echo json_encode(['error'=>'Não autorizado.']); exit; }
+            $q = $pdo->prepare("SELECT nome, categoria, tipo, cidade, contato, telefone, whatsapp, email, cnpj, itens
+                                FROM cot_fornecedor $where ORDER BY nome");
+            $q->execute($a);
+            $nome = 'fornecedores-' . date('Y-m-d');
+            foreach (['categoria'=>'cat', 'tipo'=>'tipo', 'nome'=>'busca', 'itens'=>'itens', 'cidade'=>'cidade'] as $k => $sfx)
+                if (trim((string)($_GET[$k] ?? '')) !== '') $nome .= '-' . $sfx . '_' . preg_replace('/[^A-Za-z0-9]+/', '', $_GET[$k]);
+            header('Content-Type: text/csv; charset=utf-8');
+            header('Content-Disposition: attachment; filename="' . $nome . '.csv"');
+            $out = fopen('php://output', 'w');
+            fwrite($out, "ï»¿");   // BOM: sem isso o Excel pt-BR abre "AÇO" como "AÃ‡O"
+            // ; é o separador que o Excel em português espera por padrão
+            fputcsv($out, ['Nome','Categoria','Tipo','Cidade','Contato','Telefone','WhatsApp','E-mail','CNPJ','Itens'], ';');
+            foreach ($q as $r) fputcsv($out, [$r['nome'],$r['categoria'],$r['tipo'],$r['cidade'],$r['contato'],
+                                              $r['telefone'],$r['whatsapp'],$r['email'],$r['cnpj'],$r['itens']], ';');
+            fclose($out); exit;
+        }
+
         $tot = $pdo->prepare("SELECT COUNT(*) FROM cot_fornecedor $where"); $tot->execute($a); $total = (int)$tot->fetchColumn();
         $limit = min(500, max(1, (int)($_GET['limit'] ?? 60))); $offset = max(0, (int)($_GET['offset'] ?? 0));
         $q = $pdo->prepare("SELECT * FROM cot_fornecedor $where ORDER BY nome LIMIT $limit OFFSET $offset"); $q->execute($a);

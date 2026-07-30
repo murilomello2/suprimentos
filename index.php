@@ -4099,7 +4099,7 @@ function renderDashOpp(D){
 let COT={mode:'list', tab:'cotacoes', list:[], obra:'', cur:null, novoItens:[], prop:null};
 function cotInit(){ cotTab(COT.tab||'cotacoes'); }
 function cotTab(t){ COT.tab=t; ['cotacoes','fornecedores','cartas','precos'].forEach(x=>{const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x===t);});
-  if(t==='fornecedores') fornLoad(); else if(t==='cartas') cartaLoad(); else if(t==='precos') precLoad(); else cotLoad(); }
+  if(t==='fornecedores') fornFiltro(); else if(t==='cartas') cartaLoad(); else if(t==='precos') precLoad(); else cotLoad(); }
 function cotStChip(s){ const m={aberta:['#8a9299','Aberta'],aguardando:['var(--dourado)','Aguardando'],finalizada:['var(--ok)','Finalizada']}; const x=m[s]||['#8a9299',s]; return `<span class="dchip" style="background:${x[0]}">${x[1]}</span>`; }
 function cotStLabel(s){ return ({aberta:'Aberta',aguardando:'Aguardando',finalizada:'Finalizada'})[s]||s; }
 function cotFmtDT(iso){ if(!iso)return '—'; const d=new Date(iso); if(isNaN(d.getTime()))return '—'; const p=n=>('0'+n).slice(-2); return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes()); }
@@ -5983,33 +5983,65 @@ async function solObraSave(i){ const x=SOL.obras.obras[i];
   try{ const r=await (await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'salvar_obra',me:EU&&EU.bitrix_id,obra:{coligada:x.coligada,obra_cod:x.obra_cod,nome_comercial:x.nome_comercial,cnpj:x.cnpj||'',endereco:x.endereco||'',comprador_id:x.comprador_id,radar_obra_id:x.radar_obra_id||null}})})).json();
     if(r.error){toast(r.error);return;} toast('Atribuição salva'); SOL.data=null; }catch(e){toast('Falha');} }
 /* ---------- Fornecedores (sub-aba do Mapa de Cotações) ---------- */
-let FORN={list:[],cats:[],tipos:[],total:0,f:{nome:'',categoria:'',tipo:'',itens:''},edit:null};
+/* Os filtros SEMPRE foram server-side (o total já era o do recorte inteiro), mas a tela pedia
+   limit=80 e nenhum offset: de 1.466 fornecedores dava p/ ver só os 80 primeiros, sem navegação.
+   Agora pagina de verdade, e qualquer mudança de filtro volta p/ a página 1 — senão você filtra
+   uma categoria com 12 itens estando na página 7 e a tela aparece vazia sem explicar por quê. */
+const FORN_POR_PAGINA=60;
+let FORN={list:[],cats:[],tipos:[],total:0,pag:1,f:{nome:'',categoria:'',tipo:'',itens:''},edit:null};
+function fornQS(){ const q=new URLSearchParams(); Object.entries(FORN.f).forEach(([k,v])=>{ if(v) q.set(k,v); }); return q; }
 async function fornLoad(){
   const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Carregando fornecedores…</div>';
-  const q=new URLSearchParams(); Object.entries(FORN.f).forEach(([k,v])=>{ if(v) q.set(k,v); }); q.set('limit','80');
+  const q=fornQS(); q.set('limit',String(FORN_POR_PAGINA)); q.set('offset',String((FORN.pag-1)*FORN_POR_PAGINA));
   try{ const d=await (await fetch('actions/fornecedores.php?'+q.toString())).json();
-    FORN.list=d.fornecedores||[]; FORN.cats=d.categorias||[]; FORN.tipos=d.tipos||[]; FORN.total=d.total||0; fornRender();
+    FORN.list=d.fornecedores||[]; FORN.cats=d.categorias||[]; FORN.tipos=d.tipos||[]; FORN.total=d.total||0;
+    const paginas=Math.max(1,Math.ceil(FORN.total/FORN_POR_PAGINA));
+    if(FORN.pag>paginas){ FORN.pag=paginas; return fornLoad(); }   // filtro encolheu o recorte
+    fornRender();
   }catch(e){ w.innerHTML='<div class="dempty">Falha: '+esc(e.message)+'</div>'; }
 }
-let _fornT; function fornDeb(){ clearTimeout(_fornT); _fornT=setTimeout(fornLoad,350); }
+function fornPag(n){ FORN.pag=Math.max(1,n); fornLoad(); }
+function fornFiltro(){ FORN.pag=1; fornLoad(); }          // troca de filtro sempre volta à página 1
+let _fornT; function fornDeb(){ clearTimeout(_fornT); _fornT=setTimeout(fornFiltro,350); }
+/* CSV do RECORTE ATUAL: leva os mesmos filtros ao servidor, que devolve TODAS as linhas (não a página) */
+function fornCSV(){
+  const q=fornQS(); q.set('csv','1'); q.set('me',(EU&&EU.bitrix_id)||'');
+  window.location.href='actions/fornecedores.php?'+q.toString();
+}
 function fornCatOpts(sel){ return '<option value="">Todas as categorias</option>'+FORN.cats.map(c=>`<option value="${esc(c.nome)}" ${c.nome===sel?'selected':''}>${esc(c.nome)}</option>`).join(''); }
 function fornRender(){
   if(FORN.edit) return fornRenderEdit();
   const w=document.getElementById('cotwrap');
+  const paginas=Math.max(1,Math.ceil(FORN.total/FORN_POR_PAGINA));
+  const temFiltro=!!(FORN.f.nome||FORN.f.categoria||FORN.f.tipo||FORN.f.itens);
   let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
     <div class="search" style="min-width:150px"><span class="material-icons" style="color:var(--muted)">search</span><input placeholder="Buscar nome…" value="${esc(FORN.f.nome)}" oninput="FORN.f.nome=this.value;fornDeb()"></div>
-    <select onchange="FORN.f.categoria=this.value;fornLoad()">${fornCatOpts(FORN.f.categoria)}</select>
-    <select onchange="FORN.f.tipo=this.value;fornLoad()"><option value="">Todos os tipos</option>${FORN.tipos.map(t=>`<option value="${esc(t)}" ${t===FORN.f.tipo?'selected':''}>${esc(t)}</option>`).join('')}</select>
+    <select onchange="FORN.f.categoria=this.value;fornFiltro()">${fornCatOpts(FORN.f.categoria)}</select>
+    <select onchange="FORN.f.tipo=this.value;fornFiltro()"><option value="">Todos os tipos</option>${FORN.tipos.map(t=>`<option value="${esc(t)}" ${t===FORN.f.tipo?'selected':''}>${esc(t)}</option>`).join('')}</select>
     <input placeholder="Filtrar por itens…" value="${esc(FORN.f.itens)}" oninput="FORN.f.itens=this.value;fornDeb()" style="min-width:130px">
-    <span class="muted" style="font-size:12px">${FORN.total} fornecedor(es)</span>
-    ${CAN_FORN?'<button class="btn-prim" style="margin-left:auto;padding:7px 12px" onclick="fornNovo()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Novo</button>':''}
+    ${temFiltro?`<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px;color:var(--pend);font-weight:700" onclick="FORN.f={nome:'',categoria:'',tipo:'',itens:''};fornFiltro()">✕ limpar</button>`:''}
+    <span class="muted" style="font-size:12px"><b>${FORN.total}</b> fornecedor(es)${temFiltro?' no filtro':''}${paginas>1?` · página ${FORN.pag} de ${paginas}`:''}</span>
+    <button class="btn-ghost" style="margin-left:auto;padding:7px 12px" onclick="fornCSV()" title="baixa em CSV TODAS as ${FORN.total} linha(s) do recorte atual — não só esta página">
+      <span class="material-icons" style="font-size:15px;vertical-align:-3px">download</span> Exportar CSV</button>
+    ${CAN_FORN?'<button class="btn-prim" style="padding:7px 12px" onclick="fornNovo()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Novo</button>':''}
   </div></div><div class="wrap"><table><thead><tr><th>Nome</th><th>Categoria</th><th>Cidade</th><th>Contato</th><th>Telefone</th><th>Itens</th><th>Tipo</th><th></th></tr></thead><tbody>`;
   for(const f of FORN.list){
     html+=`<tr><td><b>${esc(f.nome)}</b>${f.email?`<div class="muted" style="font-size:11px">${esc(f.email)}</div>`:''}</td><td class="muted">${esc(f.categoria||'')}</td><td class="muted">${esc(f.cidade||'')}</td><td>${esc(f.contato||'')}</td><td>${esc(f.telefone||'')}</td><td class="muted" style="font-size:11px">${esc((f.itens||'').slice(0,42))}</td><td>${esc(f.tipo||'')}</td>
       <td>${CAN_FORN?`<button class="btn-ghost" style="padding:2px 8px" onclick="fornNovo(${f.id})"><span class="material-icons" style="font-size:15px">edit</span></button>`:''}</td></tr>`;
   }
-  if(!FORN.list.length) html+='<tr><td colspan="8" class="empty">Nenhum fornecedor. Importe do sistema antigo (Excel) ou cadastre um novo.</td></tr>';
-  w.innerHTML=html+'</tbody></table></div>';
+  if(!FORN.list.length) html+=`<tr><td colspan="8" class="empty">${temFiltro?'Nenhum fornecedor com esses filtros. <span class="dmini">Tente limpar a categoria ou o tipo.</span>':'Nenhum fornecedor. Importe do sistema antigo (Excel) ou cadastre um novo.'}</td></tr>`;
+  html+='</tbody></table></div>';
+  if(paginas>1){
+    const b=(n,lbl,on)=>`<button class="btn-ghost" style="padding:4px 10px;font-size:12px;${on?'background:var(--verde);color:#fff;font-weight:700':''}" onclick="fornPag(${n})">${lbl}</button>`;
+    let nav='<div style="display:flex;gap:5px;align-items:center;justify-content:center;flex-wrap:wrap;padding:11px">';
+    if(FORN.pag>1) nav+=b(1,'« primeira')+b(FORN.pag-1,'‹ anterior');
+    const ini=Math.max(1,FORN.pag-2), fim=Math.min(paginas,ini+4);
+    for(let i=ini;i<=fim;i++) nav+=b(i,String(i),i===FORN.pag);
+    if(FORN.pag<paginas) nav+=b(FORN.pag+1,'próxima ›')+b(paginas,'última »');
+    nav+=`<span class="dmini" style="margin-left:8px">${FORN.total} no total</span></div>`;
+    html+=nav;
+  }
+  w.innerHTML=html;
 }
 function fornNovo(id){ FORN.edit = id ? Object.assign({}, (FORN.list.find(f=>f.id===id)||{id})) : {}; fornRender(); }
 function fornRenderEdit(){

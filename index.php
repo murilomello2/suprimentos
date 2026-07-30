@@ -6122,6 +6122,7 @@ function fornRender(){
     <select onchange="FORN.f.tipo=this.value;fornFiltro()"><option value="">Todos os tipos</option>${FORN.tipos.map(t=>`<option value="${esc(t)}" ${t===FORN.f.tipo?'selected':''}>${esc(t)}</option>`).join('')}</select>
     <input placeholder="Filtrar por itens…" value="${esc(FORN.f.itens)}" oninput="FORN.f.itens=this.value;fornDeb()" style="min-width:130px">
     ${temFiltro?`<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px;color:var(--pend);font-weight:700" onclick="FORN.f={nome:'',categoria:'',tipo:'',itens:''};fornFiltro()">✕ limpar</button>`:''}
+    ${IS_ADMIN?`<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px" onclick="fornDups()" title="fornecedores com o MESMO CNPJ cadastrados mais de uma vez"><span class="material-icons" style="font-size:14px;vertical-align:-3px">join_full</span> Duplicados</button>`:''}
     <span class="muted" style="font-size:12px"><b>${FORN.total}</b> fornecedor(es)${temFiltro?' no filtro':''}${paginas>1?` · página ${FORN.pag} de ${paginas}`:''}</span>
     <button class="btn-ghost" style="margin-left:auto;padding:7px 12px" onclick="fornCSV()" title="baixa em CSV TODAS as ${FORN.total} linha(s) do recorte atual — não só esta página">
       <span class="material-icons" style="font-size:15px;vertical-align:-3px">download</span> Exportar CSV</button>
@@ -6144,6 +6145,69 @@ function fornRender(){
     html+=nav;
   }
   w.innerHTML=html;
+}
+/* DUPLICADOS — mesmo CNPJ em mais de um cadastro. A tela ordena pelos FÁCEIS primeiro: grupo em que
+   o cadastro a ser removido não tem NENHUM histórico (nem convite, nem proposta, nem anexo, nem tabela
+   de preço) é fusão sem perda. Os que têm histórico dos dois lados ficam por último, com o peso à vista. */
+async function fornDups(){
+  const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Procurando duplicados…</div>';
+  try{ FORN.dups=await (await fetch('actions/fornecedores.php?duplicados=1&me='+encodeURIComponent((EU&&EU.bitrix_id)||'')+'&_='+Date.now())).json(); }
+  catch(e){ w.innerHTML='<div class="dempty">Falha ao carregar.</div>'; return; }
+  fornDupsRender();
+}
+function fornDupsRender(){
+  const w=document.getElementById('cotwrap'), d=FORN.dups; if(!w||!d) return;
+  const G=d.grupos||[];
+  const triviais=G.filter(g=>g.trivial).length;
+  let h=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:9px;flex-wrap:wrap;align-items:center">
+    <button class="btn-ghost" style="padding:5px 11px" onclick="FORN.dups=null;fornFiltro()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">arrow_back</span> Voltar</button>
+    <b style="font-size:14px">${G.length} CNPJ(s) cadastrados mais de uma vez</b>
+    <span class="dmini">${triviais} são fusão sem perda — o cadastro que sai não tem histórico nenhum</span>
+  </div></div>`;
+  if(!G.length) return void(w.innerHTML=h+'<div class="dempty" style="padding:24px">Nenhum CNPJ duplicado. 🎉</div>');
+  G.forEach((g,gi)=>{
+    const cn=String(g.cnpj).replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,'$1.$2.$3/$4-$5');
+    h+=`<div class="dcard wide" style="margin-bottom:10px;padding:12px 15px">
+      <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:8px">
+        <span class="material-icons" style="font-size:17px;color:${g.trivial?'var(--ok)':'var(--dourado)'}">${g.trivial?'check_circle':'help'}</span>
+        <b style="font-size:13px">${esc(cn)}</b>
+        <span class="dchip" style="background:${g.trivial?'#e8f5ee':'#fdf4e3'};color:${g.trivial?'var(--verde-d)':'#a4761c'};font-size:10px">${g.trivial?'fusão sem perda':'os dois têm histórico'}</span>
+        <span class="dmini">${g.n} cadastros</span>
+      </div>
+      <table class="dtable" style="width:100%"><thead><tr><th style="width:30px"></th><th>Cadastro</th><th>Categoria</th><th>Contato</th><th class="r">Histórico</th><th class="r">Compras 2026</th></tr></thead><tbody>`;
+    g.cadastros.forEach((f,i)=>{
+      const uso=Object.entries(f.uso||{}).map(([k,v])=>v+' '+k).join(' · ')||'—';
+      h+=`<tr>
+        <td><input type="radio" name="dup${gi}" ${i===0?'checked':''} onchange="FORN.dupSel=FORN.dupSel||{};FORN.dupSel[${gi}]=${f.id}" style="width:auto"></td>
+        <td><b>${esc(f.nome)}</b>${f.razao_social&&f.razao_social!==f.nome?`<div class="dmini">${esc(f.razao_social)}</div>`:''}<div class="dmini">#${f.id} · criado ${f.created_at?D(String(f.created_at).slice(0,10)):'—'}</div></td>
+        <td class="muted" style="font-size:11px">${esc(f.categoria||'—')}<br>${esc(f.tipo||'')}</td>
+        <td style="font-size:11px">${esc(f.contato||'')}${f.telefone?'<br>'+esc(f.telefone):''}${f.email?'<br><span class="muted">'+esc(f.email)+'</span>':''}</td>
+        <td class="r" style="font-size:11px;${f.uso_total?'font-weight:700':'color:var(--muted)'}">${esc(uso)}</td>
+        <td class="r" style="font-size:11px">${f.totvs_compras_2026?f.totvs_compras_2026+' PCs<br>'+BRL(f.totvs_valor_2026):'<span class="muted">—</span>'}</td>
+      </tr>`;
+    });
+    h+=`</tbody></table>
+      <div style="display:flex;align-items:center;gap:9px;margin-top:9px">
+        <button class="btn-prim" style="padding:5px 13px;font-size:12.5px" onclick="fornFundir(${gi})">Manter o marcado e juntar o resto</button>
+        <span class="dmini">o histórico dos outros passa para o marcado; os demais cadastros são apagados</span>
+      </div></div>`;
+  });
+  w.innerHTML=h;
+}
+async function fornFundir(gi){
+  const g=(FORN.dups.grupos||[])[gi]; if(!g) return;
+  const fica=(FORN.dupSel&&FORN.dupSel[gi])||g.cadastros[0].id;
+  const vao=g.cadastros.map(f=>f.id).filter(i=>i!==fica);
+  const nomeFica=(g.cadastros.find(f=>f.id===fica)||{}).nome||'';
+  if(!confirm('Manter "'+nomeFica+'" e apagar '+vao.length+' cadastro(s)? O historico (convites, propostas, anexos, tabelas de preco) passa para o que fica, e nao da pra desfazer.')) return;
+  try{
+    const r=await (await fetch('actions/fornecedores.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'fundir_fornecedores',me:EU&&EU.bitrix_id,manter_id:fica,remover_ids:vao})})).json();
+    if(r.error){ toast(r.error); return; }
+    const mv=Object.entries(r.historico_movido||{}).map(([k,v])=>v+' de '+k).join(', ');
+    toast('Fundido: ficou "'+nomeFica+'"'+(mv?' · movido '+mv:''));
+    fornDups();
+  }catch(e){ toast('Falha ao fundir'); }
 }
 function fornNovo(id){ FORN.edit = id ? Object.assign({}, (FORN.list.find(f=>f.id===id)||{id})) : {}; fornRender(); }
 function fornRenderEdit(){

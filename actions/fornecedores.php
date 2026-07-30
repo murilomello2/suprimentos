@@ -51,6 +51,38 @@ try {
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         $cats = $pdo->query("SELECT id, nome FROM cot_categoria ORDER BY nome")->fetchAll();
         if (isset($_GET['categorias'])) { echo json_encode(['categorias'=>$cats], JSON_UNESCAPED_UNICODE); exit; }
+
+        /* DUPLICADOS: mesmo CNPJ (14 dígitos) em mais de um cadastro. Devolve junto o PESO de cada um
+           — quantas cotações, propostas, anexos e tabelas de preço apontam pra ele — porque é isso que
+           decide quem sobrevive: some o cadastro vazio, fica o que tem histórico. */
+        if (isset($_GET['duplicados'])) {
+            $todos = $pdo->query("SELECT id,nome,razao_social,categoria,tipo,cidade,contato,telefone,email,cnpj,itens,
+                                         totvs_compras_2026,totvs_valor_2026,created_at
+                                  FROM cot_fornecedor ORDER BY id")->fetchAll();
+            $peso = [];
+            foreach ([['cotacao_fornecedor','convites'], ['cotacao_proposta','propostas'],
+                      ['cotacao_anexo','anexos'], ['preco_tabela','tabelas_preco']] as $t) {
+                try { foreach ($pdo->query("SELECT fornecedor_id id, COUNT(*) n FROM {$t[0]} WHERE fornecedor_id IS NOT NULL GROUP BY fornecedor_id") as $r)
+                        $peso[(int)$r['id']][$t[1]] = (int)$r['n']; } catch (Throwable $e) {}
+            }
+            $g = [];
+            foreach ($todos as $f) {
+                $c = preg_replace('/\D/', '', (string)$f['cnpj']);
+                if (strlen($c) !== 14) continue;
+                $f['uso'] = $peso[(int)$f['id']] ?? [];
+                $f['uso_total'] = array_sum($f['uso']);
+                $g[$c][] = $f;
+            }
+            $out = [];
+            foreach ($g as $c => $v) {
+                if (count($v) < 2) continue;
+                usort($v, fn($a, $b) => ($b['uso_total'] <=> $a['uso_total']) ?: ($a['id'] <=> $b['id']));
+                $out[] = ['cnpj' => $c, 'n' => count($v), 'cadastros' => $v,
+                          'trivial' => ($v[count($v)-1]['uso_total'] === 0)];   // o que vai sumir não tem histórico
+            }
+            usort($out, fn($a, $b) => ($a['trivial'] <=> $b['trivial']) ?: strcmp($a['cadastros'][0]['nome'], $b['cadastros'][0]['nome']));
+            echo json_encode(['grupos' => $out, 'total' => count($out)], JSON_UNESCAPED_UNICODE); exit;
+        }
         // lista de fornecedores com filtros
         $w = []; $a = [];
         // busca AMPLA (usada pelas sugestões de convite/proposta): casa nome OU itens OU categoria OU cidade.
@@ -192,6 +224,39 @@ try {
        ⚠️ REGRA DE OURO: só escreve em campo VAZIO. Nunca sobrescreve CNPJ existente — quando os dois
        lados discordam é decisão humana (pode ser filial diferente, homônimo ou erro de cadastro).
        O 'forcar_cnpj' existe só p/ o caso de digitação comprovada (CNPJ com nº de dígitos inválido). */
+    /* FUNDIR duplicados: repontua o histórico para o cadastro que fica e apaga os outros.
+       Não existe FK/CASCADE no banco (nenhuma tabela cot* tem), então o repontamento é manual e
+       explícito — e por isso mesmo cada tabela tocada é registrada na resposta. */
+    if ($acao === 'fundir_fornecedores') {
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
+        $fica = (int)($in['manter_id'] ?? 0);
+        $vao  = array_values(array_unique(array_map('intval', (array)($in['remover_ids'] ?? []))));
+        $vao  = array_values(array_filter($vao, fn($x) => $x > 0 && $x !== $fica));
+        if (!$fica || !$vao) throw new Exception('informe manter_id e remover_ids');
+        $st = $pdo->prepare("SELECT id, nome, cnpj FROM cot_fornecedor WHERE id=?");
+        $st->execute([$fica]); $alvo = $st->fetch();
+        if (!$alvo) throw new Exception('cadastro que ficaria não existe');
+        $in_ = implode(',', $vao);
+        $movidos = [];
+        $pdo->beginTransaction();
+        foreach (['cotacao_fornecedor', 'cotacao_proposta', 'cotacao_anexo', 'preco_tabela'] as $t) {
+            try {
+                $q = $pdo->prepare("UPDATE $t SET fornecedor_id=? WHERE fornecedor_id IN ($in_)");
+                $q->execute([$fica]);
+                if ($q->rowCount()) $movidos[$t] = $q->rowCount();
+            } catch (Throwable $e) { /* tabela pode não existir num deploy parcial */ }
+        }
+        // o nome usado nas propostas/convites é texto solto: alinha com o sobrevivente
+        foreach (['cotacao_fornecedor', 'cotacao_proposta', 'cotacao_anexo'] as $t) {
+            try { $pdo->prepare("UPDATE $t SET fornecedor_nome=? WHERE fornecedor_id=?")->execute([$alvo['nome'], $fica]); }
+            catch (Throwable $e) {}
+        }
+        $del = $pdo->prepare("DELETE FROM cot_fornecedor WHERE id IN ($in_)"); $del->execute();
+        $pdo->commit();
+        echo json_encode(['ok'=>true, 'manteve'=>['id'=>$fica, 'nome'=>$alvo['nome']],
+                          'removidos'=>$vao, 'historico_movido'=>$movidos], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($acao === 'enriquecer_totvs') {
         if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
         $lista = (array)($in['fornecedores'] ?? []);

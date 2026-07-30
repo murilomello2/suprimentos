@@ -249,7 +249,9 @@ function env_pedido_detalhe($pdo, $coligada, $numero) {
        . 'item_observacao,solic_numeros,pedido_usuario,obra_efetiva_nome,obra_efetiva_fonte,'
        . 'status_aprovacao,etapa_aprovacao,aprovador'
        . '&coligada_cod=eq.' . rawurlencode($col)
-       . '&pedido_numero=eq.' . rawurlencode($num);
+       /* O TOTVS guarda o numero com zeros a esquerda ("000002638"). Consultar sem eles nao
+          devolve linha nenhuma — o botao "Ver pedido" acharia sempre vazio. */
+       . '&pedido_numero=eq.' . rawurlencode(str_pad($num, 9, '0', STR_PAD_LEFT));
     bp_varrer($q, function ($linhas) use (&$itens, &$cab) {
         foreach ($linhas as $l) {
             if ($cab === null) $cab = $l;

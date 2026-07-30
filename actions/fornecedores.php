@@ -266,8 +266,8 @@ try {
             try { $pdo->query("SELECT {$c[0]} FROM cot_fornecedor LIMIT 1"); }
             catch (Throwable $e) { try { $pdo->exec("ALTER TABLE cot_fornecedor ADD COLUMN {$c[0]} {$c[1]}"); } catch (Throwable $e2) {} }
         }
-        $sel = $pdo->prepare("SELECT id, cnpj, razao_social FROM cot_fornecedor WHERE id=? LIMIT 1");
-        $n = 0; $cnpjNovo = 0; $razaoNova = 0; $pulou = 0; $log = [];
+        $sel = $pdo->prepare("SELECT id, cnpj, razao_social, email FROM cot_fornecedor WHERE id=? LIMIT 1");
+        $n = 0; $cnpjNovo = 0; $razaoNova = 0; $emailNovo = 0; $pulou = 0; $log = [];
         $pdo->beginTransaction();
         foreach ($lista as $f) {
             $id = (int)($f['id'] ?? 0); if (!$id) continue;
@@ -281,6 +281,12 @@ try {
                 $sets[] = 'cnpj=?'; $args[] = $novo; $cnpjNovo++;
                 $log[] = ['id'=>$id, 'campo'=>'cnpj', 'de'=>$meu, 'para'=>$novo];
             }
+            // e-mail: mesma regra do CNPJ — só entra em campo VAZIO. Quando o cockpit tem um endereço
+            // e o envio real usou outro, é troca de contato do fornecedor: decisão humana, vai p/ lista.
+            if (trim((string)($f['email'] ?? '')) !== '' && trim((string)($atual['email'] ?? '')) === '') {
+                $sets[] = 'email=?'; $args[] = trim((string)$f['email']); $emailNovo++;
+                $log[] = ['id'=>$id, 'campo'=>'email', 'de'=>'', 'para'=>trim((string)$f['email'])];
+            }
             if (trim((string)($f['razao_social'] ?? '')) !== '' && trim((string)($atual['razao_social'] ?? '')) === '') {
                 $sets[] = 'razao_social=?'; $args[] = trim((string)$f['razao_social']); $razaoNova++;
             }
@@ -292,7 +298,7 @@ try {
             $n++;
         }
         $pdo->commit();
-        echo json_encode(['ok'=>true, 'atualizados'=>$n, 'cnpj_preenchido'=>$cnpjNovo, 'razao_preenchida'=>$razaoNova,
+        echo json_encode(['ok'=>true, 'atualizados'=>$n, 'cnpj_preenchido'=>$cnpjNovo, 'razao_preenchida'=>$razaoNova, 'email_preenchido'=>$emailNovo,
                           'sem_mudanca'=>$pulou, 'log'=>$log], JSON_UNESCAPED_UNICODE); exit;
     }
 

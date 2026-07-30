@@ -94,6 +94,25 @@ function env_sinal_regularizacao($txt) {
     return false;
 }
 
+/**
+ * MARCO ZERO — a trava que os números pediram.
+ *
+ * O livro-caixa nasce vazio, mas os pedidos NÃO: só nos últimos 120 dias existem 4.049 aprovados,
+ * e quase todos já foram enviados à mão pelos compradores. Sem um corte, ligar o disparo mandaria
+ * tudo de novo — a violação mais cara da regra 3, e irreversível na cabeça do fornecedor.
+ *
+ * Reconciliar o passado pelo e-mail não resolve: o número do PC se repete entre coligadas, e por
+ * isso 2.067 dos 2.651 e-mails colhidos não casaram com pedido nenhum. Então o corte é por DATA e
+ * é explícito: o que foi aprovado antes do marco é do processo manual e nunca entra na fila.
+ */
+function env_marco($pdo) {
+    try {
+        $st = $pdo->prepare("SELECT valor FROM envio_config WHERE escopo='global' AND ref='' AND campo='marco_zero'");
+        $st->execute(); $v = trim((string)$st->fetchColumn());
+        return preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) ? $v : '';
+    } catch (Throwable $e) { return ''; }
+}
+
 function env_dias($data) {
     $t = strtotime((string)$data); if (!$t) return null;
     return (int)floor((time() - $t) / 86400);
@@ -128,6 +147,22 @@ function env_ficha_por_nome($pdo) {
 }
 
 /**
+ * A CAPRETZ produz DOIS rótulos que não são nome de obra, e cada um pede um caminho diferente:
+ *   "CAPRETZ/San Pietro"      -> compra rateada PARA a obra: o prefixo é ruído, a obra é San Pietro.
+ *   "CAPRETZ · Administrativo"-> compra da SEDE: não tem canteiro, não tem CNO, não tem almoxarifado.
+ * Tratar os dois como "obra sem ficha" escondia 791 pedidos reais atrás de um bloqueio errado.
+ */
+function env_desmembra_obra($label) {
+    $l = trim((string)$label);
+    if ($l === '') return ['tipo' => 'vazio', 'nome' => ''];
+    if (preg_match('#^CAPRETZ\s*/\s*(.+)$#iu', $l, $m)) return ['tipo' => 'obra', 'nome' => trim($m[1])];
+    /* O separador é o "·" (U+00B7); comparar por bytes evita depender de mbstring. */
+    if (stripos($l, 'CAPRETZ') === 0 && strpos($l, "\xC2\xB7") !== false)
+        return ['tipo' => 'sede', 'nome' => trim(substr($l, strpos($l, "\xC2\xB7") + 2))];
+    return ['tipo' => 'obra', 'nome' => $l];
+}
+
+/**
  * Monta a fila. Devolve ENVELOPES (= e-mails que vão sair), não pedidos soltos: o comprador manda
  * "3 anexos se for a mesma obra", então a unidade de trabalho da tela é o e-mail, não o PC.
  */
@@ -143,7 +178,9 @@ function env_fila($pdo, $filtroObra = '') {
     foreach ($pdo->query("SELECT coligada_cod, pedido_numero, decisao, motivo, por_nome FROM envio_decisao") as $d)
         $decisoes[env_chave($d['coligada_cod'], $d['pedido_numero'])] = $d;
 
+    $marco = env_marco($pdo);
     $desde = date('Y-m-d', strtotime('-' . ENV_JANELA_DIAS . ' days'));
+    if ($marco !== '' && $marco > $desde) $desde = $marco;   // o marco manda quando é mais recente
     $peds = [];   // chave -> pedido agregado
 
     /* SÓ APROVADO ENTRA. Este filtro é a regra 1 — não existe outro caminho para a fila. */
@@ -201,12 +238,17 @@ function env_fila($pdo, $filtroObra = '') {
         if (isset($jaEnviado[$k][$destino])) continue;
 
         // ---- REGRA 2: obra tem que estar resolvida e com ficha ----
-        $chaveObra = bp_nz($p['obra']);
-        $f = $fichas[$chaveObra] ?? null;
-        if ($p['obra'] === '' || !$f) {
-            $p['bloqueio'] = 'obra'; $p['bloqueio_txt'] = $p['obra'] === ''
+        $des = env_desmembra_obra($p['obra']);
+        if ($des['tipo'] === 'sede') {
+            $p['bloqueio'] = 'sede'; $p['area'] = $des['nome'];
+            $p['bloqueio_txt'] = 'Compra da sede (' . $des['nome'] . ') — não tem canteiro, então não tem endereço de entrega nem CNO.';
+            $bloq[] = $p; continue;
+        }
+        $f = $fichas[bp_nz($des['nome'])] ?? null;
+        if ($des['tipo'] === 'vazio' || !$f) {
+            $p['bloqueio'] = 'obra'; $p['bloqueio_txt'] = $des['tipo'] === 'vazio'
                 ? 'O TOTVS não resolveu a obra deste pedido.'
-                : 'A obra "' . $p['obra'] . '" não tem ficha no cockpit — sem ficha não há endereço de entrega.';
+                : 'A obra "' . $des['nome'] . '" não tem ficha no cockpit — sem ficha não há endereço de entrega.';
             $bloq[] = $p; continue;
         }
         $p['ficha_id'] = $f['id'];
@@ -254,12 +296,14 @@ function env_fila($pdo, $filtroObra = '') {
     usort($bloq, fn($a, $b) => strcmp($a['bloqueio'], $b['bloqueio']) ?: ($b['dias'] <=> $a['dias']));
 
     return ['envelopes' => $env, 'bloqueados' => $bloq, 'segurados' => $segurados,
+            'marco' => $marco, 'desde' => $desde,
             'contadores' => [
                 'envelopes' => count($env), 'pedidos' => count($fila),
                 'atrasados' => $atrasados, 'bloqueados' => count($bloq),
                 'segurados' => count($segurados),
                 'valor' => array_sum(array_map(fn($e) => $e['valor'], $env)),
                 'com_alerta' => count(array_filter($env, fn($e) => $e['alerta'])),
+                'sede' => count(array_filter($bloq, fn($b) => $b['bloqueio'] === 'sede')),
             ]];
 }
 
@@ -310,6 +354,19 @@ try {
         $up->execute([$d, $motivo, $args[4], $args[5], $args[6], $col, $num]);
         if (!$up->rowCount()) $pdo->prepare("INSERT INTO envio_decisao (coligada_cod,pedido_numero,decisao,motivo,por,por_nome,em) VALUES (?,?,?,?,?,?,?)")->execute($args);
         echo json_encode(['ok' => true]); exit;
+    }
+
+    /* Definir o marco zero é decisão de administrador e muda o que a automação enxerga. */
+    if ($acao === 'marco') {
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores.']); exit; }
+        $v = trim((string)($in['data'] ?? ''));
+        if ($v !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $v)) throw new Exception('data inválida');
+        $q = $pdo->prepare("UPDATE envio_config SET valor=?, updated_by=?, updated_at=? WHERE escopo='global' AND ref='' AND campo='marco_zero'");
+        $q->execute([$v, (string)($in['me'] ?? ''), date('c')]);
+        if (!$q->rowCount())
+            $pdo->prepare("INSERT INTO envio_config (escopo,ref,campo,valor,updated_by,updated_at) VALUES ('global','','marco_zero',?,?,?)")
+                ->execute([$v, (string)($in['me'] ?? ''), date('c')]);
+        echo json_encode(['ok' => true, 'marco' => $v]); exit;
     }
 
     throw new Exception('ação inválida: ' . $acao);

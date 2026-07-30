@@ -6982,11 +6982,14 @@ function envRender(){ const w=document.getElementById('envWrap'), d=ENV.d; if(!w
    + '<p class="sub">Sai daqui so o que esta <b>aprovado no Fluig</b>, para a <b>obra certa</b>, uma <b>unica vez</b>. Nada some da fila sozinho.</p></div>'
    + '<button class="btn-ghost" onclick="ENV.d=null;envCarregar()" style="flex:0 0 auto;margin-top:4px"><span class="material-icons" style="font-size:18px;vertical-align:-4px">refresh</span> Atualizar</button></div>';
 
+  h+=envMarco();
+
   h+='<div class="bar" style="gap:10px;flex-wrap:wrap;margin-bottom:10px">'
    + envCard('var(--ok)', (c.envelopes||0), 'E-mails prontos', (c.pedidos||0)+' pedidos - '+BRLc(c.valor||0), 'fila', ENV.aba==='fila')
    + envCard('var(--dourado)', (c.atrasados||0), 'Aprovados atrasados', 'parados ha mais de '+(d.atraso_dias||3)+' dias', 'fila', false)
    + envCard('#c0392b', (c.bloqueados||0), 'Bloqueados', 'nao podem sair - veja o motivo', 'bloq', ENV.aba==='bloq')
    + envCard('var(--muted)', (c.segurados||0), 'Segurados', 'alguem segurou de proposito', 'seg', ENV.aba==='seg')
+   + envCard('#6b7c93', (c.sede||0), 'Compras da sede', 'sem canteiro - fluxo proprio', 'bloq', false)
    + '</div>';
 
   h+='<div class="panel" style="padding:9px 14px;margin-bottom:10px"><div class="bar" style="gap:18px;flex-wrap:wrap">'
@@ -7013,6 +7016,46 @@ function envRender(){ const w=document.getElementById('envWrap'), d=ENV.d; if(!w
 function envAbaBtn(k,ic,lbl,n){ const on=ENV.aba===k;
   return '<button class="btn-ghost" onclick="envAba(\''+k+'\')" style="padding:6px 13px'+(on?';background:var(--verde);color:#fff':'')+'">'
    + '<span class="material-icons" style="font-size:16px;vertical-align:-4px">'+ic+'</span> '+lbl+(n!==null?' ('+n+')':'')+'</button>'; }
+
+/* ---- MARCO ZERO ----
+   Medimos: so nos ultimos 120 dias existem 4.049 pedidos aprovados, e quase todos ja sairam a mao.
+   O livro-caixa, porem, nasce vazio. Ligar o disparo sem um corte reenviaria tudo — a violacao mais
+   cara da regra 3. Reconciliar o passado pelo e-mail nao resolve (o numero do PC se repete entre
+   coligadas, e 2.067 dos 2.651 e-mails colhidos nao casaram). Entao o corte e por DATA e explicito. */
+function envMarco(){ const d=ENV.d, m=d.marco||'';
+  if(!m) return '<div class="panel" style="border-left:4px solid #c0392b;background:#fdf1ef;margin-bottom:10px">'
+   + cotSecHead('flag','Falta definir o marco zero','sem ele a automacao nao pode ser ligada','')
+   + '<div style="font-size:13px;line-height:1.55">A fila esta enxergando <b>tudo o que foi aprovado nos ultimos '
+   + (d.janela_dias||120)+' dias</b> — e quase tudo isso <b>ja foi enviado a mao</b> pelos compradores. '
+   + 'O registro de envios comeca vazio, entao o sistema nao tem como saber sozinho o que ja saiu.<br><br>'
+   + 'Escolha a data a partir da qual <b>o sistema assume o envio</b>. Tudo aprovado antes dela fica como '
+   + 'processo manual e <b>nunca</b> entra nesta fila.</div>'
+   + '<div class="bar" style="gap:8px;margin-top:11px;align-items:flex-end">'
+   + '<div style="max-width:190px">'+cotFld('O sistema envia a partir de','<input type="date" id="envMarcoD" value="'+esc(new Date().toISOString().slice(0,10))+'" style="width:100%">')+'</div>'
+   + '<button class="btn-prim" onclick="envMarcoSalvar()" style="padding:6px 14px">Definir marco zero</button></div></div>';
+  return '<div class="panel" style="padding:8px 14px;margin-bottom:10px"><div class="bar" style="justify-content:space-between;gap:10px;flex-wrap:wrap">'
+   + '<div class="dmini"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">flag</span> '
+   + 'A fila so considera pedidos aprovados a partir de <b>'+esc(pmData(m))+'</b>. O que veio antes e do processo manual.</div>'
+   + '<button class="btn-ghost" style="padding:3px 10px" onclick="envMarcoEditar()">Mudar</button></div></div>';
+}
+function envMarcoEditar(){
+  dlgAbrir('Envio de Pedidos','Marco zero',
+    '<div style="max-width:520px"><div class="dmini" style="margin-bottom:10px">'
+   + 'Pedidos aprovados <b>antes</b> desta data nunca entram na fila — eles sao do processo manual. '
+   + 'Adiantar a data faz a fila crescer com pedidos que talvez ja tenham sido enviados; atrasar pode '
+   + 'deixar um pedido aprovado sem sair (regra 4).</div>'
+   + cotFld('O sistema envia a partir de','<input type="date" id="envMarcoD" value="'+esc(ENV.d.marco||'')+'" style="width:100%;max-width:190px">')
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" onclick="envMarcoSalvar()">Salvar</button></div></div>');
+}
+async function envMarcoSalvar(){ const v=((document.getElementById('envMarcoD')||{}).value||'').trim();
+  if(!v){ toast('Escolha uma data'); return; }
+  try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({acao:'marco',me:(EU&&EU.bitrix_id),data:v})})).json();
+    if(r.error){ toast(r.error); return; } closeModal(true); toast('Marco zero definido');
+    ENV.d=null; envCarregar(); }catch(e){ toast('Falha: '+e.message); }
+}
 
 /* ---- fila: um cartao por E-MAIL ---- */
 function envFila(){ const es=(ENV.d.envelopes||[]);
@@ -7061,7 +7104,8 @@ function envAchar(ch){ return (ENV.d.envelopes||[]).find(x=>x.chave===ch); }
 /* ---- bloqueados: agrupados pelo MOTIVO, porque o conserto e por motivo ---- */
 const ENV_BLOQ={obra:['Obra nao identificada','apartment','Sem ficha vinculada nao existe endereco de entrega - e assim que um pedido iria para a obra errada.'],
                 config:['Obra sem dados de envio','settings','Falta CNO, endereco, contato do almoxarifado ou e-mail de NF. Preencha em Configuracoes > E-mail do pedido > Por obra.'],
-                email:['Fornecedor sem e-mail','mail_off','Nao temos e-mail deste fornecedor no cadastro. Preencha na tela de Fornecedores.']};
+                email:['Fornecedor sem e-mail','mail_off','Nao temos e-mail deste fornecedor no cadastro. Preencha na tela de Fornecedores.'],
+                sede:['Compras da sede (sem canteiro)','business','Administrativo, Marketing, Comercial, TI: nao tem obra, nao tem CNO nem almoxarifado. Precisam de um texto proprio — hoje nao entram na fila.']};
 function envBloq(){ const bs=(ENV.d.bloqueados||[]);
   if(!bs.length) return '<div class="panel"><div class="dempty">Nada bloqueado. Todo pedido aprovado tem obra, endereco e destinatario.</div></div>';
   const grupos={}; bs.forEach(b=>{ (grupos[b.bloqueio]=grupos[b.bloqueio]||[]).push(b); });

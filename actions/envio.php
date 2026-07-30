@@ -123,18 +123,46 @@ function env_dias($data) {
     return (int)floor((time() - $t) / 86400);
 }
 
-/** Mapa fornecedor_cod (CODCFO) -> e-mail do nosso cadastro. Foi o CODCFO que casou 1.160/1.160. */
+/**
+ * Mapa para achar o e-mail do fornecedor. DOIS índices, nessa ordem:
+ *   1) CODCFO (totvs_cod) — a chave exata; foi ela que casou 1.160/1.160 no enriquecimento.
+ *   2) nome normalizado EXATO — só 330 dos nossos cadastros têm CODCFO, então sem esta segunda
+ *      volta um fornecedor que a gente tem e-mail fica bloqueado à toa.
+ *
+ * O casamento por nome é EXATO depois de normalizar (bp_nz derruba acento, caixa e pontuação).
+ * Nada de aproximado: numa tentativa anterior a normalização agressiva casou "Gerdau" com
+ * "E R CONSTRUCOES". Aqui, nome ambíguo (dois cadastros com o mesmo nome normalizado e e-mails
+ * diferentes) é descartado — melhor bloquear e alguém resolver do que mandar para o e-mail errado.
+ */
 function env_forn_email($pdo) {
-    $m = [];
+    $porCod = []; $porNome = []; $ambiguo = [];
     try {
-        foreach ($pdo->query("SELECT totvs_cod, nome, email FROM fornecedores WHERE totvs_cod IS NOT NULL AND totvs_cod<>''") as $f) {
-            $c = ltrim(trim((string)$f['totvs_cod']), '0');
-            if ($c === '' || isset($m[$c])) continue;
+        foreach ($pdo->query("SELECT totvs_cod, nome, razao_social, email FROM fornecedores") as $f) {
             $e = trim((string)$f['email']);
-            $m[$c] = ['email' => $e, 'nome' => trim((string)$f['nome'])];
+            if ($e === '') continue;
+            $c = ltrim(trim((string)($f['totvs_cod'] ?? '')), '0');
+            if ($c !== '' && !isset($porCod[$c])) $porCod[$c] = ['email' => $e, 'nome' => trim((string)$f['nome'])];
+            foreach ([$f['nome'], $f['razao_social']] as $n) {
+                $k = bp_nz((string)$n);
+                if ($k === '' || strlen($k) < 6) continue;
+                if (isset($porNome[$k]) && strcasecmp($porNome[$k]['email'], $e) !== 0) { $ambiguo[$k] = true; continue; }
+                $porNome[$k] = ['email' => $e, 'nome' => trim((string)$f['nome'])];
+            }
         }
+        foreach (array_keys($ambiguo) as $k) unset($porNome[$k]);
     } catch (Throwable $e) {}
-    return $m;
+    return ['cod' => $porCod, 'nome' => $porNome];
+}
+
+/** Acha o e-mail: código TOTVS primeiro, nome exato depois. */
+function env_forn_acha($mapa, $cod, $nome, $razao = '') {
+    $c = ltrim(trim((string)$cod), '0');
+    if ($c !== '' && isset($mapa['cod'][$c])) return $mapa['cod'][$c] + ['via' => 'código TOTVS'];
+    foreach ([$nome, $razao] as $n) {
+        $k = bp_nz((string)$n);
+        if ($k !== '' && isset($mapa['nome'][$k])) return $mapa['nome'][$k] + ['via' => 'nome exato'];
+    }
+    return null;
 }
 
 /** Obra (nome que a Busca Pedidos mostra) -> ficha. Sem ficha não há endereço: não pode sair. */
@@ -210,6 +238,7 @@ function env_fila($pdo, $filtroObra = '') {
                     'forn_cod' => ltrim(trim((string)($l['fornecedor_cod'] ?? '')), '0'),
                     'forn_nome' => trim((string)($l['fornecedor_fantasia'] ?? '')) !== ''
                                    ? trim((string)$l['fornecedor_fantasia']) : trim((string)($l['fornecedor_nome'] ?? '')),
+                    'forn_razao' => trim((string)($l['fornecedor_nome'] ?? '')),
                     'comprador' => trim((string)($l['pedido_usuario'] ?? '')),
                     'valor' => 0.0, 'itens' => 0, 'produtos' => [], 'obs' => '',
                 ];
@@ -271,8 +300,9 @@ function env_fila($pdo, $filtroObra = '') {
         }
 
         // ---- destinatário ----
-        $fm = $fornMail[$p['forn_cod']] ?? null;
+        $fm = env_forn_acha($fornMail, $p['forn_cod'], $p['forn_nome'], $p['forn_razao'] ?? '');
         $p['para'] = $destino === 'obra' ? trim((string)($res['efetivo']['email_nf'] ?? '')) : trim((string)($fm['email'] ?? ''));
+        $p['email_via'] = $fm['via'] ?? '';
         if ($destino === 'fornecedor' && $p['para'] === '') {
             $p['bloqueio'] = 'email';
             $p['bloqueio_txt'] = 'Não temos e-mail de ' . ($p['forn_nome'] ?: 'fornecedor') . ' (código TOTVS ' . ($p['forn_cod'] ?: '—') . ').';

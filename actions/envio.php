@@ -266,6 +266,9 @@ function env_fila($pdo, $filtroObra = '') {
 try {
     $pdo = db();
     env_schema($pdo);
+    /* O envio_config.php entrou como BIBLIOTECA, então o bloco dele que cria/semeia as tabelas não
+       roda. Sem isto, a primeira abertura da fila quebra em "Table envio_config doesn't exist". */
+    ec_schema($pdo); ec_seed($pdo);
     $metodo = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
     if ($metodo === 'GET') {

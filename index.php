@@ -7120,15 +7120,19 @@ async function envDesarquivar(motivo){
 
 /* ---- fila: um cartao por E-MAIL ---- */
 function envFila(){ const es=(ENV.d.envelopes||[]);
-  if(!es.length) return '<div class="panel"><div class="dempty">Nenhum pedido aprovado esperando envio. '
-    + 'Se voce esperava algum aqui, ele pode estar em <b>Bloqueados</b>.</div></div>';
   const liberados=es.filter(e=>!e.alerta).length;
+  /* A barra de acoes fica FORA do estado vazio: com a config das obras em branco a fila nasce
+     zerada, e era justamente ai que o "Arquivar antigos" sumia — o botao de que ele mais precisa. */
   let h='<div class="panel" style="padding:10px 14px;margin-bottom:10px"><div class="bar" style="justify-content:space-between;flex-wrap:wrap;gap:8px">'
-   + '<div class="dmini">Cada cartao abaixo e <b>um e-mail</b>: mesma obra e mesmo fornecedor viajam juntos, como voce ja faz hoje.</div>'
+   + '<div class="dmini">'+(es.length
+       ? 'Cada cartao abaixo e <b>um e-mail</b>: mesma obra e mesmo fornecedor viajam juntos, como voce ja faz hoje.'
+       : 'Nenhum e-mail pronto ainda. Use <b>Arquivar antigos</b> para tirar da conta o que ja foi enviado a mao.')+'</div>'
    + '<span class="bar" style="gap:7px">'
    + '<button class="btn-ghost" onclick="envArqLoteForm()" style="padding:6px 13px"><span class="material-icons" style="font-size:16px;vertical-align:-4px">inventory_2</span> Arquivar antigos</button>'
    + '<button class="btn-prim" onclick="envEnviarLote()" style="padding:6px 14px"><span class="material-icons" style="font-size:16px;vertical-align:-4px">send</span> Enviar os '+liberados+' sem alerta</button>'
    + '</span></div></div>';
+  if(!es.length) return h+'<div class="panel"><div class="dempty">Nenhum pedido aprovado esperando envio. '
+    + 'Se voce esperava algum aqui, ele esta em <b>Bloqueados</b> — veja o motivo la.</div></div>';
   es.forEach(e=>{ h+=envEnvCard(e); });
   return h;
 }

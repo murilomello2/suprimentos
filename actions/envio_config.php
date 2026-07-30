@@ -23,6 +23,7 @@
  * "mudar para todos" (mexe no global) e "mudar só nessa obra" (preenche na obra) sem duplicar texto.
  */
 header('Content-Type: application/json; charset=utf-8');
+@date_default_timezone_set('America/Sao_Paulo');   // servidor em UTC; a vigencia dos avisos e por data local
 require_once __DIR__ . '/../includes/db.php';
 
 /** Campos por escopo. O rótulo e a ajuda vão para a tela — a config se descreve sozinha. */
@@ -36,7 +37,7 @@ function ec_campos() {
             'abertura_obra'  => ['Abertura p/ a obra', 'Segue para controle e lançamento'],
             'combinar'       => ['Combinar entrega', 'Favor sempre combinar a entrega com a obra previamente através do contato {almox_nome}, no telefone {almox_fone}.'],
             'faturamento'    => ['Regras de faturamento', "O faturamento deverá ser exatamente igual ao pedido de compra, com os mesmos valores, CNPJ's e condições de pagamento.\nDaremos andamento no lançamento da NF somente com a via física entregue em obra no momento da entrega do material."],
-            'cno'            => ['Linha do CNO', 'Favor sempre incluir na nota fiscal o número de CNO da obra {cno}'],
+            'linha_cno'      => ['Linha do CNO', 'Favor sempre incluir na nota fiscal o número de CNO da obra {cno}'],
             'copia_nf'       => ['Cópia da NF', 'Uma cópia da NF deverá sempre ser enviada para o e-mail {email_nf} e fiscal@caprem.com.br para arquivo.'],
             'horario'        => ['Horário de recebimento (padrão)', 'Segunda a Sexta-feira das 7:00h às 11:00h e das 13:00h às 16:00h.'],
             'atraso'         => ['Atraso na entrega', 'Os atrasos na entrega maiores que 02 (dois) dias da data acordada com a obra deverão ser justificados pelo fornecedor.'],
@@ -60,6 +61,22 @@ function ec_campos() {
             'cc_obra'      => ['Cópia desta obra', 'separe por vírgula'],
         ],
     ];
+}
+
+/**
+ * COLISAO DE CHAVE — o primeiro teste real revelou.
+ *
+ * O global tinha um campo 'cno' (o TEXTO "Favor sempre incluir ... da obra {cno}") e a obra tem um
+ * campo 'cno' (o NUMERO). Como a resolucao parte do global e a obra so sobrescreve, uma obra sem CNO
+ * herdava a FRASE no lugar do numero — e o e-mail saiu com a frase escrita duas vezes e um {cno}
+ * literal no fim. Chave de texto e chave de valor nao podem ter o mesmo nome.
+ */
+function ec_migrar_cno($pdo) {
+    try {
+        $tem = $pdo->query("SELECT COUNT(*) FROM envio_config WHERE escopo='global' AND campo='linha_cno'")->fetchColumn();
+        if (!$tem) $pdo->exec("UPDATE envio_config SET campo='linha_cno' WHERE escopo='global' AND campo='cno'");
+        else $pdo->exec("DELETE FROM envio_config WHERE escopo='global' AND campo='cno'");
+    } catch (Throwable $e) {}
 }
 
 function ec_schema($pdo) {
@@ -87,6 +104,7 @@ function ec_schema($pdo) {
             $pdo->exec("CREATE TABLE IF NOT EXISTS envio_aviso (id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT, texto TEXT, de TEXT, ate TEXT, destaque TEXT DEFAULT 'normal', ativo INTEGER DEFAULT 1, updated_by TEXT, updated_at TEXT)");
         }
     } catch (Throwable $e) {}
+    ec_migrar_cno($pdo);
 }
 
 /** Semeia o GLOBAL com o texto que os compradores já usam — a config nasce funcionando. */
@@ -201,7 +219,7 @@ function ec_compor($pdo, $fichaId, $tipo, $ctx = []) {
     if ($forn) {
         $h .= $p($linha('combinar', ['almox_nome']));
         $h .= $p($sub($ef['faturamento'] ?? ''), ';font-weight:600');
-        $h .= $p($linha('cno', ['cno']));
+        $h .= $p($linha('linha_cno', ['cno']));
         $h .= $p($linha('copia_nf', ['email_nf']));
         $h .= $p($sub($ef['atraso'] ?? ''));
     }

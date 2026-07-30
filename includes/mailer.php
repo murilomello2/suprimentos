@@ -8,9 +8,13 @@ function smtp_hdr_enc($s) { return '=?UTF-8?B?' . base64_encode((string)$s) . '?
 
 /**
  * Envia UM e-mail. $cfg = {host, port, user, senha, from, from_name}. $attachments = [{nome, mime, conteudo(raw bytes)}].
- * Retorna [bool ok, string msg].
+ * Retorna [bool ok, string msg]  — ATENCAO: e um par, nao um booleano.
+ *
+ * $opts: ['html' => true]  -> manda o corpo como text/html (senão o cliente mostra a marcação crua,
+ *                             que foi o que aconteceu no primeiro teste de pedido)
+ *        ['cc'  => [...]]  -> cópias de verdade (RCPT TO para cada uma + cabeçalho Cc)
  */
-function smtp_send($cfg, $to, $subject, $body, $attachments = [], $extraHeaders = []) {
+function smtp_send($cfg, $to, $subject, $body, $attachments = [], $extraHeaders = [], $opts = []) {
     $host = trim((string)($cfg['host'] ?? '')); $port = (int)($cfg['port'] ?? 465);
     $user = trim((string)($cfg['user'] ?? '')); $pass = (string)($cfg['senha'] ?? '');
     $from = trim((string)($cfg['from'] ?? '')) ?: $user; $fromName = (string)($cfg['from_name'] ?? 'Suprimentos · Caprem');
@@ -32,11 +36,22 @@ function smtp_send($cfg, $to, $subject, $body, $attachments = [], $extraHeaders 
     $r = $cmd(base64_encode($pass)); if (!$is($r, 235)) { fclose($fp); return [false, 'autenticação falhou (senha?): ' . trim($r)]; }
     $r = $cmd('MAIL FROM:<' . $from . '>'); if (!$is($r, 250)) { fclose($fp); return [false, 'MAIL FROM recusado: ' . trim($r)]; }
     $r = $cmd('RCPT TO:<' . $to . '>'); if (!$is($r, 250) && !$is($r, 251)) { fclose($fp); return [false, 'RCPT recusado: ' . trim($r)]; }
+    /* Copia so chega se houver RCPT TO para cada endereco — o cabecalho Cc sozinho e decorativo.
+       Uma copia recusada NAO derruba o envio principal: perder o pedido por causa de um e-mail
+       interno errado seria trocar a regra 4 por um detalhe. */
+    $cc = [];
+    foreach ((array)($opts['cc'] ?? []) as $e) {
+        $e = trim((string)$e);
+        if ($e === '' || !filter_var($e, FILTER_VALIDATE_EMAIL) || strcasecmp($e, $to) === 0) continue;
+        $rc = $cmd('RCPT TO:<' . $e . '>');
+        if ($is($rc, 250) || $is($rc, 251)) $cc[] = $e;
+    }
     $r = $cmd('DATA'); if (!$is($r, 354)) { fclose($fp); return [false, 'DATA recusado: ' . trim($r)]; }
 
     $bd = '=_' . bin2hex(random_bytes(9));
     $h  = 'From: ' . smtp_hdr_enc($fromName) . ' <' . $from . ">\r\n";
     $h .= 'To: <' . $to . ">\r\n";
+    if ($cc) $h .= 'Cc: ' . implode(', ', array_map(function ($e) { return '<' . $e . '>'; }, $cc)) . "\r\n";
     $h .= 'Subject: ' . smtp_hdr_enc($subject) . "\r\n";
     $h .= "MIME-Version: 1.0\r\n" . 'Date: ' . date('r') . "\r\n";
     // headers extras (ex.: Message-ID p/ casar a resposta via In-Reply-To/References). Sanitiza CRLF (anti header-injection).
@@ -44,9 +59,12 @@ function smtp_send($cfg, $to, $subject, $body, $attachments = [], $extraHeaders 
         $hk = trim(str_replace(["\r", "\n"], '', (string)$hk)); $hv = trim(str_replace(["\r", "\n"], '', (string)$hv));
         if ($hk !== '' && $hv !== '') $h .= $hk . ': ' . $hv . "\r\n";
     }
+    /* O corpo do pedido e HTML. Sem isto o cliente mostra a marcacao crua — foi o que
+       aconteceu no primeiro teste que chegou na caixa do Murilo. */
+    $tipo = !empty($opts['html']) ? 'text/html' : 'text/plain';
     if ($attachments) {
         $h .= 'Content-Type: multipart/mixed; boundary="' . $bd . "\"\r\n\r\n";
-        $m  = '--' . $bd . "\r\n" . "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode($body)) . "\r\n";
+        $m  = '--' . $bd . "\r\n" . 'Content-Type: ' . $tipo . "; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode($body)) . "\r\n";
         foreach ($attachments as $a) {
             $nome = preg_replace('/[^A-Za-z0-9 ._-]/', '_', (string)($a['nome'] ?? 'anexo'));
             $m .= '--' . $bd . "\r\n" . 'Content-Type: ' . ($a['mime'] ?? 'application/octet-stream') . '; name="' . $nome . "\"\r\n"
@@ -55,7 +73,7 @@ function smtp_send($cfg, $to, $subject, $body, $attachments = [], $extraHeaders 
         }
         $m .= '--' . $bd . "--\r\n";
     } else {
-        $h .= "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n";
+        $h .= 'Content-Type: ' . $tipo . "; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n";
         $m  = chunk_split(base64_encode($body));
     }
     fwrite($fp, $h . $m . "\r\n.\r\n");   // base64 não tem linha começando com '.', dispensa dot-stuffing

@@ -34,6 +34,8 @@
  * e a pessoa decide; a decisão fica gravada por pedido e não se repete.
  */
 header('Content-Type: application/json; charset=utf-8');
+/* O servidor roda em UTC; sem isto o carimbo do e-mail sai 3 horas adiantado. */
+@date_default_timezone_set('America/Sao_Paulo');
 require_once __DIR__ . '/../includes/db.php';
 define('BP_LIB_ONLY', 1); require_once __DIR__ . '/busca_pedidos.php';  // bp_varrer / bp_obra_label / bp_nz
 define('EC_LIB_ONLY', 1); require_once __DIR__ . '/envio_config.php';   // ec_resolver / ec_compor / ec_faltando
@@ -516,10 +518,13 @@ try {
         $cfgS = ['host' => $cfg['host'] ?? '', 'port' => (int)($cfg['port'] ?? 465),
                  'user' => $cfg['user'], 'senha' => $cfg['senha'],
                  'from' => $cfg['user'], 'from_name' => 'Caprem - Suprimentos (teste)'];
+        /* smtp_send devolve um PAR [ok, mensagem] — tratar como booleano faria todo envio parecer
+           bem-sucedido, porque array nao-vazio e truthy. */
         $ok = false; $erro = '';
-        try { $ok = smtp_send($cfgS, $para, '[TESTE] ' . $c['assunto'], $selo . $c['html'], $anexos); }
+        try { list($ok, $erro) = smtp_send($cfgS, $para, '[TESTE] ' . $c['assunto'], $selo . $c['html'],
+                                           $anexos, [], ['html' => true, 'cc' => []]); }
         catch (Throwable $e) { $erro = $e->getMessage(); }
-        if (!$ok && $erro === '') $erro = 'o servidor de e-mail recusou o envio';
+        if (!$ok && trim((string)$erro) === '') $erro = 'o servidor de e-mail recusou o envio';
 
         /* De proposito NAO grava em envio_registro: o livro-caixa e so de envio real. */
         echo json_encode(['ok' => (bool)$ok, 'erro' => $erro, 'para' => $para,

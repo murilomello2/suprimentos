@@ -196,6 +196,11 @@ function bp_aprov_label($k, $etapa) {
     return 'Sem fluxo de aprovação';
 }
 
+/* Endpoint E biblioteca: o Envio de Pedidos reaproveita bp_varrer/bp_obra_label/bp_aprov em vez de
+   copiá-los (duas cópias da regra da CAPRETZ acabariam divergindo, e é ela que decide a obra).
+   Quem inclui como biblioteca define BP_LIB_ONLY e o bloco de resposta abaixo não roda. */
+if (defined('BP_LIB_ONLY')) return;
+
 try {
     $pdo = db();
     $perms = user_perms($pdo, $_GET['me'] ?? null);

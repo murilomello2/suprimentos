@@ -35,6 +35,19 @@ function forn_add_categoria($pdo, $nome) {
 try {
     $pdo = db();
 
+    /* Acento -> ASCII por MAPA, não por iconv: com //TRANSLIT o resultado depende do locale do
+       servidor, e aqui o ç era simplesmente descartado (a categoria "Aço" virava "Ao" no nome do
+       arquivo exportado). Mapa fixo é feio mas é previsível. */
+    if (!function_exists('forn_sem_acento')) {
+        function forn_sem_acento($s) {
+            return strtr((string)$s, ['á'=>'a','à'=>'a','â'=>'a','ã'=>'a','ä'=>'a','é'=>'e','ê'=>'e','ë'=>'e',
+                'í'=>'i','î'=>'i','ï'=>'i','ó'=>'o','ô'=>'o','õ'=>'o','ö'=>'o','ú'=>'u','û'=>'u','ü'=>'u',
+                'ç'=>'c','ñ'=>'n','Á'=>'A','À'=>'A','Â'=>'A','Ã'=>'A','Ä'=>'A','É'=>'E','Ê'=>'E','Ë'=>'E',
+                'Í'=>'I','Î'=>'I','Ï'=>'I','Ó'=>'O','Ô'=>'O','Õ'=>'O','Ö'=>'O','Ú'=>'U','Û'=>'U','Ü'=>'U',
+                'Ç'=>'C','Ñ'=>'N']);
+        }
+    }
+
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         $cats = $pdo->query("SELECT id, nome FROM cot_categoria ORDER BY nome")->fetchAll();
         if (isset($_GET['categorias'])) { echo json_encode(['categorias'=>$cats], JSON_UNESCAPED_UNICODE); exit; }
@@ -68,7 +81,7 @@ try {
             $nome = 'fornecedores-' . date('Y-m-d');
             foreach (['categoria'=>'cat', 'tipo'=>'tipo', 'nome'=>'busca', 'itens'=>'itens', 'cidade'=>'cidade'] as $k => $sfx)
                 if (trim((string)($_GET[$k] ?? '')) !== '') $nome .= '-' . $sfx . '_' . preg_replace('/[^A-Za-z0-9]+/', '',
-                    (string)@iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', (string)$_GET[$k]));
+                    forn_sem_acento((string)$_GET[$k]));
             header('Content-Type: text/csv; charset=utf-8');
             header('Content-Disposition: attachment; filename="' . $nome . '.csv"');
             $out = fopen('php://output', 'w');

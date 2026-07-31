@@ -315,6 +315,63 @@ try {
      * NÃO substitui o nosso cadastro: o Murilo já avisou que "muitos dos e-mails aí estão
      * desatualizados". A ordem de consulta é sempre cadastro do cockpit primeiro, TOTVS depois.
      */
+
+    /**
+     * CADASTRAR/CORRIGIR O E-MAIL DE UM FORNECEDOR direto da fila de Envio.
+     *
+     * O Murilo pediu: na lista de bloqueados por "fornecedor sem e-mail", um botão que abra o
+     * cadastro, preencha e volte. Sem isso a pessoa larga a fila, vai na tela de Fornecedores,
+     * procura pelo nome (que às vezes está escrito diferente) e perde o fio.
+     *
+     * A chave é o CODCFO — o mesmo que amarra o pedido ao cadastro. Se não existir cadastro nosso
+     * para aquele fornecedor, um é criado com o que o TOTVS já sabe (razão, CNPJ, cidade), para o
+     * e-mail não ficar órfão.
+     */
+    if ($acao === 'email_rapido') {
+        /* Fornecedor é lista-mestre compartilhada: quem edita fornecedor edita aqui também. */
+        if (!forn_editor($pdo, $in['me'] ?? null)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão para editar fornecedores.']); exit; }
+        $email = trim((string)($in['email'] ?? ''));
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) throw new Exception('E-mail inválido: ' . $email);
+        $cod  = ltrim(preg_replace('/\D+/', '', (string)($in['cod'] ?? '')), '0');
+        $cnpj = preg_replace('/\D+/', '', (string)($in['cnpj'] ?? ''));
+        $nome = trim((string)($in['nome'] ?? ''));
+
+        $id = 0;
+        if ($cnpj !== '') {
+            $q = $pdo->prepare("SELECT id FROM cot_fornecedor WHERE REPLACE(REPLACE(REPLACE(REPLACE(cnpj,'.',''),'/',''),'-',''),' ','')=? ORDER BY id LIMIT 1");
+            $q->execute([$cnpj]); $id = (int)$q->fetchColumn();
+        }
+        if (!$id && $cod !== '') {
+            $q = $pdo->prepare("SELECT id FROM cot_fornecedor WHERE totvs_cod=? ORDER BY id LIMIT 1");
+            $q->execute([$cod]); $id = (int)$q->fetchColumn();
+        }
+        if (!$id && $nome !== '') {
+            $q = $pdo->prepare("SELECT id FROM cot_fornecedor WHERE LOWER(TRIM(nome))=LOWER(TRIM(?)) ORDER BY id LIMIT 1");
+            $q->execute([$nome]); $id = (int)$q->fetchColumn();
+        }
+
+        $criado = false;
+        if (!$id) {
+            // ainda não temos cadastro: nasce com o que o TOTVS sabe
+            $cid = ''; $razao = $nome;
+            try {
+                $q = $pdo->prepare("SELECT nome, cnpj, cidade FROM totvs_fornecedor WHERE codcfo=? LIMIT 1");
+                $q->execute([$cod]);
+                if ($t = $q->fetch()) { $razao = trim((string)$t['nome']) ?: $nome; $cid = trim((string)$t['cidade']); }
+            } catch (Throwable $e) {}
+            $ins = $pdo->prepare("INSERT INTO cot_fornecedor (nome, cnpj, cidade, email, ativo) VALUES (?,?,?,?,1)");
+            $ins->execute([$razao ?: ('Fornecedor ' . $cod), (string)($in['cnpj'] ?? ''), $cid, $email]);
+            $id = (int)$pdo->lastInsertId(); $criado = true;
+        } else {
+            $pdo->prepare("UPDATE cot_fornecedor SET email=? WHERE id=?")->execute([$email, $id]);
+        }
+        // grava o código do TOTVS se ainda faltava — é ele que casa o pedido com o cadastro
+        if ($cod !== '') { try { $pdo->prepare("UPDATE cot_fornecedor SET totvs_cod=? WHERE id=? AND (totvs_cod IS NULL OR totvs_cod='')")->execute([$cod, $id]); } catch (Throwable $e) {} }
+        $q = $pdo->prepare("SELECT id, nome, cnpj, cidade, contato, telefone, email, totvs_cod FROM cot_fornecedor WHERE id=?");
+        $q->execute([$id]);
+        echo json_encode(['ok'=>true, 'criado'=>$criado, 'fornecedor'=>$q->fetch()], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($acao === 'importar_totvs') {
         if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
         $E = (defined('DB_DRIVER') && DB_DRIVER === 'mysql') ? 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4' : '';

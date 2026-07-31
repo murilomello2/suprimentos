@@ -121,6 +121,33 @@ function bp_mapa_razao($pdo) {
     return $map;
 }
 
+
+/**
+ * OBRA DO RATEIO DA CAPRETZ — pelo CENTRO DE CUSTO da solicitação, não pela razão social.
+ *
+ * O Murilo pegou o erro: o PC 33539 aparecia como "CAPRETZ/INSTITUTO CAPREM" e é da Prades; o 33511
+ * aparecia como San Pietro e é da Licel. A razão social que o DAX entrega em obra_efetiva_nome é a
+ * do CENTRO DE CUSTO onde a despesa caiu, que numa compra guarda-chuva da CAPRETZ não é a obra que
+ * vai receber o material.
+ *
+ * O de-para certo já existia e é o mesmo das Solicitações: solic_obra liga (coligada, obra_cod) ao
+ * nome comercial. Basta usá-lo — 032 é Licel, 042 é Prades, 040 é Cajá. Nada de heurística nova.
+ *
+ * O que a razão social continua decidindo: se é obra ou sede (via centro de custo 8.x × 6/7.x).
+ */
+function bp_mapa_obracod($pdo) {
+    $map = [];
+    try {
+        foreach ($pdo->query("SELECT coligada, obra_cod, nome_comercial FROM solic_obra") as $o) {
+            if (stripos((string)$o['coligada'], 'CAPRETZ') === false) continue;
+            $cod = ltrim(trim((string)$o['obra_cod']), '0');
+            $nome = trim((string)$o['nome_comercial']);
+            if ($cod !== '' && $nome !== '') $map[$cod] = $nome;
+        }
+    } catch (Throwable $e) {}
+    return $map;
+}
+
 /** Encurta a razão social quando a obra não tem ficha (tira o juridiquês). */
 function bp_curto($razao) {
     $r = preg_replace('/\s+(EMPREENDIMENTOS?|EMPREEND\.?)\s+IMOB.*/iu', '', (string)$razao);
@@ -141,14 +168,20 @@ function bp_ccusto_de_obra($ccustoCod) {
  *    ccusto 8.x  -> compra de obra          => "CAPRETZ/<obra>"
  *    ccusto 6/7.x-> estrutura da sede       => "CAPRETZ · <área>"  (Administrativo, Marketing, …)
  *  Nas demais coligadas a obra é a própria coligada. */
-function bp_obra_label($razao, $fonte, $mapaRazao, $coligadaCod = '', $ccustoCod = '', $ccustoNome = '') {
+function bp_obra_label($razao, $fonte, $mapaRazao, $coligadaCod = '', $ccustoCod = '', $ccustoNome = '',
+                       $obraCod = '', $mapaObraCod = null) {
     $razao = trim((string)$razao);
     $amigavel = $razao === '' ? '' : ($mapaRazao[bp_nz($razao)] ?? bp_curto($razao));
 
     if (trim((string)$coligadaCod) === '1') {          // CAPRETZ: sede × rateio p/ obra
-        if (bp_ccusto_de_obra($ccustoCod) && strtoupper(trim((string)$fonte)) === 'RATEIO_CAPRETZ'
-            && $amigavel !== '' && stripos($amigavel, 'CAPRETZ') === false) {
-            return 'CAPRETZ/' . $amigavel;
+        if (bp_ccusto_de_obra($ccustoCod) && strtoupper(trim((string)$fonte)) === 'RATEIO_CAPRETZ') {
+            /* O obra_cod da SOLICITAÇÃO manda. A razão social do centro de custo mentia:
+               "INSTITUTO CAPREM" onde era Prades, "CPR7 CAMPINAS" onde era Licel. */
+            $cod = ltrim(trim((string)$obraCod), '0');
+            if ($cod !== '' && is_array($mapaObraCod) && isset($mapaObraCod[$cod]))
+                return 'CAPRETZ/' . $mapaObraCod[$cod];
+            if ($amigavel !== '' && stripos($amigavel, 'CAPRETZ') === false)
+                return 'CAPRETZ/' . $amigavel . ($cod !== '' ? ' (cc ' . $cod . '?)' : '');
         }
         $area = trim((string)$ccustoNome);
         return 'CAPRETZ · ' . ($area !== '' ? $area : 'Sede');
@@ -237,6 +270,7 @@ try {
             echo file_get_contents($cache); exit;
         }
         $mapaRazao = bp_mapa_razao($pdo);
+    $mapaObraCod = bp_mapa_obracod($pdo);
         $agg = [];
         bp_varrer('select=obra_efetiva_nome,obra_efetiva_fonte,coligada_cod,ccusto_cod,ccusto_nome'
                   . '&order=obra_efetiva_nome.asc,coligada_cod.asc,ccusto_cod.asc',
@@ -245,15 +279,20 @@ try {
                     $cc    = trim((string)($r['coligada_cod'] ?? ''));
                     $razao = trim((string)($r['obra_efetiva_nome'] ?? ''));
                     $lbl   = bp_obra_label($razao, $r['obra_efetiva_fonte'] ?? '', $mapaRazao,
-                                           $cc, $r['ccusto_cod'] ?? '', $r['ccusto_nome'] ?? '');
+                                           $cc, $r['ccusto_cod'] ?? '', $r['ccusto_nome'] ?? '',
+                                           $r['obra_cod'] ?? '', $mapaObraCod);
                     if ($lbl === '') continue;
                     if ($cc === '1' && strpos($lbl, 'CAPRETZ · ') === 0) {
                         $chave = 'C:' . trim((string)($r['ccusto_cod'] ?? ''));   // área da sede
                     } else {
                         // A obra entra pelo NOME LIMPO: o filtro por razão social traz a compra direta E o
                         // rateio da CAPRETZ, então rotular "CAPRETZ/San Pietro" aqui mentiria sobre o conjunto.
-                        $chave = 'R:' . $razao;
-                        $lbl   = bp_obra_label($razao, 'COLIGADA', $mapaRazao);
+                        /* O rateio da CAPRETZ agora e resolvido pelo obra_cod, entao a CHAVE do filtro
+                           precisa ser o rotulo resolvido — usar so a razao social juntaria Prades e Licel
+                           num item so (ambas caem em centros de custo com razoes diferentes). */
+                        $ehRateio = ($cc === '1' && strpos($lbl, 'CAPRETZ/') === 0);
+                        $chave = $ehRateio ? ('O:' . $lbl) : ('R:' . $razao);
+                        if (!$ehRateio) $lbl = bp_obra_label($razao, 'COLIGADA', $mapaRazao);
                     }
                     if (!isset($agg[$chave])) $agg[$chave] = ['chave' => $chave, 'label' => $lbl, 'n' => 0];
                     $agg[$chave]['n']++;
@@ -337,6 +376,7 @@ try {
 
     $sel = 'select=pedido_numero,pedido_data,pedido_status,coligada_cod,coligada,ccusto_cod,fornecedor_cod,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,preco_unit,valor_total,solic_numeros,solic_colidmov,pedido_usuario,item_observacao,obra_efetiva_nome,obra_efetiva_fonte,obra_cod,ccusto_nome,status_aprovacao,etapa_aprovacao,aprovador';
     $mapaRazao = bp_mapa_razao($pdo);
+        $mapaObraCod = bp_mapa_obracod($pdo);
 
     // ---- agrega item → PEDIDO (chave: coligada + número; o nº se repete entre coligadas) ----
     // A agregação roda A CADA PÁGINA que chega: nada de segurar as 15 mil linhas cruas na memória.
@@ -352,7 +392,8 @@ try {
                 $ped[$k] = ['numero' => $pn, 'coligada_cod' => $cc,
                     'coligada' => (trim((string)($r['coligada'] ?? '')) ?: coligada_nome($cc)),
                     'obra' => bp_obra_label($r['obra_efetiva_nome'] ?? '', $r['obra_efetiva_fonte'] ?? '', $mapaRazao,
-                                            $cc, $r['ccusto_cod'] ?? '', $r['ccusto_nome'] ?? ''),
+                                            $cc, $r['ccusto_cod'] ?? '', $r['ccusto_nome'] ?? '',
+                                            $r['obra_cod'] ?? '', $mapaObraCod),
                     'data' => (string)($r['pedido_data'] ?? ''), 'status' => (string)($r['pedido_status'] ?? ''),
                     'ccusto_cod' => (string)($r['ccusto_cod'] ?? ''), 'solic' => trim((string)($r['solic_numeros'] ?? '')),
                     'colidmov' => trim((string)($r['solic_colidmov'] ?? '')),

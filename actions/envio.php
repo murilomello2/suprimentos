@@ -283,7 +283,7 @@ function env_pedido_detalhe($pdo, $coligada, $numero) {
     $itens = []; $cab = null;
     $q = 'select=pedido_numero,pedido_data,pedido_status,coligada_cod,coligada,ccusto_cod,ccusto_nome,'
        . 'fornecedor_cod,fornecedor_cnpj,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,preco_unit,valor_total,'
-       . 'item_observacao,solic_numeros,pedido_usuario,obra_efetiva_nome,obra_efetiva_fonte,'
+       . 'item_observacao,solic_numeros,pedido_usuario,obra_efetiva_nome,obra_efetiva_fonte,obra_cod,'
        . 'status_aprovacao,etapa_aprovacao,aprovador'
        . '&coligada_cod=eq.' . rawurlencode($col)
        /* O TOTVS guarda o numero com zeros a esquerda ("000002638"). Consultar sem eles nao
@@ -307,7 +307,8 @@ function env_pedido_detalhe($pdo, $coligada, $numero) {
         'numero' => $num, 'coligada_cod' => $col, 'coligada' => (string)($cab['coligada'] ?? ''),
         'data' => (string)($cab['pedido_data'] ?? ''), 'status' => (string)($cab['pedido_status'] ?? ''),
         'obra' => bp_obra_label($cab['obra_efetiva_nome'] ?? '', $cab['obra_efetiva_fonte'] ?? '', $mapaRazao,
-                                $cab['coligada_cod'] ?? '', $cab['ccusto_cod'] ?? '', $cab['ccusto_nome'] ?? ''),
+                                $cab['coligada_cod'] ?? '', $cab['ccusto_cod'] ?? '', $cab['ccusto_nome'] ?? '',
+                                $cab['obra_cod'] ?? '', bp_mapa_obracod($pdo)),
         'ccusto' => trim(((string)($cab['ccusto_cod'] ?? '')) . ' ' . ((string)($cab['ccusto_nome'] ?? ''))),
         'fornecedor' => trim((string)($cab['fornecedor_fantasia'] ?? '')) ?: trim((string)($cab['fornecedor_nome'] ?? '')),
         'fornecedor_razao' => trim((string)($cab['fornecedor_nome'] ?? '')),
@@ -330,6 +331,7 @@ function env_pedido_detalhe($pdo, $coligada, $numero) {
  */
 function env_fila($pdo, $filtroObra = '') {
     $mapaRazao = bp_mapa_razao($pdo);
+    $mapaObraCod = bp_mapa_obracod($pdo);   // rateio da CAPRETZ: a obra vem do obra_cod da SC
     $fichas    = env_ficha_por_nome($pdo);
     $fornMail  = env_forn_email($pdo);
 
@@ -348,11 +350,11 @@ function env_fila($pdo, $filtroObra = '') {
     /* SÓ APROVADO ENTRA. Este filtro é a regra 1 — não existe outro caminho para a fila. */
     $q = 'select=pedido_numero,pedido_data,pedido_status,coligada_cod,coligada,ccusto_cod,ccusto_nome,'
        . 'fornecedor_cod,fornecedor_cnpj,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,valor_total,item_observacao,'
-       . 'obra_efetiva_nome,obra_efetiva_fonte,pedido_usuario,status_aprovacao,etapa_aprovacao,aprovador'
+       . 'obra_efetiva_nome,obra_efetiva_fonte,obra_cod,pedido_usuario,status_aprovacao,etapa_aprovacao,aprovador'
        . '&status_aprovacao=ilike.aprovado*&pedido_data=gte.' . $desde
        . '&order=pedido_data.desc,pedido_numero.desc';
 
-    bp_varrer($q, function ($linhas) use (&$peds, $mapaRazao) {
+    bp_varrer($q, function ($linhas) use (&$peds, $mapaRazao, $mapaObraCod) {
         foreach ($linhas as $l) {
             $k = env_chave($l['coligada_cod'] ?? '', $l['pedido_numero'] ?? '');
             if (!isset($peds[$k])) {
@@ -363,7 +365,8 @@ function env_fila($pdo, $filtroObra = '') {
                     'numero' => ltrim((string)($l['pedido_numero'] ?? ''), '0'),
                     'data' => (string)($l['pedido_data'] ?? ''),
                     'obra' => bp_obra_label($l['obra_efetiva_nome'] ?? '', $l['obra_efetiva_fonte'] ?? '',
-                                            $mapaRazao, $l['coligada_cod'] ?? '', $l['ccusto_cod'] ?? '', $l['ccusto_nome'] ?? ''),
+                                            $mapaRazao, $l['coligada_cod'] ?? '', $l['ccusto_cod'] ?? '', $l['ccusto_nome'] ?? '',
+                                            $l['obra_cod'] ?? '', $mapaObraCod),
                     'forn_cod' => ltrim(trim((string)($l['fornecedor_cod'] ?? '')), '0'),
                     'forn_nome' => trim((string)($l['fornecedor_fantasia'] ?? '')) !== ''
                                    ? trim((string)$l['fornecedor_fantasia']) : trim((string)($l['fornecedor_nome'] ?? '')),
@@ -435,6 +438,7 @@ function env_fila($pdo, $filtroObra = '') {
         $p['email_via'] = $fm['via'] ?? '';
         if ($destino === 'fornecedor' && $p['para'] === '') {
             $p['bloqueio'] = 'email';
+            $p['forn_cnpj_fmt'] = trim((string)($p['forn_cnpj'] ?? ''));
             $p['bloqueio_txt'] = 'Não temos e-mail de ' . ($p['forn_nome'] ?: 'fornecedor')
                 . ' — procurei por CNPJ ' . (env_cnpj14($p['forn_cnpj'] ?? '') ?: '(não informado)')
                 . ', código TOTVS ' . ($p['forn_cod'] ?: '—') . ' e pelo nome.';
@@ -609,16 +613,18 @@ try {
         $mapaRazao = bp_mapa_razao($pdo);
         $desde = date('Y-m-d', strtotime('-' . ENV_JANELA_DIAS . ' days'));
         $alvo = [];
-        bp_varrer('select=pedido_numero,coligada_cod,ccusto_cod,ccusto_nome,obra_efetiva_nome,obra_efetiva_fonte'
+        $mapaObraCod = bp_mapa_obracod($pdo);
+        bp_varrer('select=pedido_numero,coligada_cod,ccusto_cod,ccusto_nome,obra_efetiva_nome,obra_efetiva_fonte,obra_cod'
                   . '&status_aprovacao=ilike.aprovado*&pedido_data=gte.' . $desde . '&pedido_data=lte.' . $ate
                   . '&order=pedido_numero.asc',
-            function ($linhas) use (&$alvo, $mapaRazao, $obra, $ja) {
+            function ($linhas) use (&$alvo, $mapaRazao, $mapaObraCod, $obra, $ja) {
                 foreach ($linhas as $l) {
                     $k = env_chave($l['coligada_cod'] ?? '', $l['pedido_numero'] ?? '');
                     if (isset($ja[$k]) || isset($alvo[$k])) continue;
                     if ($obra !== '') {
                         $nome = bp_obra_label($l['obra_efetiva_nome'] ?? '', $l['obra_efetiva_fonte'] ?? '',
-                                              $mapaRazao, $l['coligada_cod'] ?? '', $l['ccusto_cod'] ?? '', $l['ccusto_nome'] ?? '');
+                                              $mapaRazao, $l['coligada_cod'] ?? '', $l['ccusto_cod'] ?? '', $l['ccusto_nome'] ?? '',
+                                              $l['obra_cod'] ?? '', $mapaObraCod);
                         if (bp_nz($nome) !== bp_nz($obra)) continue;
                     }
                     $alvo[$k] = [(string)($l['coligada_cod'] ?? ''), ltrim((string)($l['pedido_numero'] ?? ''), '0')];

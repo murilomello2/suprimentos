@@ -7176,6 +7176,42 @@ async function envArqUmSalvar(col,num){
   }catch(e){ toast('Falha: '+e.message); } }
 
 
+
+/* ---- CADASTRAR O E-MAIL SEM SAIR DA FILA ----
+   Pedido do Murilo: na lista de bloqueados por "fornecedor sem e-mail", um botao que abra o cadastro,
+   preencha e volte. Sem isso a pessoa larga a fila, vai na tela de Fornecedores, procura pelo nome
+   (que as vezes esta escrito diferente) e perde o fio. A chave gravada e o CODCFO — o mesmo que
+   amarra o pedido ao cadastro, entao o pedido sai do bloqueio na hora. */
+function envEmailForm(f){
+  dlgAbrir('Envio de Pedidos','Cadastrar o e-mail do fornecedor',
+    '<div style="max-width:540px">'
+   + '<div style="border:1px solid var(--line);border-radius:8px;padding:9px 12px;background:#f8faf9;margin-bottom:12px">'
+   + '<div style="font-size:14px;font-weight:700">'+esc(f.nome||'')+'</div>'
+   + '<div class="dmini" style="margin-top:3px">'+(f.cnpj?('CNPJ '+esc(f.cnpj)+'   &middot;   '):'')
+   + 'cod. TOTVS '+esc(f.cod||'—')+'</div></div>'
+   + cotFld('E-mail para receber os pedidos','<input id="envEmailV" type="email" placeholder="vendas@fornecedor.com.br" style="width:100%">')
+   + '<div class="dmini" style="margin-top:8px;color:var(--muted)">Fica gravado no nosso cadastro pelo codigo do TOTVS. '
+   + 'Assim que salvar, o pedido sai de Bloqueados e entra na fila.</div>'
+   + '<div id="envEmailMsg" class="dmini" style="margin-top:8px"></div>'
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" onclick="envEmailSalvar('+esc(JSON.stringify(f))+')">Salvar e voltar</button></div></div>');
+  setTimeout(function(){ var i=document.getElementById('envEmailV'); if(i) i.focus(); },80);
+}
+async function envEmailSalvar(f){
+  const v=((document.getElementById('envEmailV')||{}).value||'').trim();
+  const m=document.getElementById('envEmailMsg');
+  if(!v||v.indexOf('@')<0){ if(m) m.innerHTML='<span style="color:var(--pend)">Digite um e-mail valido.</span>'; return; }
+  if(m) m.textContent='Salvando...';
+  try{ const r=await (await fetch('actions/fornecedores.php',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({acao:'email_rapido',me:(EU&&EU.bitrix_id),cod:f.cod,cnpj:f.cnpj,nome:f.nome,email:v})})).json();
+    if(r.error){ if(m) m.innerHTML='<span style="color:var(--pend)">'+esc(r.error)+'</span>'; return; }
+    closeModal(true);
+    toast(r.criado?'Fornecedor cadastrado com o e-mail':'E-mail atualizado');
+    ENV.d=null; envCarregar();
+  }catch(e){ if(m) m.innerHTML='<span style="color:var(--pend)">Falha: '+esc(e.message)+'</span>'; }
+}
+
 /* ---- ANEXO MANUAL DO PDF ----
    Enquanto o gerador nao puder montar o pedido sozinho (faltam data de entrega e condicao de
    pagamento no export), o arquivo vem da mao. Mas o servidor ABRE o PDF, le o numero de DENTRO e
@@ -7374,6 +7410,7 @@ function envBloq(){ const bs=(ENV.d.bloqueados||[]);
      + '<td style="text-align:right">'+BRL(b.valor)+'</td>'
      + '<td style="text-align:right">'+(b.dias!=null?(b.dias+'d'):'—')+'</td>'
      + '<td style="text-align:right;white-space:nowrap">'
+     + (k==='email' ? '<button class="btn-prim" style="padding:2px 9px;font-size:11.5px" onclick="envEmailForm('+esc(JSON.stringify({cod:b.forn_cod||'',cnpj:b.forn_cnpj_fmt||'',nome:b.forn_nome||''}))+')">Cadastrar e-mail</button> ' : '')
      + '<button class="btn-ghost" style="padding:2px 8px;font-size:11.5px" onclick="envVerPedido(\''+b.coligada_cod+'\',\''+b.numero+'\')">Ver</button> '
      + '<button class="btn-ghost" style="padding:2px 8px;font-size:11.5px" onclick="envArqUm(\''+b.coligada_cod+'\',\''+b.numero+'\')">Arquivar</button>'
      + '</td></tr>'; });

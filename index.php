@@ -7004,11 +7004,16 @@ function envRender(){ const w=document.getElementById('envWrap'), d=ENV.d; if(!w
    + envCard('#6b7c93', (c.sede||0), 'Compras da sede', 'sem canteiro - fluxo proprio', 'bloq', false)
    + '</div>';
 
-  h+='<div class="panel" style="padding:9px 14px;margin-bottom:10px"><div class="bar" style="gap:18px;flex-wrap:wrap">'
-   + envTrava(true,'Nao aprovado nao entra na fila')
-   + envTrava(true,'Obra conferida na ficha (coligada + numero)')
-   + envTrava(true,'Livro-caixa impede o segundo envio')
-   + envTrava(true,'Nada sai da fila pelo tempo')
+  /* Legenda das QUATRO bolinhas que aparecem em cada linha. A versao anterior explicava as regras
+     internas do sistema ("livro-caixa impede o segundo envio"), que e jargao meu e nao ajuda quem
+     olha a fila: o que a pessoa precisa e saber o que cada icone da LINHA quer dizer. */
+  const lg=(t)=>'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px">'
+    + '<span class="material-icons" style="font-size:15px;color:var(--ok)">check_circle</span>'+t+'</span>';
+  h+='<div class="panel" style="padding:9px 14px;margin-bottom:10px"><div class="bar" style="gap:20px;flex-wrap:wrap">'
+   + '<span class="dmini" style="font-weight:600">As quatro marcas de cada linha:</span>'
+   + lg('aprovado no Fluig') + lg('obra conferida') + lg('nunca enviado ao fornecedor')
+   + lg('PDF do pedido gerado')
+   + '<span class="dmini" style="color:var(--muted)">a marca vazia mostra o que ainda falta</span>'
    + '</div></div>';
 
   h+='<div class="bar" style="gap:6px;margin-bottom:10px">'

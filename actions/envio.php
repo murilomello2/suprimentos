@@ -204,6 +204,18 @@ function env_forn_email($pdo) {
                 else $ix['nome'][$k] = $reg;
             }
         }
+        /* Espelho do TOTVS por CODCFO — 13.290 códigos, 9.044 com e-mail. Entra DEPOIS do nosso
+           cadastro (o Murilo avisou que muitos e-mails do TOTVS estão desatualizados), mas é a
+           chave exata do pedido: nada de depender de como o nome foi digitado. */
+        foreach ($pdo->query("SELECT codcfo, cnpj, email FROM totvs_fornecedor WHERE email IS NOT NULL AND email<>''") as $t) {
+            $e = trim((string)$t['email']);
+            if ($e === '' || strpos($e, '@') === false) continue;
+            $c = ltrim(trim((string)$t['codcfo']), '0');
+            if ($c !== '' && !isset($ix['cod'][$c])) $ix['cod'][$c] = ['email' => $e, 'nome' => '', 'totvs' => 1];
+            $cn = env_cnpj14($t['cnpj'] ?? '');
+            if ($cn !== '' && !isset($ix['cnpj'][$cn]) && !isset($amb['cnpj'][$cn]))
+                $ix['cnpj'][$cn] = ['email' => $e, 'nome' => '', 'totvs' => 1];
+        }
         foreach (array_keys($amb['cnpj']) as $k) unset($ix['cnpj'][$k]);
         foreach (array_keys($amb['nome']) as $k) unset($ix['nome'][$k]);
     } catch (Throwable $e) { $ix['erro'] = $e->getMessage(); }

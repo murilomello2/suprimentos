@@ -23,13 +23,20 @@ define('BP_LIB_ONLY', 1); require_once __DIR__ . '/busca_pedidos.php';
 define('EC_LIB_ONLY', 1); require_once __DIR__ . '/envio_config.php';
 require_once __DIR__ . '/../includes/pdf_pedido.php';
 
-/** Dados de contato do fornecedor, por CNPJ. Cadastro do cockpit primeiro; planilha como reserva. */
+/**
+ * Dados do fornecedor para o PDF. Duas fontes, nesta ordem:
+ *   1. cot_fornecedor  — o NOSSO cadastro, que tem contato e telefone e é o mais atualizado
+ *                        (o Murilo avisou: "muitos dos e-mails do TOTVS estão desatualizados");
+ *   2. totvs_fornecedor — o espelho oficial, chaveado por CODCFO. É a chave exata: não depende de
+ *                        como alguém digitou o nome nem de o CNPJ estar formatado igual.
+ * Nenhuma das duas tem endereço de rua hoje; fica para a tabela do Supabase.
+ */
 function pp_fornecedor($pdo, $cnpj, $cod, $nome) {
-    $dig = fn($s) => preg_replace('/\D+/', '', (string)$s);
-    $cn = $dig($cnpj);
+    $cn = preg_replace('/\D+/', '', (string)$cnpj);
+    $cc = ltrim(preg_replace('/\D+/', '', (string)$cod), '0');
     $r = ['contato' => '', 'fone' => '', 'email' => '', 'cidade' => '', 'uf' => '', 'endereco' => ''];
     try {
-        $st = $pdo->prepare("SELECT nome, contato, telefone, email, cidade FROM cot_fornecedor
+        $st = $pdo->prepare("SELECT contato, telefone, email, cidade FROM cot_fornecedor
                              WHERE REPLACE(REPLACE(REPLACE(REPLACE(cnpj,'.',''),'/',''),'-',''),' ','')=? LIMIT 1");
         $st->execute([$cn]);
         if ($x = $st->fetch()) {
@@ -37,13 +44,16 @@ function pp_fornecedor($pdo, $cnpj, $cod, $nome) {
             $r['email'] = trim((string)$x['email']);     $r['cidade'] = trim((string)$x['cidade']);
         }
     } catch (Throwable $e) {}
-    if ($r['email'] === '' || $r['cidade'] === '') {
-        $j = @json_decode(@file_get_contents(__DIR__ . '/../data/.fornecedores_cnpj.json'), true);
-        if (is_array($j) && isset($j[$cn])) {
-            foreach (['contato', 'fone', 'email', 'cidade'] as $k)
-                if ($r[$k] === '' && !empty($j[$cn][$k])) $r[$k] = $j[$cn][$k];
-        }
-    }
+    try {
+        $st = $cc !== ''
+            ? $pdo->prepare("SELECT cidade, uf, email FROM totvs_fornecedor WHERE codcfo=? LIMIT 1")
+            : $pdo->prepare("SELECT cidade, uf, email FROM totvs_fornecedor
+                             WHERE REPLACE(REPLACE(REPLACE(REPLACE(cnpj,'.',''),'/',''),'-',''),' ','')=? LIMIT 1");
+        $st->execute([$cc !== '' ? $cc : $cn]);
+        if ($x = $st->fetch())
+            foreach (['cidade', 'uf', 'email'] as $k)
+                if ($r[$k] === '' && trim((string)$x[$k]) !== '') $r[$k] = trim((string)$x[$k]);
+    } catch (Throwable $e) {}
     return $r;
 }
 

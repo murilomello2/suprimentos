@@ -21,7 +21,7 @@ define('SUPABASE_URL',      'https://jeqiitobuplxoezsegis.supabase.co');
 define('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImplcWlpdG9idXBseG9lenNlZ2lzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU4NzQwNjMsImV4cCI6MjA3MTQ1MDA2M30.AMawowrp_vuwQk4njwblK8iXgZxVC6DEVHHbroCPDBo');
 define('SUPABASE_SVC_EMAIL','api-externo@caprem.com.br');
 // Senha: usa env CAPREM_API_PASSWORD se existir; senão cai no literal (rotacionar depois).
-define('CAPREM_API_PASSWORD', getenv('CAPREM_API_PASSWORD') ?: 'CapremApi#2026!vQz9LpXr');
+define('CAPREM_API_PASSWORD', getenv('CAPREM_API_PASSWORD') ?: '123456');
 
 // ============================================================
 // Solicitações de Compra (Supabase alimentado pelo Power Automate/TOTVS).

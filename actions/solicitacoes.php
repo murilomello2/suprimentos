@@ -11,6 +11,11 @@
 if (extension_loaded('zlib') && !ini_get('zlib.output_compression')) @ob_start('ob_gzhandler');   // PERF: gzip do JSON (hosting não faz)
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
+/* A configuração de ENVIO é a dona do endereço de entrega. A carta de cotação passa a usar a mesma
+   fonte do e-mail e do PDF do pedido — três telas dizendo endereços diferentes é como a obra recebe
+   material no lugar errado. */
+if (!defined('EC_LIB_ONLY')) define('EC_LIB_ONLY', 1);
+require_once __DIR__ . '/envio_config.php';
 require_once __DIR__ . '/../includes/solic.php';
 require_once __DIR__ . '/../includes/obra_registry.php';   // cadastro único: resolve obra da solicitação
 
@@ -100,6 +105,49 @@ if (!function_exists('solic_cobertura')) {
     }
 }
 
+
+/**
+ * Dados da OBRA para a carta de cotação: CNPJ e endereço de ENTREGA.
+ *
+ * O endereço vem da configuração de envio (escopo obra), que é a mesma que alimenta o e-mail do
+ * pedido e o PDF — foi curada a partir dos e-mails reais e é a mais completa. O `solic_obra.endereco`
+ * entra só como reserva, para obra que ainda não tem ficha vinculada.
+ */
+function solic_dados_obra($pdo) {
+    $porFicha = [];   // radar_obra_id -> ficha
+    try {
+        foreach ($pdo->query("SELECT id, radar_obra_id, nome, cnpj FROM obra_ficha") as $f) {
+            $rid = (int)($f['radar_obra_id'] ?? 0);
+            if ($rid) $porFicha[$rid] = $f;
+        }
+    } catch (Throwable $e) {}
+
+    $out = [];
+    try {
+        foreach ($pdo->query("SELECT coligada, obra_cod, cnpj, endereco, radar_obra_id FROM solic_obra") as $o) {
+            $chave = trim((string)$o['coligada']) . '|' . (string)$o['obra_cod'];
+            $cnpj = trim((string)($o['cnpj'] ?? ''));
+            $end  = trim((string)($o['endereco'] ?? ''));
+            $rid  = (int)($o['radar_obra_id'] ?? 0);
+            $f = $rid && isset($porFicha[$rid]) ? $porFicha[$rid] : null;
+            if ($f) {
+                if ($cnpj === '') $cnpj = trim((string)($f['cnpj'] ?? ''));
+                $res = ec_resolver($pdo, (int)$f['id']);
+                if ($res) {
+                    $ef = $res['efetivo'];
+                    $e2 = trim((string)($ef['endereco'] ?? ''));
+                    if ($e2 !== '') {
+                        $c2 = trim((string)($ef['complemento'] ?? ''));
+                        $end = $e2 . ($c2 !== '' ? ' (' . $c2 . ')' : '');
+                    }
+                }
+            }
+            $out[$chave] = ['cnpj' => $cnpj, 'endereco' => $end];
+        }
+    } catch (Throwable $e) {}
+    return $out;
+}
+
 try {
     $pdo = db();
 
@@ -111,6 +159,10 @@ try {
         // se ninguém personalizou o nome comercial e existe vínculo com o radar, o nome do RADAR vence —
         // era por isso que a mesma obra era "PEDRA AZUL" aqui e "Diamond" no radar.
         $obraMap = function_exists('solic_obra_map') ? solic_obra_map($pdo) : [];
+        /* CNPJ e endereço de ENTREGA por obra — a carta de cotação passa a usar a mesma fonte do
+           e-mail e do PDF do pedido. Três telas com endereços diferentes é como material chega no
+           lugar errado. */
+        $dadosObra = solic_dados_obra($pdo);
         if (!$obraMap) { foreach ($pdo->query("SELECT * FROM solic_obra") as $o) $obraMap[$o['coligada'].'|'.$o['obra_cod']] = $o; }
         $ovMap = []; foreach ($pdo->query("SELECT * FROM solic_overlay") as $v) $ovMap[$v['coligada'].'|'.$v['numero']] = $v;
 
@@ -168,6 +220,8 @@ try {
             $lista[] = ['coligada'=>$s['coligada'],'numero'=>$s['numero'],'obra_cod'=>$s['obra_cod'],'nome_obra'=>$nomeObra,
                 'comprador_id'=>$compId,'comprador_nome'=>$compNome,'emissao'=>$s['emissao'],'dias'=>$dias,'bucket'=>$bk,
                 'status'=>$status,'observacoes'=>$ov['observacoes'] ?? '','cotacao_id'=>$ov['cotacao_id'] ?? null,
+                'cnpj_obra'=>($dadosObra[$s['coligada'].'|'.$s['obra_cod']]['cnpj'] ?? ''),
+                'endereco_entrega'=>($dadosObra[$s['coligada'].'|'.$s['obra_cod']]['endereco'] ?? ''),
                 'cobertura'=>$cobertura,'cot_cob'=>$nCob,'cot_any'=>$nAny,'cotacoes'=>$cotList,
                 'n_itens'=>count($itensC),'primeiro'=>$itensC[0]['produto'] ?? '','itens'=>$itensC];
             // dashboard

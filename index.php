@@ -6008,13 +6008,13 @@ function solRenderLista(){
       <td style="text-align:center">${s.n_itens}</td><td style="max-width:220px"><span title="${esc(s.primeiro)}">${esc((s.primeiro||'').slice(0,40))}</span></td>
       <td class="muted" style="font-size:11.5px">${esc(s.nome_obra)}</td><td class="muted" style="font-size:11.5px;white-space:nowrap">${s.emissao?D(s.emissao):'—'}</td>
       <td style="text-align:center">${solPill(s)}</td>
-      <td style="background:${st[2]};border-left:3px solid ${st[0]}">${CAN_EDIT?`<select onchange="solStatus('${esc(key)}',this.value,this)" style="font-size:11px;padding:3px 4px;font-weight:700;color:${st[0]};background:${st[2]};border:1px solid ${st[0]};border-radius:6px;cursor:pointer">${Object.entries(SOL_ST).map(([k,v])=>`<option value="${k}" ${s.status===k?'selected':''}>${v[1]}</option>`).join('')}</select>`:`<span class="dchip" style="background:${st[0]};color:#fff;font-weight:700">${st[1]}</span>`}</td>
+      <td style="background:${st[2]};border-left:3px solid ${st[0]}">${CAN_COT?`<select onchange="solStatus('${esc(key)}',this.value,this)" style="font-size:11px;padding:3px 4px;font-weight:700;color:${st[0]};background:${st[2]};border:1px solid ${st[0]};border-radius:6px;cursor:pointer">${Object.entries(SOL_ST).map(([k,v])=>`<option value="${k}" ${s.status===k?'selected':''}>${v[1]}</option>`).join('')}</select>`:`<span class="dchip" style="background:${st[0]};color:#fff;font-weight:700">${st[1]}</span>`}</td>
       <td class="muted" style="font-size:11.5px">${esc(s.comprador_nome||'—')}</td>
-      <td>${CAN_EDIT?`<input value="${esc(obs)}" title="${esc(obs)}" oninput="this.title=this.value" onchange="solObs('${esc(key)}',this.value,this)" placeholder="anotação…" style="width:150px;font-size:11px;padding:3px 5px">`:`<span title="${esc(obs)}">${esc(obs.slice(0,32))}${obs.length>32?'…':''}</span>`}</td>
+      <td>${CAN_COT?`<input value="${esc(obs)}" title="${esc(obs)}" oninput="this.title=this.value" onchange="solObs('${esc(key)}',this.value,this)" placeholder="anotação…" style="width:150px;font-size:11px;padding:3px 5px">`:`<span title="${esc(obs)}">${esc(obs.slice(0,32))}${obs.length>32?'…':''}</span>`}</td>
       <td style="white-space:nowrap"><button class="btn-ghost" style="padding:2px 6px" title="Copiar mensagem para orçamento" onclick="solCopiar('${esc(key)}')"><span class="material-icons" style="font-size:15px">content_copy</span></button>
         ${(s.cotacoes&&s.cotacoes.length)
           ? s.cotacoes.map(x=>`<button class="btn-ghost" style="padding:2px 7px;color:var(--verde-d);font-weight:700;font-size:11px" title="Ver cotação #${x.id}: ${esc(x.titulo||'')}" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${x.id}),200)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">request_quote</span>#${x.id}</button>`).join('')
-          : (s.cotacao_id?`<button class="btn-ghost" style="padding:2px 6px;color:var(--verde-d)" title="Ver cotação gerada" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${s.cotacao_id}),200)"><span class="material-icons" style="font-size:15px">request_quote</span></button>`:(CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px" title="Gerar cotação desta solicitação" onclick="solGerar('${esc(key)}')"><span class="material-icons" style="font-size:15px;color:var(--verde)">playlist_add</span></button>`:''))}</td></tr>`;
+          : (s.cotacao_id?`<button class="btn-ghost" style="padding:2px 6px;color:var(--verde-d)" title="Ver cotação gerada" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${s.cotacao_id}),200)"><span class="material-icons" style="font-size:15px">request_quote</span></button>`:(CAN_COT?`<button class="btn-ghost" style="padding:2px 6px" title="Gerar cotação desta solicitação" onclick="solGerar('${esc(key)}')"><span class="material-icons" style="font-size:15px;color:var(--verde)">playlist_add</span></button>`:''))}</td></tr>`;
     if(ex) html+=`<tr><td colspan="11" style="background:#fafbfb;padding:8px 14px"><b style="font-size:11px;color:var(--muted)">ITENS</b> <span class="muted" style="font-size:10px">⚪ sem cotação · 🟡 em cotação · 🟢 finalizada</span>${s.itens.map(it=>`<div style="font-size:12px;padding:2px 0">${solCotDot(it.cot)}${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${it.cot_cid?` <button class="btn-ghost" style="padding:0 5px;color:var(--verde-d);font-size:10px;font-weight:700;vertical-align:1px" title="Ver cotação #${it.cot_cid}${it.cot_ctit?': '+esc(it.cot_ctit):''}" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${it.cot_cid}),200)">#${it.cot_cid}</button>`:''}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</div>`).join('')}</td></tr>`;
   }
   if(!rows.length) html+='<tr><td colspan="11" class="empty">Nenhuma solicitação nesse filtro.</td></tr>';
@@ -6070,7 +6070,13 @@ async function solObs(key,v,el){ const s=solFind(key); if(!s)return; const prev=
 function solCopiar(key){ const s=solFind(key); if(!s)return;
   const sub=/CAPRETZ/i.test(s.coligada)?(s.nome_obra||'Geral'):'Geral';
   const num=String(s.numero).replace(/^0+/,'')||s.numero;
-  const txt='Por favor cotar os itens abaixo para obra:\n\n'+s.coligada+' - '+sub+'\n\nPedido nº '+num+'\n\nItens:\n\n'+s.itens.map(it=>'- '+cotNum(it.qtd)+' '+it.und+' - '+it.produto+(it.observacao?' ('+it.observacao+')':'')).join('\n');
+  /* O fornecedor precisa do CNPJ (nota) e do endereco de entrega (frete) para orcar. O endereco vem
+     da MESMA configuracao que alimenta o e-mail do pedido e o PDF — tres telas com enderecos
+     diferentes e como material chega no lugar errado. */
+  const cab=['Por favor cotar os itens abaixo para obra:','',s.coligada+' - '+sub];
+  if(s.cnpj_obra) cab.push('CNPJ: '+s.cnpj_obra);
+  if(s.endereco_entrega) cab.push('Endereço de entrega: '+s.endereco_entrega);
+  const txt=cab.join('\n')+'\n\nSolicitação nº '+num+'\n\nItens:\n\n'+s.itens.map(it=>'- '+cotNum(it.qtd)+' '+it.und+' - '+it.produto+(it.observacao?' ('+it.observacao+')':'')).join('\n');
   navigator.clipboard.writeText(txt).then(()=>toast('Mensagem copiada!'),()=>{ const t=document.createElement('textarea');t.value=txt;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();toast('Mensagem copiada!'); }); }
 async function solGerar(key){ const s=solFind(key); if(!s)return; if(!confirm('Gerar uma cotação no Mapa com os '+s.n_itens+' itens desta solicitação?'))return;
   try{ const r=await (await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'gerar_cotacao',me:EU&&EU.bitrix_id,coligada:s.coligada,numero:s.numero})})).json();
@@ -6723,7 +6729,11 @@ async function getCurrentUser(){
   // fornecedor é LISTA-MESTRE compartilhada: liberado por PAPEL (compradores reclamavam do botão sumido
   // porque estavam sem edição de obra — coisa que não deveria mandar no cadastro de fornecedor)
   CAN_FORN = IS_ADMIN || ['gerente','comprador'].includes((EU&&EU.papel)||'') || CAN_EDIT;
-  CAN_COT  = IS_ADMIN || ['gerente','comprador'].includes((EU&&EU.papel)||'') || CAN_EDIT;   // criar cotação = dinâmica de suprimentos
+  /* CAN_COT = trabalho de SUPRIMENTOS: cotar, anotar, mudar o status de uma solicitação. É por
+     PAPEL, não pelo escopo de edição de obra — comprador sem obra atribuída continua sendo
+     comprador. Era isso que sumia o campo de anotação e o botão de cotação para o Gabriel; mesma
+     decisão já tomada em fornecedores (lista-mestre compartilhada). */
+  CAN_COT  = IS_ADMIN || ['gerente','comprador'].includes((EU&&EU.papel)||'') || CAN_EDIT;
   // permissões específicas de vínculo/curadoria: valem pela PRÓPRIA flag (a permissão já É o grão fino) —
   // NÃO exigem "Edita obras" (decisão 23/jul: editar_escopo é só p/ o menu Obras/estrutura). Gerente e admin têm tudo.
   const _ger = ((EU&&EU.papel)||'')==='gerente';

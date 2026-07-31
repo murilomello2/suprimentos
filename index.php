@@ -3539,6 +3539,8 @@ const BP_APROV={
   pendente :{ic:'schedule',     cor:'#a4761c', bg:'#fdf4e3', t:'Em aprovação'},
   sem      :{ic:'remove_circle_outline', cor:'#8a9299', bg:'#f4f5f6', t:'Sem fluxo'}
 };
+function bpDataHora(s){ try{ return new Date(s).toLocaleString('pt-BR'); }catch(e){ return s||''; } }
+function bpDataCurta(s){ try{ const d=new Date(s); return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2); }catch(e){ return ''; } }
 function bpAprovCel(p){
   const a=BP_APROV[p.aprovacao]||BP_APROV.sem;
   // 2ª linha: quem trava (pendente) ou por que caiu (reprovado). É o que muda a decisão.
@@ -3629,6 +3631,13 @@ function bpRender(){
     const obsTxt=(p.obs||[]).join(' · ');
     h+='<tr>'
       +'<td style="text-align:left;'+cut+'"><b>'+esc(String(p.numero).replace(/^0+/,''))+'</b>'
+        /* Marca de ENVIADO. Vem do livro-caixa do modulo Envio — a MESMA tabela que impede o
+           segundo envio. Ler dali garante que as duas telas nunca discordem. */
+        +(p.enviado?('<div style="font-size:9px;font-weight:800;color:#1f8f4e;letter-spacing:.2px" title="'
+            +esc('Enviado por e-mail em '+bpDataHora(p.enviado.em)+(p.enviado.para?(' para '+p.enviado.para):'')
+                 +(p.enviado.por?(' — por '+p.enviado.por):'')
+                 +(p.enviado.destino==='obra'?' (copia para lancamento, nao foi ao fornecedor)':''))
+            +'">&#10003; ENVIADO '+esc(bpDataCurta(p.enviado.em))+'</div>'):'')
         +(p.repartido_n?'<div style="font-size:9px;font-weight:800;color:#a4761c;letter-spacing:.2px" title="'+esc('Mesmo fornecedor, mesmo valor e mesma data em '+p.repartido_n+' obras ('+(p.repartido_obras||[]).join(' · ')+'). Normalmente e uma compra unica repartida entre obras — confira a observacao do item.')+'">⇄ '+p.repartido_i+'/'+p.repartido_n+' OBRAS</div>':'')
       +'</td>'
       +'<td style="text-align:left;padding-right:4px">'+bpAprovCel(p)+'</td>'
@@ -7134,10 +7143,15 @@ async function envVerPedido(col,num){
    + '<td style="text-align:center">'+esc(i.und)+'</td><td style="text-align:right">'+BRL(i.preco)+'</td>'
    + '<td style="text-align:right">'+BRL(i.total)+'</td></tr>'; });
   h+='</tbody></table></div>';
-  h+='<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
-   + '<button class="btn-ghost" onclick="closeModal(true)">Fechar</button>'
+  const fid=(ENV.d&&(ENV.d.envelopes||[]).flatMap(x=>x.pedidos||[]).find(p=>String(p.numero)===String(num))||{}).ficha_id||0;
+  h+='<div class="bar" style="justify-content:space-between;gap:8px;margin-top:14px;flex-wrap:wrap">'
+   + '<span>'+(d.tem_pdf
+       ? '<a href="actions/envio.php?baixar_pdf='+encodeURIComponent(col+'|'+num)+'&me='+envMe()+'" target="_blank" class="btn-ghost" style="padding:5px 13px;text-decoration:none"><span class="material-icons" style="font-size:15px;vertical-align:-3px">picture_as_pdf</span> Ver o PDF anexado</a>'
+         + ' <button class="btn-ghost" style="padding:5px 11px;font-size:11.5px" onclick="envAnexoRemover(\''+esc(col)+'\',\''+esc(num)+'\')">trocar</button>'
+       : '<button class="btn-prim" style="padding:5px 13px" onclick="envAnexarForm(\''+esc(col)+'\',\''+esc(num)+'\','+fid+',\''+esc(d.fornecedor_cnpj||'')+'\')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">attach_file</span> Anexar o PDF</button>')+'</span>'
+   + '<span class="bar" style="gap:8px"><button class="btn-ghost" onclick="closeModal(true)">Fechar</button>'
    + '<button class="btn-ghost" style="padding:5px 13px" onclick="envArqUm(\''+esc(col)+'\',\''+esc(num)+'\')">'
-   + '<span class="material-icons" style="font-size:15px;vertical-align:-3px">inventory_2</span> Arquivar este pedido</button></div>';
+   + '<span class="material-icons" style="font-size:15px;vertical-align:-3px">inventory_2</span> Arquivar</button></span></div>';
   dlgAbrir('Pedido '+esc(num)+' &middot; '+esc(d.coligada||('coligada '+col)), esc(d.fornecedor||'Pedido de compra'), h);
 }
 
@@ -7160,6 +7174,46 @@ async function envArqUmSalvar(col,num){
     if(r.error){ toast(r.error); return; }
     closeModal(true); toast('Pedido arquivado'); ENV.d=null; envCarregar();
   }catch(e){ toast('Falha: '+e.message); } }
+
+
+/* ---- ANEXO MANUAL DO PDF ----
+   Enquanto o gerador nao puder montar o pedido sozinho (faltam data de entrega e condicao de
+   pagamento no export), o arquivo vem da mao. Mas o servidor ABRE o PDF, le o numero de DENTRO e
+   confere o CNPJ da empresa: arquivo trocado e RECUSADO, nao aceito com aviso. Foi assim que 9 dos
+   1.303 PDFs da pasta ficaram com o nome errado — e um deles no e-mail e a obra errada. */
+function envAnexarForm(col,num,fichaId,cnpjForn){
+  dlgAbrir('Pedido '+esc(num),'Anexar o PDF do pedido',
+    '<div style="max-width:520px"><div class="dmini" style="margin-bottom:10px">'
+   + 'Escolha o PDF que o TOTVS gerou para <b>este</b> pedido. O sistema abre o arquivo, le o numero '
+   + 'de dentro dele e confere com a coligada — se for de outro pedido, <b>recusa</b>.</div>'
+   + '<input type="file" id="envPdfFile" accept="application/pdf,.pdf" style="width:100%;font-size:13px">'
+   + '<div id="envPdfMsg" class="dmini" style="margin-top:9px"></div>'
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" onclick="envAnexarEnviar(\'' + col + '\',\'' + num + '\',' + (fichaId||0) + ',\'' + (cnpjForn||'') + '\')">Anexar e conferir</button></div></div>');
+}
+async function envAnexarEnviar(col,num,fichaId,cnpjForn){
+  const f=(document.getElementById('envPdfFile')||{}).files;
+  const msg=document.getElementById('envPdfMsg');
+  if(!f||!f.length){ if(msg) msg.innerHTML='<span style="color:var(--pend)">Escolha um arquivo.</span>'; return; }
+  if(msg) msg.textContent='Conferindo o arquivo...';
+  const fd=new FormData();
+  fd.append('acao','anexo'); fd.append('me',(EU&&EU.bitrix_id)||''); fd.append('coligada',col);
+  fd.append('numero',num); fd.append('ficha_id',fichaId||0); fd.append('cnpj_forn',cnpjForn||'');
+  fd.append('pdf',f[0]);
+  try{ const r=await (await fetch('actions/envio.php',{method:'POST',body:fd})).json();
+    if(r.error){ if(msg) msg.innerHTML='<span style="color:var(--pend)"><b>Recusado.</b> '+esc(r.error)+'</span>'; return; }
+    closeModal(true);
+    toast('PDF anexado e conferido'+(r.aviso?(' — '+r.aviso):''));
+    ENV.d=null; envCarregar();
+  }catch(e){ if(msg) msg.innerHTML='<span style="color:var(--pend)">Falha: '+esc(e.message)+'</span>'; }
+}
+async function envAnexoRemover(col,num){
+  if(!confirm('Remover o PDF anexado deste pedido?')) return;
+  try{ await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({acao:'anexo_remover',me:(EU&&EU.bitrix_id),coligada:col,numero:num})});
+    closeModal(true); toast('Anexo removido'); ENV.d=null; envCarregar(); }catch(e){ toast('Falha: '+e.message); }
+}
 
 /* ---- ARQUIVAR: tirar da tela sem apagar nada ----
    Pedido antigo aprovado nao e mais para enviar, mas tirar um a um seriam milhares de cliques — e
@@ -7219,6 +7273,20 @@ async function envDesarquivar(motivo){
   }catch(e){ toast('Falha: '+e.message); }
 }
 
+function envLegenda(){
+  /* As bordas tinham dois tons de laranja quase iguais para motivos DIFERENTES — o Murilo perguntou
+     e tinha razao. Agora cada cor tem um motivo so, e a legenda fica a vista. */
+  const it=(cor,txt)=>'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px">'
+    +'<span style="width:11px;height:11px;border-radius:3px;background:'+cor+';display:inline-block"></span>'+txt+'</span>';
+  return '<div class="panel" style="padding:8px 14px;margin-bottom:10px"><div class="bar" style="gap:16px;flex-wrap:wrap">'
+   + '<span class="dmini" style="font-weight:600">O que a cor da borda quer dizer:</span>'
+   + it('var(--ok)','pronto — pode enviar')
+   + it('var(--dourado)','confira antes: sinal de material ja entregue')
+   + it('#8e44ad','falta o PDF do pedido')
+   + it('#c0392b','aprovado ha mais de '+(ENV.d.atraso_dias||3)+' dias')
+   + '</div></div>';
+}
+
 /* ---- fila: um cartao por E-MAIL ---- */
 function envFila(){ const es=(ENV.d.envelopes||[]);
   const liberados=es.filter(e=>!e.alerta).length;
@@ -7234,13 +7302,16 @@ function envFila(){ const es=(ENV.d.envelopes||[]);
    + '</span></div></div>';
   if(!es.length) return h+'<div class="panel"><div class="dempty">Nenhum pedido aprovado esperando envio. '
     + 'Se voce esperava algum aqui, ele esta em <b>Bloqueados</b> — veja o motivo la.</div></div>';
+  h+=envLegenda();
   es.forEach(e=>{ h+=envEnvCard(e); });
   return h;
 }
 function envEnvCard(e){
-  const atras=e.dias>(ENV.d.atraso_dias||3);
+  const atras=e.dias>(ENV.d.atraso_dias||3), semPdf=(e.sem_pdf||0)>0;
   const pcs=(e.pedidos||[]).map(p=>p.numero).join(', ');
-  let h='<div class="panel" style="margin-bottom:9px;border-left:4px solid '+(e.alerta?'var(--dourado)':(atras?'#d98c1f':'var(--ok)'))+'">';
+  /* Uma cor = um motivo. Ordem de gravidade: regularizacao > sem PDF > atraso > pronto. */
+  const cor = e.alerta ? 'var(--dourado)' : (semPdf ? '#8e44ad' : (atras ? '#c0392b' : 'var(--ok)'));
+  let h='<div class="panel" style="margin-bottom:9px;border-left:4px solid '+cor+'">';
   h+='<div class="bar" style="justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">';
   h+='<div style="min-width:260px;flex:1">'
    + '<div style="font-size:14.5px;font-weight:700">'+esc(e.obra)+' <span style="color:var(--muted);font-weight:400">para</span> '+esc(e.forn_nome)+'</div>'
@@ -7253,6 +7324,7 @@ function envEnvCard(e){
   h+='<div class="bar" style="gap:14px;flex-wrap:wrap;margin-top:8px">'
    + envTrava(true,'Aprovado no Fluig') + envTrava(true,'Obra conferida')
    + envTrava(true,'Nunca enviado') + envTrava(true,e.destino==='obra'?'E-mail da obra':'E-mail do fornecedor')
+   + envTrava(!semPdf, semPdf?('falta o PDF de '+e.sem_pdf+' pedido(s)'):'PDF conferido')
    + '</div>';
 
   if(e.alerta) h+='<div style="margin-top:8px;border-left:4px solid var(--dourado);background:#fdf9ec;padding:8px 12px;border-radius:0 8px 8px 0;font-size:12.5px">'
@@ -7260,7 +7332,10 @@ function envEnvCard(e){
    + 'Se for isso, mande so para a obra - foi assim que 6 pedidos vazaram para o fornecedor.</div>';
 
   h+='<div class="bar" style="gap:7px;margin-top:9px;justify-content:flex-end">'
-   + (e.pedidos||[]).slice(0,3).map(p=>'<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px" onclick="envVerPedido(\''+p.coligada_cod+'\',\''+p.numero+'\')" title="ver os itens deste pedido">PC '+esc(p.numero)+'</button>').join('')
+   + (e.pedidos||[]).slice(0,4).map(p=>'<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px'
+       + (p.tem_pdf?'':';color:#8e44ad;font-weight:700')+'" onclick="envVerPedido(\''+p.coligada_cod+'\',\''+p.numero+'\')" '
+       + 'title="'+(p.tem_pdf?'PDF anexado e conferido':'sem PDF — clique para anexar')+'">'
+       + (p.tem_pdf?'':'&#9679; ')+'PC '+esc(p.numero)+'</button>').join('')
    + '<button class="btn-ghost" style="padding:5px 12px" onclick="envVerEmail(\''+e.chave+'\')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">visibility</span> Ver o e-mail</button>'
    + '<button class="btn-ghost" style="padding:5px 12px" onclick="envDecidir(\''+e.chave+'\',\'so_obra\')">So para a obra</button>'
    + '<button class="btn-ghost" style="padding:5px 12px" onclick="envDecidir(\''+e.chave+'\',\'arquivado\')" title="tira da tela sem apagar nada">Arquivar</button>'

@@ -201,6 +201,28 @@ function bp_aprov_label($k, $etapa) {
    Quem inclui como biblioteca define BP_LIB_ONLY e o bloco de resposta abaixo não roda. */
 if (defined('BP_LIB_ONLY')) return;
 
+
+/**
+ * O QUE JÁ FOI ENVIADO — o livro-caixa do módulo Envio, lido aqui.
+ *
+ * Pedido do Murilo: "se eu enviar algum pedido, você vai marcar como e-mail já enviado e guardar a
+ * data?". Sim — e a fonte é a MESMA tabela que impede o segundo envio (envio_registro). Ler dali,
+ * em vez de manter uma marca própria, garante que as duas telas nunca discordem: se aparece
+ * "enviado" aqui, aquele pedido não volta para a fila; se não aparece, ele volta.
+ */
+function bp_enviados($pdo) {
+    $m = [];
+    try {
+        foreach ($pdo->query("SELECT coligada_cod, pedido_numero, destino, para, enviado_em, enviado_por_nome
+                              FROM envio_registro ORDER BY enviado_em") as $r) {
+            $k = trim((string)$r['coligada_cod']) . '|' . ltrim(trim((string)$r['pedido_numero']), '0');
+            $m[$k] = ['em' => $r['enviado_em'], 'para' => $r['para'],
+                      'destino' => $r['destino'], 'por' => $r['enviado_por_nome']];
+        }
+    } catch (Throwable $e) {}          // módulo Envio ainda não criou a tabela: segue sem a coluna
+    return $m;
+}
+
 try {
     $pdo = db();
     $perms = user_perms($pdo, $_GET['me'] ?? null);
@@ -458,6 +480,15 @@ try {
     $paginas = max(1, (int)ceil($total / BP_POR_PAGINA));
     if ($pagina > $paginas) $pagina = $paginas;
     $page = array_slice($lista, ($pagina - 1) * BP_POR_PAGINA, BP_POR_PAGINA);
+
+    /* Marca de ENVIADO — só na página que vai para a tela, para não custar nada nas outras.
+       A fonte é o livro-caixa do módulo Envio: a mesma tabela que impede o segundo envio. */
+    $enviados = bp_enviados($pdo);
+    if ($enviados) foreach ($page as &$pp) {
+        $k = trim((string)($pp['coligada_cod'] ?? '')) . '|' . ltrim((string)($pp['numero'] ?? ''), '0');
+        if (isset($enviados[$k])) $pp['enviado'] = $enviados[$k];
+    }
+    unset($pp);
 
     echo json_encode(['ok' => true, 'pedidos' => $page, 'total' => $total, 'pagina' => $pagina, 'paginas' => $paginas,
         'por_pagina' => BP_POR_PAGINA, 'itens_lidos' => $lidos, 'truncado' => $truncado,

@@ -41,10 +41,35 @@ define('BP_LIB_ONLY', 1); require_once __DIR__ . '/busca_pedidos.php';  // bp_va
 define('EC_LIB_ONLY', 1); require_once __DIR__ . '/envio_config.php';   // ec_resolver / ec_compor / ec_faltando
 require_once __DIR__ . '/../includes/mailer.php';
 require_once __DIR__ . '/../includes/pdf_simples.php';
+require_once __DIR__ . '/../includes/pdf_ler.php';      // confere o PDF anexado a mao
 
 define('ENV_ATRASO_DIAS', 3);      // aprovado e parado há mais que isso = atrasado (regra 4)
 define('ENV_JANELA_DIAS', 120);    // até onde a fila olha para trás
 define('ENV_AMOSTRA', 120);        // bloqueados enviados por motivo (a contagem vai cheia — ver env_fila)
+
+/* ============================ ANEXO MANUAL, CONFERIDO ============================
+   Enquanto faltarem data de entrega e condicao de pagamento no export do TOTVS, o PDF vem da mao
+   do comprador. Mas nao entra no escuro: pdf_conferir abre o arquivo, le o numero DENTRO dele e
+   confere o CNPJ da empresa. PDF trocado e RECUSADO — nao e aviso amarelo, e recusa.
+   Testado nos 14 modelos do Murilo: 14/14 aceitos, e os dois casos ruins (arquivo de outro pedido,
+   e numero certo com coligada errada) recusados. */
+define('ENV_PDF_DIR', __DIR__ . '/../data/pedidos_pdf');
+
+function env_pdf_caminho($coligada, $numero) {
+    return ENV_PDF_DIR . '/' . preg_replace('/\W+/', '', (string)$coligada) . '_'
+         . ltrim(preg_replace('/\D+/', '', (string)$numero), '0') . '.pdf';
+}
+function env_pdf_tem($coligada, $numero) { return is_file(env_pdf_caminho($coligada, $numero)); }
+
+/** CNPJ da empresa daquele pedido — vem da ficha da obra, quando houver. */
+function env_cnpj_empresa($pdo, $fichaId) {
+    if (!$fichaId) return '';
+    try {
+        $st = $pdo->prepare("SELECT cnpj FROM obra_ficha WHERE id=? LIMIT 1");
+        $st->execute([(int)$fichaId]);
+        return trim((string)$st->fetchColumn());
+    } catch (Throwable $e) { return ''; }
+}
 
 function env_schema($pdo) {
     static $ok = false; if ($ok) return; $ok = true;
@@ -404,6 +429,7 @@ function env_fila($pdo, $filtroObra = '') {
             $bloq[] = $p; continue;
         }
         $p['destino'] = $destino;
+        $p['tem_pdf'] = env_pdf_tem($p['coligada_cod'], $p['numero']);
         $p['obra_ficha'] = $f['nome'];
         $p['assina'] = trim((string)($res['obra']['comprador_nome'] ?? ''));
         if ($p['dias'] !== null && $p['dias'] > ENV_ATRASO_DIAS) $atrasados++;
@@ -418,12 +444,13 @@ function env_fila($pdo, $filtroObra = '') {
             'chave' => $ek, 'destino' => $p['destino'], 'obra' => $p['obra_ficha'], 'ficha_id' => $p['ficha_id'],
             'forn_nome' => $p['destino'] === 'obra' ? 'Obra / lançamento' : $p['forn_nome'],
             'forn_cod' => $p['forn_cod'], 'para' => $p['para'], 'assina' => $p['assina'],
-            'pedidos' => [], 'valor' => 0.0, 'dias' => 0, 'alerta' => false,
+            'pedidos' => [], 'valor' => 0.0, 'dias' => 0, 'alerta' => false, 'sem_pdf' => 0,
         ];
         $env[$ek]['pedidos'][] = $p;
         $env[$ek]['valor'] += $p['valor'];
         $env[$ek]['dias'] = max($env[$ek]['dias'], (int)$p['dias']);
         if ($p['regulariza']) $env[$ek]['alerta'] = true;
+        if (empty($p['tem_pdf'])) $env[$ek]['sem_pdf'] = ($env[$ek]['sem_pdf'] ?? 0) + 1;
     }
     $env = array_values($env);
     usort($env, fn($a, $b) => ($b['dias'] <=> $a['dias']) ?: strcmp($a['obra'], $b['obra']));
@@ -469,9 +496,18 @@ try {
         $perms = user_perms($pdo, $_GET['me'] ?? null);
         if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }
 
+        if (isset($_GET['baixar_pdf'])) {
+            $p = explode('|', (string)$_GET['baixar_pdf']);
+            $c = env_pdf_caminho($p[0] ?? '', $p[1] ?? '');
+            if (!is_file($c)) { http_response_code(404); echo json_encode(['error' => 'sem anexo']); exit; }
+            header('Content-Type: application/pdf');
+            header('Content-Disposition: inline; filename="PC ' . preg_replace('/\D+/', '', $p[1] ?? '') . '.pdf"');
+            readfile($c); exit;
+        }
         if (isset($_GET['pedido'])) {
             $p = explode('|', (string)$_GET['pedido']);
             $d = env_pedido_detalhe($pdo, $p[0] ?? '', $p[1] ?? '');
+            if ($d) $d['tem_pdf'] = env_pdf_tem($p[0] ?? '', $p[1] ?? '');
             echo json_encode($d ?: ['error' => 'pedido nao encontrado'], JSON_UNESCAPED_UNICODE); exit;
         }
         if (isset($_GET['historico'])) {
@@ -486,10 +522,37 @@ try {
         echo json_encode($r, JSON_UNESCAPED_UNICODE); exit;
     }
 
-    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    /* Upload chega como multipart; o resto como JSON no corpo. */
+    $in = !empty($_POST) ? $_POST : (json_decode(file_get_contents('php://input'), true) ?: []);
     $perms = user_perms($pdo, $in['me'] ?? null);
     if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }
     $acao = $in['acao'] ?? '';
+
+
+    /* Upload do PDF de UM pedido. multipart/form-data: pdf + coligada + numero. */
+    if ($acao === 'anexo') {
+        $col = trim((string)($in['coligada'] ?? '')); $num = ltrim((string)($in['numero'] ?? ''), '0');
+        if ($col === '' || $num === '') throw new Exception('pedido nao identificado');
+        if (empty($_FILES['pdf']['tmp_name'])) throw new Exception('nenhum arquivo recebido');
+        if ((int)$_FILES['pdf']['size'] > 8 * 1024 * 1024) throw new Exception('arquivo acima de 8 MB');
+        $bin = @file_get_contents($_FILES['pdf']['tmp_name']);
+        if (!$bin || substr($bin, 0, 5) !== '%PDF-') throw new Exception('o arquivo nao e um PDF');
+
+        $fichaId = (int)($in['ficha_id'] ?? 0);
+        $conf = pdf_conferir($bin, $num, env_cnpj_empresa($pdo, $fichaId), (string)($in['cnpj_forn'] ?? ''));
+        if (!$conf['ok']) { echo json_encode(['error' => $conf['motivo'], 'conferencia' => $conf], JSON_UNESCAPED_UNICODE); exit; }
+
+        if (!is_dir(ENV_PDF_DIR)) @mkdir(ENV_PDF_DIR, 0755, true);
+        if (@file_put_contents(env_pdf_caminho($col, $num), $bin) === false)
+            throw new Exception('nao consegui gravar o arquivo no servidor');
+        echo json_encode(['ok' => true, 'aviso' => $conf['motivo'], 'pc_no_pdf' => $conf['pc_no_pdf'],
+                          'bytes' => strlen($bin)], JSON_UNESCAPED_UNICODE); exit;
+    }
+    if ($acao === 'anexo_remover') {
+        $c = env_pdf_caminho((string)($in['coligada'] ?? ''), (string)($in['numero'] ?? ''));
+        if (is_file($c)) @unlink($c);
+        echo json_encode(['ok' => true]); exit;
+    }
 
     /* Segurar / liberar / marcar como regularização. Toda decisão fica com nome e motivo:
        "por que este pedido aprovado não saiu?" precisa ter resposta em qualquer dia do ano. */

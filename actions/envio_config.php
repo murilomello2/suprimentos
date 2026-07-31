@@ -47,6 +47,12 @@ function ec_campos() {
         'cidade' => [
             'aviso_cidade' => ['Aviso desta cidade', 'ex.: alíquota de ISSQN do município, com o link da lei'],
         ],
+        /* Uma linha por COMPRADOR. O padrão é o mesmo para todos — muda o nome e o telefone. */
+        'assinatura' => [
+            'nome'     => ['Nome como aparece na assinatura', 'ex.: Gabriel B. Souza'],
+            'cargo'    => ['Cargo', 'Suprimentos'],
+            'telefone' => ['Telefone', 'ex.: (19) 97413-3339'],
+        ],
         'obra' => [
             'cno'          => ['CNO da obra', ''],
             'endereco'     => ['Endereço de entrega', ''],
@@ -119,7 +125,7 @@ function ec_tudo($pdo) {
     /* A fila de envio resolve a config de CENTENAS de pedidos numa requisição só; sem memória isso
        viraria uma varredura da tabela por pedido. Invalida no POST (ec_esquecer). */
     static $memo = null; if ($memo !== null) return $memo;
-    $out = ['global' => [], 'cidade' => [], 'obra' => []];
+    $out = ['global' => [], 'cidade' => [], 'obra' => [], 'assinatura' => []];
     foreach ($pdo->query("SELECT escopo, ref, campo, valor FROM envio_config") as $r) {
         if ($r['escopo'] === 'global') $out['global'][$r['campo']] = $r['valor'];
         else $out[$r['escopo']][$r['ref']][$r['campo']] = $r['valor'];
@@ -195,6 +201,48 @@ function ec_conta_publica() {
             'nome' => $c['nome'] ?? 'Caprem - Suprimentos',
             'configurada' => (trim((string)($c['user'] ?? '')) !== '' && trim((string)($c['senha'] ?? '')) !== ''),
             'fonte' => $g['fonte'], 'fonte_user' => $g['user'] ?? ''];
+}
+
+/**
+ * BLOCO DE ASSINATURA — o mesmo desenho para todos, só mudam nome e telefone.
+ *
+ * O Murilo mandou o modelo: nome em negrito, "Suprimentos" abaixo em cinza, telefone e site numa
+ * linha, e o logo à direita separado por um filete. Montado em HTML (tabela), não como imagem
+ * única: assim o telefone de cada comprador entra sem alguém ter de editar um PNG, e quem recebe
+ * consegue copiar o número. O logo é a única imagem, e só entra se estiver configurado.
+ */
+function ec_assinatura($pdo, $nomeComprador, $imagem = '') {
+    $nome = trim((string)$nomeComprador);
+    $cargo = 'Suprimentos'; $fone = '';
+    if ($nome !== '') {
+        $t = ec_tudo($pdo);
+        $a = $t['assinatura'][$nome] ?? null;
+        if (!$a) {   // casa ignorando caixa e acento, que é como o nome chega da ficha
+            foreach (($t['assinatura'] ?? []) as $k => $v)
+                if (strcasecmp(trim($k), $nome) === 0) { $a = $v; break; }
+        }
+        if ($a) {
+            if (trim((string)($a['nome'] ?? '')) !== '')     $nome  = trim($a['nome']);
+            if (trim((string)($a['cargo'] ?? '')) !== '')    $cargo = trim($a['cargo']);
+            if (trim((string)($a['telefone'] ?? '')) !== '') $fone  = trim($a['telefone']);
+        }
+    }
+    if ($nome === '') return '';
+    $eh = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+    $img = trim((string)$imagem);
+
+    $esq = '<div style="font-size:15px;font-weight:700;color:#111;line-height:1.3">' . $eh($nome) . '</div>'
+         . '<div style="font-size:12px;color:#777;margin-top:1px">' . $eh($cargo) . '</div>'
+         . '<div style="font-size:12px;color:#333;margin-top:8px">'
+         . ($fone !== '' ? ($eh($fone) . '&nbsp;&nbsp;&nbsp;') : '')
+         . '<a href="https://caprem.com.br" style="color:#333;text-decoration:none">caprem.com.br</a></div>';
+
+    $h = '<table cellpadding="0" cellspacing="0" style="margin-top:6px;border-collapse:collapse"><tr>'
+       . '<td style="padding:0 18px 0 0;vertical-align:middle">' . $esq . '</td>';
+    if ($img !== '')
+        $h .= '<td style="padding:0 0 0 18px;border-left:1px solid #d8d8d8;vertical-align:middle">'
+            . '<img src="' . $eh($img) . '" alt="Caprem Construtora" style="max-height:56px;height:auto;border:0"></td>';
+    return $h . '</tr></table>';
 }
 
 /**
@@ -287,9 +335,11 @@ function ec_compor($pdo, $fichaId, $tipo, $ctx = []) {
         $ci = preg_replace('#(https?://\S+)#i', '<a href="$1" style="color:#1a6b3c">$1</a>', $eh($ci));
         $h .= '<p style="margin:0 0 12px;font-size:13px;color:#444">' . nl2br($ci) . '</p>';
     }
-    $h .= '<p style="margin:14px 0 4px">Atenciosamente,</p>';
-    if (trim((string)($ctx['comprador'] ?? '')) !== '') $h .= '<p style="margin:0 0 6px"><b>' . $eh($ctx['comprador']) . '</b></p>';
-    if ($img = trim((string)($ef['assinatura_img'] ?? ''))) $h .= '<p style="margin:0"><img src="' . $eh($img) . '" alt="Caprem" style="max-width:320px;height:auto"></p>';
+    $h .= '<p style="margin:16px 0 6px">Atenciosamente,</p>';
+    $assin = ec_assinatura($pdo, (string)($ctx['comprador'] ?? ''), (string)($ef['assinatura_img'] ?? ''));
+    if ($assin !== '') $h .= $assin;
+    elseif (trim((string)($ctx['comprador'] ?? '')) !== '')
+        $h .= '<p style="margin:0 0 6px"><b>' . $eh($ctx['comprador']) . '</b></p>';
     $h .= '</div>';
 
     $cc = array_values(array_unique(array_filter(array_map('trim', preg_split('/[;,\s]+/',
@@ -338,8 +388,15 @@ try {
             echo json_encode($r, JSON_UNESCAPED_UNICODE); exit;
         }
         $obras = $pdo->query("SELECT id, nome, cidade, estado FROM obra_ficha ORDER BY nome")->fetchAll();
+        /* Quem assina hoje: os compradores que estão na ficha das obras. É a lista que a tela mostra
+           para configurar telefone — não adianta cadastrar assinatura de quem não assina obra nenhuma. */
+        $assinantes = [];
+        try {
+            foreach ($pdo->query("SELECT DISTINCT comprador_nome FROM obra_ficha WHERE comprador_nome IS NOT NULL AND comprador_nome<>'' ORDER BY comprador_nome") as $r)
+                $assinantes[] = trim((string)$r['comprador_nome']);
+        } catch (Throwable $e) {}
         $avisos = $pdo->query("SELECT * FROM envio_aviso ORDER BY (ativo=0), id DESC")->fetchAll();
-        echo json_encode(['campos'=>ec_campos(), 'config'=>ec_tudo($pdo), 'obras'=>$obras,
+        echo json_encode(['campos'=>ec_campos(), 'config'=>ec_tudo($pdo), 'obras'=>$obras, 'assinantes'=>$assinantes,
                           'cidades'=>array_values(array_unique(array_filter(array_map(fn($o)=>trim((string)$o['cidade']), $obras)))),
                           'avisos'=>$avisos, 'hoje'=>date('Y-m-d')], JSON_UNESCAPED_UNICODE); exit;
     }

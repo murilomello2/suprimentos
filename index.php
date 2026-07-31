@@ -7074,57 +7074,104 @@ async function envMarcoSalvar(){ const v=((document.getElementById('envMarcoD')|
 
 
 
-/* ---- ASSINATURAS DOS COMPRADORES ----
-   O desenho e o mesmo para todos: nome, "Suprimentos", telefone e o site, com o logo a direita.
-   So mudam o nome e o telefone — entao a configuracao e uma linha por comprador, e nao uma imagem
-   por pessoa. Quem assina cada obra vem da ficha da obra; aqui so se completa o telefone. */
+/* ---- ASSINATURAS ----
+   Quem assina o e-mail e QUEM ENVIA: o usuario do Bitrix logado que clicou em Enviar. Nao e o
+   "responsavel pela obra" — o fornecedor vai responder para a pessoa que mandou, e e o nome dela
+   que tem de estar ali.
+
+   Por usuario: nome como aparece na assinatura, cargo, telefone e uma imagem propria. Se a imagem
+   existir, ela substitui o bloco de texto inteiro — varios compradores ja tem a assinatura pronta
+   em PNG e nao faz sentido remontar. */
 function pmAssin(){
   const ass=(PM.d.config.assinatura||{}), lista=(PM.d.assinantes||[]);
+  const PAPEL={admin:'Administrador',gerente:'Gerente',comprador:'Comprador',diretor:'Diretor',
+               coordenador:'Coordenador',personalizado:'Personalizado'};
   let h='<div class="panel">'+cotSecHead('draw','Assinaturas dos compradores',
-    'quem assina cada obra vem da ficha da obra — aqui entra o telefone de cada um',
-    '<button class="btn-prim" onclick="pmAssinSalvarTodos()" style="padding:5px 13px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar assinaturas</button>');
-  if(!lista.length) h+='<div class="dempty">Nenhuma obra tem comprador definido na ficha. Preencha em <b>Obras</b> para que o e-mail saiba quem assina.</div>';
+    'quem assina e quem envia — o usuario do Bitrix logado no momento do disparo',
+    '<button class="btn-prim" onclick="pmAssinSalvarTodos()" style="padding:5px 13px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar</button>');
+  if(!lista.length) return h+'<div class="dempty">Nenhum usuario carregado.</div></div>';
   h+='<div style="overflow-x:auto"><table class="dtable" style="width:100%;font-size:12.5px"><thead><tr>'
-   + '<th style="text-align:left">Comprador (da ficha da obra)</th><th style="text-align:left">Nome na assinatura</th>'
-   + '<th style="text-align:left">Cargo</th><th style="text-align:left">Telefone</th></tr></thead><tbody>';
-  lista.forEach(function(n){
-    const a=ass[n]||{};
-    const id=btoa(unescape(encodeURIComponent(n))).replace(/[^A-Za-z0-9]/g,'');
-    h+='<tr><td><b>'+esc(n)+'</b></td>'
-     + '<td><input id="pma_n_'+id+'" value="'+esc(a.nome||n)+'" style="width:100%"></td>'
-     + '<td><input id="pma_c_'+id+'" value="'+esc(a.cargo||'Suprimentos')+'" style="width:100%"></td>'
-     + '<td><input id="pma_t_'+id+'" value="'+esc(a.telefone||'')+'" placeholder="(19) 9....-...." style="width:100%"></td></tr>';
+   + '<th style="text-align:left">Usuario (Bitrix)</th><th style="text-align:left">Nome na assinatura</th>'
+   + '<th style="text-align:left">Cargo</th><th style="text-align:left">Telefone</th>'
+   + '<th style="text-align:left">Imagem propria</th></tr></thead><tbody>';
+  lista.forEach(function(u){
+    const id=String(u.bitrix_id), a=ass[id]||{};
+    const img=(a.imagem||'').trim();
+    h+='<tr><td><b>'+esc(u.nome)+'</b><div class="dmini" style="color:var(--muted)">#'+esc(id)+' &middot; '
+     + esc(PAPEL[u.papel]||u.papel||'')+(u.cargo?(' &middot; '+esc(u.cargo)):'')+'</div></td>'
+     + '<td><input id="pma_n_'+id+'" value="'+esc(a.nome||u.nome||'')+'" style="width:100%;min-width:150px"></td>'
+     + '<td><input id="pma_c_'+id+'" value="'+esc(a.cargo||u.cargo||'Suprimentos')+'" style="width:100%;min-width:130px"></td>'
+     + '<td><input id="pma_t_'+id+'" value="'+esc(a.telefone||'')+'" placeholder="(19) 9....-...." style="width:100%;min-width:120px"></td>'
+     + '<td style="white-space:nowrap">'
+     + (img
+        ? ('<img src="'+esc(img)+'?v='+Date.now()+'" style="max-height:34px;vertical-align:middle;border:1px solid var(--line);border-radius:4px">'
+           + ' <button class="btn-ghost" style="padding:2px 8px;font-size:11px" onclick="pmAssinImgRemover(\''+id+'\')">remover</button>')
+        : ('<button class="btn-ghost" style="padding:3px 10px;font-size:11.5px" onclick="pmAssinImgForm(\''+id+'\',\''+esc(u.nome).replace(/'/g,"")+'\')">'
+           + '<span class="material-icons" style="font-size:14px;vertical-align:-3px">upload</span> anexar</button>'))
+     + '</td></tr>';
   });
   h+='</tbody></table></div>';
+  h+='<div class="dmini" style="margin-top:10px;color:var(--muted)">Com imagem, o e-mail usa a imagem e ignora os campos de texto. '
+   + 'Sem imagem, monta o bloco: nome em negrito, cargo abaixo, telefone e caprem.com.br.</div>';
   h+='<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">'
-   + cotSecHead('image','Logo da Caprem na assinatura','cole a URL de uma imagem publica (ou uma data URI) — e a unica imagem do e-mail','')
-   + cotFld('URL do logo', pmArea('global','assinatura_img',(PM.d.config.global||{}).assinatura_img,'https://.../logo.png',1))
-   + '<div class="bar" style="margin-top:9px;gap:8px"><button class="btn-ghost" onclick="pmSalvar(\'global\',\'\')" style="padding:5px 13px">Salvar o logo</button>'
-   + '<span class="dmini" style="color:var(--muted)">Sem logo, a assinatura sai so com o texto — continua correta.</span></div></div>';
-  h+='<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">'
-   + '<div class="dmini" style="margin-bottom:6px">Previa</div>'+pmAssinPrevia(lista[0]||'', ass)+'</div>';
+   + '<div class="dmini" style="margin-bottom:6px">Previa de quem esta logado ('+esc((EU&&EU.nome)||'')+')</div>'
+   + pmAssinPrevia(String((EU&&EU.bitrix_id)||''), ass)+'</div>';
   return h+'</div>';
 }
-function pmAssinPrevia(nome, ass){
-  const a=ass[nome]||{};
-  const img=((PM.d.config.global||{}).assinatura_img||'').trim();
+function pmAssinPrevia(id, ass){
+  const a=ass[id]||{}, img=(a.imagem||'').trim();
+  if(img) return '<div style="border:1px solid var(--line);border-radius:10px;padding:14px;background:#fff;display:inline-block">'
+    + '<img src="'+esc(img)+'?v='+Date.now()+'" style="max-width:360px"></div>';
+  const logo=((PM.d.config.global||{}).assinatura_img||'').trim();
   return '<div style="border:1px solid var(--line);border-radius:10px;padding:16px 18px;background:#fff;display:inline-block">'
    + '<div style="font-family:Arial,sans-serif;display:flex;align-items:center;gap:18px">'
-   + '<div><div style="font-size:15px;font-weight:700">'+esc(a.nome||nome||'(comprador)')+'</div>'
+   + '<div><div style="font-size:15px;font-weight:700">'+esc(a.nome||(EU&&EU.nome)||'(nome)')+'</div>'
    + '<div style="font-size:12px;color:#777">'+esc(a.cargo||'Suprimentos')+'</div>'
    + '<div style="font-size:12px;color:#333;margin-top:8px">'+esc(a.telefone||'(telefone)')+' &nbsp;&nbsp; caprem.com.br</div></div>'
-   + (img?('<div style="border-left:1px solid #d8d8d8;padding-left:18px"><img src="'+esc(img)+'" style="max-height:56px"></div>'):'')
+   + (logo?('<div style="border-left:1px solid #d8d8d8;padding-left:18px"><img src="'+esc(logo)+'" style="max-height:56px"></div>'):'')
    + '</div></div>';
+}
+function pmAssinImgForm(id, nome){
+  dlgAbrir('Assinaturas','Imagem de assinatura de '+esc(nome),
+    '<div style="max-width:520px"><div class="dmini" style="margin-bottom:10px">'
+   + 'PNG, JPG ou GIF, ate 2 MB. Quando houver imagem, o e-mail usa ela no lugar do bloco de texto. '
+   + 'Fica guardada no servidor e servida por um endereco proprio — o fornecedor consegue ver.</div>'
+   + '<input type="file" id="pmAssinFile" accept="image/png,image/jpeg,image/gif" style="width:100%;font-size:13px">'
+   + '<div id="pmAssinMsg" class="dmini" style="margin-top:9px"></div>'
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" onclick="pmAssinImgEnviar(\''+id+'\')">Anexar</button></div></div>');
+}
+async function pmAssinImgEnviar(id){
+  const f=(document.getElementById('pmAssinFile')||{}).files, m=document.getElementById('pmAssinMsg');
+  if(!f||!f.length){ if(m) m.innerHTML='<span style="color:var(--pend)">Escolha uma imagem.</span>'; return; }
+  if(m) m.textContent='Enviando...';
+  const fd=new FormData();
+  fd.append('acao','assinatura_img'); fd.append('me',(EU&&EU.bitrix_id)||''); fd.append('bitrix_id',id); fd.append('img',f[0]);
+  try{ const r=await (await fetch('actions/envio_config.php',{method:'POST',body:fd})).json();
+    if(r.error){ if(m) m.innerHTML='<span style="color:var(--pend)">'+esc(r.error)+'</span>'; return; }
+    closeModal(true); toast('Assinatura anexada');
+    const sub=PM.sub; await pmLoad(); PM.sub=sub; pmRender();
+  }catch(e){ if(m) m.innerHTML='<span style="color:var(--pend)">Falha: '+esc(e.message)+'</span>'; }
+}
+async function pmAssinImgRemover(id){
+  if(!confirm('Remover a imagem de assinatura deste usuario?')) return;
+  try{ await fetch('actions/envio_config.php',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({acao:'assinatura_img_remover',me:(EU&&EU.bitrix_id),bitrix_id:id})});
+    toast('Imagem removida');
+    const sub=PM.sub; await pmLoad(); PM.sub=sub; pmRender();
+  }catch(e){ toast('Falha: '+e.message); }
 }
 async function pmAssinSalvarTodos(){
   const lista=(PM.d.assinantes||[]);
   let n=0;
-  for(const nome of lista){
-    const id=btoa(unescape(encodeURIComponent(nome))).replace(/[^A-Za-z0-9]/g,'');
+  for(const u of lista){
+    const id=String(u.bitrix_id);
     const g=x=>((document.getElementById(x)||{}).value||'').trim();
     const campos={nome:g('pma_n_'+id), cargo:g('pma_c_'+id), telefone:g('pma_t_'+id)};
+    if(!campos.nome && !campos.telefone) continue;
     try{ const r=await (await fetch('actions/envio_config.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({acao:'salvar',me:(EU&&EU.bitrix_id),escopo:'assinatura',ref:nome,campos:campos})})).json();
+      body:JSON.stringify({acao:'salvar',me:(EU&&EU.bitrix_id),escopo:'assinatura',ref:id,campos:campos})})).json();
       if(!r.error) n++; }catch(e){}
   }
   toast(n+' assinatura(s) salva(s)');
@@ -7606,7 +7653,7 @@ async function envVerEmail(ch){ const e=envAchar(ch); if(!e) return;
   const pcs=(e.pedidos||[]).map(p=>p.numero).join(',');
   const u='actions/envio_config.php?previa='+e.ficha_id+'&tipo='+(e.destino==='obra'?'obra':'fornecedor')
         + '&pcs='+encodeURIComponent(pcs)+'&fornecedor='+encodeURIComponent(e.forn_nome)
-        + '&comprador='+encodeURIComponent(e.assina||'')+'&me='+envMe();
+        + '&comprador='+encodeURIComponent(e.assina||'')+'&me='+envMe();   // assina quem esta logado
   let p; try{ p=await (await fetch(u)).json(); }catch(err){ toast('Falha: '+err.message); return; }
   if(p.error){ toast(p.error); return; }
   dlgAbrir('Envio de Pedidos - '+esc(e.obra), 'Previa do e-mail',

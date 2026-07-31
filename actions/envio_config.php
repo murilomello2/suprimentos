@@ -47,11 +47,14 @@ function ec_campos() {
         'cidade' => [
             'aviso_cidade' => ['Aviso desta cidade', 'ex.: alíquota de ISSQN do município, com o link da lei'],
         ],
-        /* Uma linha por COMPRADOR. O padrão é o mesmo para todos — muda o nome e o telefone. */
+        /* Uma linha por USUÁRIO DO BITRIX. Quem assina é quem está enviando — não o "responsável
+           pela obra". O e-mail sai da mão de alguém, e é o nome dessa pessoa que o fornecedor vai
+           procurar para responder. A chave é o bitrix_id. */
         'assinatura' => [
             'nome'     => ['Nome como aparece na assinatura', 'ex.: Gabriel B. Souza'],
             'cargo'    => ['Cargo', 'Suprimentos'],
-            'telefone' => ['Telefone', 'ex.: (19) 97413-3339'],
+            'telefone' => ['Telefone / WhatsApp', 'ex.: (19) 97413-3339'],
+            'imagem'   => ['Imagem da assinatura (URL ou upload)', 'quando houver, substitui o texto'],
         ],
         'obra' => [
             'cno'          => ['CNO da obra', ''],
@@ -211,22 +214,35 @@ function ec_conta_publica() {
  * única: assim o telefone de cada comprador entra sem alguém ter de editar um PNG, e quem recebe
  * consegue copiar o número. O logo é a única imagem, e só entra se estiver configurado.
  */
-function ec_assinatura($pdo, $nomeComprador, $imagem = '') {
-    $nome = trim((string)$nomeComprador);
-    $cargo = 'Suprimentos'; $fone = '';
-    if ($nome !== '') {
-        $t = ec_tudo($pdo);
-        $a = $t['assinatura'][$nome] ?? null;
-        if (!$a) {   // casa ignorando caixa e acento, que é como o nome chega da ficha
-            foreach (($t['assinatura'] ?? []) as $k => $v)
-                if (strcasecmp(trim($k), $nome) === 0) { $a = $v; break; }
-        }
-        if ($a) {
-            if (trim((string)($a['nome'] ?? '')) !== '')     $nome  = trim($a['nome']);
-            if (trim((string)($a['cargo'] ?? '')) !== '')    $cargo = trim($a['cargo']);
-            if (trim((string)($a['telefone'] ?? '')) !== '') $fone  = trim($a['telefone']);
-        }
+function ec_assinatura($pdo, $bitrixId, $logoGlobal = '') {
+    $bid = trim((string)$bitrixId);
+    $a = [];
+    if ($bid !== '') { $t = ec_tudo($pdo); $a = $t['assinatura'][$bid] ?? []; }
+
+    /* O nome vem do cadastro de usuários (que é o do Bitrix); a configuração só sobrescreve se
+       alguém quiser um nome mais curto na assinatura ("Gabriel B. Souza"). */
+    $nome = trim((string)($a['nome'] ?? ''));
+    $cargo = trim((string)($a['cargo'] ?? ''));
+    if ($nome === '' || $cargo === '') {
+        try {
+            $st = $pdo->prepare("SELECT nome, cargo FROM usuario WHERE bitrix_id=? LIMIT 1");
+            $st->execute([$bid]);
+            if ($u = $st->fetch()) {
+                if ($nome === '')  $nome  = trim((string)$u['nome']);
+                if ($cargo === '') $cargo = trim((string)$u['cargo']);
+            }
+        } catch (Throwable $e) {}
     }
+    if ($cargo === '') $cargo = 'Suprimentos';
+    $fone = trim((string)($a['telefone'] ?? ''));
+
+    /* Imagem PRÓPRIA do comprador vence tudo: se ele subiu a assinatura dele, é ela que vai. */
+    $propria = trim((string)($a['imagem'] ?? ''));
+    if ($propria !== '') {
+        return '<p style="margin:6px 0 0"><img src="' . htmlspecialchars($propria, ENT_QUOTES, 'UTF-8')
+             . '" alt="' . htmlspecialchars($nome, ENT_QUOTES, 'UTF-8') . '" style="max-width:360px;height:auto;border:0"></p>';
+    }
+    $imagem = $logoGlobal;
     if ($nome === '') return '';
     $eh = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
     $img = trim((string)$imagem);
@@ -336,7 +352,8 @@ function ec_compor($pdo, $fichaId, $tipo, $ctx = []) {
         $h .= '<p style="margin:0 0 12px;font-size:13px;color:#444">' . nl2br($ci) . '</p>';
     }
     $h .= '<p style="margin:16px 0 6px">Atenciosamente,</p>';
-    $assin = ec_assinatura($pdo, (string)($ctx['comprador'] ?? ''), (string)($ef['assinatura_img'] ?? ''));
+    /* Assina QUEM ENVIA (bitrix_id de quem clicou), não o responsável pela obra. */
+    $assin = ec_assinatura($pdo, (string)($ctx['assina_bid'] ?? ''), (string)($ef['assinatura_img'] ?? ''));
     if ($assin !== '') $h .= $assin;
     elseif (trim((string)($ctx['comprador'] ?? '')) !== '')
         $h .= '<p style="margin:0 0 6px"><b>' . $eh($ctx['comprador']) . '</b></p>';
@@ -370,6 +387,20 @@ try {
         $perms = user_perms($pdo, $_GET['me'] ?? null);
         if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error'=>'Não autorizado.']); exit; }
         if (isset($_GET['conta'])) { echo json_encode(ec_conta_publica(), JSON_UNESCAPED_UNICODE); exit; }
+        /* A imagem de assinatura é servida por aqui: data/ é 403 no .htaccess, e o e-mail precisa de
+           uma URL pública para o <img>. Só entrega arquivo de assinatura, nada mais. */
+        if (isset($_GET['assinatura'])) {
+            $bid = preg_replace('/\D+/', '', (string)$_GET['assinatura']);
+            foreach (['png' => 'image/png', 'jpg' => 'image/jpeg', 'gif' => 'image/gif'] as $e2 => $mime) {
+                $cam = __DIR__ . '/../data/assinaturas/' . $bid . '.' . $e2;
+                if (is_file($cam)) {
+                    header_remove('Content-Type'); header('Content-Type: ' . $mime);
+                    header('Cache-Control: public, max-age=86400');
+                    readfile($cam); exit;
+                }
+            }
+            http_response_code(404); echo json_encode(['error' => 'sem assinatura']); exit;
+        }
         if (isset($_GET['previa'])) {
             /* A prévia da tela de Envio manda os PCs e o fornecedor DE VERDADE; a de Configurações
                não manda nada e cai no exemplo. Mesmo compositor nos dois casos. */
@@ -379,6 +410,7 @@ try {
                 'sigla' => trim((string)($_GET['sigla'] ?? 'CPR4')),
                 'fornecedor' => trim((string)($_GET['fornecedor'] ?? '')) ?: 'Fornecedor Exemplo Ltda',
                 'comprador' => trim((string)($_GET['comprador'] ?? '')),
+                'assina_bid' => trim((string)($_GET['me'] ?? '')),
             ]);
             echo json_encode($c ?: ['error' => 'obra não encontrada'], JSON_UNESCAPED_UNICODE); exit;
         }
@@ -390,10 +422,14 @@ try {
         $obras = $pdo->query("SELECT id, nome, cidade, estado FROM obra_ficha ORDER BY nome")->fetchAll();
         /* Quem assina hoje: os compradores que estão na ficha das obras. É a lista que a tela mostra
            para configurar telefone — não adianta cadastrar assinatura de quem não assina obra nenhuma. */
+        /* Quem pode assinar = usuário do cockpit (que vem do Bitrix). Não é "o responsável pela
+           obra": o e-mail sai da mão de alguém, e é essa pessoa que o fornecedor vai procurar. */
         $assinantes = [];
         try {
-            foreach ($pdo->query("SELECT DISTINCT comprador_nome FROM obra_ficha WHERE comprador_nome IS NOT NULL AND comprador_nome<>'' ORDER BY comprador_nome") as $r)
-                $assinantes[] = trim((string)$r['comprador_nome']);
+            foreach ($pdo->query("SELECT bitrix_id, nome, cargo, papel FROM usuario
+                                  WHERE (ativo=1 OR ativo IS NULL) ORDER BY nome") as $r)
+                $assinantes[] = ['bitrix_id' => (string)$r['bitrix_id'], 'nome' => trim((string)$r['nome']),
+                                 'cargo' => trim((string)$r['cargo']), 'papel' => (string)$r['papel']];
         } catch (Throwable $e) {}
         $avisos = $pdo->query("SELECT * FROM envio_aviso ORDER BY (ativo=0), id DESC")->fetchAll();
         echo json_encode(['campos'=>ec_campos(), 'config'=>ec_tudo($pdo), 'obras'=>$obras, 'assinantes'=>$assinantes,
@@ -420,6 +456,38 @@ try {
             $n++;
         }
         echo json_encode(['ok'=>true, 'salvos'=>$n]); exit;
+    }
+
+    /* Upload da imagem de assinatura de UM usuário. Fica em data/assinaturas/ e é servida por
+       este mesmo arquivo (?assinatura=<bitrix_id>), para não depender de hospedagem externa. */
+    if ($acao === 'assinatura_img') {
+        $bid = preg_replace('/\D+/', '', (string)($in['bitrix_id'] ?? ''));
+        if ($bid === '') throw new Exception('usuário não identificado');
+        if (empty($_FILES['img']['tmp_name'])) throw new Exception('nenhuma imagem recebida');
+        if ((int)$_FILES['img']['size'] > 2 * 1024 * 1024) throw new Exception('imagem acima de 2 MB');
+        $bin = @file_get_contents($_FILES['img']['tmp_name']);
+        $tipo = @getimagesizefromstring($bin);
+        if (!$tipo || !in_array($tipo[2], [IMAGETYPE_PNG, IMAGETYPE_JPEG, IMAGETYPE_GIF], true))
+            throw new Exception('envie uma imagem PNG, JPG ou GIF');
+        $dir = __DIR__ . '/../data/assinaturas';
+        if (!is_dir($dir)) @mkdir($dir, 0755, true);
+        $ext = $tipo[2] === IMAGETYPE_PNG ? 'png' : ($tipo[2] === IMAGETYPE_JPEG ? 'jpg' : 'gif');
+        foreach (['png', 'jpg', 'gif'] as $e2) @unlink($dir . '/' . $bid . '.' . $e2);
+        if (@file_put_contents($dir . '/' . $bid . '.' . $ext, $bin) === false)
+            throw new Exception('não consegui gravar a imagem');
+        $url = 'actions/envio_config.php?assinatura=' . $bid;
+        $up = $pdo->prepare("UPDATE envio_config SET valor=?, updated_by=?, updated_at=? WHERE escopo='assinatura' AND ref=? AND campo='imagem'");
+        $up->execute([$url, (string)($in['me'] ?? ''), date('c'), $bid]);
+        if (!$up->rowCount())
+            $pdo->prepare("INSERT INTO envio_config (escopo,ref,campo,valor,updated_by,updated_at) VALUES ('assinatura',?,'imagem',?,?,?)")
+                ->execute([$bid, $url, (string)($in['me'] ?? ''), date('c')]);
+        echo json_encode(['ok' => true, 'url' => $url, 'bytes' => strlen($bin)]); exit;
+    }
+    if ($acao === 'assinatura_img_remover') {
+        $bid = preg_replace('/\D+/', '', (string)($in['bitrix_id'] ?? ''));
+        foreach (['png', 'jpg', 'gif'] as $e2) @unlink(__DIR__ . '/../data/assinaturas/' . $bid . '.' . $e2);
+        $pdo->prepare("DELETE FROM envio_config WHERE escopo='assinatura' AND ref=? AND campo='imagem'")->execute([$bid]);
+        echo json_encode(['ok' => true]); exit;
     }
 
     if ($acao === 'conta') {

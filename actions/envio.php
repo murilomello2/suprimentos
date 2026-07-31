@@ -905,6 +905,9 @@ try {
             'pcs' => $pcs, 'fornecedor' => $env['forn_nome'],
             'sigla' => trim((string)($env['pedidos'][0]['coligada'] ?? '')),
             'comprador' => $env['assina'],
+            /* Assina QUEM ESTA ENVIANDO. O fornecedor responde para quem mandou — nao para o
+               "responsavel pela obra", que pode nem estar na mesa hoje. */
+            'assina_bid' => (string)($in['me'] ?? ''),
         ]);
         if (!$c) throw new Exception('não consegui montar o e-mail desta obra');
         if (!empty($c['faltando']))

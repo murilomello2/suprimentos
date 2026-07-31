@@ -17,7 +17,8 @@
  *    faz o documento parecer de 1998.
  *  - Verde e dourado da Caprem só em filetes e rótulos — impressos em preto e branco viram cinza
  *    claro e o documento continua legível.
- *  - A DATA DE ENTREGA é POR ITEM (o Murilo frisou): ela é coluna da tabela, não campo do cabeçalho.
+ *  - Sem coluna de ENTREGA: o dado existe na base e na tela, mas no papel poluía sem decidir
+ *    nada — quem combina a entrega é a obra, e isso já está no bloco de condições.
  *
  * SEM BIBLIOTECA. Este servidor não tem FPDF/TCPDF/mbstring. O PDF é escrito na mão. A tabela de
  * larguras da Helvetica está aqui porque sem ela não há alinhamento à direita nem quebra de linha
@@ -205,8 +206,10 @@ function pdf_pedido($p) {
     $emp = (array)($p['empresa'] ?? []);
     $f   = (array)($p['fornecedor'] ?? []);
     $itens = (array)($p['itens'] ?? []);
+    /* A coluna ENTREGA saiu do documento (pedido do Murilo). O dado continua na base e na tela do
+       pedido; no papel ele poluia sem decidir nada — quem combina a entrega e a obra, e isso ja
+       esta escrito no bloco de condicoes. */
     $temEntrega = false;
-    foreach ($itens as $it) if (trim((string)($it['entrega'] ?? '')) !== '') { $temEntrega = true; break; }
 
     // ---- colunas da tabela ----
     /* Bordas DIREITAS das colunas numéricas, medidas pelo pior caso: "R$ 1.083,86" ocupa ~45pt a
@@ -274,7 +277,20 @@ function pdf_pedido($p) {
         $d->retangulo(0, PdfPedido::A - 6, PdfPedido::L, 6, $VERDE);
 
         $y = PdfPedido::A - 34;
-        $d->txt($ML, $y, (string)($emp['razao'] ?? ''), 12.5, true, $ESCURO);
+        /* A razao social das SPEs e longa ("CPR4 SANTA BARBARA DO OESTE EMPREENDIMENTO IMOBILIARIO
+           SPE LTDA.") e passava por cima do bloco do numero, a direita. Encolhe a fonte ate caber na
+           largura disponivel, e so entao quebra. */
+        $razao = (string)($emp['razao'] ?? '');
+        $largura = $MR - $ML - 170;                 // 170pt reservados ao bloco do numero
+        $tam = 12.5;
+        while ($tam > 8.5 && pdfp_largura($razao, $tam, true) > $largura) $tam -= 0.5;
+        if (pdfp_largura($razao, $tam, true) > $largura) {
+            $ls = pdfp_quebrar($razao, $largura, $tam, true);
+            $d->txt($ML, $y, $ls[0], $tam, true, $ESCURO);
+            if (isset($ls[1])) { $y -= $tam + 1; $d->txt($ML, $y, $ls[1], $tam, true, $ESCURO); }
+        } else {
+            $d->txt($ML, $y, $razao, $tam, true, $ESCURO);
+        }
         $y -= 13;
         $end = trim(trim((string)($emp['endereco'] ?? '')) . ' ' . trim((string)($emp['numero'] ?? '')), ' ');
         $l1 = trim($end . ($emp['bairro'] ?? '' ? ' — ' . $emp['bairro'] : ''), ' —');

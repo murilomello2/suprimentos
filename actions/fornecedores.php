@@ -302,6 +302,52 @@ try {
                           'sem_mudanca'=>$pulou, 'log'=>$log], JSON_UNESCAPED_UNICODE); exit;
     }
 
+
+    /**
+     * ESPELHO DO CADASTRO DE FORNECEDORES DO TOTVS.
+     *
+     * O TOTVS é a base oficial — o próprio Murilo lembrou que a certeza de qual fornecedor é vem do
+     * CODCFO. Este espelho existe para duas coisas:
+     *   1. o PDF do pedido mostrar razão social, CNPJ, cidade/UF e e-mail corretos;
+     *   2. a fila de Envio achar o e-mail do fornecedor por CODCFO — a chave exata, que não depende
+     *      de como alguém digitou o nome.
+     *
+     * NÃO substitui o nosso cadastro: o Murilo já avisou que "muitos dos e-mails aí estão
+     * desatualizados". A ordem de consulta é sempre cadastro do cockpit primeiro, TOTVS depois.
+     */
+    if ($acao === 'importar_totvs') {
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
+        $E = (defined('DB_DRIVER') && DB_DRIVER === 'mysql') ? 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4' : '';
+        if (defined('DB_DRIVER') && DB_DRIVER === 'mysql') {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS totvs_fornecedor (
+                codcfo VARCHAR(20) NOT NULL, cnpj VARCHAR(24), nome VARCHAR(255), fantasia VARCHAR(255),
+                cidade VARCHAR(120), uf VARCHAR(4), email VARCHAR(255), atualizado VARCHAR(40),
+                PRIMARY KEY (codcfo), KEY idx_tf_cnpj (cnpj), KEY idx_tf_nome (nome)
+            ) $E");
+        } else {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS totvs_fornecedor (codcfo TEXT PRIMARY KEY, cnpj TEXT, nome TEXT, fantasia TEXT, cidade TEXT, uf TEXT, email TEXT, atualizado TEXT)");
+        }
+        if (!empty($in['limpar'])) $pdo->exec("DELETE FROM totvs_fornecedor");
+        $lista = (array)($in['linhas'] ?? []);
+        $ins = $pdo->prepare("INSERT INTO totvs_fornecedor (codcfo,cnpj,nome,fantasia,cidade,uf,email,atualizado)
+                              VALUES (?,?,?,?,?,?,?,?)");
+        $upd = $pdo->prepare("UPDATE totvs_fornecedor SET cnpj=?,nome=?,fantasia=?,cidade=?,uf=?,email=?,atualizado=? WHERE codcfo=?");
+        $n = 0; $agora = date('c');
+        $pdo->beginTransaction();
+        foreach ($lista as $l) {
+            $cod = ltrim(preg_replace('/\D+/', '', (string)($l['cod'] ?? '')), '0');
+            if ($cod === '') continue;
+            $a = [(string)($l['cnpj'] ?? ''), (string)($l['nome'] ?? ''), (string)($l['fantasia'] ?? ''),
+                  (string)($l['cidade'] ?? ''), (string)($l['uf'] ?? ''), (string)($l['email'] ?? ''), $agora];
+            $upd->execute(array_merge($a, [$cod]));
+            if (!$upd->rowCount()) { try { $ins->execute(array_merge([$cod], $a)); } catch (Throwable $e) {} }
+            $n++;
+        }
+        $pdo->commit();
+        $tot = (int)$pdo->query("SELECT COUNT(*) FROM totvs_fornecedor")->fetchColumn();
+        echo json_encode(['ok'=>true, 'gravados'=>$n, 'total'=>$tot]); exit;
+    }
+
     if ($acao === 'importar_fornecedores') {
         if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Import é só admin.']); exit; }
         $lista = (array)($in['fornecedores'] ?? []);

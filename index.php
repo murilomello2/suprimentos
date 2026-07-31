@@ -6972,7 +6972,7 @@ async function cfgImapTeste(){ const el=document.getElementById('ceImapRes'); if
 
    Por isso a unidade da tela e o E-MAIL (obra x fornecedor), e nao o pedido solto: e assim que o
    comprador ja trabalha ("mando um email com 3 anexos se for a mesma obra"). */
-let ENV={d:null, aba:'fila', obra:'', busca:''};   // obra = filtro da fila
+let ENV={d:null, aba:'fila', obra:'', busca:'', sel:{}};   // obra = filtro; sel = selecao em massa
 function envMe(){ return encodeURIComponent((EU&&EU.bitrix_id)||''); }
 async function envInit(){ if(ENV.d) { envRender(); return; } envCarregar(); }
 async function envCarregar(){ const w=document.getElementById('envWrap'); if(!w) return;
@@ -6991,10 +6991,6 @@ function envCard(cor,valor,rot,sub,aba,ativo){
    + '<div style="font-size:23px;font-weight:700;line-height:1.1;color:'+cor+'">'+valor+'</div>'
    + '<div style="font-size:12.5px;font-weight:600;margin-top:2px">'+rot+'</div>'
    + '<div class="dmini" style="color:var(--muted);margin-top:1px">'+sub+'</div></div>';
-}
-function envTrava(ok,txt){
-  return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:'+(ok?'var(--verde-d)':'var(--muted)')+'">'
-   + '<span class="material-icons" style="font-size:14px">'+(ok?'verified':'remove')+'</span>'+txt+'</span>';
 }
 
 function envRender(){ const w=document.getElementById('envWrap'), d=ENV.d; if(!w||!d) return;
@@ -7495,9 +7491,13 @@ function envLegenda(){
 }
 
 /* ---- FILA: uma LINHA por e-mail, agrupada por obra ----
-   Os cartoes ocupavam meia tela cada e o Murilo tinha de rolar para ver tres envelopes. A mesma
-   informacao cabe numa linha de tabela; o que era chip virou icone, e o detalhe continua a um
-   clique. Agrupar por obra e o padrao da casa: o comprador pensa por canteiro, nao por fornecedor. */
+   Selecao em massa porque gerar PDF um a um nao escala: numa obra com 9 e-mails eram 9 cliques e 9
+   esperas. Agora marca-se a obra inteira (ou linhas soltas) e uma barra fixa no rodape age sobre
+   tudo de uma vez.
+
+   A linha com "CNPJ na observacao" ganha fundo rosa: e o sinal de que o fornecedor ja foi
+   escolhido/contratado na solicitacao, e em parte dos casos significa material ja em obra. Nao
+   bloqueia (aparece em 28,7% dos pedidos), mas tem de saltar aos olhos. */
 function envObrasDaFila(){
   const m={};
   (ENV.d.envelopes||[]).forEach(e=>{ m[e.obra]=(m[e.obra]||0)+1; });
@@ -7505,11 +7505,25 @@ function envObrasDaFila(){
 }
 function envFiltroObra(v){ ENV.obra=v; envRender(); }
 
+/* ---- selecao ---- */
+function envSelToggle(ch){ ENV.sel=ENV.sel||{}; ENV.sel[ch]=!ENV.sel[ch]; envRender(); }
+function envSelObra(obra){
+  ENV.sel=ENV.sel||{};
+  const g=(ENV.d.envelopes||[]).filter(e=>e.obra===obra);
+  const todosMarcados=g.every(e=>ENV.sel[e.chave]);
+  g.forEach(e=>{ ENV.sel[e.chave]=!todosMarcados; });
+  envRender();
+}
+function envSelLimpar(){ ENV.sel={}; envRender(); }
+function envSelecionados(){
+  ENV.sel=ENV.sel||{};
+  return (ENV.d.envelopes||[]).filter(e=>ENV.sel[e.chave]);
+}
+
 function envFila(){
   const todos=(ENV.d.envelopes||[]);
   const obras=envObrasDaFila();
   const es = ENV.obra ? todos.filter(e=>e.obra===ENV.obra) : todos;
-  const prontos=es.filter(e=>!e.alerta && !(e.sem_pdf||0));
 
   let h='<div class="panel" style="padding:9px 14px;margin-bottom:10px"><div class="bar" style="justify-content:space-between;flex-wrap:wrap;gap:8px">'
    + '<span class="bar" style="gap:8px;flex-wrap:wrap">'
@@ -7518,77 +7532,196 @@ function envFila(){
    + obras.map(o=>'<option value="'+esc(o.obra)+'"'+(ENV.obra===o.obra?' selected':'')+'>'+esc(o.obra)+' ('+o.n+')</option>').join('')
    + '</select>'
    + (ENV.obra?('<button class="btn-ghost" style="padding:4px 10px;font-size:11.5px;color:var(--pend);font-weight:700" onclick="envFiltroObra(\'\')">&times; limpar</button>'):'')
-   + '<span class="dmini">Cada linha e <b>um e-mail</b>: mesma obra e mesmo fornecedor viajam juntos.</span>'
+   + '<span class="dmini">Marque as linhas (ou a obra inteira) e use a barra que aparece embaixo.</span>'
    + '</span>'
-   + '<span class="bar" style="gap:7px">'
    + '<button class="btn-ghost" onclick="envArqLoteForm()" style="padding:6px 13px"><span class="material-icons" style="font-size:16px;vertical-align:-4px">inventory_2</span> Arquivar antigos</button>'
-   + '<button class="btn-prim" onclick="envEnviarLote()" style="padding:6px 14px"><span class="material-icons" style="font-size:16px;vertical-align:-4px">send</span> Enviar os '+prontos.length+' prontos</button>'
-   + '</span></div></div>';
+   + '</div></div>';
 
   if(!es.length) return h+'<div class="panel"><div class="dempty">Nenhum pedido aprovado esperando envio'
     + (ENV.obra?(' na obra <b>'+esc(ENV.obra)+'</b>'):'')+'. Se voce esperava algum, ele esta em <b>Bloqueados</b>.</div></div>';
 
   h+=envLegenda();
 
-  // agrupa por obra, sempre — e ordena cada grupo pelo mais atrasado
   const grupos={};
   es.forEach(e=>{ (grupos[e.obra]=grupos[e.obra]||[]).push(e); });
   Object.keys(grupos).sort().forEach(obra=>{
     const g=grupos[obra].sort((a,b)=>(b.dias-a.dias));
     const val=g.reduce((a,b)=>a+b.valor,0), nped=g.reduce((a,b)=>a+(b.pedidos||[]).length,0);
+    const marcados=g.filter(e=>(ENV.sel||{})[e.chave]).length;
     h+='<div class="panel" style="margin-bottom:10px;padding-top:10px">'
      + '<div class="bar" style="justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:7px">'
-     + '<span class="bar" style="gap:8px"><span class="material-icons" style="font-size:19px;color:var(--verde)">apartment</span>'
+     + '<span class="bar" style="gap:8px">'
+     + '<input type="checkbox" title="marcar todos desta obra" onchange="envSelObra('+JSON.stringify(obra)+')"'
+     + (marcados===g.length?' checked':'')+(marcados&&marcados<g.length?' data-parcial="1"':'')+'>'
+     + '<span class="material-icons" style="font-size:19px;color:var(--verde)">apartment</span>'
      + '<b style="font-size:15px">'+esc(obra)+'</b>'
-     + '<span class="dmini" style="color:var(--muted)">'+g.length+' e-mail(s) &middot; '+nped+' pedido(s) &middot; '+BRLc(val)+'</span></span>'
+     + '<span class="dmini" style="color:var(--muted)">'+g.length+' e-mail(s) &middot; '+nped+' pedido(s) &middot; '+BRLc(val)
+     + (marcados?(' &middot; <b style="color:var(--verde-d)">'+marcados+' marcado(s)</b>'):'')+'</span></span>'
      + '</div>'
-     + '<div style="overflow-x:auto"><table class="dtable" style="width:100%;font-size:12.5px"><tbody>';
+     + '<div style="overflow-x:auto"><table class="dtable" style="width:100%;font-size:12.5px">'
+     + '<thead><tr>'
+     + '<th style="width:26px"></th>'
+     + '<th style="text-align:left">FORNECEDOR / DESTINATÁRIO</th>'
+     + '<th style="text-align:left">PEDIDOS (PC)</th>'
+     + '<th style="text-align:center" title="aprovado no Fluig · obra conferida · nunca enviado · PDF gerado">CONFERÊNCIA</th>'
+     + '<th style="text-align:right">VALOR</th>'
+     + '<th style="text-align:right">PARADO</th>'
+     + '<th style="text-align:right">AÇÕES</th>'
+     + '</tr></thead><tbody>';
     g.forEach(e=>{ h+=envLinha(e); });
     h+='</tbody></table></div></div>';
   });
+
+  h+=envBarraSelecao();
   return h;
 }
 
-/* Uma linha = um e-mail. Cor na borda esquerda, estado em icones, acoes a direita. */
+/* Barra fixa no rodape — so aparece quando ha selecao. */
+function envBarraSelecao(){
+  const sel=envSelecionados();
+  if(!sel.length) return '';
+  const semPdf=sel.reduce((a,b)=>a+(b.sem_pdf||0),0);
+  const prontos=sel.filter(e=>!(e.sem_pdf||0));
+  const nped=sel.reduce((a,b)=>a+(b.pedidos||[]).length,0);
+  const val=sel.reduce((a,b)=>a+b.valor,0);
+  return '<div style="position:sticky;bottom:0;z-index:6;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'
+   + 'background:var(--verde-d);color:#fff;padding:10px 16px;border-radius:10px;margin-top:8px;box-shadow:0 6px 20px rgba(0,0,0,.18)">'
+   + '<b>'+sel.length+' e-mail(s) &middot; '+nped+' pedido(s) &middot; '+BRLc(val)+'</b>'
+   + '<span style="margin-left:auto"></span>'
+   + (semPdf?('<button class="btn-prim" style="background:#fff;color:var(--verde-d)" onclick="envLoteGerarPdf()">'
+       + '<span class="material-icons" style="font-size:16px;vertical-align:-3px">auto_awesome</span> Gerar '+semPdf+' PDF(s)</button>'):'')
+   + '<button class="btn-ghost" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.6)" onclick="envLoteSoObra()">'
+   + 'Marcar como só para a obra</button>'
+   + (prontos.length?('<button class="btn-prim" style="background:#fff;color:var(--verde-d)" onclick="envLoteEnviar()">'
+       + '<span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Enviar '+prontos.length+'</button>'):'')
+   + '<button class="btn-ghost" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.6)" onclick="envSelLimpar()">Limpar</button>'
+   + '</div>';
+}
+
+/* Uma linha = um e-mail. */
 function envLinha(e){
   const atras=e.dias>(ENV.d.atraso_dias||3), semPdf=(e.sem_pdf||0)>0;
   const cor = e.alerta ? 'var(--dourado)' : (semPdf ? '#8e44ad' : (atras ? '#c0392b' : 'var(--ok)'));
-  const pcs=(e.pedidos||[]).map(p=>p.numero).join(', ');
-  const ic=(ok,t,i)=>'<span class="material-icons" title="'+esc(t)+'" style="font-size:14px;vertical-align:-3px;color:'
+  const marcado=(ENV.sel||{})[e.chave];
+  /* fundo rosa claro quando ha CNPJ na observacao ou sinal de material ja em obra */
+  const rosa = (e.alerta || e.forn_travado);
+  const fundo = marcado ? '#eef6f0' : (rosa ? '#fdf3f3' : '');
+  const ic=(ok,t)=>'<span class="material-icons" title="'+esc(t)+'" style="font-size:14px;vertical-align:-3px;color:'
     +(ok?'var(--ok)':'#8e44ad')+'">'+(ok?'check_circle':'radio_button_unchecked')+'</span>';
-  let h='<tr style="border-left:4px solid '+cor+'">';
-  // fornecedor + destino
-  h+='<td style="padding:7px 8px 7px 10px;max-width:250px">'
+  let h='<tr style="border-left:4px solid '+cor+(fundo?(';background:'+fundo):'')+'">';
+  h+='<td style="padding:7px 0 7px 8px;vertical-align:top"><input type="checkbox"'+(marcado?' checked':'')
+   + ' onchange="envSelToggle('+JSON.stringify(e.chave)+')"></td>';
+  h+='<td style="padding:7px 8px;max-width:260px">'
    + '<div style="font-weight:700;font-size:12.5px">'+esc(e.forn_nome)+'</div>'
-   + '<div class="dmini" style="color:var(--muted)">'+(e.destino==='obra'?'<b>copia p/ lancamento</b>':esc(e.para))+'</div>'
-   + (e.alerta?'<div class="dmini" style="color:#a05a00;font-weight:700">&#9888; sinal de material ja em obra</div>':'')
-   + (!e.alerta&&e.forn_travado?'<div class="dmini" style="color:#6b7c93">CNPJ na observacao</div>':'')
+   + '<div class="dmini" style="color:var(--muted)">'+(e.destino==='obra'?'<b>cópia p/ lançamento</b>':esc(e.para))+'</div>'
+   + (e.alerta?'<div class="dmini" style="color:#c0392b;font-weight:700">&#9888; material pode já estar em obra — confira</div>':'')
+   + (!e.alerta&&e.forn_travado?'<div class="dmini" style="color:#c0392b;font-weight:700">&#9888; CNPJ na observação — pode ser só para a obra</div>':'')
    + '</td>';
-  // pedidos
   h+='<td style="padding:7px 8px;white-space:nowrap">'
    + (e.pedidos||[]).slice(0,4).map(p=>'<button class="btn-ghost" style="padding:1px 7px;font-size:11px;margin:1px'
-       + (p.tem_pdf?'':';color:#8e44ad;font-weight:700')+'" title="'+(p.tem_pdf?'PDF pronto':'sem PDF')+'" '
+       + (p.tem_pdf?'':';color:#8e44ad;font-weight:700')+'" title="'+(p.tem_pdf?'PDF pronto — clique para ver':'sem PDF ainda')+'" '
        + 'onclick="envVerPedido(\''+p.coligada_cod+'\',\''+p.numero+'\')">'+esc(p.numero)+'</button>').join('')
    + ((e.pedidos||[]).length>4?('<span class="dmini"> +'+((e.pedidos||[]).length-4)+'</span>'):'')
    + '</td>';
-  // estado
   h+='<td style="padding:7px 8px;white-space:nowrap;text-align:center">'
    + ic(true,'Aprovado no Fluig') + ic(true,'Obra conferida') + ic(true,'Nunca enviado')
-   + ic(!semPdf, semPdf?('falta o PDF de '+e.sem_pdf+' pedido(s)'):'PDF pronto')
+   + ic(!semPdf, semPdf?('falta o PDF de '+e.sem_pdf+' pedido(s)'):'PDF gerado')
    + '</td>';
   h+='<td style="padding:7px 8px;text-align:right;white-space:nowrap"><b>'+BRL(e.valor)+'</b></td>';
   h+='<td style="padding:7px 8px;text-align:right;white-space:nowrap">'
    + '<span class="dchip" style="background:'+(atras?'var(--dourado)':'var(--muted)')+'">'
    + (e.dias===0?'hoje':(e.dias+'d'))+'</span></td>';
-  // acoes
   h+='<td style="padding:5px 8px;text-align:right;white-space:nowrap">'
    + (semPdf?('<button class="btn-prim" style="padding:3px 9px;font-size:11px" onclick="envGerarPdfLote(\''+e.chave+'\')">Gerar PDF</button> '):'')
    + '<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="envVerEmail(\''+e.chave+'\')">Ver</button> '
-   + '<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="envDecidir(\''+e.chave+'\',\'so_obra\')" title="manda so para a obra, para lancamento">So obra</button> '
-   + '<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="envDecidir(\''+e.chave+'\',\'segurar\')">Segurar</button> '
+   + '<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="envDecidir(\''+e.chave+'\',\'so_obra\')" title="o e-mail vai só para a obra, para lançamento — o fornecedor não recebe">Só obra</button> '
+   + '<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="envDecidir(\''+e.chave+'\',\'segurar\')" title="retém de propósito, com motivo e seu nome; fica visível na aba Segurados até alguém liberar">Segurar</button> '
    + (semPdf?'':'<button class="btn-prim" style="padding:3px 11px;font-size:11px" onclick="envEnviar(\''+e.chave+'\')">Enviar</button>')
    + '</td></tr>';
   return h;
+}
+
+/* ---- acoes em massa ---- */
+async function envLoteGerarPdf(){
+  const sel=envSelecionados().filter(e=>(e.sem_pdf||0)>0);
+  if(!sel.length){ toast('Todos os PDFs dos marcados já estão prontos'); return; }
+  const total=sel.reduce((a,b)=>a+(b.sem_pdf||0),0);
+  toast('Gerando '+total+' PDF(s)...');
+  let ok=0; const err=[];
+  for(const e of sel){
+    const faltam=(e.pedidos||[]).filter(p=>!p.tem_pdf);
+    try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'gerar_pdf_lote',me:(EU&&EU.bitrix_id),ficha_id:e.ficha_id,obra:e.obra,
+        so_obra:(e.destino==='obra'?1:0),
+        pedidos:faltam.map(p=>({coligada:p.coligada_cod,numero:p.numero}))})})).json();
+      if(r.error) err.push(e.obra+'/'+e.forn_nome+': '+r.error); else ok+=(r.gerados||0);
+      (r.falhas||[]).forEach(f=>err.push('PC '+f.numero+': '+f.motivo));
+    }catch(x){ err.push(e.forn_nome+': '+x.message); }
+  }
+  toast(ok+' PDF(s) gerado(s)'+(err.length?(' — '+err.length+' com problema'):''));
+  if(err.length) setTimeout(()=>toast(err[0]),2600);
+  ENV.d=null; envCarregar();
+}
+async function envLoteSoObra(){
+  const sel=envSelecionados();
+  if(!sel.length) return;
+  dlgAbrir('Envio de Pedidos','Marcar '+sel.length+' e-mail(s) como só para a obra',
+    '<div style="max-width:540px"><div class="dmini" style="margin-bottom:10px">'
+   + 'O e-mail vai <b>só para a obra</b>, para lançamento. O fornecedor <b>não recebe nada</b> — é a trava '
+   + 'do material que já foi entregue.</div>'
+   + cotFld('Motivo (fica registrado com o seu nome)','<input id="envLoteMot" placeholder="ex.: material já entregue, pedido só para lançamento" style="width:100%">')
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" onclick="envLoteSoObraSalvar()">Confirmar</button></div></div>');
+}
+async function envLoteSoObraSalvar(){
+  const m=((document.getElementById('envLoteMot')||{}).value||'').trim();
+  if(!m){ toast('Escreva o motivo'); return; }
+  const sel=envSelecionados(); let n=0;
+  for(const e of sel) for(const p of (e.pedidos||[])){
+    try{ await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'decidir',me:(EU&&EU.bitrix_id),me_nome:(EU&&EU.nome)||'',
+                           decisao:'so_obra',coligada:p.coligada_cod,numero:p.numero,motivo:m})}); n++; }catch(x){}
+  }
+  closeModal(true); toast(n+' pedido(s) marcados para ir só à obra');
+  ENV.sel={}; ENV.d=null; envCarregar();
+}
+async function envLoteEnviar(){
+  const sel=envSelecionados().filter(e=>!(e.sem_pdf||0));
+  if(!sel.length){ toast('Nenhum marcado com o PDF pronto'); return; }
+  const comAlerta=sel.filter(e=>e.alerta||e.forn_travado).length;
+  dlgAbrir('Envio de Pedidos','Enviar '+sel.length+' e-mail(s)',
+    '<div style="max-width:640px">'
+   + (comAlerta?('<div style="border-left:4px solid #c0392b;background:#fdf1ef;padding:9px 12px;border-radius:0 8px 8px 0;'
+      + 'font-size:12.5px;margin-bottom:10px"><b>'+comAlerta+' com sinal de material já em obra ou CNPJ na observação.</b> '
+      + 'Se algum for regularização, cancele e use <b>Só para a obra</b> — o fornecedor pode entregar de novo.</div>'):'')
+   + '<div style="max-height:250px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:12px">'
+   + '<table class="dtable" style="width:100%;font-size:12px"><tbody>'
+   + sel.map(x=>'<tr'+((x.alerta||x.forn_travado)?' style="background:#fdf3f3"':'')+'><td>'+esc(x.obra)+'</td><td>'+esc(x.forn_nome)+'</td>'
+       + '<td class="muted">'+esc(x.para)+'</td><td style="text-align:right">'+(x.pedidos||[]).length+' PC</td></tr>').join('')
+   + '</tbody></table></div>'
+   + '<div id="envLoteMsg" class="dmini" style="margin-bottom:8px"></div>'
+   + '<div class="bar" style="justify-content:flex-end;gap:8px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" id="envLoteBtn" onclick="envLoteEnviarConfirmado()">Enviar os '+sel.length+'</button></div></div>');
+}
+async function envLoteEnviarConfirmado(){
+  const sel=envSelecionados().filter(e=>!(e.sem_pdf||0));
+  const b=document.getElementById('envLoteBtn'), m=document.getElementById('envLoteMsg');
+  if(b) b.disabled=true;
+  let ok=0; const err=[];
+  for(let i=0;i<sel.length;i++){
+    if(m) m.textContent='Enviando '+(i+1)+' de '+sel.length+'...';
+    try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'enviar',me:(EU&&EU.bitrix_id),me_nome:(EU&&EU.nome)||'',
+                           envelope:sel[i].chave, aceito_conta_geral:1})})).json();
+      if(r.error) err.push(sel[i].obra+' / '+sel[i].forn_nome+': '+String(r.error).replace('CONTA_GERAL:','')); else ok++;
+    }catch(e){ err.push(sel[i].forn_nome+': '+e.message); }
+  }
+  closeModal(true);
+  toast(ok+' e-mail(s) enviado(s)'+(err.length?(' — '+err.length+' com problema'):''));
+  if(err.length) setTimeout(()=>toast(err[0]),2600);
+  ENV.sel={}; ENV.d=null; envCarregar();
 }
 
 function envAchar(ch){ return (ENV.d.envelopes||[]).find(x=>x.chave===ch); }
@@ -7785,42 +7918,6 @@ async function envEnviarConfirmado(ch, aceitaContaGeral){
     if(b){ b.disabled=false; b.textContent='Enviar agora'; }
     if(m) m.innerHTML='<span style="color:var(--pend)">Falha: '+esc(err.message)+'</span>';
   }
-}
-function envEnviarLote(){
-  const es=(ENV.d.envelopes||[]).filter(function(x){ return !x.alerta && !(x.sem_pdf||0); });
-  if(!es.length){ toast('Nenhum e-mail pronto: ou tem alerta, ou falta PDF'); return; }
-  const nPed=es.reduce(function(a,b){ return a+(b.pedidos||[]).length; },0);
-  dlgAbrir('Envio de Pedidos','Enviar '+es.length+' e-mail(s)',
-    '<div style="max-width:620px"><div class="dmini" style="margin-bottom:10px">Vao sair <b>'+es.length
-   + '</b> e-mail(s) com <b>'+nPed+'</b> pedido(s). Os que tem alerta de regularizacao ou PDF faltando <b>ficam de fora</b>.</div>'
-   + '<div style="max-height:250px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:12px">'
-   + '<table class="dtable" style="width:100%;font-size:12px"><tbody>'
-   + es.map(function(x){ return '<tr><td>'+esc(x.obra)+'</td><td>'+esc(x.forn_nome)+'</td>'
-       + '<td class="muted">'+esc(x.para)+'</td><td style="text-align:right">'+(x.pedidos||[]).length+' PC</td></tr>'; }).join('')
-   + '</tbody></table></div>'
-   + '<div id="envLoteMsg" class="dmini" style="margin-bottom:8px"></div>'
-   + '<div class="bar" style="justify-content:flex-end;gap:8px">'
-   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
-   + '<button class="btn-prim" id="envLoteBtn" onclick="envEnviarLoteConfirmado()">Enviar os '+es.length+'</button></div></div>');
-}
-async function envEnviarLoteConfirmado(){
-  const es=(ENV.d.envelopes||[]).filter(function(x){ return !x.alerta && !(x.sem_pdf||0); });
-  const b=document.getElementById('envLoteBtn'), m=document.getElementById('envLoteMsg');
-  if(b) b.disabled=true;
-  let ok=0; const err=[];
-  for(let i=0;i<es.length;i++){
-    if(m) m.textContent='Enviando '+(i+1)+' de '+es.length+'...';
-    try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
-         body:JSON.stringify({acao:'enviar',me:(EU&&EU.bitrix_id),me_nome:(EU&&EU.nome)||'',
-                              envelope:es[i].chave, aceito_conta_geral:1})})).json();
-      if(r.error) err.push(es[i].obra+' / '+es[i].forn_nome+': '+String(r.error).replace('CONTA_GERAL:',''));
-      else ok++;
-    }catch(e){ err.push(es[i].obra+': '+e.message); }
-  }
-  closeModal(true);
-  toast(ok+' e-mail(s) enviado(s)'+(err.length?(' — '+err.length+' com problema'):''));
-  if(err.length) setTimeout(function(){ toast(err[0]); },2600);
-  ENV.d=null; envCarregar();
 }
 
 

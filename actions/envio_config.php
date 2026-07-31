@@ -437,7 +437,9 @@ try {
                           'avisos'=>$avisos, 'hoje'=>date('Y-m-d')], JSON_UNESCAPED_UNICODE); exit;
     }
 
-    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    /* Upload de imagem chega como multipart/form-data, e nesse formato php://input vem VAZIO — o
+       'me' nao chegava e o admin era tratado como anonimo ("Apenas administradores"). */
+    $in = !empty($_POST) ? $_POST : (json_decode(file_get_contents('php://input'), true) ?: []);
     $perms = user_perms($pdo, $in['me'] ?? null);
     if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
     $acao = $in['acao'] ?? ''; $now = date('c'); $quem = (string)($in['me'] ?? '');

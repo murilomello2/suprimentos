@@ -136,23 +136,27 @@ function bp_mapa_razao($pdo) {
  * O que a razão social continua decidindo: se é obra ou sede (via centro de custo 8.x × 6/7.x).
  */
 function bp_mapa_obracod($pdo) {
-    /* Usa solic_obra_map(), não a tabela crua: a coluna nome_comercial fica VAZIA nas linhas em que o
-       nome vem do cadastro da obra (radar_obra_id). Ler o cru devolvia mapa vazio e o rateio continuava
-       saindo pela razão social — foi o que manteve "CAPRETZ/INSTITUTO CAPREM" depois do primeiro conserto. */
-    $map = [];
+    /* BASE ESTÁTICA. É a mesma tabela que solic_nome_default() usa nas Solicitações — copiada aqui
+       de propósito, em vez de incluir includes/solic.php: aquele arquivo puxa config + supabase e a
+       dependência estava falhando em silêncio dentro do try/catch, deixando o mapa vazio. Uma cópia
+       de 11 linhas que não pode falhar vale mais que um include elegante que falha calado. */
+    $map = ['001' => 'Comercial Americana', '010' => 'Sede', '015' => 'MKT', '020' => 'SAT',
+            '032' => 'Licel', '033' => 'Obras SAT', '036' => 'Piamonte', '039' => 'Contrap. Piamonte',
+            '040' => 'Cajá', '041' => 'Espazo', '042' => 'Prades'];
+    $out = [];
+    foreach ($map as $cod => $nome) $out[ltrim($cod, '0')] = $nome;
+
+    /* O de-para salvo no banco SOBRESCREVE a base — é onde alguém corrige ou cadastra um centro de
+       custo novo sem precisar de deploy. */
     try {
-        require_once __DIR__ . '/../includes/solic.php';
-        foreach (solic_obra_map($pdo) as $chave => $o) {
-            if (stripos((string)($o['coligada'] ?? ''), 'CAPRETZ') === false) continue;
-            $cod = ltrim(trim((string)($o['obra_cod'] ?? '')), '0');
-            $nome = trim((string)($o['nome_comercial'] ?? ''));
-            if ($cod === '' || $nome === '') continue;
-            /* "Sede" e afins não são obra de canteiro: o rótulo da sede é decidido pelo centro de
-               custo (6/7.x), não aqui. */
-            $map[$cod] = $nome;
+        foreach ($pdo->query("SELECT coligada, obra_cod, nome_comercial FROM solic_obra") as $r) {
+            if (stripos((string)$r['coligada'], 'CAPRETZ') === false) continue;
+            $cod = ltrim(trim((string)$r['obra_cod']), '0');
+            $nome = trim((string)$r['nome_comercial']);
+            if ($cod !== '' && $nome !== '') $out[$cod] = $nome;
         }
     } catch (Throwable $e) {}
-    return $map;
+    return $out;
 }
 
 /** Encurta a razão social quando a obra não tem ficha (tira o juridiquês). */

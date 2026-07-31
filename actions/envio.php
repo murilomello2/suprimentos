@@ -111,17 +111,62 @@ function env_schema($pdo) {
 /** A CHAVE de um pedido. Nunca use o número sozinho — ele se repete entre coligadas. */
 function env_chave($coligada, $numero) { return trim((string)$coligada) . '|' . ltrim(trim((string)$numero), '0'); }
 
-/** Este servidor NÃO tem mbstring (nem PHPMailer) — nada de mb_*. bp_nz já derruba acento e caixa. */
-function env_norm($s) { return ' ' . bp_nz($s) . ' '; }
+/**
+ * Normaliza para procurar frase: MAIÚSCULA, sem acento, só letras e números.
+ *
+ * NÃO usa bp_nz aqui. O bp_nz depende de iconv //TRANSLIT, cujo resultado varia com o locale: nesta
+ * máquina "Já" vira "J A" (com espaço no meio) e no servidor de produção o "ç" some. Para casar
+ * NOME DE OBRA isso é tolerável; para decidir se um pedido é regularização, não é — a frase
+ * "Já está sendo utilizado" simplesmente não casaria. Mapa fixo é feio e é previsível.
+ */
+function env_norm($s) {
+    $s = strtr((string)$s, [
+        'á'=>'a','à'=>'a','â'=>'a','ã'=>'a','ä'=>'a','é'=>'e','ê'=>'e','è'=>'e','ë'=>'e',
+        'í'=>'i','î'=>'i','ì'=>'i','ï'=>'i','ó'=>'o','ô'=>'o','õ'=>'o','ò'=>'o','ö'=>'o',
+        'ú'=>'u','û'=>'u','ù'=>'u','ü'=>'u','ç'=>'c','ñ'=>'n',
+        'Á'=>'A','À'=>'A','Â'=>'A','Ã'=>'A','Ä'=>'A','É'=>'E','Ê'=>'E','È'=>'E','Ë'=>'E',
+        'Í'=>'I','Î'=>'I','Ì'=>'I','Ï'=>'I','Ó'=>'O','Ô'=>'O','Õ'=>'O','Ò'=>'O','Ö'=>'O',
+        'Ú'=>'U','Û'=>'U','Ù'=>'U','Ü'=>'U','Ç'=>'C','Ñ'=>'N']);
+    $s = strtoupper($s);
+    $s = preg_replace('/[^A-Z0-9]+/', ' ', $s);
+    return ' ' . trim(preg_replace('/\s+/', ' ', $s)) . ' ';
+}
 
-/** Sinais de que o pedido é regularização de material já entregue (o caso "(lançar)"). */
+/**
+  * Sinais de que o pedido é REGULARIZAÇÃO de algo que já está na obra — o caso "(lançar)".
+  *
+  * O Murilo apontou o PC 1703 (locação da ALUGTEC): a observação diz "Já está sendo utilizado na
+  * obra - 2 meses". Isso é o sinal mais claro que existe, e eu não pegava — faltavam as frases de
+  * USO, só havia as de ENTREGA. Equipamento locado não é "entregue", é "está em uso".
+  *
+  * Medido em 2.302 pedidos desde junho: o conjunto abaixo marca 1,1% (25 pedidos). É a ordem de
+  * grandeza certa para uma trava — pega o caso real sem segurar a fila inteira.
+  */
 function env_sinal_regularizacao($txt) {
-    $t = env_norm($txt);
+    $t = env_norm($txt);          // env_norm -> bp_nz: MAIÚSCULA sem acento, então nada de /u aqui
     foreach (['LANCAR', 'LANCAMENTO', 'JA ENTREGUE', 'JA RECEBIDO', 'REGULARIZA', 'SALDO DE',
               'COMPLEMENTO DE NF', 'MATERIAL ENTREGUE', 'ENTREGA REALIZADA', 'JA FOI ENTREGUE',
-              'JA COMPRADO', 'MATERIAL JA'] as $s)
+              'JA COMPRADO', 'MATERIAL JA',
+              // locação e serviço em andamento: "já está sendo utilizado", "já em uso na obra"
+              'JA ESTA SENDO UTILIZAD', 'JA ESTA SENDO US', 'JA ESTA UTILIZAD', 'JA ESTA EM USO',
+              'JA VEM SENDO', 'JA SE ENCONTRA', 'UTILIZADO NA OBRA', 'EM USO NA OBRA',
+              'JA ESTA INSTALAD', 'JA ESTA ALOCAD', 'JA FOI EXECUTAD', 'SERVICO JA'] as $s)
         if (strpos($t, $s) !== false) return true;
     return false;
+}
+
+/**
+ * Sinal FRACO: a observação traz o CNPJ do fornecedor ("Obrigatoriamente: X - CNPJ: ...").
+ *
+ * O Murilo pediu para tratar isso como "manda só para a obra". Medi antes de implementar: aparece em
+ * 28,7% dos pedidos (661 de 2.302) — quase um terço. Travar por aqui seguraria centenas de compras
+ * legítimas, o que quebra a regra 4 (nunca deixar de enviar um aprovado) para consertar a 3.
+ *
+ * Então NÃO bloqueia: vira uma marca visível no cartão, para o comprador bater o olho e decidir.
+ * Quando ele decide, a decisão fica gravada e não se repete.
+ */
+function env_sinal_cnpj_na_obs($txt) {
+    return (bool)preg_match('/\bCNPJ\b/i', (string)$txt);
 }
 
 /**
@@ -394,6 +439,7 @@ function env_fila($pdo, $filtroObra = '') {
 
         $p['dias'] = env_dias($p['data']);
         $p['regulariza'] = env_sinal_regularizacao($p['obs'] . ' ' . implode(' ', $p['produtos']));
+        $p['forn_travado'] = env_sinal_cnpj_na_obs($p['obs']);   // fornecedor fixado na SC — só informa
 
         $dec = $decisoes[$k] ?? null;
         /* ARQUIVADO sai da tela por completo — nem fila, nem bloqueado, nem contagem. É o "isso aqui
@@ -468,6 +514,7 @@ function env_fila($pdo, $filtroObra = '') {
         $env[$ek]['valor'] += $p['valor'];
         $env[$ek]['dias'] = max($env[$ek]['dias'], (int)$p['dias']);
         if ($p['regulariza']) $env[$ek]['alerta'] = true;
+        if (!empty($p['forn_travado'])) $env[$ek]['forn_travado'] = true;
         if (empty($p['tem_pdf'])) $env[$ek]['sem_pdf'] = ($env[$ek]['sem_pdf'] ?? 0) + 1;
     }
     $env = array_values($env);

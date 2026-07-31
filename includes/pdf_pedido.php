@@ -336,10 +336,11 @@ function pdf_pedido($p) {
         $y -= $alt + 12;
 
         /* ---- faixa de chips: emissão / pagamento / aprovado / frete ---- */
+        /* Só o que o FORNECEDOR precisa saber. Emissão e data de aprovação são informação interna
+           (o Murilo tirou): para quem recebe o pedido, o que vale é quanto e como se paga, e o
+           frete. A data de entrega está na linha de cada item, que é onde ela manda. */
         $chips = [];
-        $chips[] = ['EMISSÃO', pdfp_data($p['data'] ?? '') ?: '—'];
         $chips[] = ['CONDIÇÃO DE PAGAMENTO', trim((string)($p['cond_pagto'] ?? '')) ?: '—'];
-        $chips[] = ['APROVADO EM', pdfp_data($p['aprovado_em'] ?? '') ?: '—'];
         $chips[] = ['FRETE', pdfp_brl($p['frete'] ?? 0)];
         $n = count($chips); $gap = 8; $wc = ($LARG - $gap * ($n - 1)) / $n; $hc = 34;
         $d->cartao($ML, $y - $hc, $LARG, $hc, 5, [255, 255, 255], $LINHA);

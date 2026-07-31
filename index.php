@@ -7414,6 +7414,10 @@ function envEnvCard(e){
    + envTrava(!semPdf, semPdf?('falta o PDF de '+e.sem_pdf+' pedido(s)'):'PDF conferido')
    + '</div>';
 
+  if(!e.alerta && e.forn_travado) h+='<div class="dmini" style="margin-top:7px;color:#6b7c93">'
+   + '<span class="material-icons" style="font-size:14px;vertical-align:-3px">info</span> '
+   + 'A observacao traz o CNPJ do fornecedor (compra direcionada na solicitacao). Aparece em 28,7% dos pedidos, '
+   + 'entao nao bloqueia — mas se este for material ja em obra, use <b>So para a obra</b>.</div>';
   if(e.alerta) h+='<div style="margin-top:8px;border-left:4px solid var(--dourado);background:#fdf9ec;padding:8px 12px;border-radius:0 8px 8px 0;font-size:12.5px">'
    + '<b>Confira antes de enviar.</b> A descricao tem sinal de material ja entregue (regularizacao). '
    + 'Se for isso, mande so para a obra - foi assim que 6 pedidos vazaram para o fornecedor.</div>';
@@ -7520,9 +7524,16 @@ async function envVerEmail(ch){ const e=envAchar(ch); if(!e) return;
    + '<div style="border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:12.5px;background:#f8faf9;margin-bottom:8px">'+((p.cc||[]).length?esc(p.cc.join(', ')):'<span style="color:var(--muted)">ninguem</span>')+'</div>'
    + '<div class="dmini" style="margin-bottom:3px">Assunto</div>'
    + '<div style="border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:13px;background:#f8faf9;margin-bottom:8px"><b>'+esc(p.assunto||'')+'</b></div>'
+   /* O estado do anexo e POR PEDIDO — a versao anterior escrevia "ainda nao anexado" fixo, entao
+      um PDF ja gerado aparecia como faltando. */
    + '<div class="dmini" style="margin-bottom:3px">Anexos</div>'
    + '<div style="border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:12.5px;background:#f8faf9;margin-bottom:8px">'
-   + (e.pedidos||[]).map(x=>'PC '+esc(x.numero)+'.pdf').join(' &middot; ')+' <span style="color:var(--pend)">(ainda nao anexado - ver abaixo)</span></div>'
+   + (e.pedidos||[]).map(x=> x.tem_pdf
+        ? ('<a href="actions/envio.php?baixar_pdf='+encodeURIComponent(x.coligada_cod+'|'+x.numero)+'&me='+envMe()
+           +'" target="_blank" style="color:var(--verde-d);text-decoration:none">&#10003; PC '+esc(x.numero)+'.pdf</a>')
+        : ('<span style="color:#8e44ad">&#9679; PC '+esc(x.numero)+'.pdf (falta gerar)</span>')).join(' &nbsp;&middot;&nbsp; ')
+   + ((e.sem_pdf||0) ? ' <button class="btn-ghost" style="padding:2px 9px;font-size:11px;margin-left:6px" onclick="closeModal(true);envGerarPdfLote(\''+e.chave+'\')">Gerar os que faltam</button>' : '')
+   + '</div>'
    + '<div class="dmini" style="margin-bottom:3px">Mensagem</div>'
    + '<div style="border:1px solid var(--line);border-radius:10px;padding:16px 18px;background:#fff">'+p.html+'</div>'
    + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'

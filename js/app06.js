@@ -52,8 +52,19 @@ async function envLoteEnviar(){
   const sel=envSelecionados().filter(e=>!(e.sem_pdf||0));
   if(!sel.length){ toast('Nenhum marcado com o PDF pronto'); return; }
   const comAlerta=sel.filter(e=>e.alerta||e.forn_travado).length;
+  /* De onde o lote vai sair. No envio unitario o servidor PARA e pergunta quando o remetente nao e
+     pedidos@caprem.com.br; aqui isso precisa aparecer ANTES, porque um lote nao tem onde parar no
+     meio — sairiam N e-mails de um endereco que o fornecedor nao reconhece. */
+  const ct=(ENV.d&&ENV.d.conta)||{};
   dlgAbrir('Envio de Pedidos','Enviar '+sel.length+' e-mail(s)',
     '<div style="max-width:640px">'
+   + '<div class="dmini" style="margin-bottom:10px;padding:7px 11px;border-radius:8px;background:#f8faf9;border:1px solid var(--line)">'
+   + 'Remetente: <b>'+esc(ct.de||'(nao configurado)')+'</b></div>'
+   + (ct.e_pedidos?'':('<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:9px 12px;border-radius:0 8px 8px 0;'
+      + 'font-size:12.5px;margin-bottom:10px">Esta <b>nao</b> e a conta dos pedidos. Os fornecedores conhecem '
+      + '<b>pedidos@caprem.com.br</b>; sairao '+sel.length+' e-mail(s) de <b>'+esc(ct.de||'?')+'</b>.'
+      + '<label style="display:flex;gap:6px;align-items:center;margin-top:7px;font-weight:700">'
+      + '<input type="checkbox" id="envLoteConta"> Enviar assim mesmo</label></div>'))
    + (comAlerta?('<div style="border-left:4px solid #c0392b;background:#fdf1ef;padding:9px 12px;border-radius:0 8px 8px 0;'
       + 'font-size:12.5px;margin-bottom:10px"><b>'+comAlerta+' com sinal de material já em obra ou CNPJ na observação.</b> '
       + 'Se algum for regularização, cancele e use <b>Só para a obra</b> — o fornecedor pode entregar de novo.</div>'):'')
@@ -70,13 +81,21 @@ async function envLoteEnviar(){
 async function envLoteEnviarConfirmado(){
   const sel=envSelecionados().filter(e=>!(e.sem_pdf||0));
   const b=document.getElementById('envLoteBtn'), m=document.getElementById('envLoteMsg');
+  /* So repassa o "aceito a conta geral" se o Murilo tiver marcado a caixa. Mandar 1 fixo, como
+     estava, fazia o lote atravessar calado a trava que o envio unitario respeita. */
+  const ct=(ENV.d&&ENV.d.conta)||{};
+  const aceita=ct.e_pedidos?1:((document.getElementById('envLoteConta')||{}).checked?1:0);
+  if(!ct.e_pedidos&&!aceita){
+    if(m) m.innerHTML='<span style="color:var(--pend)">Marque <b>Enviar assim mesmo</b> para sair de '+esc(ct.de||'outra conta')+'.</span>';
+    return;
+  }
   if(b) b.disabled=true;
   let ok=0; const err=[];
   for(let i=0;i<sel.length;i++){
     if(m) m.textContent='Enviando '+(i+1)+' de '+sel.length+'...';
     try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({acao:'enviar',me:(EU&&EU.bitrix_id),me_nome:(EU&&EU.nome)||'',
-                           envelope:sel[i].chave, aceito_conta_geral:1})})).json();
+                           envelope:sel[i].chave, aceito_conta_geral:aceita})})).json();
       if(r.error) err.push(sel[i].obra+' / '+sel[i].forn_nome+': '+String(r.error).replace('CONTA_GERAL:','')); else ok++;
     }catch(e){ err.push(sel[i].forn_nome+': '+e.message); }
   }

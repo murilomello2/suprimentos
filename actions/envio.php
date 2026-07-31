@@ -586,6 +586,13 @@ try {
         $r = env_fila($pdo, trim((string)($_GET['obra'] ?? '')));
         $r['atraso_dias'] = ENV_ATRASO_DIAS;
         $r['janela_dias'] = ENV_JANELA_DIAS;
+        /* De qual endereço isto vai sair. A tela precisa saber ANTES do clique: o fornecedor conhece
+           pedidos@caprem.com.br, e um lote saindo da conta das cotações vira "quem é esse remetente?"
+           multiplicado por quantos e-mails o comprador marcou. */
+        $ce = ec_conta_efetiva();
+        $r['conta'] = ['de' => (string)($ce['user'] ?? ''), 'fonte' => (string)($ce['fonte'] ?? ''),
+                       'e_pedidos' => (($ce['fonte'] ?? '') === 'pedidos'),
+                       'configurada' => !empty($ce['user']) && !empty($ce['senha'])];
         echo json_encode($r, JSON_UNESCAPED_UNICODE); exit;
     }
 

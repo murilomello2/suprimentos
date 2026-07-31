@@ -283,7 +283,7 @@ function env_pedido_detalhe($pdo, $coligada, $numero) {
     $itens = []; $cab = null;
     $q = 'select=pedido_numero,pedido_data,pedido_status,coligada_cod,coligada,ccusto_cod,ccusto_nome,'
        . 'fornecedor_cod,fornecedor_cnpj,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,preco_unit,valor_total,'
-       . 'item_observacao,solic_numeros,pedido_usuario,obra_efetiva_nome,obra_efetiva_fonte,obra_cod,'
+       . 'item_observacao,solic_numeros,pedido_usuario,obra_efetiva_nome,obra_efetiva_fonte,obra_cod,data_entrega,'
        . 'status_aprovacao,etapa_aprovacao,aprovador'
        . '&coligada_cod=eq.' . rawurlencode($col)
        /* O TOTVS guarda o numero com zeros a esquerda ("000002638"). Consultar sem eles nao
@@ -296,6 +296,8 @@ function env_pedido_detalhe($pdo, $coligada, $numero) {
                         'und' => (string)($l['und'] ?? ''), 'preco' => (float)($l['preco_unit'] ?? 0),
                         'total' => (float)($l['valor_total'] ?? 0),
                         'obs' => trim((string)($l['item_observacao'] ?? '')),
+                        /* A entrega e POR ITEM — a tela mostra em coluna, igual ao PDF. */
+                        'entrega' => (string)($l['data_entrega'] ?? ''),
                         'sc' => trim((string)($l['solic_numeros'] ?? ''))];
         }
     });
@@ -544,6 +546,67 @@ try {
     if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }
     $acao = $in['acao'] ?? '';
 
+
+
+    /**
+     * GERAR O PDF do pedido a partir do TOTVS e guardá-lo como anexo.
+     *
+     * Este é o caminho normal — o anexo manual existe só como escape. Gerado aqui, o PDF nasce do
+     * MESMO registro que decidiu a obra e o destinatário, então não há como o arquivo divergir do
+     * pedido (que é o buraco de anexar da pasta: 9 dos 1.303 arquivos têm no nome um número que não
+     * é o de dentro).
+     *
+     * Se os valores do pedido não fecham na base, NÃO gera: devolve a lista de itens divergentes.
+     */
+    if ($acao === 'gerar_pdf') {
+        $col = trim((string)($in['coligada'] ?? '')); $num = ltrim((string)($in['numero'] ?? ''), '0');
+        if ($col === '' || $num === '') throw new Exception('pedido não identificado');
+        if (!defined('PP_LIB_ONLY')) define('PP_LIB_ONLY', 1);
+        require_once __DIR__ . '/pedido_pdf.php';
+        require_once __DIR__ . '/../includes/pdf_pedido.php';
+
+        $d = pp_montar($pdo, $col, $num, [
+            'ficha_id' => (int)($in['ficha_id'] ?? 0),
+            'obra'     => trim((string)($in['obra'] ?? '')),
+            'so_obra'  => !empty($in['so_obra']),
+        ]);
+        if (!$d) throw new Exception('pedido não encontrado no TOTVS');
+        if (!empty($d['divergencias'])) {
+            echo json_encode(['error' => 'Os valores deste pedido não fecham na base do TOTVS — o PDF não foi gerado.',
+                              'divergencias' => $d['divergencias']], JSON_UNESCAPED_UNICODE); exit;
+        }
+        $bin = pdf_pedido($d);
+        if (!is_dir(ENV_PDF_DIR)) @mkdir(ENV_PDF_DIR, 0755, true);
+        if (@file_put_contents(env_pdf_caminho($col, $num), $bin) === false)
+            throw new Exception('não consegui gravar o PDF no servidor');
+        echo json_encode(['ok' => true, 'bytes' => strlen($bin), 'itens' => count($d['itens'])]); exit;
+    }
+
+    /** Gera de uma vez todos os pedidos de um envelope. */
+    if ($acao === 'gerar_pdf_lote') {
+        if (!defined('PP_LIB_ONLY')) define('PP_LIB_ONLY', 1);
+        require_once __DIR__ . '/pedido_pdf.php';
+        require_once __DIR__ . '/../includes/pdf_pedido.php';
+        $ok = 0; $falhas = [];
+        foreach ((array)($in['pedidos'] ?? []) as $p) {
+            $col = trim((string)($p['coligada'] ?? '')); $num = ltrim((string)($p['numero'] ?? ''), '0');
+            if ($col === '' || $num === '') continue;
+            try {
+                $d = pp_montar($pdo, $col, $num, ['ficha_id' => (int)($in['ficha_id'] ?? 0),
+                                                  'obra' => trim((string)($in['obra'] ?? '')),
+                                                  'so_obra' => !empty($in['so_obra'])]);
+                if (!$d) { $falhas[] = ['numero' => $num, 'motivo' => 'não encontrado no TOTVS']; continue; }
+                if (!empty($d['divergencias'])) {
+                    $falhas[] = ['numero' => $num, 'motivo' => 'valores não fecham: ' . implode('; ', array_slice($d['divergencias'], 0, 3))];
+                    continue;
+                }
+                if (!is_dir(ENV_PDF_DIR)) @mkdir(ENV_PDF_DIR, 0755, true);
+                @file_put_contents(env_pdf_caminho($col, $num), pdf_pedido($d));
+                $ok++;
+            } catch (Throwable $e) { $falhas[] = ['numero' => $num, 'motivo' => $e->getMessage()]; }
+        }
+        echo json_encode(['ok' => true, 'gerados' => $ok, 'falhas' => $falhas], JSON_UNESCAPED_UNICODE); exit;
+    }
 
     /* Upload do PDF de UM pedido. multipart/form-data: pdf + coligada + numero. */
     if ($acao === 'anexo') {

@@ -19,8 +19,11 @@
 header('Content-Type: application/json; charset=utf-8');
 @date_default_timezone_set('America/Sao_Paulo');
 require_once __DIR__ . '/../includes/db.php';
-define('BP_LIB_ONLY', 1); require_once __DIR__ . '/busca_pedidos.php';
-define('EC_LIB_ONLY', 1); require_once __DIR__ . '/envio_config.php';
+/* Guardas: o envio.php inclui este arquivo como biblioteca e ja definiu as duas constantes. */
+if (!defined('BP_LIB_ONLY')) define('BP_LIB_ONLY', 1);
+if (!defined('EC_LIB_ONLY')) define('EC_LIB_ONLY', 1);
+require_once __DIR__ . '/busca_pedidos.php';
+require_once __DIR__ . '/envio_config.php';
 require_once __DIR__ . '/../includes/pdf_pedido.php';
 
 /**

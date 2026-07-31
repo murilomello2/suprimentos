@@ -136,13 +136,20 @@ function bp_mapa_razao($pdo) {
  * O que a razão social continua decidindo: se é obra ou sede (via centro de custo 8.x × 6/7.x).
  */
 function bp_mapa_obracod($pdo) {
+    /* Usa solic_obra_map(), não a tabela crua: a coluna nome_comercial fica VAZIA nas linhas em que o
+       nome vem do cadastro da obra (radar_obra_id). Ler o cru devolvia mapa vazio e o rateio continuava
+       saindo pela razão social — foi o que manteve "CAPRETZ/INSTITUTO CAPREM" depois do primeiro conserto. */
     $map = [];
     try {
-        foreach ($pdo->query("SELECT coligada, obra_cod, nome_comercial FROM solic_obra") as $o) {
-            if (stripos((string)$o['coligada'], 'CAPRETZ') === false) continue;
-            $cod = ltrim(trim((string)$o['obra_cod']), '0');
-            $nome = trim((string)$o['nome_comercial']);
-            if ($cod !== '' && $nome !== '') $map[$cod] = $nome;
+        require_once __DIR__ . '/../includes/solic.php';
+        foreach (solic_obra_map($pdo) as $chave => $o) {
+            if (stripos((string)($o['coligada'] ?? ''), 'CAPRETZ') === false) continue;
+            $cod = ltrim(trim((string)($o['obra_cod'] ?? '')), '0');
+            $nome = trim((string)($o['nome_comercial'] ?? ''));
+            if ($cod === '' || $nome === '') continue;
+            /* "Sede" e afins não são obra de canteiro: o rótulo da sede é decidido pelo centro de
+               custo (6/7.x), não aqui. */
+            $map[$cod] = $nome;
         }
     } catch (Throwable $e) {}
     return $map;

@@ -7131,24 +7131,36 @@ async function envVerPedido(col,num){
     if(!x[1]) return;
     h+='<tr><td style="padding:1px 12px 1px 0;color:#666;white-space:nowrap">'+x[0]+':</td><td style="padding:1px 0"><b>'+esc(String(x[1]))+'</b></td></tr>'; });
   h+='</table>';
-  if(d.observacao) h+='<div class="dmini" style="margin-bottom:3px">Observacao dos itens</div>'
-   + '<div style="border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:12.5px;background:'
-   + (d.regulariza?'#fdf9ec':'#f8faf9')+';margin-bottom:12px;white-space:pre-wrap;max-height:170px;overflow:auto">'+esc(d.observacao)+'</div>';
+  /* A observacao e DE CADA ITEM — juntar tudo num campo so misturava a descricao de produtos
+     diferentes. Vira coluna ao lado do produto, como no PDF. */
+  if(d.regulariza) h+='<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:8px 12px;'
+   + 'border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:12px"><b>Sinal de regularizacao.</b> '
+   + 'A descricao indica material ja entregue — confira antes de mandar ao fornecedor.</div>';
   h+='<div class="dmini" style="margin-bottom:3px">Itens ('+d.itens.length+')</div>';
-  h+='<div style="overflow:auto;max-height:300px;border:1px solid var(--line);border-radius:8px">'
+  h+='<div style="overflow:auto;max-height:330px;border:1px solid var(--line);border-radius:8px">'
    + '<table class="dtable" style="width:100%;font-size:12.5px"><thead><tr>'
-   + '<th style="text-align:left">Produto</th><th style="text-align:right">Qtd</th><th>Und</th>'
+   + '<th style="text-align:left">Produto</th><th style="text-align:left">Descricao / observacao</th>'
+   + '<th style="text-align:left">Entrega</th><th style="text-align:right">Qtd</th><th>Und</th>'
    + '<th style="text-align:right">Unit.</th><th style="text-align:right">Total</th></tr></thead><tbody>';
-  d.itens.forEach(i=>{ h+='<tr><td>'+esc(i.produto)+'</td><td style="text-align:right">'+QNUM(i.qtd)+'</td>'
-   + '<td style="text-align:center">'+esc(i.und)+'</td><td style="text-align:right">'+BRL(i.preco)+'</td>'
-   + '<td style="text-align:right">'+BRL(i.total)+'</td></tr>'; });
+  d.itens.forEach(i=>{
+    const zero=(Number(i.total)===0 && Number(i.qtd)*Number(i.preco)>0.009);
+    h+='<tr><td style="max-width:190px"><b>'+esc(i.produto)+'</b></td>'
+     + '<td style="max-width:250px;color:#555;font-size:11.5px">'+esc(i.obs||'—')+'</td>'
+     + '<td style="white-space:nowrap">'+(i.entrega?esc(String(i.entrega).slice(0,10).split('-').reverse().join('/')):'—')+'</td>'
+     + '<td style="text-align:right">'+QNUM(i.qtd)+'</td>'
+     + '<td style="text-align:center">'+esc(i.und)+'</td><td style="text-align:right">'+BRL(i.preco)+'</td>'
+     + '<td style="text-align:right'+(zero?';color:var(--pend);font-weight:700':'')+'" '
+     + (zero?'title="o valor total deste item veio ZERADO na base do TOTVS — o PDF fica bloqueado ate corrigirem"':'')+'>'
+     + BRL(i.total)+(zero?' !':'')+'</td></tr>'; });
   h+='</tbody></table></div>';
   const fid=(ENV.d&&(ENV.d.envelopes||[]).flatMap(x=>x.pedidos||[]).find(p=>String(p.numero)===String(num))||{}).ficha_id||0;
   h+='<div class="bar" style="justify-content:space-between;gap:8px;margin-top:14px;flex-wrap:wrap">'
-   + '<span>'+(d.tem_pdf
-       ? '<a href="actions/envio.php?baixar_pdf='+encodeURIComponent(col+'|'+num)+'&me='+envMe()+'" target="_blank" class="btn-ghost" style="padding:5px 13px;text-decoration:none"><span class="material-icons" style="font-size:15px;vertical-align:-3px">picture_as_pdf</span> Ver o PDF anexado</a>'
-         + ' <button class="btn-ghost" style="padding:5px 11px;font-size:11.5px" onclick="envAnexoRemover(\''+esc(col)+'\',\''+esc(num)+'\')">trocar</button>'
-       : '<button class="btn-prim" style="padding:5px 13px" onclick="envAnexarForm(\''+esc(col)+'\',\''+esc(num)+'\','+fid+',\''+esc(d.fornecedor_cnpj||'')+'\')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">attach_file</span> Anexar o PDF</button>')+'</span>'
+   + '<span class="bar" style="gap:7px">'+(d.tem_pdf
+       ? '<a href="actions/envio.php?baixar_pdf='+encodeURIComponent(col+'|'+num)+'&me='+envMe()+'" target="_blank" class="btn-prim" style="padding:5px 13px;text-decoration:none"><span class="material-icons" style="font-size:15px;vertical-align:-3px">picture_as_pdf</span> Ver o PDF</a>'
+         + '<button class="btn-ghost" style="padding:5px 11px;font-size:11.5px" onclick="envGerarPdf(\''+esc(col)+'\',\''+esc(num)+'\','+fid+')">gerar de novo</button>'
+         + '<button class="btn-ghost" style="padding:5px 11px;font-size:11.5px" onclick="envAnexoRemover(\''+esc(col)+'\',\''+esc(num)+'\')">remover</button>'
+       : '<button class="btn-prim" style="padding:5px 13px" onclick="envGerarPdf(\''+esc(col)+'\',\''+esc(num)+'\','+fid+')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Gerar o PDF</button>'
+         + '<button class="btn-ghost" style="padding:5px 12px;font-size:11.5px" onclick="envAnexarForm(\''+esc(col)+'\',\''+esc(num)+'\','+fid+',\''+esc(d.fornecedor_cnpj||'')+'\')">ou anexar um arquivo</button>')+'</span>'
    + '<span class="bar" style="gap:8px"><button class="btn-ghost" onclick="closeModal(true)">Fechar</button>'
    + '<button class="btn-ghost" style="padding:5px 13px" onclick="envArqUm(\''+esc(col)+'\',\''+esc(num)+'\')">'
    + '<span class="material-icons" style="font-size:15px;vertical-align:-3px">inventory_2</span> Arquivar</button></span></div>';
@@ -7210,6 +7222,45 @@ async function envEmailSalvar(f){
     toast(r.criado?'Fornecedor cadastrado com o e-mail':'E-mail atualizado');
     ENV.d=null; envCarregar();
   }catch(e){ if(m) m.innerHTML='<span style="color:var(--pend)">Falha: '+esc(e.message)+'</span>'; }
+}
+
+
+/* ---- GERAR O PDF ----
+   Este e o caminho normal; anexar arquivo e o escape. Gerado aqui, o PDF nasce do MESMO registro que
+   decidiu a obra e o destinatario — nao ha como divergir do pedido. */
+async function envGerarPdf(col,num,fichaId){
+  toast('Gerando o PDF...');
+  try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({acao:'gerar_pdf',me:(EU&&EU.bitrix_id),coligada:col,numero:num,ficha_id:fichaId||0})})).json();
+    if(r.error){
+      dlgAbrir('Pedido '+esc(num),'Nao consegui gerar o PDF',
+        '<div style="max-width:560px"><div style="border-left:4px solid var(--pend);background:#fdf1ef;padding:10px 13px;'
+        + 'border-radius:0 8px 8px 0;font-size:13px;margin-bottom:10px">'+esc(r.error)+'</div>'
+        + ((r.divergencias||[]).length?('<div class="dmini" style="margin-bottom:4px">Itens com problema:</div><ul style="margin:0 0 0 18px;font-size:12.5px;line-height:1.6">'
+            + r.divergencias.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>'):'')
+        + '<div class="dmini" style="margin-top:10px;color:var(--muted)">O campo de valor total desses itens veio zerado no TOTVS. '
+        + 'Enquanto nao for corrigido na origem, o pedido nao sai — mandar um PDF com R$ 0,00 num item e pior do que nao mandar.</div>'
+        + '<div class="bar" style="justify-content:flex-end;margin-top:14px"><button class="btn-prim" onclick="closeModal(true)">Entendi</button></div></div>');
+      return;
+    }
+    closeModal(true); toast('PDF gerado ('+r.itens+' itens)'); ENV.d=null; envCarregar();
+  }catch(e){ toast('Falha: '+e.message); }
+}
+/* Gera de uma vez todos os PDFs que faltam num envelope. */
+async function envGerarPdfLote(ch){
+  const e=envAchar(ch); if(!e) return;
+  const faltam=(e.pedidos||[]).filter(p=>!p.tem_pdf);
+  if(!faltam.length){ toast('Todos os PDFs ja estao prontos'); return; }
+  toast('Gerando '+faltam.length+' PDF(s)...');
+  try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({acao:'gerar_pdf_lote',me:(EU&&EU.bitrix_id),ficha_id:e.ficha_id,obra:e.obra,
+         so_obra:(e.destino==='obra'?1:0),
+         pedidos:faltam.map(p=>({coligada:p.coligada_cod,numero:p.numero}))})})).json();
+    if(r.error){ toast(r.error); return; }
+    toast(r.gerados+' PDF(s) gerado(s)'+((r.falhas||[]).length?(' — '+r.falhas.length+' com problema'):''));
+    if((r.falhas||[]).length) setTimeout(()=>toast('PC '+r.falhas[0].numero+': '+r.falhas[0].motivo),2600);
+    ENV.d=null; envCarregar();
+  }catch(e2){ toast('Falha: '+e2.message); }
 }
 
 /* ---- ANEXO MANUAL DO PDF ----
@@ -7372,6 +7423,8 @@ function envEnvCard(e){
        + (p.tem_pdf?'':';color:#8e44ad;font-weight:700')+'" onclick="envVerPedido(\''+p.coligada_cod+'\',\''+p.numero+'\')" '
        + 'title="'+(p.tem_pdf?'PDF anexado e conferido':'sem PDF — clique para anexar')+'">'
        + (p.tem_pdf?'':'&#9679; ')+'PC '+esc(p.numero)+'</button>').join('')
+   + (semPdf?('<button class="btn-prim" style="padding:5px 12px" onclick="envGerarPdfLote(\''+e.chave+'\')">'
+       + '<span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Gerar '+e.sem_pdf+' PDF(s)</button>'):'')
    + '<button class="btn-ghost" style="padding:5px 12px" onclick="envVerEmail(\''+e.chave+'\')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">visibility</span> Ver o e-mail</button>'
    + '<button class="btn-ghost" style="padding:5px 12px" onclick="envDecidir(\''+e.chave+'\',\'so_obra\')">So para a obra</button>'
    + '<button class="btn-ghost" style="padding:5px 12px" onclick="envDecidir(\''+e.chave+'\',\'arquivado\')" title="tira da tela sem apagar nada">Arquivar</button>'

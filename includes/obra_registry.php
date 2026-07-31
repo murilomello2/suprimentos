@@ -84,3 +84,28 @@ function obra_radar_id($pdo, $fichaId) {
     $pdo->prepare("UPDATE obra_ficha SET radar_obra_id=?, updated_at=? WHERE id=?")->execute([$nid, date('c'), $fichaId]);
     return $nid;
 }
+
+/** Resolve a FICHA pelo NOME da obra (usado na importação do Mapa de Cotações antigo, onde a obra vem
+ *  só como texto: "Koelle Gardens", "Trinity CPR11", "VS5 - Lirios"...). Conservador de propósito:
+ *  só devolve quando o vencedor é ÚNICO — no empate prefere não vincular a vincular na obra errada.
+ *  -> ficha_id | null */
+function obra_ficha_de_nome($pdo, $nome) {
+    $n = ob_norm((string)$nome); if ($n === '') return null;
+    try { $fichas = $pdo->query("SELECT id, nome FROM obra_ficha")->fetchAll(); } catch (Throwable $e) { return null; }
+    if (!$fichas) return null;
+    foreach ($fichas as $f) if (ob_norm((string)$f['nome']) === $n) return (int)$f['id'];   // igualdade exata
+    $t = _obra_tokens($nome); if (!$t) return null;
+    $best = null; $bs = 0; $empate = false;
+    foreach ($fichas as $f) {
+        $s = count(array_intersect($t, _obra_tokens((string)$f['nome'])));
+        if ($s > $bs)      { $bs = $s; $best = (int)$f['id']; $empate = false; }
+        elseif ($s === $bs && $s > 0) { $empate = true; }
+    }
+    return ($bs >= 1 && !$empate) ? $best : null;
+}
+
+/** Atalho: nome da obra (texto do sistema antigo) → obra_id do radar, PROMOVENDO se preciso. -> obra_id | null */
+function obra_radar_de_nome($pdo, $nome) {
+    $fid = obra_ficha_de_nome($pdo, $nome);
+    return $fid ? obra_radar_id($pdo, $fid) : null;
+}

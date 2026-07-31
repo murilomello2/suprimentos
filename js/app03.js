@@ -728,7 +728,10 @@ function cotTab(t){ COT.tab=t; ['cotacoes','fornecedores','cartas','precos'].for
 function cotStChip(s){ const m={aberta:['#8a9299','Aberta'],aguardando:['var(--dourado)','Aguardando'],finalizada:['var(--ok)','Finalizada']}; const x=m[s]||['#8a9299',s]; return `<span class="dchip" style="background:${x[0]}">${x[1]}</span>`; }
 function cotStLabel(s){ return ({aberta:'Aberta',aguardando:'Aguardando',finalizada:'Finalizada'})[s]||s; }
 function cotFmtDT(iso){ if(!iso)return '—'; const d=new Date(iso); if(isNaN(d.getTime()))return '—'; const p=n=>('0'+n).slice(-2); return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes()); }
-function cotSort(col){ COT.sort=COT.sort||{col:'created_at',dir:-1}; if(COT.sort.col===col) COT.sort.dir=-COT.sort.dir; else COT.sort={col, dir:(col==='created_at'||col==='n_propostas'||col==='n_itens'||col==='melhor_oferta')?-1:1}; cotRender(); }
+function cotSort(col){ COT.sort=COT.sort||{col:'created_at',dir:-1}; if(COT.sort.col===col) COT.sort.dir=-COT.sort.dir; else COT.sort={col, dir:(col==='created_at'||col==='n_propostas'||col==='n_itens'||col==='melhor_oferta')?-1:1}; COT.page=1; cotRender(); }
+// paginação da lista (30 por página) — com o histórico do sistema antigo importado são ~850 cotações
+const COT_POR_PAGINA=30;
+function cotPagina(p){ COT.page=Math.max(1,p|0); cotRender(); const w=document.getElementById('cotwrap'); if(w)w.scrollIntoView({block:'start',behavior:'smooth'}); }
 function cotObraOpts(sel){ return '<option value="">— obra —</option>'+((typeof OBRAS!=='undefined'&&OBRAS)||[]).map(o=>`<option value="${o.id}" ${String(sel)===String(o.id)?'selected':''}>${esc(o.nome)}</option>`).join(''); }
 async function cotLoad(){
   const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Carregando cotações…</div>';
@@ -782,15 +785,20 @@ function cotRender(){
   const sval=c=>({titulo:(c.titulo||'').toLowerCase(),apelido:(c.apelido||'').toLowerCase(),obra_nome:(c.obra_nome||'').toLowerCase(),categoria:(c.categoria||'').toLowerCase(),criado_nome:(c.criado_nome||'').toLowerCase(),
       n_itens:+c.n_itens||0,n_propostas:+c.n_propostas||0,melhor_oferta:+c.melhor_oferta||0,status:(c.status||''),created_at:(c.created_at||''),id:+c.id||0}[sc]);
   rows=rows.slice().sort((a,b)=>{ const x=sval(a),y=sval(b); return (x<y?-1:x>y?1:0)*dir; });
+  // paginação CLIENT-SIDE — corta só o que vai para a tela; filtro/busca/ordenação acima varrem a lista INTEIRA
+  const _tot=rows.length, _pgs=Math.max(1,Math.ceil(_tot/COT_POR_PAGINA));
+  COT.page=Math.min(Math.max(1,COT.page||1),_pgs);
+  const _ini=(COT.page-1)*COT_POR_PAGINA, pageRows=rows.slice(_ini,_ini+COT_POR_PAGINA);
   const arw=col=>COT.sort.col===col?(COT.sort.dir>0?' ▲':' ▼'):'';
   const th=(lbl,col,extra)=>`<th ${extra||''} onclick="cotSort('${col}')" style="cursor:pointer;user-select:none;white-space:nowrap">${lbl}${arw(col)}</th>`;
   let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
-     <div class="search" style="min-width:170px"><span class="material-icons" style="color:var(--muted)">search</span><input id="cotListBusca" placeholder="Buscar cotação, nº solicitação ou pedido…" value="${esc(COT.filt.q)}" oninput="COT.filt.q=this.value;cotRender()"></div>
+     <div class="search" style="min-width:170px"><span class="material-icons" style="color:var(--muted)">search</span><input id="cotListBusca" placeholder="Buscar cotação, nº solicitação ou pedido…" value="${esc(COT.filt.q)}" oninput="COT.filt.q=this.value;COT.page=1;cotRender()"></div>
      <label class="muted" style="font-size:12px">Obra <select onchange="COT.obra=this.value;cotLoad()" style="margin-left:4px">${cotObraOpts(COT.obra)}</select></label>
-     <select onchange="COT.filt.categoria=this.value;cotRender()" style="font-size:12px;padding:6px"><option value="">Todas categorias</option>${cats.map(c=>`<option value="${esc(c)}" ${c===COT.filt.categoria?'selected':''}>${esc(c)}</option>`).join('')}</select>
-     <select onchange="COT.filt.status=this.value;cotRender()" style="font-size:12px;padding:6px"><option value="">Todos status</option>${sts.map(s=>`<option value="${esc(s)}" ${s===COT.filt.status?'selected':''}>${esc(cotStLabel(s))}</option>`).join('')}</select>
-     <select onchange="COT.filt.criador=this.value;cotRender()" style="font-size:12px;padding:6px" title="filtrar pelo criador (responsável) da cotação"><option value="">Todos criadores</option>${creators.map(u=>`<option value="${esc(u.id)}" ${u.id===COT.filt.criador?'selected':''}>${esc(u.nome)}</option>`).join('')}</select>
-     <span class="muted" style="font-size:11.5px">${rows.length} de ${all.length}</span>
+     <select onchange="COT.filt.categoria=this.value;COT.page=1;cotRender()" style="font-size:12px;padding:6px"><option value="">Todas categorias</option>${cats.map(c=>`<option value="${esc(c)}" ${c===COT.filt.categoria?'selected':''}>${esc(c)}</option>`).join('')}</select>
+     <select onchange="COT.filt.status=this.value;COT.page=1;cotRender()" style="font-size:12px;padding:6px"><option value="">Todos status</option>${sts.map(s=>`<option value="${esc(s)}" ${s===COT.filt.status?'selected':''}>${esc(cotStLabel(s))}</option>`).join('')}</select>
+     <select onchange="COT.filt.criador=this.value;COT.page=1;cotRender()" style="font-size:12px;padding:6px" title="filtrar pelo criador (responsável) da cotação"><option value="">Todos criadores</option>${creators.map(u=>`<option value="${esc(u.id)}" ${u.id===COT.filt.criador?'selected':''}>${esc(u.nome)}</option>`).join('')}</select>
+     <span class="muted" style="font-size:11.5px">${_tot?(_ini+1):0}–${_ini+pageRows.length} de ${_tot}${_tot!==all.length?` <span style="opacity:.75">(filtrado de ${all.length})</span>`:''}</span>
+     ${(COT.totalServidor&&COT.totalServidor>all.length)?`<span class="dchip" style="background:var(--pend);color:#fff;font-size:10px" title="o servidor devolve no máximo ${COT.limiteServidor} cotações por vez">mostrando ${all.length} de ${COT.totalServidor}</span>`:''}
      <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
        ${inboxNovoTotal?`<span class="dchip" style="background:var(--pend);color:#fff" title="e-mails de fornecedores ainda não processados — clique em Buscar respostas">📨 ${inboxNovoTotal} não processada(s)</span>`:''}
        ${CAN_EDIT?`<button class="btn-ghost" style="padding:7px 12px" onclick="cotBuscarRespostasLista(this)" title="ler a caixa suprimentos@ agora (enquanto o cron de hora em hora não roda)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">mark_email_unread</span> Buscar respostas</button>`:''}
@@ -799,7 +807,7 @@ function cotRender(){
      </span>
    </div></div><div class="wrap" style="overflow-x:auto"><table style="table-layout:fixed;width:100%;font-size:12px"><colgroup><col style="width:25%"><col style="width:10%"><col style="width:12%"><col style="width:9%"><col style="width:5%"><col style="width:6.5%"><col style="width:10%"><col style="width:8%"><col style="width:11%"><col style="width:8%"><col style="width:3%"></colgroup><thead><tr>${th('Cotação','titulo')}${th('Obra','obra_nome')}${th('Cat./Tipo','categoria')}<th title="Nº da solicitação de compra / nº do pedido de compra">SC/PC</th>${th('Itens','n_itens','style="text-align:center"')}${th('Prop.','n_propostas','style="text-align:center" title="propostas recebidas / convidados"')}${th('Melhor','melhor_oferta','style="text-align:right" title="melhor oferta"')}${th('Criada','created_at')}${th('Criador','criado_nome')}${th('Status','status')}<th></th></tr></thead><tbody>`;
   const _ell='overflow:hidden;text-overflow:ellipsis;white-space:nowrap';   // trunca c/ reticências (table-layout:fixed)
-  for(const c of rows){
+  for(const c of pageRows){
     const _inbox=(+c.n_inbound_novo)?` <span class="dchip" style="background:var(--pend);color:#fff;font-size:9px" title="${c.n_inbound_novo} e-mail(s) de fornecedor não processado(s)">📨${c.n_inbound_novo}</span>`:'';
     html+=`<tr style="cursor:pointer" onclick="cotOpen(${c.id})">`
       +`<td style="overflow:hidden" title="${esc(c.apelido?(c.apelido+' — '+c.titulo):c.titulo)}">${c.apelido
@@ -819,7 +827,18 @@ function cotRender(){
   if(!rows.length) html+=`<tr><td colspan="11" class="empty">${all.length?'Nenhuma cotação casa os filtros.':'Nenhuma cotação ainda. Crie a primeira.'}</td></tr>`;
   // preserva foco/caret da busca — o innerHTML recria o input a cada tecla e mataria o foco
   const _foc=document.activeElement, _wasBusca=_foc&&_foc.id==='cotListBusca', _car=_wasBusca?_foc.selectionStart:null;
-  w.innerHTML=html+'</tbody></table></div>';
+  let _pager='';
+  if(_pgs>1){
+    const _b=(p,lbl,dis,cur)=>`<button class="${cur?'btn-prim':'btn-ghost'}" style="padding:5px 10px;font-size:12px;min-width:34px${dis?';opacity:.35;pointer-events:none':''}" onclick="cotPagina(${p})">${lbl}</button>`;
+    const _n=[], _a=Math.max(1,COT.page-2), _z=Math.min(_pgs,COT.page+2);
+    if(_a>1){ _n.push(_b(1,'1',false,false)); if(_a>2)_n.push('<span class="muted" style="padding:0 2px">…</span>'); }
+    for(let p=_a;p<=_z;p++) _n.push(_b(p,String(p),false,p===COT.page));
+    if(_z<_pgs){ if(_z<_pgs-1)_n.push('<span class="muted" style="padding:0 2px">…</span>'); _n.push(_b(_pgs,String(_pgs),false,false)); }
+    _pager=`<div class="bar" style="justify-content:center;gap:6px;margin-top:10px;flex-wrap:wrap;align-items:center">`
+      +_b(COT.page-1,'‹',COT.page<=1,false)+_n.join('')+_b(COT.page+1,'›',COT.page>=_pgs,false)
+      +`<span class="muted" style="font-size:11.5px;margin-left:8px">página ${COT.page} de ${_pgs}</span></div>`;
+  }
+  w.innerHTML=html+'</tbody></table></div>'+_pager;
   if(_wasBusca){ const ni=document.getElementById('cotListBusca'); if(ni){ ni.focus(); try{ ni.setSelectionRange(_car,_car); }catch(e){} } }
 }
 function cotNovo(){ COT.mode='novo'; COT.novoServico=null; COT.novoPre=null; COT.novoConvidados=[]; COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; cotRender(); }

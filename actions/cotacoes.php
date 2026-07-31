@@ -18,6 +18,10 @@ require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/obra_registry.php';   // cadastro único: resolver/promover obra
 require_once __DIR__ . '/../includes/coligadas.php';       // FASE 2: coligada_cod_de_nome p/ agrupar PC por coligada
 
+// Teto da lista. Os filtros/busca/ordenação da tela são CLIENT-SIDE (varrem a lista toda), então o servidor
+// manda tudo e o front pagina de 30 em 30. Era 500 — não cabe o histórico importado do sistema antigo (~760).
+define('COT_LISTA_MAX', 3000);
+
 function cot_can_edit($pdo, $me, $obra) {
     $perms = user_perms($pdo, $me);
     if (empty($perms['autorizado'])) return null;
@@ -277,9 +281,13 @@ try {
                                    (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND cp.total>0 AND (cp.ativa=1 OR cp.ativa IS NULL)) AS melhor_oferta,
                                    (SELECT COUNT(*) FROM cotacao_email_in ei WHERE ei.cotacao_id=c.id AND ei.status='novo') AS n_inbound_novo
                             FROM cotacao c LEFT JOIN obra o ON o.id=c.obra_id
-                            $where ORDER BY c.id DESC LIMIT 500");
+                            $where ORDER BY c.created_at DESC, c.id DESC LIMIT " . COT_LISTA_MAX);
         $q->execute($args);
-        echo json_encode(['cotacoes'=>$q->fetchAll()], JSON_UNESCAPED_UNICODE); exit;
+        $rows = $q->fetchAll();
+        // total real (p/ a lista avisar se bateu no teto) — as importadas do sistema antigo têm id ALTO e data ANTIGA,
+        // por isso a ordenação é por created_at: por id elas empurrariam as cotações recentes para fora do limite.
+        $tq = $pdo->prepare("SELECT COUNT(*) FROM cotacao c " . $where); $tq->execute($args);
+        echo json_encode(['cotacoes'=>$rows, 'total'=>(int)$tq->fetchColumn(), 'limite'=>COT_LISTA_MAX], JSON_UNESCAPED_UNICODE); exit;
     }
 
     // ---------- POST ----------

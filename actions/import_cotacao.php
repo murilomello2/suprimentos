@@ -14,6 +14,7 @@
  */
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/obra_registry.php';   // cadastro único: resolver a obra pelo NOME
 
 try {
     $pdo = db();
@@ -30,7 +31,16 @@ try {
     if ($jaId && empty($in['forcar'])) { echo json_encode(['ok' => true, 'ja_importada' => true, 'cotacao_id' => $jaId], JSON_UNESCAPED_UNICODE); exit; }
 
     $created = trim((string)($c['created_at'] ?? '')) ?: date('c');            // PRESERVA a data original
-    $status  = (($c['status'] ?? '') === 'finalizada') ? 'finalizada' : 'aberta';
+    // aguardando_respostas (antigo) -> 'aguardando'; finalizada -> 'finalizada'. Nunca 'aberta': no antigo
+    // toda cotação já tinha sido enviada aos fornecedores.
+    $status  = (($c['status'] ?? '') === 'finalizada') ? 'finalizada' : 'aguardando';
+    // OBRA: o antigo guarda só o NOME. Resolve no cadastro único (promovendo ao radar) e mantém o texto
+    // em obra_livre como memória do que veio — se não casar, a cotação aparece com o nome livre mesmo.
+    $obraNome = trim((string)($c['obra_nome'] ?? ''));
+    $obraId = null;
+    if ($obraNome !== '' && empty($c['nao_vincular_obra'])) {
+        try { $obraId = obra_radar_de_nome($pdo, $obraNome); } catch (Throwable $e) { $obraId = null; }
+    }
 
     $pdo->beginTransaction();
     if ($jaId && !empty($in['forcar'])) {   // reimportar: apaga o import anterior (cotação + filhos) e recomeça limpo
@@ -42,10 +52,14 @@ try {
         $pdo->exec("DELETE FROM cotacao_anexo WHERE cotacao_id=" . $jaId . " AND criado_por='__IMPORT__'");
         $pdo->exec("DELETE FROM cotacao WHERE id=" . $jaId);
     }
-    $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, verba_origem, descricao, status, aprovacao, criado_por, criado_nome, obra_livre, import_origem, created_at, updated_at) VALUES (NULL,NULL,?,?,?,?, 'definida', ?,?, 'aguardando', ?,?,?,?,?,?)")
-        ->execute([(string)($c['titulo'] ?? ''), (string)($c['categoria'] ?? ''), (string)($c['tipo_servico'] ?? ''),
+    $pdo->prepare("INSERT INTO cotacao (obra_id, servico_id, titulo, categoria, tipo_servico, verba, verba_origem, descricao, status, aprovacao, criado_por, criado_nome, obra_livre, import_origem, created_at, updated_at) VALUES (?,NULL,?,?,?,?, 'definida', ?,?,?, ?,?,?,?,?,?)")
+        ->execute([$obraId, (string)($c['titulo'] ?? ''), (string)($c['categoria'] ?? ''), (string)($c['tipo_servico'] ?? ''),
             ($c['verba'] ?? null) !== null ? (float)$c['verba'] : null, (string)($c['descricao'] ?? ''), $status,
-            (string)($in['me'] ?? ''), (string)($c['criado_nome'] ?? ''), (string)($c['obra_nome'] ?? ''), $origem, $created, $created]);
+            (($c['aprovacao'] ?? '') === 'aprovada' ? 'aprovada' : 'aguardando'),
+            // criado_por: bitrix_id real quando o criador antigo casa com um usuário do sistema novo;
+            // senão um marcador "old:<login>" — assim o filtro por criador ainda separa as pessoas.
+            (string)($c['criado_por'] ?? ($in['me'] ?? '')), (string)($c['criado_nome'] ?? ''),
+            $obraNome, $origem, $created, $created]);
     $cid = (int)$pdo->lastInsertId();
 
     // itens (map _oldid -> novo id)
@@ -62,7 +76,7 @@ try {
     $findF = $pdo->prepare("SELECT id FROM cot_fornecedor WHERE LOWER(nome)=LOWER(?) LIMIT 1");
     $insF  = $pdo->prepare("INSERT INTO cot_fornecedor (nome, categoria, cidade, contato, telefone, email, cnpj, ativo, created_at) VALUES (?,?,?,?,?,?,?,1,?)");
     $insConv = $pdo->prepare("INSERT INTO cotacao_fornecedor (cotacao_id, fornecedor_id, fornecedor_nome, categoria, contato, email, telefone, created_at) VALUES (?,?,?,?,?,?,?,?)");
-    $insProp = $pdo->prepare("INSERT INTO cotacao_proposta (cotacao_id, fornecedor_id, fornecedor_nome, observacoes, total, data_resposta, created_at) VALUES (?,?,?,?,?,?,?)");
+    $insProp = $pdo->prepare("INSERT INTO cotacao_proposta (cotacao_id, fornecedor_id, fornecedor_nome, prazo, observacoes, total, data_resposta, created_at, ativa) VALUES (?,?,?,?,?,?,?,?,1)");
     $insPI   = $pdo->prepare("INSERT INTO cotacao_proposta_item (proposta_id, cotacao_item_id, preco_unit, preco_total, observacao) VALUES (?,?,?,?,?)");
     $insAnx  = $pdo->prepare("INSERT INTO cotacao_anexo (cotacao_id, fornecedor_id, fornecedor_nome, nome, arquivo, url, tamanho, mime, criado_por, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)");
     $nForn = 0; $nProp = 0; $nObs = 0; $nAnx = 0;
@@ -76,13 +90,16 @@ try {
         }
         $insConv->execute([$cid, $fid, $fnome, (string)($c['categoria'] ?? ''), (string)($p['contato'] ?? ''), (string)($p['email'] ?? ''), (string)($p['telefone'] ?? ''), $created]);
         $total = ($p['total'] ?? null) !== null ? (float)$p['total'] : null;
-        $insProp->execute([$cid, $fid, $fnome, (string)($p['observacoes'] ?? ''), $total, $created, $created]);
+        $dResp = trim((string)($p['data_resposta'] ?? '')) ?: $created;   // data em que o fornecedor respondeu
+        $insProp->execute([$cid, $fid, $fnome, (string)($p['prazo'] ?? ''), (string)($p['observacoes'] ?? ''), $total, $dResp, $created]);
         $pid = (int)$pdo->lastInsertId(); $nProp++;
+        // preço 0 no sistema antigo = "não cotou este item" (não existe zero legítimo lá). Grava NULL: o
+        // mapa mostra célula vazia em vez de "R$ 0,00", e cot_mapa já ignora null no melhor-por-item.
+        $num = function ($v) { return ($v === null || (float)$v == 0.0) ? null : (float)$v; };
         foreach (($p['itens'] ?? []) as $pi) {
             $ciid = $itemMap[(string)($pi['_item_oldid'] ?? '')] ?? 0; if (!$ciid) continue;
             $obs = (string)($pi['observacao'] ?? ''); if ($obs !== '') $nObs++;
-            $insPI->execute([$pid, $ciid, ($pi['preco_unit'] ?? null) !== null ? (float)$pi['preco_unit'] : null,
-                ($pi['preco_total'] ?? null) !== null ? (float)$pi['preco_total'] : null, $obs]);
+            $insPI->execute([$pid, $ciid, $num($pi['preco_unit'] ?? null), $num($pi['preco_total'] ?? null), $obs]);
         }
         // anexos da proposta (PDF por LINK — do storage antigo). 1 registro por PDF único do fornecedor.
         foreach (($p['anexos'] ?? []) as $ax) {
@@ -91,8 +108,19 @@ try {
             $nAnx++;
         }
     }
+    // ANEXOS DA COTAÇÃO (por LINK). No sistema antigo o anexo pende da COTAÇÃO, não da resposta:
+    // são as cartas-convite e os projetos que foram enviados aos fornecedores (o antigo não guarda
+    // o PDF da proposta — elas chegavam por formulário). Por isso fornecedor_id fica NULL.
+    foreach (($in['anexos'] ?? []) as $ax) {
+        $url = trim((string)($ax['url'] ?? '')); if ($url === '') continue;
+        $insAnx->execute([$cid, null, '', (string)($ax['nome'] ?? 'anexo.pdf'), '', $url,
+            (int)($ax['tamanho'] ?? 0), (string)($ax['mime'] ?? 'application/pdf'), '__IMPORT__',
+            trim((string)($ax['created_at'] ?? '')) ?: $created]);
+        $nAnx++;
+    }
     $pdo->commit();
-    echo json_encode(['ok' => true, 'cotacao_id' => $cid, 'itens' => count($itemMap), 'fornecedores_novos' => $nForn,
+    echo json_encode(['ok' => true, 'cotacao_id' => $cid, 'obra_id' => $obraId, 'obra_nome' => $obraNome,
+        'itens' => count($itemMap), 'fornecedores_novos' => $nForn,
         'propostas' => $nProp, 'observacoes' => $nObs, 'anexos' => $nAnx, 'created_at' => $created, 'substituiu' => $jaId ?: null], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();

@@ -148,6 +148,77 @@ function solic_dados_obra($pdo) {
     return $out;
 }
 
+
+/**
+ * ITENS DA SC QUE JÁ VIRARAM PEDIDO DE COMPRA.
+ *
+ * A fila do TOTVS deveria trazer só o que está PENDENTE, mas não tira o que já foi comprado: medi
+ * 120 de 1.197 itens (10%), em 12 das 249 solicitações. O caso que o Murilo pegou é a SC 2455 da
+ * Vitrius, cujos 3 itens saíram no PC 2852 em 24/07 e continuavam na fila.
+ *
+ * O certo é consertar o feed. Enquanto isso, cruzamos aqui — temos os dois lados.
+ *
+ * ARMADILHA: o número da SC se repete entre coligadas (a busca por "2455" traz também o PC 2926 da
+ * coligada 34, que é outra obra e outro material). O casamento só fecha por
+ * COLIGADA + NÚMERO DA SC + CÓDIGO DO PRODUTO.
+ *
+ * O resultado fica em cache por 30 min: são ~20 mil linhas de pedido, caro demais para reler a cada
+ * abertura da tela.
+ */
+define('SOLIC_ATEND_CACHE', __DIR__ . '/../data/.solic_atendidos.json');
+define('SOLIC_ATEND_TTL', 1800);
+
+function solic_atendidos($forcar = false) {
+    if (!$forcar && is_file(SOLIC_ATEND_CACHE) && (time() - filemtime(SOLIC_ATEND_CACHE)) < SOLIC_ATEND_TTL) {
+        $j = @json_decode(@file_get_contents(SOLIC_ATEND_CACHE), true);
+        if (is_array($j)) return $j;
+    }
+    $map = [];
+    try {
+        $desde = date('Y-m-d', strtotime('-9 months'));
+        for ($off = 0; $off < 40000; $off += 1000) {
+            $url = SOLIC_SUPABASE_URL . '/rest/v1/pedidos_itens?select=coligada_cod,codprd,solic_numeros,pedido_numero'
+                 . '&solic_numeros=not.is.null&pedido_data=gte.' . $desde . '&limit=1000&offset=' . $off;
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => 1, CURLOPT_TIMEOUT => 40, CURLOPT_HTTPHEADER => [
+                'apikey: ' . SOLIC_SUPABASE_KEY, 'Authorization: Bearer ' . SOLIC_SUPABASE_KEY, 'Accept: application/json']]);
+            $body = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+            if ($code !== 200) break;
+            $lote = json_decode((string)$body, true);
+            if (!is_array($lote) || !$lote) break;
+            foreach ($lote as $p) {
+                $cod = trim((string)($p['codprd'] ?? ''));
+                if ($cod === '') continue;
+                $pc = ltrim((string)($p['pedido_numero'] ?? ''), '0');
+                foreach (preg_split('/[,;\s]+/', (string)($p['solic_numeros'] ?? '')) as $n) {
+                    $n = ltrim(trim($n), '0');
+                    if ($n === '') continue;
+                    $k = trim((string)($p['coligada_cod'] ?? '')) . '|' . $n . '|' . $cod;
+                    if (!isset($map[$k])) $map[$k] = $pc;
+                }
+            }
+            if (count($lote) < 1000) break;
+        }
+        @file_put_contents(SOLIC_ATEND_CACHE, json_encode($map));
+    } catch (Throwable $e) {}
+    return $map;
+}
+
+/** Carimba cada item com o PC que já o atendeu. Devolve quantos ficaram pendentes. */
+function solic_marcar_atendidos(&$itens, $atend, $colidmov, $numero) {
+    $col = explode('-', (string)$colidmov)[0];
+    $num = ltrim((string)$numero, '0');
+    $pend = 0;
+    foreach ($itens as &$it) {
+        $cod = trim((string)($it['codprd'] ?? ''));
+        $pc = $cod !== '' ? ($atend[$col . '|' . $num . '|' . $cod] ?? '') : '';
+        $it['pc_atendido'] = $pc;
+        if ($pc === '') $pend++;
+    }
+    unset($it);
+    return $pend;
+}
+
 try {
     $pdo = db();
 
@@ -163,6 +234,7 @@ try {
            e-mail e do PDF do pedido. Três telas com endereços diferentes é como material chega no
            lugar errado. */
         $dadosObra = solic_dados_obra($pdo);
+        $atendidos = solic_atendidos(!empty($_GET['recarregar']));
         if (!$obraMap) { foreach ($pdo->query("SELECT * FROM solic_obra") as $o) $obraMap[$o['coligada'].'|'.$o['obra_cod']] = $o; }
         $ovMap = []; foreach ($pdo->query("SELECT * FROM solic_overlay") as $v) $ovMap[$v['coligada'].'|'.$v['numero']] = $v;
 
@@ -214,6 +286,9 @@ try {
             $bk = $dias===null?'r':($dias<7?'r':($dias<15?'a':($dias<30?'l':'c')));
             // carimba a cobertura em cada item + agrega a cobertura da SC (cinza/parcial/total)
             $itensC = $s['itens'];
+            /* Carimba o que já virou pedido ANTES da cobertura de cotação: item comprado não é
+               pendente, e não deve puxar a solicitação para a fila nem entrar numa cotação nova. */
+            $nPend = solic_marcar_atendidos($itensC, $atendidos, $s['colidmov'] ?? '', $s['numero']);
             $cb = solic_item_cobertura($itensC, $cov[$s['coligada'].'|'.$s['numero']] ?? []);
             $nCob = $cb['n_cobertos']; $nAny = $cb['n_tocados'];
             $cobertura = $cb['cobertura']; $cotList = $cb['cotacoes'];
@@ -223,7 +298,9 @@ try {
                 'cnpj_obra'=>($dadosObra[$s['coligada'].'|'.$s['obra_cod']]['cnpj'] ?? ''),
                 'endereco_entrega'=>($dadosObra[$s['coligada'].'|'.$s['obra_cod']]['endereco'] ?? ''),
                 'cobertura'=>$cobertura,'cot_cob'=>$nCob,'cot_any'=>$nAny,'cotacoes'=>$cotList,
-                'n_itens'=>count($itensC),'primeiro'=>$itensC[0]['produto'] ?? '','itens'=>$itensC];
+                'n_itens'=>count($itensC),'n_pendentes'=>$nPend,
+                'n_atendidos'=>count($itensC)-$nPend,
+                'primeiro'=>$itensC[0]['produto'] ?? '','itens'=>$itensC];
             // dashboard
             $dash['total']++; $dash['b'][$bk]++;
             $dash['por_status'][$status] = ($dash['por_status'][$status] ?? 0) + 1;
@@ -283,6 +360,19 @@ try {
         // lê os itens da solicitação da fila (filtro server-side no PostgREST)
         $rows = solic_rest('select=*&coligada=eq.' . rawurlencode($col) . '&numero=eq.' . rawurlencode($num) . '&order=seq.asc');
         if (!$rows) throw new Exception('solicitação não encontrada na fila');
+        /* Item que já virou pedido NÃO entra em cotação nova — senão o comprador cota de novo o que
+           já comprou. A fila do TOTVS ainda os entrega; o cruzamento é nosso. */
+        $atend = solic_atendidos();
+        $colX = explode('-', (string)($rows[0]['colidmov'] ?? ''))[0];
+        $numX = ltrim((string)$num, '0');
+        $antes = count($rows);
+        $rows = array_values(array_filter($rows, function ($r) use ($atend, $colX, $numX) {
+            $cod = trim((string)($r['codprd'] ?? ''));
+            return $cod === '' || !isset($atend[$colX . '|' . $numX . '|' . $cod]);
+        }));
+        if (!$rows) throw new Exception('Todos os itens desta solicitação já viraram pedido de compra — não há o que cotar.');
+        $pulados = $antes - count($rows);
+
         $obraCod = $rows[0]['obra'] ?? '';
         $q = $pdo->prepare("SELECT nome_comercial, comprador_id, radar_obra_id FROM solic_obra WHERE coligada=? AND obra_cod=?"); $q->execute([$col,$obraCod]); $so = $q->fetch();
         $nomeObra = $so['nome_comercial'] ?? sol_nome_default($col, $obraCod);
@@ -304,7 +394,7 @@ try {
         if ($ovid) $pdo->prepare("UPDATE solic_overlay SET cotacao_id=?, status='em_cotacao', updated_by=?, updated_at=? WHERE id=?")->execute([$cid,$me,$now,$ovid]);
         else $pdo->prepare("INSERT INTO solic_overlay (coligada,numero,status,cotacao_id,updated_by,updated_at) VALUES (?,?, 'em_cotacao', ?,?,?)")->execute([$col,$num,$cid,$me,$now]);
         $pdo->commit();
-        echo json_encode(['ok'=>true, 'cotacao_id'=>$cid], JSON_UNESCAPED_UNICODE); exit;
+        echo json_encode(['ok'=>true, 'cotacao_id'=>$cid, 'itens'=>count($rows), 'pulados'=>$pulados], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'gerar_cotacao_multi') {   // cria UMA cotação juntando itens escolhidos de VÁRIAS solicitações (multi-obra)

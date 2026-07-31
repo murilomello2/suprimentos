@@ -6005,7 +6005,7 @@ function solRenderLista(){
   for(const s of rows){ const key=s.coligada+'|'+s.numero, ex=SOL.exp[key];
     const st=SOL_ST[s.status]||['var(--neu)','?','var(--neubg)'], obs=s.observacoes||'';
     html+=`<tr${SOL.sel[key]?' style="background:#eef6f0"':''}><td style="text-align:center"><input type="checkbox" ${SOL.sel[key]?'checked':''} onchange="solSelToggle('${esc(key)}')"></td><td><b style="cursor:pointer" onclick="SOL.exp['${esc(key)}']=${ex?'false':'true'};solRenderLista()">${ex?'▾':'▸'} ${solCotDot(s.cobertura,(s.cot_cob||0)+'/'+s.n_itens+' itens')}${esc(String(s.numero).replace(/^0+/,'')||s.numero)}</b></td>
-      <td style="text-align:center">${s.n_itens}</td><td style="max-width:220px"><span title="${esc(s.primeiro)}">${esc((s.primeiro||'').slice(0,40))}</span></td>
+      <td style="text-align:center" title="${s.n_atendidos?esc(s.n_atendidos+' item(ns) ja viraram pedido de compra'):'todos pendentes'}">${s.n_atendidos?`<b>${s.n_pendentes}</b><span class="muted" style="font-size:10px">/${s.n_itens}</span>`:s.n_itens}</td><td style="max-width:220px"><span title="${esc(s.primeiro)}">${esc((s.primeiro||'').slice(0,40))}</span></td>
       <td class="muted" style="font-size:11.5px">${esc(s.nome_obra)}</td><td class="muted" style="font-size:11.5px;white-space:nowrap">${s.emissao?D(s.emissao):'—'}</td>
       <td style="text-align:center">${solPill(s)}</td>
       <td style="background:${st[2]};border-left:3px solid ${st[0]}">${CAN_COT?`<select onchange="solStatus('${esc(key)}',this.value,this)" style="font-size:11px;padding:3px 4px;font-weight:700;color:${st[0]};background:${st[2]};border:1px solid ${st[0]};border-radius:6px;cursor:pointer">${Object.entries(SOL_ST).map(([k,v])=>`<option value="${k}" ${s.status===k?'selected':''}>${v[1]}</option>`).join('')}</select>`:`<span class="dchip" style="background:${st[0]};color:#fff;font-weight:700">${st[1]}</span>`}</td>
@@ -6015,7 +6015,14 @@ function solRenderLista(){
         ${(s.cotacoes&&s.cotacoes.length)
           ? s.cotacoes.map(x=>`<button class="btn-ghost" style="padding:2px 7px;color:var(--verde-d);font-weight:700;font-size:11px" title="Ver cotação #${x.id}: ${esc(x.titulo||'')}" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${x.id}),200)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">request_quote</span>#${x.id}</button>`).join('')
           : (s.cotacao_id?`<button class="btn-ghost" style="padding:2px 6px;color:var(--verde-d)" title="Ver cotação gerada" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${s.cotacao_id}),200)"><span class="material-icons" style="font-size:15px">request_quote</span></button>`:(CAN_COT?`<button class="btn-ghost" style="padding:2px 6px" title="Gerar cotação desta solicitação" onclick="solGerar('${esc(key)}')"><span class="material-icons" style="font-size:15px;color:var(--verde)">playlist_add</span></button>`:''))}</td></tr>`;
-    if(ex) html+=`<tr><td colspan="11" style="background:#fafbfb;padding:8px 14px"><b style="font-size:11px;color:var(--muted)">ITENS</b> <span class="muted" style="font-size:10px">⚪ sem cotação · 🟡 em cotação · 🟢 finalizada</span>${s.itens.map(it=>`<div style="font-size:12px;padding:2px 0">${solCotDot(it.cot)}${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${it.cot_cid?` <button class="btn-ghost" style="padding:0 5px;color:var(--verde-d);font-size:10px;font-weight:700;vertical-align:1px" title="Ver cotação #${it.cot_cid}${it.cot_ctit?': '+esc(it.cot_ctit):''}" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${it.cot_cid}),200)">#${it.cot_cid}</button>`:''}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</div>`).join('')}</td></tr>`;
+    if(ex) html+=`<tr><td colspan="11" style="background:#fafbfb;padding:8px 14px"><b style="font-size:11px;color:var(--muted)">ITENS</b> <span class="muted" style="font-size:10px">⚪ sem cotação · 🟡 em cotação · 🟢 finalizada</span>${s.itens.map(it=>{
+          /* Item que ja virou PEDIDO fica RISCADO, com o numero do PC. Nao some: sumir sem explicacao
+             e o que faz o comprador desconfiar da tela — e se o cruzamento errar, some um item que
+             estava pendente de verdade. */
+          const pc=it.pc_atendido||'';
+          const est=pc?'text-decoration:line-through;opacity:.55':'';
+          return `<div style="font-size:12px;padding:2px 0;${est}">${pc?'<span class="material-icons" style="font-size:13px;vertical-align:-2px;color:var(--ok)">shopping_cart_checkout</span> ':solCotDot(it.cot)}${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${pc?` <b style="color:var(--verde-d);text-decoration:none;font-size:10.5px">ja no PC ${esc(pc)}</b>`:''}${(!pc&&it.cot_cid)?` <button class="btn-ghost" style="padding:0 5px;color:var(--verde-d);font-size:10px;font-weight:700;vertical-align:1px" title="Ver cotação #${it.cot_cid}${it.cot_ctit?': '+esc(it.cot_ctit):''}" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${it.cot_cid}),200)">#${it.cot_cid}</button>`:''}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</div>`;
+        }).join('')}</td></tr>`;
   }
   if(!rows.length) html+='<tr><td colspan="11" class="empty">Nenhuma solicitação nesse filtro.</td></tr>';
   const nSel=Object.keys(SOL.sel).filter(k=>SOL.sel[k]).length;
@@ -6076,7 +6083,8 @@ function solCopiar(key){ const s=solFind(key); if(!s)return;
   const cab=['Por favor cotar os itens abaixo para obra:','',s.coligada+' - '+sub];
   if(s.cnpj_obra) cab.push('CNPJ: '+s.cnpj_obra);
   if(s.endereco_entrega) cab.push('Endereço de entrega: '+s.endereco_entrega);
-  const txt=cab.join('\n')+'\n\nSolicitação nº '+num+'\n\nItens:\n\n'+s.itens.map(it=>'- '+cotNum(it.qtd)+' '+it.und+' - '+it.produto+(it.observacao?' ('+it.observacao+')':'')).join('\n');
+  const txt=cab.join('\n')+'\n\nSolicitação nº '+num+'\n\nItens:\n\n'+s.itens.filter(it=>!it.pc_atendido).map(it=>'- '+cotNum(it.qtd)+' '+it.und+' - '+it.produto+(it.observacao?' ('+it.observacao+')':'')).join('\n');
+  if(!s.itens.filter(it=>!it.pc_atendido).length){ toast('Todos os itens desta solicitação já viraram pedido de compra'); return; }
   navigator.clipboard.writeText(txt).then(()=>toast('Mensagem copiada!'),()=>{ const t=document.createElement('textarea');t.value=txt;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();toast('Mensagem copiada!'); }); }
 async function solGerar(key){ const s=solFind(key); if(!s)return; if(!confirm('Gerar uma cotação no Mapa com os '+s.n_itens+' itens desta solicitação?'))return;
   try{ const r=await (await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'gerar_cotacao',me:EU&&EU.bitrix_id,coligada:s.coligada,numero:s.numero})})).json();
@@ -7573,6 +7581,7 @@ function envFila(){
   });
 
   h+=envBarraSelecao();
+  if(envSelecionados().length) h+='<div style="height:64px"></div>';   // a barra fixa nao pode cobrir a ultima linha
   return h;
 }
 
@@ -7584,8 +7593,11 @@ function envBarraSelecao(){
   const prontos=sel.filter(e=>!(e.sem_pdf||0));
   const nped=sel.reduce((a,b)=>a+(b.pedidos||[]).length,0);
   const val=sel.reduce((a,b)=>a+b.valor,0);
-  return '<div style="position:sticky;bottom:0;z-index:6;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'
-   + 'background:var(--verde-d);color:#fff;padding:10px 16px;border-radius:10px;margin-top:8px;box-shadow:0 6px 20px rgba(0,0,0,.18)">'
+  /* FIXA na tela, nao sticky. Sticky no ULTIMO elemento so aparece quando se rola ate o fim — o
+     Murilo marcou quatro linhas e a barra ficou fora da vista. */
+  return '<div style="position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;align-items:center;gap:10px;'
+   + 'flex-wrap:wrap;background:var(--verde-d);color:#fff;padding:11px 20px;'
+   + 'box-shadow:0 -4px 20px rgba(0,0,0,.22)">'
    + '<b>'+sel.length+' e-mail(s) &middot; '+nped+' pedido(s) &middot; '+BRLc(val)+'</b>'
    + '<span style="margin-left:auto"></span>'
    + (semPdf?('<button class="btn-prim" style="background:#fff;color:var(--verde-d)" onclick="envLoteGerarPdf()">'

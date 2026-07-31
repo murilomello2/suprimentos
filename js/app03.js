@@ -114,7 +114,7 @@ function bpEtapaCards(d){
   const tot=E.reduce((a,x)=>a+x.n,0), totV=E.reduce((a,x)=>a+Number(x.valor||0),0);
   const M=v=>v>=1e6?('R$ '+(v/1e6).toFixed(1).replace('.',',')+' mi'):(v>=1e3?('R$ '+Math.round(v/1e3)+' mil'):('R$ '+Math.round(v||0)));
   const card=(x)=>{ const on=BP.etapa===x.etapa_raw;
-    return '<div onclick="bpFiltroEtapa('+JSON.stringify(x.etapa_raw).replace(/"/g,'&quot;')+')" '
+    return '<div onclick="bpFiltroEtapa('+jsArg(x.etapa_raw)+')" '
       +'title="'+esc(x.n+' pedido(s) parado(s) em '+x.etapa+' — '+M(x.valor))+(on?' · clique p/ limpar':' · clique p/ ver so estes')+'" '
       +'style="cursor:pointer;flex:1;min-width:132px;background:'+(on?'#fdf4e3':'#fbfdfb')+';border:1px solid '+(on?'#a4761c':'var(--line)')+';border-radius:9px;padding:8px 11px">'
       +'<div style="font-size:19px;font-weight:800;color:#a4761c;line-height:1">'+x.n+'</div>'

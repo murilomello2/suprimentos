@@ -1476,7 +1476,7 @@ function envFila(){
     h+='<div class="panel" style="margin-bottom:10px;padding-top:10px">'
      + '<div class="bar" style="justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:7px">'
      + '<span class="bar" style="gap:8px">'
-     + '<input type="checkbox" title="marcar todos desta obra" onchange="envSelObra('+JSON.stringify(obra)+')"'
+     + '<input type="checkbox" title="marcar todos desta obra" onchange="envSelObra('+jsArg(obra)+')"'
      + (marcados===g.length?' checked':'')+(marcados&&marcados<g.length?' data-parcial="1"':'')+'>'
      + '<span class="material-icons" style="font-size:19px;color:var(--verde)">apartment</span>'
      + '<b style="font-size:15px">'+esc(obra)+'</b>'
@@ -1539,7 +1539,7 @@ function envLinha(e){
     +(ok?'var(--ok)':'#8e44ad')+'">'+(ok?'check_circle':'radio_button_unchecked')+'</span>';
   let h='<tr style="border-left:4px solid '+cor+(fundo?(';background:'+fundo):'')+'">';
   h+='<td style="padding:7px 0 7px 8px;vertical-align:top"><input type="checkbox"'+(marcado?' checked':'')
-   + ' onchange="envSelToggle('+JSON.stringify(e.chave)+')"></td>';
+   + ' onchange="envSelToggle('+jsArg(e.chave)+')"></td>';
   h+='<td style="padding:7px 8px;max-width:260px">'
    + '<div style="font-weight:700;font-size:12.5px">'+esc(e.forn_nome)+'</div>'
    + '<div class="dmini" style="color:var(--muted)">'+(e.destino==='obra'?'<b>cópia p/ lançamento</b>':esc(e.para))+'</div>'

@@ -276,7 +276,7 @@ async function envEnviar(ch){
    + '<span class="dmini" style="color:var(--muted)">Depois de enviado, estes pedidos entram no livro-caixa e '
    + '<b>não voltam</b> para a fila.</span>'
    + '<span class="bar" style="gap:8px"><button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
-   + '<button class="btn-prim" id="envCBtn" onclick="envEnviarConfirmado('+JSON.stringify(ch)+',0)">'
+   + '<button class="btn-prim" id="envCBtn" onclick="envEnviarConfirmado('+jsArg(ch)+',0)">'
    + '<span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar agora</button></span></div></div>';
 
   dlgAbrir('Envio de Pedidos - '+esc(e.obra),'Conferir e enviar', h);
@@ -296,7 +296,7 @@ async function envEnviarConfirmado(ch, aceitaContaGeral){
       if(String(r.error).indexOf('CONTA_GERAL:')===0){
         if(m) m.innerHTML='<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:9px 12px;border-radius:0 8px 8px 0">'
           + esc(String(r.error).slice(12))+'</div>';
-        if(b) b.setAttribute('onclick','envEnviarConfirmado('+JSON.stringify(ch)+',1)');
+        if(b) b.setAttribute('onclick','envEnviarConfirmado('+jsArg(ch)+',1)');
         return;
       }
       if(m) m.innerHTML='<span style="color:var(--pend)">'+esc(r.error)+'</span>';

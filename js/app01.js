@@ -139,7 +139,13 @@ let MAT_SEL=(()=>{ try{ const v=JSON.parse(localStorage.getItem('sup_mat_obras')
 let MAT_COLLAPSED=new Set(), MAT_EXP=new Set(), _matDrag=null, MAT_OBRAS_CUR=[], MAT_SVCS_CUR=[];
 let MAT_OBRA_ORDER=(()=>{ try{ const v=JSON.parse(localStorage.getItem('sup_matobra_ord')||'null'); return Array.isArray(v)?v:null; }catch(e){ return null; } })();
 // arg seguro p/ string em atributo HTML de evento (aspas simples no JS + &quot; no atributo)
-function jsArg(s){ return "'"+String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/\n/g,' ')+"'"; }
+/* Argumento de string para dentro de um atributo HTML (onclick="f(...)").
+   NUNCA use JSON.stringify aqui: ele devolve "texto" com ASPAS DUPLAS, que fecham o atributo no
+   meio — o navegador le onchange="envSelToggle(" e o handler simplesmente nao existe. Foi o que
+   quebrou as caixas de selecao e o botao "Enviar agora": a tela parecia certa e o clique nao fazia
+   nada. Aqui a string sai entre aspas SIMPLES, escapando primeiro o que quebra o literal JS e
+   depois o que quebra o HTML. */
+function jsArg(s){ return "'"+String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/\n/g,' ')+"'"; }
 // bloco de detalhe (quantitativo/verba/responsável/status) mostrado quando o serviço é expandido na matriz
 // selo de curadoria (✓ curado manual / 🤖 sugerido pelo auto-vínculo) — hover explica, clique abre o item p/ editar
 function matCurIcon(kind, i){

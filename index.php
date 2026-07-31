@@ -7864,42 +7864,71 @@ async function envLiberar(col,num){
     toast('Liberado — voltou para a fila'); ENV.d=null; envCarregar(); }catch(e){ toast('Falha: '+e.message); }
 }
 
-/* ---- O DISPARO ----
-   A confirmacao mostra EXATAMENTE o que vai sair: para quem, com copia para quem, quantos anexos,
-   quanto e quem assina. Nada de "deseja continuar?" — o que se confirma tem de estar a vista.
-   As travas sao reconferidas NO SERVIDOR; isto aqui e so a tela. */
-function envEnviar(ch){
+/* ---- O DISPARO: tela de CONFERENCIA ----
+   Clicar em Enviar abre o e-mail inteiro, do jeito que vai sair: destinatario, copia, assunto, os
+   anexos (abriveis) e a mensagem renderizada com a assinatura. Os tres primeiros sao EDITAVEIS —
+   o contato do fornecedor muda, as vezes se quer incluir o engenheiro nesta compra.
+
+   O servidor reconfere tudo de novo e grava no livro-caixa o endereco que SAIU, nao o que estava
+   configurado: "para quem foi este pedido?" nao pode ter duas respostas. */
+async function envEnviar(ch){
   const e=envAchar(ch); if(!e) return;
   if((e.sem_pdf||0)>0){ toast('Faltam '+e.sem_pdf+' PDF(s) — gere antes de enviar'); return; }
-  const pcs=(e.pedidos||[]).map(p=>p.numero).join(', ');
-  const linhas=[['Para', e.destino==='obra'?(e.para+'   (copia para lancamento)'):e.para],
-                ['Obra', e.obra], ['Pedidos', pcs],
-                ['Anexos', (e.pedidos||[]).length+' PDF(s)'],
-                ['Valor', BRL(e.valor)],
-                ['Assina', e.assina||'(sem comprador na ficha da obra)']];
-  dlgAbrir('Envio de Pedidos - '+esc(e.obra),'Confirmar o envio',
-    '<div style="max-width:600px">'
-   + (e.alerta?('<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:9px 12px;'
-      + 'border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:12px"><b>Este pedido tem sinal de material ja em obra.</b> '
-      + 'Se for regularizacao, feche isto e use <b>So para a obra</b> — o fornecedor pode entregar de novo.</div>'):'')
-   + '<table cellpadding="0" cellspacing="0" style="font-size:13px;margin-bottom:12px">'
-   + linhas.map(function(x){ return '<tr><td style="padding:2px 12px 2px 0;color:#666;white-space:nowrap">'
-       + x[0]+':</td><td style="padding:2px 0"><b>'+esc(String(x[1]))+'</b></td></tr>'; }).join('')
-   + '</table>'
-   + '<div class="dmini" style="color:var(--muted);margin-bottom:12px">Depois de enviado, estes pedidos entram no '
-   + 'livro-caixa e <b>nao voltam</b> para a fila. Um reenvio passa a exigir justificativa.</div>'
-   + '<div id="envSendMsg" class="dmini" style="margin-bottom:8px"></div>'
-   + '<div class="bar" style="justify-content:flex-end;gap:8px">'
-   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
-   + '<button class="btn-prim" id="envSendBtn" onclick="envEnviarConfirmado(' + JSON.stringify(ch) + ',0)">'
-   + '<span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar agora</button></div></div>');
+
+  dlgAbrir('Envio de Pedidos - '+esc(e.obra),'Conferir e enviar','<div class="dempty">Montando o e-mail…</div>');
+  const pcs=(e.pedidos||[]).map(p=>p.numero).join(',');
+  const u='actions/envio_config.php?previa='+e.ficha_id+'&tipo='+(e.destino==='obra'?'obra':'fornecedor')
+        + '&pcs='+encodeURIComponent(pcs)+'&fornecedor='+encodeURIComponent(e.forn_nome)
+        + '&sigla='+encodeURIComponent((e.pedidos[0]||{}).coligada||'')
+        + '&me='+envMe();
+  let p; try{ p=await (await fetch(u)).json(); }catch(err){ toast('Falha: '+err.message); closeModal(true); return; }
+  if(p.error){ toast(p.error); closeModal(true); return; }
+
+  const rot=t=>'<div class="dmini" style="margin:10px 0 3px;font-weight:600">'+t+'</div>';
+  let h='<div style="max-width:780px">';
+  if(e.alerta||e.forn_travado) h+='<div style="border-left:4px solid #c0392b;background:#fdf1ef;padding:9px 12px;'
+   + 'border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:10px">'
+   + (e.alerta?'<b>A descrição indica material já em obra.</b> ':'<b>A observação traz o CNPJ do fornecedor.</b> ')
+   + 'Se for regularização, feche e use <b>Só para a obra</b> — o fornecedor pode entregar de novo.</div>';
+
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+   + '<div>'+rot('Para')+'<input id="envCPara" value="'+esc(e.para)+'" style="width:100%"></div>'
+   + '<div>'+rot('Obra / pedidos')+'<div style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;'
+   + 'background:#f8faf9;font-size:12.5px"><b>'+esc(e.obra)+'</b> &middot; PC '+esc((e.pedidos||[]).map(x=>x.numero).join(', '))
+   + ' &middot; '+BRL(e.valor)+'</div></div></div>';
+  h+=rot('Com cópia (separe por vírgula)')
+   + '<input id="envCCc" value="'+esc((p.cc||[]).join(', '))+'" style="width:100%">';
+  h+=rot('Assunto')+'<input id="envCAss" value="'+esc(p.assunto||'')+'" style="width:100%">';
+  h+=rot('Anexos')
+   + '<div style="border:1px solid var(--line);border-radius:8px;padding:7px 11px;background:#f8faf9;font-size:12.5px">'
+   + (e.pedidos||[]).map(x=>'<a href="actions/envio.php?baixar_pdf='+encodeURIComponent(x.coligada_cod+'|'+x.numero)
+       + '&me='+envMe()+'" target="_blank" style="color:var(--verde-d);text-decoration:none;margin-right:14px">'
+       + '<span class="material-icons" style="font-size:14px;vertical-align:-3px">picture_as_pdf</span> PC '
+       + esc(x.numero)+'.pdf</a>').join('')
+   + '</div>';
+  h+=rot('Mensagem (com a sua assinatura)')
+   + '<div style="border:1px solid var(--line);border-radius:10px;padding:16px 18px;background:#fff;max-height:340px;overflow:auto">'
+   + p.html+'</div>';
+  h+='<div id="envCMsg" class="dmini" style="margin-top:10px"></div>';
+  h+='<div class="bar" style="justify-content:space-between;gap:8px;margin-top:12px;flex-wrap:wrap">'
+   + '<span class="dmini" style="color:var(--muted)">Depois de enviado, estes pedidos entram no livro-caixa e '
+   + '<b>não voltam</b> para a fila.</span>'
+   + '<span class="bar" style="gap:8px"><button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" id="envCBtn" onclick="envEnviarConfirmado('+JSON.stringify(ch)+',0)">'
+   + '<span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar agora</button></span></div></div>';
+
+  dlgAbrir('Envio de Pedidos - '+esc(e.obra),'Conferir e enviar', h);
 }
 async function envEnviarConfirmado(ch, aceitaContaGeral){
-  const b=document.getElementById('envSendBtn'), m=document.getElementById('envSendMsg');
+  const b=document.getElementById('envCBtn'), m=document.getElementById('envCMsg');
+  const g=x=>((document.getElementById(x)||{}).value||'').trim();
+  const para=g('envCPara');
+  if(!para || para.indexOf('@')<0){ if(m) m.innerHTML='<span style="color:var(--pend)">Destinatário inválido.</span>'; return; }
   if(b){ b.disabled=true; b.textContent='Enviando...'; }
   try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
        body:JSON.stringify({acao:'enviar',me:(EU&&EU.bitrix_id),me_nome:(EU&&EU.nome)||'',
-                            envelope:ch, aceito_conta_geral:aceitaContaGeral?1:0})})).json();
+                            envelope:ch, para:para, cc:g('envCCc'), assunto:g('envCAss'),
+                            aceito_conta_geral:aceitaContaGeral?1:0})})).json();
     if(r.error){
       if(b){ b.disabled=false; b.innerHTML='<span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar agora'; }
       if(String(r.error).indexOf('CONTA_GERAL:')===0){
@@ -7913,15 +7942,12 @@ async function envEnviarConfirmado(ch, aceitaContaGeral){
     }
     closeModal(true);
     toast('Enviado para '+r.para+' — '+r.pedidos+' pedido(s), '+r.anexos+' anexo(s)');
-    ENV.d=null; envCarregar();
+    ENV.sel={}; ENV.d=null; envCarregar();
   }catch(err){
     if(b){ b.disabled=false; b.textContent='Enviar agora'; }
     if(m) m.innerHTML='<span style="color:var(--pend)">Falha: '+esc(err.message)+'</span>';
   }
 }
-
-
-
 /* ---- ENVIO DE TESTE ----
    Unico lugar do sistema que dispara e-mail de verdade hoje, e mesmo assim so para um endereco
    DIGITADO na hora — nunca escolhido de uma lista de fornecedores, para que um clique errado nao

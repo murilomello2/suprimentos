@@ -899,6 +899,15 @@ try {
             throw new Exception('CONTA_GERAL:O remetente seria ' . $cfg['user'] . ', que é a conta das cotações. '
                 . 'Os fornecedores conhecem pedidos@caprem.com.br. Configure a conta dos pedidos, ou confirme para enviar assim mesmo.');
 
+        /* ---- campos que a tela de conferencia deixou editar ----
+           O destinatario e a copia podem ser ajustados na hora (o contato do fornecedor mudou, quer
+           incluir o engenheiro nesta compra). Mas o que vale e o que SAIU: o livro-caixa grava o
+           endereco efetivamente usado, nao o que estava configurado — senao "para quem foi este
+           pedido?" teria duas respostas diferentes. */
+        $paraEdit = trim((string)($in['para'] ?? ''));
+        $ccEdit   = $in['cc'] ?? null;          // null = usa o configurado; array/string = substitui
+        $assEdit  = trim((string)($in['assunto'] ?? ''));
+
         $tipo = $env['destino'] === 'obra' ? 'obra' : 'fornecedor';
         $pcs  = array_map(fn($p) => $p['numero'], $env['pedidos']);
         $c = ec_compor($pdo, (int)$env['ficha_id'], $tipo, [
@@ -912,6 +921,27 @@ try {
         if (!$c) throw new Exception('não consegui montar o e-mail desta obra');
         if (!empty($c['faltando']))
             throw new Exception('A obra ' . $env['obra'] . ' ainda não tem: ' . implode(', ', $c['faltando']) . '.');
+
+        /* Aplica as edicoes DEPOIS de compor, e valida cada endereco. Um e-mail invalido aqui
+           derruba o envio inteiro — melhor do que mandar para um endereco que nao existe. */
+        $paraFinal = $paraEdit !== '' ? $paraEdit : $env['para'];
+        if (!filter_var($paraFinal, FILTER_VALIDATE_EMAIL))
+            throw new Exception('Destinatário inválido: ' . $paraFinal);
+        $trocouDestino = (strcasecmp($paraFinal, (string)$env['para']) !== 0);
+
+        $ccFinal = $c['cc'];
+        if ($ccEdit !== null) {
+            $bruto = is_array($ccEdit) ? $ccEdit : preg_split('/[;,\s]+/', (string)$ccEdit);
+            $ccFinal = [];
+            foreach ((array)$bruto as $e) {
+                $e = trim((string)$e);
+                if ($e === '') continue;
+                if (!filter_var($e, FILTER_VALIDATE_EMAIL)) throw new Exception('Cópia inválida: ' . $e);
+                if (strcasecmp($e, $paraFinal) !== 0) $ccFinal[] = $e;
+            }
+            $ccFinal = array_values(array_unique($ccFinal));
+        }
+        $assuntoFinal = $assEdit !== '' ? $assEdit : $c['assunto'];
 
         $anexos = [];
         foreach ($env['pedidos'] as $p) {
@@ -933,8 +963,9 @@ try {
         foreach ($env['pedidos'] as $p) {
             try {
                 $ins->execute([$p['coligada_cod'], $p['numero'], $env['destino'], $env['obra'], (int)$env['ficha_id'],
-                               $env['forn_cod'], $env['forn_nome'], $env['para'], implode(', ', $c['cc']),
-                               $c['assunto'], implode(', ', array_map(fn($a) => $a['nome'], $anexos)),
+                               $env['forn_cod'], $env['forn_nome'], $paraFinal, implode(', ', $ccFinal),
+                               $assuntoFinal . ($trocouDestino ? '  [destinatário alterado no envio]' : ''),
+                               implode(', ', array_map(fn($a) => $a['nome'], $anexos)),
                                (float)$p['valor'], $agora, $quem, $quemNome]);
                 $reservados[] = $p;
             } catch (Throwable $e) {
@@ -950,8 +981,8 @@ try {
                  'user' => $cfg['user'], 'senha' => $cfg['senha'], 'from' => $cfg['user'],
                  'from_name' => trim((string)($cfg['nome'] ?? '')) ?: 'Caprem - Suprimentos'];
         $ok = false; $erro = '';
-        try { list($ok, $erro) = smtp_send($cfgS, $env['para'], $c['assunto'], $c['html'], $anexos, [],
-                                           ['html' => true, 'cc' => $c['cc']]); }
+        try { list($ok, $erro) = smtp_send($cfgS, $paraFinal, $assuntoFinal, $c['html'], $anexos, [],
+                                           ['html' => true, 'cc' => $ccFinal]); }
         catch (Throwable $e) { $erro = $e->getMessage(); }
 
         // ---- 4. confirma, ou desfaz para o pedido voltar à fila
@@ -963,7 +994,7 @@ try {
         }
         if (!$ok) throw new Exception('O servidor de e-mail recusou: ' . ($erro ?: 'motivo não informado') . '. Nada foi enviado e os pedidos continuam na fila.');
 
-        echo json_encode(['ok' => true, 'para' => $env['para'], 'cc' => count($c['cc']),
+        echo json_encode(['ok' => true, 'para' => $paraFinal, 'cc' => count($ccFinal),
                           'pedidos' => count($env['pedidos']), 'anexos' => count($anexos),
                           'de' => $cfg['user'], 'conta' => $cfg['fonte']], JSON_UNESCAPED_UNICODE); exit;
     }

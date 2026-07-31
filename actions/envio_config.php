@@ -197,6 +197,64 @@ function ec_conta_efetiva() {
     return ['fonte' => 'nenhuma'];
 }
 
+/**
+ * TESTAR A CONEXÃO — responde "por onde este servidor consegue mandar e-mail?".
+ *
+ * Existe porque o sintoma engana: quando a saída está bloqueada, o erro que chega é "Connection
+ * timed out (110)", que soa como porta errada e manda conferir os números — que estavam certos.
+ * O que decide é medir de dentro do servidor, e três medidas bastam:
+ *   1. o host configurado, do jeito exato que o mailer conecta;
+ *   2. o MTA local, que o bloqueio de saída quase sempre deixa passar;
+ *   3. um host externo qualquer, que separa "a hospedagem não deixa sair" de "este host não responde".
+ *
+ * Não autentica e não envia: só abre o socket, lê o banner e desliga.
+ */
+function ec_testar_conexao($conta = null) {
+    $c = is_array($conta) ? $conta : ec_conta_efetiva();
+    $host = trim((string)($c['host'] ?? '')) ?: 'mail.caprem.com.br';
+    $port = (int)($c['port'] ?? 465) ?: 465;
+
+    $abrir = function ($tr, $h, $p, $to = 5) {
+        $t0 = microtime(true);
+        $ctx = stream_context_create(['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]]);
+        $en = 0; $es = '';
+        $fp = @stream_socket_client("$tr://$h:$p", $en, $es, $to, STREAM_CLIENT_CONNECT, $ctx);
+        $ms = (int)round((microtime(true) - $t0) * 1000);
+        if (!$fp) return ['ok' => false, 'ms' => $ms, 'errno' => (int)$en, 'erro' => trim((string)$es)];
+        stream_set_timeout($fp, $to);
+        $b = @fgets($fp, 512);
+        @fwrite($fp, "QUIT\r\n"); @fclose($fp);
+        return ['ok' => true, 'ms' => $ms, 'banner' => substr(trim((string)$b), 0, 120) ?: null];
+    };
+
+    $t = [];
+    $t['configurado'] = ['alvo' => "ssl://$host:$port", 'o_que' => 'o servidor da conta, do jeito que o envio conecta']
+                      + $abrir('ssl', $host, $port);
+    $t['local']       = ['alvo' => 'ssl://127.0.0.1:465', 'o_que' => 'o servidor de e-mail desta propria maquina']
+                      + $abrir('ssl', '127.0.0.1', 465);
+    $t['externo']     = ['alvo' => 'ssl://smtp.gmail.com:465', 'o_que' => 'referencia: a hospedagem deixa sair?']
+                      + $abrir('ssl', 'smtp.gmail.com', 465);
+
+    if (!empty($t['configurado']['ok'])) {
+        $v = ['nivel' => 'ok', 'texto' => 'A conexão com ' . $host . ':' . $port . ' funciona. Se o envio ainda falhar, '
+              . 'aí sim é usuário ou senha.'];
+    } elseif (empty($t['externo']['ok']) && !empty($t['local']['ok'])) {
+        $v = ['nivel' => 'bloqueio', 'texto' => 'Esta hospedagem bloqueia SMTP de saída: nem ' . $host . ' nem um servidor '
+              . 'externo qualquer respondem, mas o servidor de e-mail desta própria máquina responde na hora. '
+              . 'Não é senha nem porta — nenhum ajuste aqui resolve. É preciso liberar a saída na porta ' . $port
+              . ' para o servidor de ' . $host . ', ou usar uma conta hospedada nesta mesma máquina.'];
+    } elseif (empty($t['configurado']['ok']) && !empty($t['externo']['ok'])) {
+        $v = ['nivel' => 'host', 'texto' => 'A saída funciona (um servidor externo respondeu), mas ' . $host . ':' . $port
+              . ' não responde. O endereço do servidor está errado, ou ele está barrando esta máquina.'];
+    } else {
+        $v = ['nivel' => 'nada', 'texto' => 'Nenhuma conexão de e-mail funciona a partir deste servidor, nem para a própria '
+              . 'máquina. Isso é a hospedagem, não a configuração.'];
+    }
+    return ['conta' => ['user' => (string)($c['user'] ?? ''), 'fonte' => (string)($c['fonte'] ?? ''),
+                        'host' => $host, 'port' => $port],
+            'testes' => array_values($t), 'veredito' => $v];
+}
+
 function ec_conta_publica() {
     $c = ec_conta(); $g = ec_conta_efetiva();
     return ['host' => $c['host'] ?? 'mail.caprem.com.br', 'port' => (int)($c['port'] ?? 465),
@@ -400,6 +458,11 @@ try {
                 }
             }
             http_response_code(404); echo json_encode(['error' => 'sem assinatura']); exit;
+        }
+        if (isset($_GET['testar_conexao'])) {
+            $perms = user_perms($pdo, $_GET['me'] ?? null);
+            if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores.']); exit; }
+            echo json_encode(ec_testar_conexao(), JSON_UNESCAPED_UNICODE); exit;
         }
         if (isset($_GET['previa'])) {
             /* A prévia da tela de Envio manda os PCs e o fornecedor DE VERDADE; a de Configurações

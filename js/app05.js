@@ -1138,9 +1138,31 @@ async function pmConta(){ const w=document.getElementById('pmContaWrap'); if(!w)
    + cotFld('Usuario (remetente dos pedidos)','<input id="pmcUser" value="'+esc(c.user||'')+'" placeholder="pedidos@caprem.com.br" style="width:100%">')
    + cotFld('Nome que aparece para o fornecedor','<input id="pmcNome" value="'+esc(c.nome||'Caprem - Suprimentos')+'" style="width:100%">')+'</div>';
   h+='<div style="margin-top:9px;max-width:420px">'+cotFld('Senha (vazio mantem a atual)','<input id="pmcSenha" type="password" autocomplete="new-password" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" style="width:100%">')+'</div>';
-  h+='<div style="margin-top:11px"><button class="btn-prim" onclick="pmContaSalvar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar conta dos pedidos</button></div>';
+  h+='<div class="bar" style="margin-top:11px;gap:8px"><button class="btn-prim" onclick="pmContaSalvar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar conta dos pedidos</button>'
+   + '<button class="btn-ghost" onclick="pmContaTestar()" title="abre a conexao com o servidor de e-mail e mostra o que responde — nao envia nada">'
+   + '<span class="material-icons" style="font-size:15px;vertical-align:-3px">network_check</span> Testar conexão</button></div>';
+  h+='<div id="pmcTeste"></div>';
   h+='<div class="dmini" style="margin-top:10px;color:var(--muted)">A senha fica num arquivo do servidor protegido (403), nunca no banco e nunca no que chega ao navegador.</div>';
   w.innerHTML=h;
+}
+/* Testar a conexao ANTES de descobrir pelo pedido que nao saiu. O sintoma engana: saida bloqueada
+   chega como "Connection timed out", que parece porta errada e faz conferir numeros que ja estavam
+   certos. Aqui vem o veredito em portugues, com as tres medidas por tras dele. */
+async function pmContaTestar(){
+  const w=document.getElementById('pmcTeste'); if(!w) return;
+  w.innerHTML='<div class="dmini" style="margin-top:10px;color:var(--muted)">Abrindo as conexões… (até 15s)</div>';
+  let r; try{ r=await (await fetch('actions/envio_config.php?testar_conexao=1&me='+(EU&&EU.bitrix_id))).json(); }
+  catch(e){ w.innerHTML='<div class="dmini" style="margin-top:10px;color:var(--pend)">Falha: '+esc(e.message)+'</div>'; return; }
+  if(r.error){ w.innerHTML='<div class="dmini" style="margin-top:10px;color:var(--pend)">'+esc(r.error)+'</div>'; return; }
+  const cor={ok:'var(--ok)',bloqueio:'#c0392b',host:'var(--dourado)',nada:'#c0392b'}[r.veredito.nivel]||'var(--muted)';
+  w.innerHTML='<div style="margin-top:12px;border-left:4px solid '+cor+';background:#f8faf9;padding:10px 13px;border-radius:0 8px 8px 0">'
+   + '<div style="font-size:12.5px;margin-bottom:8px">'+esc(r.veredito.texto)+'</div>'
+   + '<table class="dtable" style="width:100%;font-size:11.5px"><tbody>'
+   + r.testes.map(t=>'<tr><td style="width:16px">'+(t.ok?'<span class="material-icons" style="font-size:14px;color:var(--ok)">check_circle</span>'
+       :'<span class="material-icons" style="font-size:14px;color:#c0392b">cancel</span>')+'</td>'
+   + '<td><b>'+esc(t.alvo)+'</b><div class="muted">'+esc(t.o_que)+'</div></td>'
+   + '<td style="text-align:right;white-space:nowrap">'+(t.ok?(t.ms+' ms'):esc(t.erro+' ('+t.errno+')'))+'</td></tr>').join('')
+   + '</tbody></table></div>';
 }
 async function pmContaSalvar(){ const g=x=>((document.getElementById(x)||{}).value||'').trim();
   if(!g('pmcUser')){ toast('Informe o e-mail remetente'); return; }

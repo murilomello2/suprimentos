@@ -23,7 +23,21 @@ function smtp_send($cfg, $to, $subject, $body, $attachments = [], $extraHeaders 
 
     $ctx = stream_context_create(['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]]);
     $fp = @stream_socket_client('ssl://' . $host . ':' . $port, $en, $es, 20, STREAM_CLIENT_CONNECT, $ctx);
-    if (!$fp) return [false, 'conexão SMTP falhou: ' . $es . ' (' . $en . ')'];
+    if (!$fp) {
+        /* O socket nem chegou a existir, então usuário e senha NÃO foram usados — o erro não pode
+           soar como credencial. 110 (ETIMEDOUT) é o pacote saindo e ninguém respondendo: rota de
+           saída bloqueada. 111 (ECONNREFUSED) é o outro lado dizendo não. Dizer só "Connection timed
+           out (110)" mandou o comprador conferir número de porta, com os números certos, à toa. */
+        $dica = '';
+        if ((int)$en === 110) {
+            $dica = ' — este servidor não alcança ' . $host . ':' . $port . '. Os pacotes saem e ninguém'
+                  . ' responde, o que é a rota de saída da hospedagem, não a senha nem a porta.'
+                  . ' Use "Testar conexão" em Configurações › E-mail do pedido para ver por onde há saída.';
+        } elseif ((int)$en === 111) {
+            $dica = ' — ' . $host . ' respondeu recusando a porta ' . $port . '.';
+        }
+        return [false, 'conexão SMTP falhou: ' . $es . ' (' . $en . ')' . $dica];
+    }
     stream_set_timeout($fp, 20);
     $read = function () use ($fp) { $data = ''; while (($line = fgets($fp, 515)) !== false) { $data .= $line; if (strlen($line) < 4 || $line[3] === ' ') break; } return $data; };
     $cmd  = function ($c) use ($fp, $read) { fwrite($fp, $c . "\r\n"); return $read(); };

@@ -15,6 +15,7 @@
 header('Content-Type: application/json; charset=utf-8');
 set_time_limit(300);
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/config.php';   // SOLIC_SUPABASE_* p/ o sync do TOTVS
 
 function forn_editor($pdo, $me) {
     $p = user_perms($pdo, $me);
@@ -370,6 +371,73 @@ try {
         $q = $pdo->prepare("SELECT id, nome, cnpj, cidade, contato, telefone, email, totvs_cod FROM cot_fornecedor WHERE id=?");
         $q->execute([$id]);
         echo json_encode(['ok'=>true, 'criado'=>$criado, 'fornecedor'=>$q->fetch()], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+
+    /**
+     * SINCRONIZA o espelho de fornecedores direto do Supabase (tabela `fornecedores`, vinda do TOTVS).
+     *
+     * O TOTVS é a base oficial e o CODCFO é a chave — a mesma que amarra o pedido ao cadastro. Esta
+     * tabela traz o que faltava para o PDF: endereço, número, bairro, CEP, complemento, cidade/UF.
+     *
+     * O QUE ELA **NÃO** É BOA: telefone vem 0% preenchido e e-mail 2%. Então contato, telefone e
+     * e-mail continuam saindo do NOSSO cadastro — o Murilo foi explícito: "tirando o e-mail de envio,
+     * que na nossa tabela está mais atualizado".
+     *
+     * Lê em páginas (?offset=) para não estourar o tempo do PHP com 13 mil linhas de uma vez.
+     */
+    if ($acao === 'sync_totvs') {
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
+        $mysql = defined('DB_DRIVER') && DB_DRIVER === 'mysql';
+        if ($mysql) {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS totvs_fornecedor (
+                codcfo VARCHAR(20) NOT NULL, cnpj VARCHAR(24), nome VARCHAR(255), fantasia VARCHAR(255),
+                cidade VARCHAR(120), uf VARCHAR(4), email VARCHAR(255), atualizado VARCHAR(40),
+                PRIMARY KEY (codcfo), KEY idx_tf_cnpj (cnpj), KEY idx_tf_nome (nome)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        } else {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS totvs_fornecedor (codcfo TEXT PRIMARY KEY, cnpj TEXT, nome TEXT, fantasia TEXT, cidade TEXT, uf TEXT, email TEXT, atualizado TEXT)");
+        }
+        // colunas de endereço são ADITIVAS: a tabela já existia sem elas
+        $tem = [];
+        try {
+            if ($mysql) { foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='totvs_fornecedor'") as $c) $tem[strtolower($c['COLUMN_NAME'])] = 1; }
+            else { foreach ($pdo->query("PRAGMA table_info(totvs_fornecedor)") as $c) $tem[strtolower($c['name'])] = 1; }
+        } catch (Throwable $e) {}
+        foreach (['endereco'=>'VARCHAR(255)', 'numero'=>'VARCHAR(40)', 'bairro'=>'VARCHAR(160)',
+                  'cep'=>'VARCHAR(20)', 'complemento'=>'VARCHAR(255)', 'telefone'=>'VARCHAR(60)'] as $c => $t)
+            if (!isset($tem[$c])) { try { $pdo->exec("ALTER TABLE totvs_fornecedor ADD COLUMN $c " . ($mysql ? $t : 'TEXT')); } catch (Throwable $e) {} }
+
+        $off = max(0, (int)($in['offset'] ?? 0));
+        $lim = 1000;
+        $url = SOLIC_SUPABASE_URL . '/rest/v1/fornecedores?select=*&order=codcfo.asc&limit=' . $lim . '&offset=' . $off;
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER=>1, CURLOPT_TIMEOUT=>50, CURLOPT_HTTPHEADER=>[
+            'apikey: ' . SOLIC_SUPABASE_KEY, 'Authorization: Bearer ' . SOLIC_SUPABASE_KEY, 'Accept: application/json']]);
+        $body = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+        if ($code !== 200) throw new Exception('Supabase HTTP ' . $code . ' — ' . substr((string)$body, 0, 120));
+        $linhas = json_decode((string)$body, true) ?: [];
+
+        $cols = 'cnpj,nome,fantasia,cidade,uf,email,endereco,numero,bairro,cep,complemento,telefone,atualizado';
+        $ins = $pdo->prepare("INSERT INTO totvs_fornecedor (codcfo,$cols) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        $upd = $pdo->prepare("UPDATE totvs_fornecedor SET cnpj=?,nome=?,fantasia=?,cidade=?,uf=?,email=?,endereco=?,numero=?,bairro=?,cep=?,complemento=?,telefone=?,atualizado=? WHERE codcfo=?");
+        $n = 0; $agora = date('c');
+        $pdo->beginTransaction();
+        foreach ($linhas as $l) {
+            $cod = ltrim(preg_replace('/\D+/', '', (string)($l['codcfo'] ?? '')), '0');
+            if ($cod === '') continue;
+            $a = [(string)($l['cnpj'] ?? ''), (string)($l['nome'] ?? ''), (string)($l['nome_fantasia'] ?? ''),
+                  (string)($l['cidade'] ?? ''), (string)($l['estado'] ?? ''), (string)($l['email'] ?? ''),
+                  (string)($l['endereco'] ?? ''), (string)($l['numero'] ?? ''), (string)($l['bairro'] ?? ''),
+                  (string)($l['cep'] ?? ''), (string)($l['complemento'] ?? ''), (string)($l['telefone'] ?? ''), $agora];
+            $upd->execute(array_merge($a, [$cod]));
+            if (!$upd->rowCount()) { try { $ins->execute(array_merge([$cod], $a)); } catch (Throwable $e) {} }
+            $n++;
+        }
+        $pdo->commit();
+        $tot = (int)$pdo->query("SELECT COUNT(*) FROM totvs_fornecedor")->fetchColumn();
+        echo json_encode(['ok'=>true, 'lidos'=>count($linhas), 'gravados'=>$n, 'total'=>$tot,
+                          'proximo'=>(count($linhas) >= $lim ? ($off + $lim) : null)]); exit;
     }
 
     if ($acao === 'importar_totvs') {

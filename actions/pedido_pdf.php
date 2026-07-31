@@ -37,7 +37,7 @@ require_once __DIR__ . '/../includes/pdf_pedido.php';
 function pp_fornecedor($pdo, $cnpj, $cod, $nome) {
     $cn = preg_replace('/\D+/', '', (string)$cnpj);
     $cc = ltrim(preg_replace('/\D+/', '', (string)$cod), '0');
-    $r = ['contato' => '', 'fone' => '', 'email' => '', 'cidade' => '', 'uf' => '', 'endereco' => ''];
+    $r = ['contato' => '', 'fone' => '', 'email' => '', 'cidade' => '', 'uf' => '', 'endereco' => '', 'cep' => ''];
     try {
         $st = $pdo->prepare("SELECT contato, telefone, email, cidade FROM cot_fornecedor
                              WHERE REPLACE(REPLACE(REPLACE(REPLACE(cnpj,'.',''),'/',''),'-',''),' ','')=? LIMIT 1");
@@ -48,14 +48,29 @@ function pp_fornecedor($pdo, $cnpj, $cod, $nome) {
         }
     } catch (Throwable $e) {}
     try {
+        $sel = "SELECT cidade, uf, email, endereco, numero, bairro, cep, complemento, telefone FROM totvs_fornecedor";
         $st = $cc !== ''
-            ? $pdo->prepare("SELECT cidade, uf, email FROM totvs_fornecedor WHERE codcfo=? LIMIT 1")
-            : $pdo->prepare("SELECT cidade, uf, email FROM totvs_fornecedor
-                             WHERE REPLACE(REPLACE(REPLACE(REPLACE(cnpj,'.',''),'/',''),'-',''),' ','')=? LIMIT 1");
+            ? $pdo->prepare("$sel WHERE codcfo=? LIMIT 1")
+            : $pdo->prepare("$sel WHERE REPLACE(REPLACE(REPLACE(REPLACE(cnpj,'.',''),'/',''),'-',''),' ','')=? LIMIT 1");
         $st->execute([$cc !== '' ? $cc : $cn]);
-        if ($x = $st->fetch())
-            foreach (['cidade', 'uf', 'email'] as $k)
-                if ($r[$k] === '' && trim((string)$x[$k]) !== '') $r[$k] = trim((string)$x[$k]);
+        if ($x = $st->fetch()) {
+            /* Endereço é do TOTVS e ponto: é a base oficial e vem 95% preenchida. E-mail e telefone
+               só entram se o nosso cadastro não tiver — lá o dado é mais novo (o do TOTVS vem 0% de
+               telefone e 2% de e-mail). */
+            $end = trim(trim((string)($x['endereco'] ?? '')) . ' ' . trim((string)($x['numero'] ?? '')));
+            $comp = trim((string)($x['complemento'] ?? ''));
+            if ($comp !== '') $end = trim($end . ' - ' . $comp);
+            $bai = trim((string)($x['bairro'] ?? ''));
+            if ($bai !== '') $end = trim($end . ' - ' . $bai);
+            if ($end !== '') $r['endereco'] = $end;
+            if (trim((string)($x['cep'] ?? '')) !== '') $r['cep'] = trim((string)$x['cep']);
+            foreach (['cidade', 'uf'] as $k)
+                if (trim((string)$x[$k]) !== '') $r[$k] = trim((string)$x[$k]);
+            foreach (['email', 'telefone'] as $k) {
+                $destino = $k === 'telefone' ? 'fone' : 'email';
+                if ($r[$destino] === '' && trim((string)($x[$k] ?? '')) !== '') $r[$destino] = trim((string)$x[$k]);
+            }
+        }
     } catch (Throwable $e) {}
     return $r;
 }

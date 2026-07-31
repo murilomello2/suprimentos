@@ -306,20 +306,28 @@ function pdf_pedido($p) {
         }
 
         /* ---- cartão do fornecedor (o dado que o comprador confere primeiro) ---- */
-        $alt = 62;
-        $d->cartao($ML, $y - $alt, $LARG, $alt, 5, $FUNDO, $LINHA);
-        $d->txt($ML + 14, $y - 15, 'FORNECEDOR', 6.5, true, $OURO, 0.9);
-        $d->txt($ML + 14, $y - 30, (string)($f['nome'] ?? ''), 11.5, true, $TINTA);
+        /* Três linhas: identificação, endereço (agora que o TOTVS entrega) e contato. */
         $li = [];
         if (!empty($f['cnpj']))    $li[] = 'CNPJ ' . $f['cnpj'];
         if (!empty($f['cod']))     $li[] = 'cód. TOTVS ' . $f['cod'];
-        if (!empty($f['cidade']))  $li[] = trim($f['cidade'] . (!empty($f['uf']) ? '/' . $f['uf'] : ''));
-        $d->txt($ML + 14, $y - 43, implode('   ·   ', $li), 8, false, $CINZA);
+        $lEnd = trim((string)($f['endereco'] ?? ''));
+        $lugar = trim((string)($f['cidade'] ?? '') . (!empty($f['uf']) ? '/' . $f['uf'] : ''));
+        if (!empty($f['cep'])) $lugar = trim($lugar . '   CEP ' . $f['cep']);
+        if ($lEnd !== '' && $lugar !== '') $lEnd .= '   ·   ' . $lugar;
+        elseif ($lEnd === '') $lEnd = $lugar;
         $li2 = [];
         if (!empty($f['contato'])) $li2[] = 'Contato: ' . $f['contato'];
         if (!empty($f['fone']))    $li2[] = $f['fone'];
         if (!empty($f['email']))   $li2[] = $f['email'];
-        $d->txt($ML + 14, $y - 54, implode('   ·   ', $li2), 8, false, $CINZA);
+        $nLin = 1 + ($lEnd !== '' ? 1 : 0) + ($li2 ? 1 : 0);
+        $alt = 34 + $nLin * 11;
+        $d->cartao($ML, $y - $alt, $LARG, $alt, 5, $FUNDO, $LINHA);
+        $d->txt($ML + 14, $y - 15, 'FORNECEDOR', 6.5, true, $OURO, 0.9);
+        $d->txt($ML + 14, $y - 30, (string)($f['nome'] ?? ''), 11.5, true, $TINTA);
+        $yy = $y - 43;
+        $d->txt($ML + 14, $yy, implode('   ·   ', $li), 8, false, $CINZA); $yy -= 11;
+        if ($lEnd !== '') { $d->txt($ML + 14, $yy, $lEnd, 8, false, $CINZA); $yy -= 11; }
+        if ($li2) $d->txt($ML + 14, $yy, implode('   ·   ', $li2), 8, false, $CINZA);
         // obra, no canto direito do cartão
         if (!empty($p['obra'])) {
             $d->txtDir($MR - 14, $y - 15, 'OBRA', 6.5, true, $OURO, 0.9);

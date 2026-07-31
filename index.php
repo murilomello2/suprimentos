@@ -7577,26 +7577,98 @@ async function envLiberar(col,num){
     toast('Liberado — voltou para a fila'); ENV.d=null; envCarregar(); }catch(e){ toast('Falha: '+e.message); }
 }
 
-/* ---- disparo: ainda NAO armado. Ver a mensagem do modal. ---- */
-function envEnviar(ch){ const e=envAchar(ch); envDisparoPendente(e?1:0, e?(e.pedidos||[]).length:0); }
-function envEnviarLote(){ const es=(ENV.d.envelopes||[]).filter(x=>!x.alerta);
-  envDisparoPendente(es.length, es.reduce((a,b)=>a+(b.pedidos||[]).length,0)); }
-function envDisparoPendente(n,pedidos){
-  dlgAbrir('Envio de Pedidos','O disparo ainda nao esta ligado',
-    '<div style="max-width:560px">'
-   + '<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:10px 13px;border-radius:0 8px 8px 0;font-size:13px;margin-bottom:12px">'
-   + 'Voce clicou em enviar <b>'+n+' e-mail(s)</b> com <b>'+pedidos+' pedido(s)</b>. A fila, as travas e o texto ja estao prontos — '
-   + 'mas eu <b>nao disparei nada</b>, de proposito.</div>'
-   + '<div class="dmini" style="margin-bottom:8px">Faltam duas pecas, e as duas mexem com as suas regras:</div>'
-   + '<ol style="margin:0 0 12px 18px;font-size:13px;line-height:1.6">'
-   + '<li><b>O PDF do pedido.</b> Hoje ele e impresso do TOTVS a mao e salvo numa pasta. Enquanto o anexo vier de pasta, '
-   + 'um arquivo no lugar errado manda o pedido da obra A com o PDF da obra B — e a regra 2 cai. Precisamos ler o numero '
-   + '<i>de dentro</i> do PDF e conferir com a coligada, ou gerar o PDF aqui.</li>'
-   + '<li><b>A conta de envio.</b> O disparo vai sair de pedidos@caprem.com.br. Preciso do seu ok para ligar, '
-   + 'e vale trocar a senha antes — ela passou pelo nosso chat.</li></ol>'
-   + '<div class="dmini" style="color:var(--muted)">Enquanto isso, use esta tela para conferir a fila e ajustar o texto em Configuracoes &gt; E-mail do pedido.</div>'
-   + '<div class="bar" style="justify-content:flex-end;margin-top:14px"><button class="btn-prim" onclick="closeModal(true)">Entendi</button></div></div>');
+/* ---- O DISPARO ----
+   A confirmacao mostra EXATAMENTE o que vai sair: para quem, com copia para quem, quantos anexos,
+   quanto e quem assina. Nada de "deseja continuar?" — o que se confirma tem de estar a vista.
+   As travas sao reconferidas NO SERVIDOR; isto aqui e so a tela. */
+function envEnviar(ch){
+  const e=envAchar(ch); if(!e) return;
+  if((e.sem_pdf||0)>0){ toast('Faltam '+e.sem_pdf+' PDF(s) — gere antes de enviar'); return; }
+  const pcs=(e.pedidos||[]).map(p=>p.numero).join(', ');
+  const linhas=[['Para', e.destino==='obra'?(e.para+'   (copia para lancamento)'):e.para],
+                ['Obra', e.obra], ['Pedidos', pcs],
+                ['Anexos', (e.pedidos||[]).length+' PDF(s)'],
+                ['Valor', BRL(e.valor)],
+                ['Assina', e.assina||'(sem comprador na ficha da obra)']];
+  dlgAbrir('Envio de Pedidos - '+esc(e.obra),'Confirmar o envio',
+    '<div style="max-width:600px">'
+   + (e.alerta?('<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:9px 12px;'
+      + 'border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:12px"><b>Este pedido tem sinal de material ja em obra.</b> '
+      + 'Se for regularizacao, feche isto e use <b>So para a obra</b> — o fornecedor pode entregar de novo.</div>'):'')
+   + '<table cellpadding="0" cellspacing="0" style="font-size:13px;margin-bottom:12px">'
+   + linhas.map(function(x){ return '<tr><td style="padding:2px 12px 2px 0;color:#666;white-space:nowrap">'
+       + x[0]+':</td><td style="padding:2px 0"><b>'+esc(String(x[1]))+'</b></td></tr>'; }).join('')
+   + '</table>'
+   + '<div class="dmini" style="color:var(--muted);margin-bottom:12px">Depois de enviado, estes pedidos entram no '
+   + 'livro-caixa e <b>nao voltam</b> para a fila. Um reenvio passa a exigir justificativa.</div>'
+   + '<div id="envSendMsg" class="dmini" style="margin-bottom:8px"></div>'
+   + '<div class="bar" style="justify-content:flex-end;gap:8px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" id="envSendBtn" onclick="envEnviarConfirmado(' + JSON.stringify(ch) + ',0)">'
+   + '<span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar agora</button></div></div>');
 }
+async function envEnviarConfirmado(ch, aceitaContaGeral){
+  const b=document.getElementById('envSendBtn'), m=document.getElementById('envSendMsg');
+  if(b){ b.disabled=true; b.textContent='Enviando...'; }
+  try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({acao:'enviar',me:(EU&&EU.bitrix_id),me_nome:(EU&&EU.nome)||'',
+                            envelope:ch, aceito_conta_geral:aceitaContaGeral?1:0})})).json();
+    if(r.error){
+      if(b){ b.disabled=false; b.innerHTML='<span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar agora'; }
+      if(String(r.error).indexOf('CONTA_GERAL:')===0){
+        if(m) m.innerHTML='<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:9px 12px;border-radius:0 8px 8px 0">'
+          + esc(String(r.error).slice(12))+'</div>';
+        if(b) b.setAttribute('onclick','envEnviarConfirmado('+JSON.stringify(ch)+',1)');
+        return;
+      }
+      if(m) m.innerHTML='<span style="color:var(--pend)">'+esc(r.error)+'</span>';
+      return;
+    }
+    closeModal(true);
+    toast('Enviado para '+r.para+' — '+r.pedidos+' pedido(s), '+r.anexos+' anexo(s)');
+    ENV.d=null; envCarregar();
+  }catch(err){
+    if(b){ b.disabled=false; b.textContent='Enviar agora'; }
+    if(m) m.innerHTML='<span style="color:var(--pend)">Falha: '+esc(err.message)+'</span>';
+  }
+}
+function envEnviarLote(){
+  const es=(ENV.d.envelopes||[]).filter(function(x){ return !x.alerta && !(x.sem_pdf||0); });
+  if(!es.length){ toast('Nenhum e-mail pronto: ou tem alerta, ou falta PDF'); return; }
+  const nPed=es.reduce(function(a,b){ return a+(b.pedidos||[]).length; },0);
+  dlgAbrir('Envio de Pedidos','Enviar '+es.length+' e-mail(s)',
+    '<div style="max-width:620px"><div class="dmini" style="margin-bottom:10px">Vao sair <b>'+es.length
+   + '</b> e-mail(s) com <b>'+nPed+'</b> pedido(s). Os que tem alerta de regularizacao ou PDF faltando <b>ficam de fora</b>.</div>'
+   + '<div style="max-height:250px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:12px">'
+   + '<table class="dtable" style="width:100%;font-size:12px"><tbody>'
+   + es.map(function(x){ return '<tr><td>'+esc(x.obra)+'</td><td>'+esc(x.forn_nome)+'</td>'
+       + '<td class="muted">'+esc(x.para)+'</td><td style="text-align:right">'+(x.pedidos||[]).length+' PC</td></tr>'; }).join('')
+   + '</tbody></table></div>'
+   + '<div id="envLoteMsg" class="dmini" style="margin-bottom:8px"></div>'
+   + '<div class="bar" style="justify-content:flex-end;gap:8px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" id="envLoteBtn" onclick="envEnviarLoteConfirmado()">Enviar os '+es.length+'</button></div></div>');
+}
+async function envEnviarLoteConfirmado(){
+  const es=(ENV.d.envelopes||[]).filter(function(x){ return !x.alerta && !(x.sem_pdf||0); });
+  const b=document.getElementById('envLoteBtn'), m=document.getElementById('envLoteMsg');
+  if(b) b.disabled=true;
+  let ok=0; const err=[];
+  for(let i=0;i<es.length;i++){
+    if(m) m.textContent='Enviando '+(i+1)+' de '+es.length+'...';
+    try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
+         body:JSON.stringify({acao:'enviar',me:(EU&&EU.bitrix_id),me_nome:(EU&&EU.nome)||'',
+                              envelope:es[i].chave, aceito_conta_geral:1})})).json();
+      if(r.error) err.push(es[i].obra+' / '+es[i].forn_nome+': '+String(r.error).replace('CONTA_GERAL:',''));
+      else ok++;
+    }catch(e){ err.push(es[i].obra+': '+e.message); }
+  }
+  closeModal(true);
+  toast(ok+' e-mail(s) enviado(s)'+(err.length?(' — '+err.length+' com problema'):''));
+  if(err.length) setTimeout(function(){ toast(err[0]); },2600);
+  ENV.d=null; envCarregar();
+}
+
 
 
 /* ---- ENVIO DE TESTE ----

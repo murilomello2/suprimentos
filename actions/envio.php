@@ -383,7 +383,9 @@ function env_fila($pdo, $filtroObra = '') {
     $fornMail  = env_forn_email($pdo);
 
     $jaEnviado = [];
-    foreach ($pdo->query("SELECT coligada_cod, pedido_numero, destino, enviado_em FROM envio_registro") as $r)
+    /* 'enviando' é o estado de dúvida (o processo morreu entre reservar e confirmar): o pedido não
+       volta à fila, porque pode ter saído. Fica para alguém confirmar. */
+    foreach ($pdo->query("SELECT coligada_cod, pedido_numero, destino, enviado_em, resultado FROM envio_registro") as $r)
         $jaEnviado[env_chave($r['coligada_cod'], $r['pedido_numero'])][$r['destino']] = $r['enviado_em'];
     $decisoes = [];
     foreach ($pdo->query("SELECT coligada_cod, pedido_numero, decisao, motivo, por_nome FROM envio_decisao") as $d)
@@ -854,6 +856,113 @@ try {
                           'de' => $cfg['user'], 'conta' => $cfg['fonte'],
                           'assunto' => '[TESTE] ' . $c['assunto'], 'anexos' => count($anexos),
                           'faltando' => $c['faltando']], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+
+    /**
+     * ============================ O DISPARO ============================
+     *
+     * ORDEM DOS PASSOS, e por quê:
+     *
+     *  1. Reconfere TODAS as travas AQUI, do zero. Nada do que o navegador mandou é aceito como
+     *     verdade — nem a obra, nem o destinatário, nem o "está aprovado". O cliente diz apenas
+     *     QUAL envelope; o servidor decide se ele pode sair.
+     *  2. GRAVA no livro-caixa com resultado='enviando' ANTES de falar com o SMTP. O UNIQUE
+     *     (coligada, número, destino) é o que impede o segundo envio mesmo com dois cliques ao
+     *     mesmo tempo — em duas abas, em dois computadores, no mesmo segundo.
+     *  3. Dispara.
+     *  4. Marca 'ok' — ou apaga a marca, se o SMTP recusou, para o pedido voltar à fila.
+     *
+     * Se o processo morrer entre 2 e 4, a linha fica em 'enviando': o pedido NÃO volta à fila (pode
+     * ter saído) e NÃO conta como enviado (pode não ter saído). Fica visível como "confirmar" para
+     * alguém decidir. É o único estado seguro para uma dúvida — as duas alternativas automáticas
+     * quebrariam a regra 3 ou a 4.
+     */
+    if ($acao === 'enviar') {
+        $chave = trim((string)($in['envelope'] ?? ''));
+        if ($chave === '') throw new Exception('envelope não identificado');
+
+        /* Recalcula a fila do zero: é a única forma de garantir que o que vai sair é o que as
+           travas aprovam AGORA, e não o que a tela mostrava há dez minutos. */
+        $fila = env_fila($pdo);
+        $env = null;
+        foreach ($fila['envelopes'] as $e) if ($e['chave'] === $chave) { $env = $e; break; }
+        if (!$env) throw new Exception('Este e-mail não está mais na fila — pode já ter sido enviado, arquivado ou bloqueado. Recarregue a tela.');
+
+        if (!empty($env['sem_pdf']))
+            throw new Exception('Faltam ' . $env['sem_pdf'] . ' PDF(s). Gere-os antes de enviar.');
+
+        $cfg = ec_conta_efetiva();
+        if (empty($cfg['user']) || empty($cfg['senha']))
+            throw new Exception('A conta de envio não está configurada (Configurações › E-mail do pedido › Conta de envio).');
+        if (($cfg['fonte'] ?? '') !== 'pedidos' && empty($in['aceito_conta_geral']))
+            throw new Exception('CONTA_GERAL:O remetente seria ' . $cfg['user'] . ', que é a conta das cotações. '
+                . 'Os fornecedores conhecem pedidos@caprem.com.br. Configure a conta dos pedidos, ou confirme para enviar assim mesmo.');
+
+        $tipo = $env['destino'] === 'obra' ? 'obra' : 'fornecedor';
+        $pcs  = array_map(fn($p) => $p['numero'], $env['pedidos']);
+        $c = ec_compor($pdo, (int)$env['ficha_id'], $tipo, [
+            'pcs' => $pcs, 'fornecedor' => $env['forn_nome'],
+            'sigla' => trim((string)($env['pedidos'][0]['coligada'] ?? '')),
+            'comprador' => $env['assina'],
+        ]);
+        if (!$c) throw new Exception('não consegui montar o e-mail desta obra');
+        if (!empty($c['faltando']))
+            throw new Exception('A obra ' . $env['obra'] . ' ainda não tem: ' . implode(', ', $c['faltando']) . '.');
+
+        $anexos = [];
+        foreach ($env['pedidos'] as $p) {
+            $cam = env_pdf_caminho($p['coligada_cod'], $p['numero']);
+            if (!is_file($cam)) throw new Exception('o PDF do pedido ' . $p['numero'] . ' sumiu do servidor');
+            $anexos[] = ['nome' => 'PC ' . str_pad($p['numero'], 6, '0', STR_PAD_LEFT) . '.pdf',
+                         'mime' => 'application/pdf', 'conteudo' => file_get_contents($cam)];
+        }
+
+        $quem = (string)($in['me'] ?? ''); $quemNome = (string)($in['me_nome'] ?? '');
+        $agora = date('c');
+        $ins = $pdo->prepare("INSERT INTO envio_registro
+            (coligada_cod,pedido_numero,destino,obra_nome,obra_ficha_id,fornecedor_cod,fornecedor_nome,
+             para,cc,assunto,anexos,valor,enviado_em,enviado_por,enviado_por_nome,resultado)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'enviando')");
+
+        // ---- 2. reserva no livro-caixa. Se o UNIQUE recusar, alguém já está enviando ou já enviou.
+        $reservados = [];
+        foreach ($env['pedidos'] as $p) {
+            try {
+                $ins->execute([$p['coligada_cod'], $p['numero'], $env['destino'], $env['obra'], (int)$env['ficha_id'],
+                               $env['forn_cod'], $env['forn_nome'], $env['para'], implode(', ', $c['cc']),
+                               $c['assunto'], implode(', ', array_map(fn($a) => $a['nome'], $anexos)),
+                               (float)$p['valor'], $agora, $quem, $quemNome]);
+                $reservados[] = $p;
+            } catch (Throwable $e) {
+                foreach ($reservados as $r)
+                    $pdo->prepare("DELETE FROM envio_registro WHERE coligada_cod=? AND pedido_numero=? AND destino=? AND resultado='enviando'")
+                        ->execute([$r['coligada_cod'], $r['numero'], $env['destino']]);
+                throw new Exception('O pedido ' . $p['numero'] . ' já está registrado como enviado. Nada foi disparado.');
+            }
+        }
+
+        // ---- 3. dispara
+        $cfgS = ['host' => $cfg['host'] ?? 'mail.caprem.com.br', 'port' => (int)($cfg['port'] ?? 465),
+                 'user' => $cfg['user'], 'senha' => $cfg['senha'], 'from' => $cfg['user'],
+                 'from_name' => trim((string)($cfg['nome'] ?? '')) ?: 'Caprem - Suprimentos'];
+        $ok = false; $erro = '';
+        try { list($ok, $erro) = smtp_send($cfgS, $env['para'], $c['assunto'], $c['html'], $anexos, [],
+                                           ['html' => true, 'cc' => $c['cc']]); }
+        catch (Throwable $e) { $erro = $e->getMessage(); }
+
+        // ---- 4. confirma, ou desfaz para o pedido voltar à fila
+        foreach ($env['pedidos'] as $p) {
+            if ($ok) $pdo->prepare("UPDATE envio_registro SET resultado='ok', enviado_em=? WHERE coligada_cod=? AND pedido_numero=? AND destino=?")
+                         ->execute([date('c'), $p['coligada_cod'], $p['numero'], $env['destino']]);
+            else $pdo->prepare("DELETE FROM envio_registro WHERE coligada_cod=? AND pedido_numero=? AND destino=? AND resultado='enviando'")
+                     ->execute([$p['coligada_cod'], $p['numero'], $env['destino']]);
+        }
+        if (!$ok) throw new Exception('O servidor de e-mail recusou: ' . ($erro ?: 'motivo não informado') . '. Nada foi enviado e os pedidos continuam na fila.');
+
+        echo json_encode(['ok' => true, 'para' => $env['para'], 'cc' => count($c['cc']),
+                          'pedidos' => count($env['pedidos']), 'anexos' => count($anexos),
+                          'de' => $cfg['user'], 'conta' => $cfg['fonte']], JSON_UNESCAPED_UNICODE); exit;
     }
 
     /* Definir o marco zero é decisão de administrador e muda o que a automação enxerga. */

@@ -260,7 +260,10 @@ async function envEnviar(ch){
   const pcs=(e.pedidos||[]).map(p=>p.numero).join(',');
   const u='actions/envio_config.php?previa='+e.ficha_id+'&tipo='+(e.destino==='obra'?'obra':'fornecedor')
         + '&pcs='+encodeURIComponent(pcs)+'&fornecedor='+encodeURIComponent(e.forn_nome)
-        + '&sigla='+encodeURIComponent((e.pedidos[0]||{}).coligada||'')
+        /* A sigla vem PRONTA do servidor. Montar aqui a partir de e.pedidos[0].coligada dava vazio
+           (a base nao preenche o nome da coligada) e o assunto saia "Pedido de Compra -  - Diamond".
+           E como esta tela devolve o assunto como override, o furo ia junto no envio. */
+        + '&sigla='+encodeURIComponent((e.pedidos[0]||{}).coligada_sigla||'')
         + '&me='+envMe();
   let p; try{ p=await (await fetch(u)).json(); }catch(err){ toast('Falha: '+err.message); closeModal(true); return; }
   if(p.error){ toast(p.error); closeModal(true); return; }

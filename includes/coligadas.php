@@ -66,6 +66,26 @@ function coligadas_map() {
 function coligada_nome($cod) { $m = coligadas_map(); $c = (int)$cod; return isset($m[$c]) ? $m[$c]['nome'] : ''; }
 function coligada_fantasia($cod) { $m = coligadas_map(); $c = (int)$cod; return isset($m[$c]) ? $m[$c]['fantasia'] : ''; }
 function coligada_cnpj($cod) { $m = coligadas_map(); $c = (int)$cod; return isset($m[$c]) ? $m[$c]['cnpj'] : ''; }
+/**
+ * NOME CURTO da coligada, para o assunto do e-mail de pedido ("Pedido de Compra - {sigla} - ...").
+ *
+ * A razão social não cabe: "Pedido de Compra - PEDRA AZUL EMPREENDIMENTO IMOBILIARIO SPE LTDA -
+ * Diamond - 1706" enche a linha do Outlook antes de chegar no número do pedido, que é o que o
+ * fornecedor procura. E a fantasia às vezes já traz o codinome da obra colado ("PEDRA AZUL -
+ * DIAMOND"), o que repetiria a obra que vem logo em seguida no assunto.
+ *
+ * Então: corta no primeiro " - " (tira codinome e "ENCERRADA") e apara o final societário.
+ */
+function coligada_sigla($cod) {
+    $f = coligada_fantasia($cod);
+    if (trim($f) === '') $f = coligada_nome($cod);
+    $s = trim(explode(' - ', str_replace('  ', ' ', $f))[0]);
+    // sufixo societário: sempre no fim, e só ele — "CPR10 CORDEIROPOLIS ... SPE LTDA" vira "CPR10 CORDEIROPOLIS"
+    /* Alternativa, NAO classe de caractere: "Á" em UTF-8 sao dois bytes e [AÁ] sem /u casaria um
+       byte solto no meio da letra. E /u nao serve aqui porque nem toda razao social chega em UTF-8. */
+    $s = preg_replace('/\s+(?:EMPREENDIMENTOS?)?\s*(?:IMOBILIARIOS?|IMOBILI' . "\xC3\x81" . 'RIOS?)?\s*(?:SPE)?\s*(?:LTDA|S\.?\/?A\.?|EIRELI|ME)\.?$/i', '', $s);
+    return trim($s) !== '' ? trim($s) : trim($f);
+}
 /** Lista das coligadas p/ dropdown (ordenada pela fantasia). */
 function coligadas_list() { $out = []; foreach (coligadas_map() as $cod => $c) $out[] = ['cod' => $cod, 'nome' => $c['nome'], 'fantasia' => $c['fantasia'], 'cnpj' => $c['cnpj']]; usort($out, fn($a, $b) => strcasecmp($a['fantasia'], $b['fantasia'])); return $out; }
 /** Centros de custo da CAPRETZ (a compra "guarda-chuva": a obra tem coligada própria, mas as SC/PC saem pela CAPRETZ+ccusto). */

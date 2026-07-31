@@ -410,7 +410,12 @@ function env_fila($pdo, $filtroObra = '') {
                 $peds[$k] = [
                     'chave' => $k,
                     'coligada_cod' => (string)($l['coligada_cod'] ?? ''),
-                    'coligada' => (string)($l['coligada'] ?? ''),
+                    /* A base traz coligada_cod sempre e o NOME quase nunca (nos 32 pedidos da fila,
+                       zero tinham). Sem o de-para o assunto saia "Pedido de Compra -  - Diamond -
+                       1706", com o buraco no lugar da empresa que esta comprando — em todo e-mail.
+                       Mesmo fallback que a Busca de Pedidos ja usava. */
+                    'coligada' => (trim((string)($l['coligada'] ?? '')) ?: coligada_nome((int)($l['coligada_cod'] ?? 0))),
+                    'coligada_sigla' => coligada_sigla((int)($l['coligada_cod'] ?? 0)),
                     'numero' => ltrim((string)($l['pedido_numero'] ?? ''), '0'),
                     'data' => (string)($l['pedido_data'] ?? ''),
                     'obra' => bp_obra_label($l['obra_efetiva_nome'] ?? '', $l['obra_efetiva_fonte'] ?? '',
@@ -919,7 +924,8 @@ try {
         $pcs  = array_map(fn($p) => $p['numero'], $env['pedidos']);
         $c = ec_compor($pdo, (int)$env['ficha_id'], $tipo, [
             'pcs' => $pcs, 'fornecedor' => $env['forn_nome'],
-            'sigla' => trim((string)($env['pedidos'][0]['coligada'] ?? '')),
+            /* Sai do CÓDIGO, que a base sempre traz — não do nome, que ela quase nunca traz. */
+            'sigla' => coligada_sigla((int)($env['pedidos'][0]['coligada_cod'] ?? 0)),
             'comprador' => $env['assina'],
             /* Assina QUEM ESTA ENVIANDO. O fornecedor responde para quem mandou — nao para o
                "responsavel pela obra", que pode nem estar na mesa hoje. */

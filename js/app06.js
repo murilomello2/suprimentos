@@ -213,13 +213,14 @@ async function envVerEmail(ch){ const e=envAchar(ch); if(!e) return;
 
 /* ---- decisoes humanas: sempre com motivo, sempre com nome ---- */
 function envDecidir(ch,dec){ const e=envAchar(ch); if(!e) return;
-  const TIT={segurar:'Segurar estes pedidos', so_obra:'Regularizacao - nao enviar ao fornecedor', arquivado:'Arquivar estes pedidos'};
+  const TIT={segurar:'Segurar estes pedidos', so_obra:'Regularização — não enviar ao fornecedor', arquivado:'Arquivar estes pedidos'};
   /* A 1a frase do so_obra e "isto nao envia nada agora": o titulo antigo ("marcar como so para a
-     obra") somado a um dialogo que descrevia o e-mail fazia a tela parecer um envio. */
+     obra") somado a um dialogo que descrevia o e-mail fazia a tela parecer um envio.
+     Texto ACENTUADO de proposito: tem que ler igual ao dialogo da acao em lote. */
   const TXT={segurar:'Eles continuam visiveis na aba <b>Segurados</b> ate alguem liberar. Nao somem da fila.',
-             so_obra:'<b>Isto nao envia nada agora.</b> Marca o pedido como regularizacao de material que ja foi entregue: '
-                   + 'o fornecedor deixa de ser destinatario (nao corre o risco de entregar de novo) e o pedido passa a '
-                   + 'compor <b>um unico e-mail por obra</b>, para lancamento. Esse e-mail fica na fila e voce envia depois.',
+             so_obra:'<b>Isto não envia nada agora.</b> Marca o pedido como regularização de material que já foi entregue: '
+                   + 'o fornecedor deixa de ser destinatário (não corre o risco de entregar de novo) e o pedido passa a '
+                   + 'compor <b>um único e-mail por obra</b>, para lançamento. Esse e-mail fica na fila e você envia depois.',
              arquivado:'Somem da fila e das contagens, mas <b>nada e apagado</b>: o pedido continua no TOTVS e volta pela aba <b>Arquivados</b>.'};
   const tit=TIT[dec]||'Decidir', txt=TXT[dec]||'';
   dlgAbrir('Envio de Pedidos - '+esc(e.obra), tit,

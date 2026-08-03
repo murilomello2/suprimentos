@@ -243,6 +243,11 @@ function cotProposta(pid){
   COT.prop={id:pid||0, precos:{}};
   (d.itens||[]).forEach(it=>{ const pi=ex?(ex.itens||{})[it.id]:null; COT.prop.precos[it.id]={preco_unit:pi&&pi.preco_unit!=null?pi.preco_unit:'',preco_total:pi&&pi.preco_total!=null?pi.preco_total:''}; });
   COT.prop.fornecedor_nome=ex?ex.fornecedor_nome:''; COT.prop.prazo=ex?ex.prazo:''; COT.prop.observacoes=ex?ex.observacoes:'';
+  /* EDITANDO: restaura o vínculo com o cadastro. Sem isto, abrir e salvar uma proposta já
+     vinculada a transformava em "manual" — o UPDATE grava fornecedor_id=NULL quando não vem nada.
+     Guarda também o _fornPick para a regra de "trocou o texto, perdeu o vínculo" valer aqui. */
+  COT.prop.fornecedor_id = ex && ex.fornecedor_id ? ex.fornecedor_id : null;
+  COT.prop._fornPick = COT.prop.fornecedor_id ? {id:COT.prop.fornecedor_id, nome:ex.fornecedor_nome} : null;
   COT.mode='proposta'; cotRenderProposta();
 }
 // Autocomplete próprio do fornecedor (substitui o <datalist> nativo, que renderizava preto e filtrava mal).
@@ -250,6 +255,10 @@ function cotProposta(pid){
 let _prFT=null;
 function cotFornSearch(el){
   COT.prop.fornecedor_nome=el.value;                 // mantém o texto livre p/ salvar
+  /* Se o texto deixou de ser exatamente o do fornecedor escolhido, o vínculo morre. Sem isto,
+     escolher "Mauro Terraplenagem" e depois editar o nome salvaria a proposta com o ID do Mauro. */
+  const esc0=COT.prop._fornPick;
+  if(esc0 && (el.value||'').trim()!==esc0.nome){ COT.prop.fornecedor_id=null; COT.prop._fornPick=null; }
   const q=(el.value||'').trim();
   clearTimeout(_prFT);
   _prFT=setTimeout(async()=>{
@@ -270,6 +279,12 @@ function cotFornPick(i){
   const f=(COT.prop._fornList||[])[i]; if(!f)return;
   const el=document.getElementById('prF'); if(el)el.value=f.nome;
   COT.prop.fornecedor_nome=f.nome;
+  /* GUARDA O VÍNCULO. Antes daqui só o NOME era levado: a proposta nascia sem fornecedor_id e o
+     card da Concorrência virava "fornecedor manual — sem cadastro p/ editar", com e-mail, telefone
+     e CNPJ em "faltando", mesmo o fornecedor tendo cadastro completo. Guardamos o objeto inteiro
+     porque o convite (cot_insert_convidados) também aceita categoria/contato/e-mail/telefone. */
+  COT.prop.fornecedor_id=f.id||null;
+  COT.prop._fornPick=f;
   const drop=document.getElementById('prFDrop'); if(drop){ drop.style.display='none'; drop.innerHTML=''; }
 }
 function cotFornBlur(){ setTimeout(()=>{ const drop=document.getElementById('prFDrop'); if(drop) drop.style.display='none'; },160); }
@@ -309,12 +324,22 @@ async function cotSalvarProposta(){
   const itens=Object.entries(COT.prop.precos).map(([iid,p])=>({cotacao_item_id:Number(iid),preco_unit:p.preco_unit!==''?Number(p.preco_unit):'',preco_total:p.preco_total!==''?Number(p.preco_total):''}));
   const body=COT.prop.revisarDe
     ? {acao:'proposta_revisar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:COT.prop.revisarDe,fornecedor_nome:forn,fornecedor_id:COT.prop.fornecedor_id||undefined,prazo:val('prP'),observacoes:val('prO'),itens}
-    : {acao:'proposta',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:COT.prop.id||undefined,fornecedor_nome:forn,prazo:val('prP'),observacoes:val('prO'),itens};
+    // fornecedor_id ia SÓ no ramo de revisão; sem ele aqui, toda proposta nova saía "manual"
+    : {acao:'proposta',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:COT.prop.id||undefined,fornecedor_nome:forn,fornecedor_id:COT.prop.fornecedor_id||undefined,prazo:val('prP'),observacoes:val('prO'),itens};
   COT._savingProp=true; const _sb=document.getElementById('prSalvarBtn'); if(_sb){_sb.disabled=true;_sb.style.opacity='.6';}
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error); COT._savingProp=false; if(_sb){_sb.disabled=false;_sb.style.opacity='';} return;}
     // garante que o fornecedor da proposta esteja na Concorrência (p/ editar/excluir a proposta ali)
-    try{ const nz=s=>String(s||'').trim().toLowerCase(); if(!((COT.cur&&COT.cur.convidados)||[]).some(cv=>nz(cv.fornecedor_nome)===nz(forn))) await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'convidar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,convidados:[{nome:forn}]})}); }catch(e){}
+    /* leva o CADASTRO junto (id/categoria/contato/e-mail/telefone) quando veio da busca — era só
+       {nome} e por isso o card nascia sem dado nenhum, com os três "faltando" em vermelho */
+    try{ const nz=s=>String(s||'').trim().toLowerCase();
+      if(!((COT.cur&&COT.cur.convidados)||[]).some(cv=>nz(cv.fornecedor_nome)===nz(forn))){
+        const fp=COT.prop._fornPick;
+        const conv = (fp && nz(fp.nome)===nz(forn))
+          ? {nome:fp.nome, id:fp.id, categoria:fp.categoria||'', contato:fp.contato||'', email:fp.email||'', telefone:fp.telefone||''}
+          : {nome:forn};
+        await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'convidar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,convidados:[conv]})});
+      } }catch(e){}
     // aplica a equalização pré-preenchida pela IA nesta proposta (mescla com o que já houver, sem apagar valores manuais)
     if(COT.prop.eqIA && Object.keys(COT.prop.eqIA).length && r.proposta_id){
       const src=(COT.cur.propostas||[]).find(p=>p.id===r.proposta_id), base=(src&&src.equaliza)?Object.assign({},src.equaliza):{};
@@ -328,7 +353,9 @@ async function cotSalvarProposta(){
 // abre o form pré-preenchido com a proposta VIGENTE p/ registrar a próxima revisão (a anterior fica no histórico)
 function cotPropostaRevisar(pid){
   const d=COT.cur, ex=(d.propostas||[]).find(p=>String(p.id)===String(pid)); if(!ex){toast('Proposta não encontrada');return;}   // id STRING no MySQL
-  COT.prop={id:0, revisarDe:pid, revisaoBase:ex.revisao||0, fornecedor_id:ex.fornecedor_id||null, precos:{}};
+  // _fornPick p/ a regra "trocou o texto, perdeu o vínculo" valer também na revisão
+  COT.prop={id:0, revisarDe:pid, revisaoBase:ex.revisao||0, fornecedor_id:ex.fornecedor_id||null, precos:{},
+            _fornPick: ex.fornecedor_id?{id:ex.fornecedor_id, nome:ex.fornecedor_nome}:null};
   (d.itens||[]).forEach(it=>{ const pi=(ex.itens||{})[it.id]; COT.prop.precos[it.id]={preco_unit:pi&&pi.preco_unit!=null?pi.preco_unit:'',preco_total:pi&&pi.preco_total!=null?pi.preco_total:''}; });
   COT.prop.fornecedor_nome=ex.fornecedor_nome; COT.prop.prazo=ex.prazo||''; COT.prop.observacoes=ex.observacoes||'';
   COT.mode='proposta'; cotRenderProposta();
@@ -513,11 +540,13 @@ function cotIARender(){ const s=COT.ia; if(!s)return; let ov=document.getElement
 async function cotIAExecutar(){ const s=COT.ia; if(!s||!s.sel.length||s.busy)return; s.busy=true; cotIARender();
   try{ const r=await (await fetch('actions/cotacao_ia.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'preencher',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,fornecedor_id:s.fornId,fornecedor_nome:s.fornNome,anexo_ids:s.sel})})).json();
     if(r.error){ toast(r.error); s.busy=false; cotIARender(); return; }
-    const fn=s.fornNome; cotIAFechar(); cotIAAplicar(fn,r.draft,r);
+    const fn=s.fornNome; cotIAFechar(); cotIAAplicar(fn,r.draft,r,s.fornId);   // leva o id: a proposta da IA também tem que nascer vinculada
   }catch(e){ toast('Falha: '+e.message); s.busy=false; cotIARender(); } }
-async function cotIAAplicar(fornNome,draft,meta){ const d=COT.cur; draft=draft||{}; const nz=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+async function cotIAAplicar(fornNome,draft,meta,fornId){ const d=COT.cur; draft=draft||{}; const nz=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
   const ex=(d.propostas||[]).find(p=>nz(p.fornecedor_nome)===nz(fornNome));   // já tem proposta? edita; senão cria
-  COT.prop={id:ex?ex.id:0, precos:{}};
+  const fidIA = fornId || (ex&&ex.fornecedor_id) || null;
+  COT.prop={id:ex?ex.id:0, precos:{}, fornecedor_id:fidIA,
+            _fornPick: fidIA?{id:fidIA, nome:fornNome}:null};
   (d.itens||[]).forEach(it=>{ COT.prop.precos[it.id]={preco_unit:'',preco_total:''}; });
   const byId={}; (draft.itens||[]).forEach(x=>{ if(x&&x.item_id!=null)byId[x.item_id]=x; });
   let preench=0;

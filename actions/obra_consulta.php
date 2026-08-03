@@ -28,6 +28,18 @@ require_once __DIR__ . '/api.php';              // traz db.php/cronograma/solic 
 function oc_out($d) { echo json_encode($d, JSON_UNESCAPED_UNICODE); exit; }
 function oc_erro($msg, $http = 400) { http_response_code($http); oc_out(['ok' => false, 'error' => $msg]); }
 
+/**
+ * Paginação. `por_pagina=0` devolve a lista INTEIRA — é o modo que as telas da obra usam.
+ * Por quê: busca, filtros e ordenação delas são client-side e precisam varrer tudo. Se o servidor
+ * mandasse só uma fatia (o teto da API externa é 500, e o radar tem ~2.400 itens), o contador diria
+ * "de 500" enquanto o card diz 2.458, e filtrar percorreria um pedaço sem avisar ninguém.
+ * O teto de 500 continua valendo para a API externa, que é paginada de verdade.
+ */
+function oc_paginar($lista, $pagina, $porPagina) {
+    if ((int)$porPagina === 0) { $t = count($lista); return [$lista, $t, 1, 1, $t]; }
+    return api_paginar($lista, $pagina, $porPagina);
+}
+
 try {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') oc_erro('Esta tela é somente leitura.', 405);
 
@@ -38,7 +50,7 @@ try {
     $tela = trim((string)($_GET['tela'] ?? ''));
     $q    = api_nz($_GET['q'] ?? '');
     $pag  = (int)($_GET['pagina'] ?? 1);
-    $pp   = (int)($_GET['por_pagina'] ?? API_POR_PAGINA);
+    $pp   = isset($_GET["por_pagina"]) ? (int)$_GET["por_pagina"] : API_POR_PAGINA;
 
     /* Recorte por obra. O papel 'obra' vê TODAS (decisão de 31/jul), mas quem tiver ver_escopo='sel'
        — coordenador, por exemplo — continua limitado às obras dele. O recorte é do SERVIDOR: o filtro
@@ -101,7 +113,7 @@ try {
             if ($l['cotacao']) $cont['com_cotacao']++;
             if (!$l['data_em_obra']) $cont['sem_data']++;
         }
-        [$pagina, $total, $p, $paginas, $ppp] = api_paginar($linhas, $pag, $pp);
+        [$pagina, $total, $p, $paginas, $ppp] = oc_paginar($linhas, $pag, $pp);
         oc_out(['ok' => true, 'tela' => 'radar', 'total' => $total, 'pagina' => $p, 'paginas' => $paginas,
                 'por_pagina' => $ppp, 'gerado_em' => date('c'), 'parcial' => !empty($faltando),
                 'obras_nao_processadas' => $faltando, 'contadores' => $cont,
@@ -135,7 +147,7 @@ try {
             elseif ($c['status'] === 'finalizada') $cont['finalizadas']++;
             if ((int)$c['propostas_recebidas'] === 0) $cont['sem_proposta']++;
         }
-        [$pagina, $total, $p, $paginas, $ppp] = api_paginar($lista, $pag, $pp);
+        [$pagina, $total, $p, $paginas, $ppp] = oc_paginar($lista, $pag, $pp);
         oc_out(['ok' => true, 'tela' => 'cotacoes', 'total' => $total, 'pagina' => $p, 'paginas' => $paginas,
                 'por_pagina' => $ppp, 'gerado_em' => date('c'), 'contadores' => $cont,
                 'criadores' => array_keys($criadores), 'categorias' => array_keys($cats), 'dados' => $pagina]);
@@ -184,7 +196,7 @@ try {
             if ($d !== null) { $soma += $d; $n++; if ($d > 15) $cont['paradas15']++; if ($d > 30) $cont['paradas30']++; }
         }
         $cont['media_dias'] = $n ? round($soma / $n) : 0;
-        [$pagina, $total, $p, $paginas, $ppp] = api_paginar($lista, $pag, $pp);
+        [$pagina, $total, $p, $paginas, $ppp] = oc_paginar($lista, $pag, $pp);
         oc_out(['ok' => true, 'tela' => 'solicitacoes', 'total' => $total, 'pagina' => $p, 'paginas' => $paginas,
                 'por_pagina' => $ppp, 'gerado_em' => date('c'), 'contadores' => $cont,
                 'compradores' => array_keys($comps), 'dados' => $pagina]);

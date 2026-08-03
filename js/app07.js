@@ -38,7 +38,9 @@ async function ovRadarLoad(recarregar){
   const w=document.getElementById('ovRadarWrap'); if(!w) return;
   w.innerHTML='<div class="dempty">Lendo o radar de aquisições…</div>';
   const f=OV.radar.filt;
-  const p=new URLSearchParams({tela:'radar', me:decodeURIComponent(ovMe()), por_pagina:'500'});
+  /* por_pagina=0 = a lista INTEIRA. Busca, filtros e ordenação abaixo são client-side e têm que
+     varrer tudo; com fatia do servidor o contador diria "de 500" e o card, 2.458. */
+  const p=new URLSearchParams({tela:'radar', me:decodeURIComponent(ovMe()), por_pagina:'0'});
   if(f.obra) p.set('obra_id', f.obra);
   if(recarregar) p.set('recarregar','1');
   try{

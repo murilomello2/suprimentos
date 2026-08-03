@@ -114,7 +114,7 @@ function ovRadarRender(){
     +'<div style="font-weight:700;font-size:12.5px">'+tit+'</div>'
     +'<div class="dmini" style="color:var(--muted)">'+sub+'</div></div>';
 
-  let h=cotSecHead('radar','O que vem por aí',
+  let h=cotSecHead('radar','Status - Curva A e B',
     'itens de compra da obra: quando a cotação precisa começar e quando o material é necessário',
     '<button class="btn-ghost" style="padding:5px 12px" onclick="ovRadarLoad(1)" title="refaz a leitura ignorando o cache">'
     +'<span class="material-icons" style="font-size:15px;vertical-align:-3px">refresh</span> Atualizar</button>');
@@ -552,7 +552,7 @@ function ovScRender(){
     +'<div style="font-weight:700;font-size:12.5px">'+tit+'</div>'
     +'<div class="dmini" style="color:var(--muted)">'+sub+'</div></div>';
 
-  let h=cotSecHead('inbox','Solicitações de compra',
+  let h=cotSecHead('inbox','Solicitações Totvs',
     'o que a obra pediu e o que já virou cotação — o tempo em aberto é o que mais importa aqui',
     '<button class="btn-ghost" style="padding:5px 12px" onclick="OV.sc.d=null;ovScLoad()">'
     +'<span class="material-icons" style="font-size:15px;vertical-align:-3px">refresh</span> Atualizar</button>');

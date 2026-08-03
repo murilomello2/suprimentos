@@ -630,7 +630,7 @@ async function t20Reseed(){ if(!confirm('Apagar TODOS os grupos e voltar aos 20 
 
 const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['solicitacoes','Solicitações'],['envio','Envio de Pedidos'],['buscaped','Busca Pedidos'],['obras','Obras'],['oportunidades','Oportunidades'],['top20','Top 20'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações'],
   /* telas de CONSULTA da obra (papel 'obra') — leitura, sem nenhuma ação */
-  ['ov_radar','Obra: O que vem por aí'],['ov_cotacoes','Obra: Cotações'],['ov_solicitacoes','Obra: Solicitações']];
+  ['ov_radar','Obra: Status - Curva A e B'],['ov_cotacoes','Obra: Cotações'],['ov_solicitacoes','Obra: Solicitações Totvs']];
 const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',gerente:'Gerente de Suprimentos',comprador:'Suprimentos',coordenador:'Coordenador',obra:'Obra (consulta)',personalizado:'Personalizado'};
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},
@@ -690,10 +690,15 @@ function applyMenus(){
   // Admin com uma SELEÇÃO de menus definida → respeita a seleção dele (pode esconder itens de si mesmo p/ "pintar a tela").
   // Config e Radar IA ficam sempre visíveis p/ admin (evita se trancar / oráculo é leitura).
   const adminSel = IS_ADMIN && Array.isArray(EU&&EU.menus);
+  /* Papel de CONSULTA (obra) não entra na regra do "sempre visível". Ela nasceu quando todo mundo
+     no app era de suprimentos; para um engenheiro ela entregava a tela INTERNA de Solicitações
+     (que tem botões de ação), o cadastro de Obras e o Radar IA — nenhum deles marcado no cadastro
+     dele. Para esse papel vale só o que o admin marcou. */
+  const ehLeitor = ((EU&&EU.papel)||'')==='obra';
   document.querySelectorAll('.nav a[data-menu]').forEach(a=>{
     const m=a.getAttribute('data-menu');
     let show;
-    if(m==='oraculo'||m==='solicitacoes'||m==='obras') show = auth;        // Radar IA + Solicitações + Obras (referência) p/ todo autorizado
+    if(!ehLeitor && (m==='oraculo'||m==='solicitacoes'||m==='obras')) show = auth;  // p/ suprimentos, referência sempre à mão
     else if(m==='config') show = IS_ADMIN||allow.includes('config')||CAN_RESP;  // Config nunca some p/ admin
     else if(adminSel) show = allow.includes(m);                            // admin escolheu → mostra só o marcado
     else show = IS_ADMIN||allow.includes(m);

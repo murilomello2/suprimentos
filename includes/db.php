@@ -674,7 +674,12 @@ function db_schema($pdo) {
 
 /** Permissões efetivas de um usuário p/ enforcement NO SERVIDOR. Não cadastrado/sem id => nega. */
 function user_perms($pdo, $bid) {
-    $deny = ['autorizado'=>false,'perm_admin'=>0,'nome'=>'','editar_escopo'=>'nenhuma','obras_editar'=>[]];
+    /* ver_escopo/obras_ver entram aqui em 03/08/2026. Eles existiam no cadastro e na tela desde o
+       começo, mas NENHUM endpoint os recebia — esta função só devolvia o lado da EDIÇÃO. Resultado:
+       "Vê obras: Selecionadas" era um campo que não fazia nada, para qualquer papel. Sem eles no
+       $perms não há como o servidor recortar leitura por obra. Negado = o mais restritivo. */
+    $deny = ['autorizado'=>false,'perm_admin'=>0,'nome'=>'','editar_escopo'=>'nenhuma','obras_editar'=>[],
+             'ver_escopo'=>'sel','obras_ver'=>[]];
     $bid = trim((string)($bid ?? ''));               // BX24 às vezes manda id com espaço/quebra invisível
     if ($bid === '') return $deny;
     // compara já com TRIM dos dois lados (resiliente a id salvo/recebido com espaço)
@@ -685,6 +690,8 @@ function user_perms($pdo, $bid) {
     return ['autorizado'=>true,'perm_admin'=>(int)$u['perm_admin'],'nome'=>$u['nome'] ?? '','papel'=>$u['papel'] ?? '',
             'editar_escopo'=>$u['editar_escopo'] ?? 'nenhuma',
             'obras_editar'=>$u['obras_editar'] ? (json_decode($u['obras_editar'], true) ?: []) : [],
+            'ver_escopo'=>$u['ver_escopo'] ?? 'todas',
+            'obras_ver'=>$u['obras_ver'] ? (json_decode($u['obras_ver'], true) ?: []) : [],
             'perm_crono'=>(int)($u['perm_crono'] ?? 0),
             'perm_orcamento'=>(int)($u['perm_orcamento'] ?? 0),
             'perm_quant'=>(int)($u['perm_quant'] ?? 0),

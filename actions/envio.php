@@ -427,6 +427,11 @@ function env_fila($pdo, $filtroObra = '') {
                     'forn_razao' => trim((string)($l['fornecedor_nome'] ?? '')),
                     'forn_cnpj' => trim((string)($l['fornecedor_cnpj'] ?? '')),
                     'comprador' => trim((string)($l['pedido_usuario'] ?? '')),
+                    /* Status do pedido no TOTVS (A/B/C/F/G/N/Q/R/U). É campo do PEDIDO, replicado em
+                       cada linha — medido em 3.973 aprovados de 120 dias: ZERO variam entre as linhas
+                       do mesmo pedido. Por isso a 1ª linha basta. Hoje é SÓ EXIBIÇÃO: 59% da fila está
+                       'F' (faturado), ou seja, a nota já foi lançada e o pedido já morreu fora daqui. */
+                    'status' => strtoupper(trim((string)($l['pedido_status'] ?? ''))),
                     'valor' => 0.0, 'itens' => 0, 'produtos' => [], 'obs' => '',
                 ];
             }
@@ -516,10 +521,16 @@ function env_fila($pdo, $filtroObra = '') {
             'forn_nome' => $p['destino'] === 'obra' ? 'Obra / lançamento' : $p['forn_nome'],
             'forn_cod' => $p['forn_cod'], 'para' => $p['para'], 'assina' => $p['assina'],
             'pedidos' => [], 'valor' => 0.0, 'dias' => 0, 'alerta' => false, 'sem_pdf' => 0,
+            'n_faturado' => 0, 'n_parcial' => 0,
         ];
         $env[$ek]['pedidos'][] = $p;
         $env[$ek]['valor'] += $p['valor'];
         $env[$ek]['dias'] = max($env[$ek]['dias'], (int)$p['dias']);
+        /* FATURAMENTO (só contagem, ainda não decide nada). F=faturado, Q=quitado, B=baixado — o
+           pedido já terminou o ciclo no TOTVS. G=parcialmente faturado é o caso ambíguo: parte veio,
+           parte não; por isso conta separado e nunca se mistura com o resto. */
+        if (in_array($p['status'] ?? '', ['F', 'Q', 'B'], true)) $env[$ek]['n_faturado']++;
+        elseif (($p['status'] ?? '') === 'G')                    $env[$ek]['n_parcial']++;
         if ($p['regulariza']) $env[$ek]['alerta'] = true;
         if (!empty($p['forn_travado'])) $env[$ek]['forn_travado'] = true;
         if (empty($p['tem_pdf'])) $env[$ek]['sem_pdf'] = ($env[$ek]['sem_pdf'] ?? 0) + 1;
@@ -553,6 +564,12 @@ function env_fila($pdo, $filtroObra = '') {
                 'com_alerta' => count(array_filter($env, fn($e) => $e['alerta'])),
                 'sede' => count(array_filter($bloq, fn($b) => $b['bloqueio'] === 'sede')),
                 'arquivados' => $arquivados,
+                /* FATURADOS — por ora só medição, para conferir o número antes de deixar isto decidir
+                   qualquer coisa. 'envelopes_faturados' = e-mail em que TODOS os pedidos já foram
+                   faturados: é o candidato a não ir ao fornecedor de jeito nenhum. */
+                'pedidos_faturados' => count(array_filter($fila, fn($p) => in_array($p['status'] ?? '', ['F', 'Q', 'B'], true))),
+                'pedidos_parciais'  => count(array_filter($fila, fn($p) => ($p['status'] ?? '') === 'G')),
+                'envelopes_faturados' => count(array_filter($env, fn($e) => $e['n_faturado'] > 0 && $e['n_faturado'] === count($e['pedidos']))),
             ]];
 }
 

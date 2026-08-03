@@ -933,6 +933,12 @@ function envRender(){ const w=document.getElementById('envWrap'), d=ENV.d; if(!w
    + envCard('#c0392b', (c.bloqueados||0), 'Bloqueados', 'nao podem sair - veja o motivo', 'bloq', ENV.aba==='bloq')
    + envCard('var(--muted)', (c.segurados||0), 'Segurados', 'alguem segurou de proposito', 'seg', ENV.aba==='seg')
    + envCard('#6b7c93', (c.sede||0), 'Compras da sede', 'sem canteiro - fluxo proprio', 'bloq', false)
+   /* MEDIÇÃO (ainda não decide nada): quantos da fila já têm nota lançada no TOTVS. Mandar um
+      desses ao fornecedor é pedir segunda entrega — é o mesmo risco do "(LANÇAR)", só que aqui
+      vem do status do pedido, que é fato, e não de adivinhar pela descrição. */
+   + envCard('#8a6d1f', (c.pedidos_faturados||0), 'Ja faturados no TOTVS',
+       (c.envelopes_faturados||0)+' e-mail(s) so com faturados'
+       + ((c.pedidos_parciais||0)?(' - '+c.pedidos_parciais+' parcial(is)'):''), 'fila', false)
    + '</div>';
 
   /* Legenda das QUATRO bolinhas que aparecem em cada linha. A versao anterior explicava as regras
@@ -1549,6 +1555,20 @@ function envBarraSelecao(){
    + '</div>';
 }
 
+/* Selo de FATURAMENTO (TOTVS). Por enquanto é só informação — não muda o que o botão Enviar faz.
+   Faturado/quitado/baixado = a nota já foi lançada, o pedido já terminou fora daqui: mandar ao
+   fornecedor arrisca segunda entrega. Parcialmente faturado é o caso ambíguo e vem em cor própria. */
+function envSeloFat(e){
+  const f=+e.n_faturado||0, g=+e.n_parcial||0, n=(e.pedidos||[]).length;
+  if(!f&&!g) return '';
+  const txt=[];
+  if(f) txt.push(f===n?'já faturado no TOTVS':(f+' de '+n+' já faturado(s)'));
+  if(g) txt.push(g+' parcialmente faturado(s)');
+  return '<div class="dmini" style="color:#8a6d1f;font-weight:700" '
+       + 'title="status do pedido no TOTVS — se a nota já foi lançada, o fornecedor não deveria receber o pedido de novo">'
+       + '&#128220; '+txt.join(' · ')+'</div>';
+}
+
 /* Uma linha = um e-mail. */
 function envLinha(e){
   const atras=e.dias>(ENV.d.atraso_dias||3), semPdf=(e.sem_pdf||0)>0;
@@ -1567,6 +1587,7 @@ function envLinha(e){
    + '<div class="dmini" style="color:var(--muted)">'+(e.destino==='obra'?'<b>cópia p/ lançamento</b>':esc(e.para))+'</div>'
    + (e.alerta?'<div class="dmini" style="color:#c0392b;font-weight:700">&#9888; material pode já estar em obra — confira</div>':'')
    + (!e.alerta&&e.forn_travado?'<div class="dmini" style="color:#c0392b;font-weight:700">&#9888; CNPJ na observação — pode ser só para a obra</div>':'')
+   + envSeloFat(e)
    + '</td>';
   h+='<td style="padding:7px 8px;white-space:nowrap">'
    + (e.pedidos||[]).slice(0,4).map(p=>'<button class="btn-ghost" style="padding:1px 7px;font-size:11px;margin:1px'

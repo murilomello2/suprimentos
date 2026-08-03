@@ -720,7 +720,8 @@ function cfgTab(t){
   const eb=document.getElementById('cfgtab-email'); if(eb) eb.style.display = IS_ADMIN?'':'none';
   const pb=document.getElementById('cfgtab-pedmail'); if(pb) pb.style.display = IS_ADMIN?'':'none';
   const ac=document.getElementById('cfgtab-acessos'); if(ac) ac.style.display = IS_ADMIN?'':'none';
-  const permitida={users:IS_ADMIN, receitas:IS_ADMIN, resp:canR, email:IS_ADMIN, pedmail:IS_ADMIN, acessos:IS_ADMIN};
+  const ak=document.getElementById('cfgtab-api'); if(ak) ak.style.display = IS_ADMIN?'':'none';
+  const permitida={users:IS_ADMIN, receitas:IS_ADMIN, resp:canR, email:IS_ADMIN, pedmail:IS_ADMIN, acessos:IS_ADMIN, api:IS_ADMIN};
   if(!permitida[t]) t = IS_ADMIN?'users':(canR?'resp':'users');
   document.getElementById('cfg-users').style.display = t==='users'?'':'none';
   document.getElementById('cfg-receitas').style.display = t==='receitas'?'':'none';
@@ -728,14 +729,117 @@ function cfgTab(t){
   const ce=document.getElementById('cfg-email'); if(ce) ce.style.display = t==='email'?'':'none';
   const cp=document.getElementById('cfg-pedmail'); if(cp) cp.style.display = t==='pedmail'?'':'none';
   const ca=document.getElementById('cfg-acessos'); if(ca) ca.style.display = t==='acessos'?'':'none';
+  const ck=document.getElementById('cfg-api'); if(ck) ck.style.display = t==='api'?'':'none';
   const ab=document.getElementById('cfgAddBtn'); if(ab) ab.style.display = (t==='users'&&IS_ADMIN)?'':'none';
   const lb=document.getElementById('cfgLoteBtn'); if(lb) lb.style.display = (t==='users'&&IS_ADMIN)?'':'none';
-  ['users','resp','receitas','pedmail','email','acessos'].forEach(x=>{ const b=document.getElementById('cfgtab-'+x); if(b){ b.style.background = x===t?'var(--verde)':''; b.style.color = x===t?'#fff':''; } });
+  ['users','resp','receitas','pedmail','email','acessos','api'].forEach(x=>{ const b=document.getElementById('cfgtab-'+x); if(b){ b.style.background = x===t?'var(--verde)':''; b.style.color = x===t?'#fff':''; } });
   if(t==='receitas') renderReceitas();
   if(t==='resp') renderRespLote();
   if(t==='email') cfgEmailLoad();
   if(t==='pedmail') pmLoad();
   if(t==='acessos') cfgAcessosLoad();
+  if(t==='api') cfgApiLoad();
+}
+
+/* ===== Config » Chaves de API =====
+   A API (actions/api.php) é SOMENTE LEITURA e serve sistemas externos — hoje o Cockpit de Obras.
+   O segredo aparece UMA ÚNICA VEZ, na criação: depois só fica no arquivo do servidor
+   (data/.api_keys.json, fora do git). Não existe "ver de novo" de propósito — se perdeu, revoga e
+   cria outra. É por isso que esta tela mostra só os 6 últimos caracteres.
+   Uma chave dá acesso a TODOS os dados de suprimentos de TODAS as obras: trate como senha. */
+let APIK=null;
+async function cfgApiLoad(){
+  const w=document.getElementById('cfgApiWrap'); if(!w) return;
+  w.innerHTML='<div class="dempty">Carregando chaves…</div>';
+  try{
+    const r=await (await fetch('actions/api.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({me:(EU&&EU.bitrix_id),acao:'chave_listar'})})).json();
+    if(r.error){ w.innerHTML='<div class="dempty">'+esc(r.error)+'</div>'; return; }
+    APIK=r.chaves||[]; cfgApiRender();
+  }catch(e){ w.innerHTML='<div class="dempty">Falha: '+esc(e.message)+'</div>'; }
+}
+function cfgApiRender(){
+  const w=document.getElementById('cfgApiWrap');
+  const ativas=(APIK||[]).filter(c=>!c.revogada);
+  let h=cotSecHead('vpn_key','Chaves de API',
+    'acesso de LEITURA aos dados de suprimentos por sistemas externos — trate cada chave como uma senha',
+    '<button class="btn-prim" onclick="cfgApiCriar()" style="padding:5px 13px">'
+    +'<span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Nova chave</button>');
+  h+='<div class="dmini" style="margin:0 0 12px;padding:9px 12px;border-left:4px solid var(--dourado);background:#fdf9ec;border-radius:0 8px 8px 0">'
+   + 'A chave vale para <b>todas as obras</b> e para todos os recursos de leitura da API. Ela deve viver '
+   + '<b>no servidor</b> do sistema que consome (nunca no JavaScript do navegador, nunca em query string). '
+   + 'O segredo aparece <b>uma única vez</b>, na criação — guarde na hora.</div>';
+  if(!(APIK||[]).length){
+    h+='<div class="dempty">Nenhuma chave criada. A API responde 503 enquanto não existir nenhuma.</div>';
+    w.innerHTML=h; return;
+  }
+  h+='<div class="wrap"><table class="dtable" style="width:100%;font-size:12.5px"><thead><tr>'
+   + '<th>Nome</th><th>Final</th><th>Criada em</th><th>Último uso</th><th>Situação</th><th></th></tr></thead><tbody>';
+  for(const c of APIK){
+    h+='<tr'+(c.revogada?' style="opacity:.5"':'')+'>'
+     + '<td><b>'+esc(c.nome||'—')+'</b></td>'
+     + '<td class="muted" style="font-family:monospace">'+esc(c.final||'')+'</td>'
+     + '<td class="muted">'+(c.criada_em?cotFmtDT(c.criada_em):'—')+'</td>'
+     + '<td class="muted">'+(c.ultimo_uso?esc(c.ultimo_uso):'<i>nunca usada</i>')+'</td>'
+     + '<td>'+(c.revogada?'<span class="dchip" style="background:#8a9299">Revogada</span>'
+                        :'<span class="dchip" style="background:var(--ok)">Ativa</span>')+'</td>'
+     + '<td style="text-align:right">'+(c.revogada?''
+        :'<button class="btn-ghost" style="padding:3px 9px;font-size:11px;color:#c0392b" '
+        +'onclick="cfgApiRevogar('+jsArg(c.id)+','+jsArg(c.nome||'')+')">Revogar</button>')+'</td></tr>';
+  }
+  h+='</tbody></table></div>';
+  h+='<div class="dmini" style="margin-top:10px">'+ativas.length+' chave(s) ativa(s). '
+   + 'Revogar é imediato e não tem volta: quem estiver usando aquela chave para de receber dados na hora.</div>';
+  w.innerHTML=h;
+}
+function cfgApiCriar(){
+  dlgAbrir('Configurações','Nova chave de API',
+    '<div style="max-width:520px"><div class="dmini" style="margin-bottom:10px">'
+   + 'Dê um nome que diga QUEM vai usar — é por ele que você vai saber o que revogar depois '
+   + '(ex.: "Cockpit de Obras", "Power BI").</div>'
+   + cotFld('Nome do sistema','<input id="apikNome" placeholder="ex.: Cockpit de Obras" style="width:100%">')
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" onclick="cfgApiCriarSalvar()">Criar chave</button></div></div>');
+}
+async function cfgApiCriarSalvar(){
+  const nome=((document.getElementById('apikNome')||{}).value||'').trim();
+  if(!nome){ toast('Dê um nome à chave'); return; }
+  try{
+    const r=await (await fetch('actions/api.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({me:(EU&&EU.bitrix_id),acao:'chave_criar',nome:nome})})).json();
+    if(r.error){ toast(r.error); return; }
+    /* ÚNICA vez que o segredo existe fora do servidor. Sem "copiei" não fecha: fechar sem copiar
+       significa criar outra chave, e chave órfã ativa é exatamente o que não se quer. */
+    dlgAbrir('Configurações','Chave criada — copie agora',
+      '<div style="max-width:600px">'
+     + '<div style="border-left:4px solid #c0392b;background:#fdf1ef;padding:10px 13px;border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:12px">'
+     + '<b>Esta chave não será mostrada de novo.</b> Se fechar sem copiar, ela fica ativa e inútil — '
+     + 'aí o certo é revogar e criar outra.</div>'
+     + cotFld('Chave de '+esc(nome),
+         '<input id="apikVal" readonly value="'+esc(r.chave)+'" style="width:100%;font-family:monospace;font-size:12px" onclick="this.select()">')
+     + '<div class="dmini" style="margin-top:8px">Guarde no servidor que vai consumir (ex.: uma constante '
+     + 'no <code>config.php</code> daquele sistema). Envie no header <code>X-API-Key</code>.</div>'
+     + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+     + '<button class="btn-prim" onclick="cfgApiCopiar()">Copiar chave</button>'
+     + '<button class="btn-ghost" onclick="closeModal(true);cfgApiLoad()">Já copiei, fechar</button></div></div>');
+  }catch(e){ toast('Falha: '+e.message); }
+}
+function cfgApiCopiar(){
+  const i=document.getElementById('apikVal'); if(!i) return;
+  i.select();
+  const ok=()=>toast('Chave copiada — cole agora no sistema que vai usar');
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(i.value).then(ok).catch(()=>{try{document.execCommand('copy');ok();}catch(e){toast('Copie manualmente (Ctrl+C)');}});
+  else { try{ document.execCommand('copy'); ok(); }catch(e){ toast('Copie manualmente (Ctrl+C)'); } }
+}
+async function cfgApiRevogar(id,nome){
+  if(!confirm('Revogar a chave "'+nome+'"?\n\nQuem estiver usando ela para de receber dados imediatamente. Não tem volta.')) return;
+  try{
+    const r=await (await fetch('actions/api.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({me:(EU&&EU.bitrix_id),acao:'chave_revogar',id:id})})).json();
+    if(r.error){ toast(r.error); return; }
+    toast('Chave "'+nome+'" revogada'); cfgApiLoad();
+  }catch(e){ toast('Falha: '+e.message); }
 }
 
 /* ===================== CONTROLE DE ACESSOS =====================

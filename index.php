@@ -566,10 +566,12 @@
       <button class="btn-ghost" id="cfgtab-pedmail" onclick="cfgTab('pedmail')" style="padding:6px 14px">📨 E-mail do pedido</button>
       <button class="btn-ghost" id="cfgtab-email" onclick="cfgTab('email')" style="padding:6px 14px">📧 E-mail (disparo)</button>
       <button class="btn-ghost" id="cfgtab-acessos" onclick="cfgTab('acessos')" style="padding:6px 14px">👁 Acessos</button>
+      <button class="btn-ghost" id="cfgtab-api" onclick="cfgTab('api')" style="padding:6px 14px">🔑 Chaves de API</button>
     </div>
     <div id="cfg-pedmail" style="display:none"><div class="wrap" id="cfgPedMailWrap"></div></div>
     <div id="cfg-email" style="display:none"><div class="wrap" id="cfgEmailWrap"></div></div>
     <div id="cfg-acessos" style="display:none"><div class="wrap" id="cfgAcessosWrap"></div></div>
+    <div id="cfg-api" style="display:none"><div class="wrap" id="cfgApiWrap"></div></div>
     <div id="cfg-users">
       <div class="panel">
         <h3>O que cada papel faz</h3>

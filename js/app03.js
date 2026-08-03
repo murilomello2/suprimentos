@@ -1563,3 +1563,72 @@ async function cotVincTSalvar(remover){
     cotOpen(c.id);
   }catch(e){ toast('Falha: '+e.message); if(b){b.disabled=false;b.textContent='Vincular';} }
 }
+
+/* ───────── VÍNCULO PELO OUTRO LADO: do ITEM DO RADAR para uma COTAÇÃO QUE JÁ EXISTE ─────────
+   Mesmo vínculo do cotVincTardio, só que partindo de onde a pessoa está quando percebe que não
+   precisa criar cotação nova — o mapa já existe, criado do zero ou importado do sistema antigo.
+   Candidatas = cotações SEM vínculo com o radar, da mesma obra (ou ainda sem obra nenhuma:
+   nesse caso o set_servico aproveita a obra do item, sem sobrescrever nada). */
+let RV = { ordem:null, obra:null, item:'', cands:[], escolhida:null };
+
+async function radVincCot(ordem, obraId, nomeItem){
+  RV={ordem:ordem, obra:obraId, item:nomeItem||('item #'+ordem), cands:[], escolhida:null};
+  dlgAbrir('Radar de Aquisições','Vincular a uma cotação existente',
+    '<div style="max-width:660px">'
+   + '<div class="dmini" style="margin-bottom:10px">Amarrando <b>'+esc(RV.item)+'</b> a um mapa que já existe. '
+   + 'Aparecem só as cotações <b>sem vínculo com o radar</b> — desta obra ou ainda sem obra definida.</div>'
+   + '<div class="search" style="width:100%;margin-bottom:8px"><span class="material-icons" style="color:var(--muted)">search</span>'
+   + '<input id="rvQ" placeholder="Filtrar por título, apelido, nº de SC ou de pedido…" oninput="radVincRender()"></div>'
+   + '<div id="rvLista"><div class="dempty">Procurando cotações…</div></div>'
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button></div></div>');
+  try{
+    const d=await (await fetch('actions/cotacoes.php?_='+Date.now())).json();
+    RV.cands=(d.cotacoes||[]).filter(c=>!c.servico_id
+      && (String(c.obra_id||'')===String(obraId) || !c.obra_id));
+  }catch(e){ RV.cands=[]; }
+  radVincRender();
+}
+
+function radVincRender(){
+  const box=document.getElementById('rvLista'); if(!box)return;
+  const raw=((document.getElementById('rvQ')||{}).value||'').trim(), q=opNorm(raw);
+  let L=RV.cands||[];
+  if(q.length>=2) L=L.filter(c=>opNorm((c.apelido||'')+' '+(c.titulo||'')+' '+(c.categoria||'')+' '
+      +(c.num_solicitacao||'')+' '+(c.num_pedido||'')).includes(q));
+  if(!(RV.cands||[]).length){
+    box.innerHTML='<div class="dempty">Nenhuma cotação sem vínculo nesta obra. '
+      + 'Se a cotação que você quer já está amarrada a outro item, abra ela e troque o vínculo por lá.</div>'; return;
+  }
+  if(!L.length){ box.innerHTML='<div class="dempty">Nenhuma casa "'+esc(raw)+'".</div>'; return; }
+  box.innerHTML='<div style="max-height:330px;overflow:auto;border:1px solid var(--line);border-radius:9px">'
+    + L.slice(0,60).map(c=>{
+        const org = c.num_solicitacao ? 'de uma SC' : 'criada do zero';
+        return '<div onclick="radVincEscolher('+c.id+')" style="padding:9px 12px;cursor:pointer;border-bottom:1px solid #f1f3f2" '
+        + 'onmouseover="this.style.background=\'#eff7f1\'" onmouseout="this.style.background=\'\'">'
+        + '<div style="font-weight:700;font-size:12.5px">'+esc(c.apelido||c.titulo)+'</div>'
+        + (c.apelido?'<div class="muted" style="font-size:10.5px">'+esc(c.titulo)+'</div>':'')
+        + '<div class="muted" style="font-size:10.5px;margin-top:2px">'+esc(org)
+        + (c.obra_nome?(' · '+esc(c.obra_nome)):' · <span style="color:var(--dourado)">sem obra — vai herdar a deste item</span>')
+        + ' · '+c.n_propostas+' proposta(s)'
+        + (c.melhor_oferta?(' · melhor '+BRL(c.melhor_oferta)):'')
+        + (c.criado_nome?(' · '+esc(c.criado_nome)):'')
+        + (c.created_at?(' · '+cotFmtDT(c.created_at)):'')+'</div></div>';
+      }).join('')
+    + '</div>'
+    + (L.length>60?'<div class="dmini" style="margin-top:6px">mostrando 60 de '+L.length+' — refine a busca</div>':'');
+}
+
+async function radVincEscolher(cid){
+  const c=(RV.cands||[]).find(x=>String(x.id)===String(cid)); if(!c)return;
+  if(!confirm('Vincular a cotação "'+(c.apelido||c.titulo)+'" ao item "'+RV.item+'"?')) return;
+  try{
+    const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'set_servico',me:EU&&EU.bitrix_id,cotacao_id:c.id,servico_id:RV.ordem,obra_id:RV.obra})})).json();
+    if(r.error){ toast(r.error); return; }
+    closeModal(true);
+    toast('Item vinculado à cotação "'+(c.apelido||c.titulo)+'"');
+    /* recarrega o radar p/ a coluna Mapa e o modal do item refletirem o vínculo na hora */
+    if(typeof recarregar==='function') recarregar(); else if(typeof load==='function') load();
+  }catch(e){ toast('Falha: '+e.message); }
+}

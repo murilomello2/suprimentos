@@ -19,6 +19,13 @@ function preset($papel) {
         case 'gerente':     return ['ver_escopo'=>'todas','editar_escopo'=>'todas','menus'=>['dashboard','radar','matriz','cotacoes','solicitacoes','obras','oportunidades','top20'],'perm_admin'=>0];
         case 'comprador':   return ['ver_escopo'=>'todas','editar_escopo'=>'todas','menus'=>['radar','matriz','cotacoes'],'perm_admin'=>0];
         case 'coordenador': return ['ver_escopo'=>'sel','editar_escopo'=>'nenhuma','menus'=>['radar','matriz'],'perm_admin'=>0];
+        // OBRA (engenheiro/coordenador de obra): CONSULTA pura. Vê todas as obras — decisão do Murilo
+        // em 31/jul: manter obras_ver por usuário desatualiza e vira chamado de "não vejo minha obra".
+        // menus VAZIO de propósito: as 3 telas de consulta ainda não existem (etapa 2). Enquanto isso,
+        // cadastrar alguém como 'obra' não dá acesso a nada — que é o comportamento certo.
+        // A trava de escrita NÃO está aqui: está em sup_veta_leitor_em_post() no includes/db.php,
+        // que recusa POST deste papel em qualquer endpoint (menos a telemetria).
+        case 'obra':        return ['ver_escopo'=>'todas','editar_escopo'=>'nenhuma','menus'=>[],'perm_admin'=>0];
         default:            return $base;
     }
 }

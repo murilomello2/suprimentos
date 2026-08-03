@@ -876,3 +876,67 @@ function db_seed_if_empty() {
     }
     return true;
 }
+
+/* ============================================================================
+ * TRAVA DO PAPEL VISUALIZADOR  (papel 'obra' — engenheiros/coordenadores de obra)
+ *
+ * Por que aqui e não em cada endpoint: são 25 arquivos que gravam. Vinte e cinco
+ * chamadas espalhadas é uma garantia que ninguém consegue conferir de uma vez, e
+ * que o próximo endpoint criado esquece. TODOS incluem este arquivo, então este é
+ * o único ponto por onde toda escrita passa obrigatoriamente.
+ *
+ * Ela NÃO substitui as travas que já existem (responsabilidade do item, papel na
+ * cotação, perm_* de curadoria): é uma camada a mais, e a única auditável por
+ * inspeção de um lugar só.
+ *
+ * O QUE ELA NÃO FAZ: a identidade ainda vem do `me` que o cliente manda, sem
+ * validar assinatura do app Bitrix. Quem souber o bitrix_id de um comprador pode
+ * se passar por ele — isso vale para o app INTEIRO e não é consertado aqui.
+ *
+ * Fail-OPEN de propósito: banco fora do ar, usuário desconhecido ou requisição
+ * sem `me` NÃO bloqueiam. O trabalho desta função é impedir que um visualizador
+ * CONHECIDO grave, não autenticar ninguém — travar por dúvida derrubaria o app.
+ * ==========================================================================*/
+
+/** Papéis que só consultam. Um papel novo entra aqui e herda a trava inteira. */
+function sup_papeis_leitores() { return ['obra']; }
+
+/** Scripts que um visualizador PODE chamar por POST (exceções conscientes). */
+function sup_post_liberado_para_leitor() {
+    return ['acessos.php'];   // telemetria de navegação: só grava acesso_log
+}
+
+/** Descobre o `me` da requisição sem consumir o corpo para quem vem depois. */
+function sup_me_da_requisicao() {
+    if (isset($_POST['me']) && $_POST['me'] !== '') return trim((string)$_POST['me']);
+    if (isset($_GET['me'])  && $_GET['me']  !== '') return trim((string)$_GET['me']);
+    $raw = @file_get_contents('php://input');       // re-legível (JSON não-multipart)
+    if (is_string($raw) && $raw !== '') {
+        $j = json_decode($raw, true);
+        if (is_array($j) && isset($j['me'])) return trim((string)$j['me']);
+    }
+    return '';
+}
+
+/** Recusa 403 se um papel de leitura tentar POST fora das exceções. */
+function sup_veta_leitor_em_post() {
+    if (PHP_SAPI === 'cli') return;
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') return;
+    $script = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
+    if (in_array($script, sup_post_liberado_para_leitor(), true)) return;
+    try {
+        $me = sup_me_da_requisicao();
+        if ($me === '') return;                      // sem identidade: não é aqui que se resolve
+        $q = db()->prepare("SELECT papel FROM usuario WHERE TRIM(bitrix_id)=? AND ativo=1");
+        $q->execute([$me]);
+        $papel = trim((string)$q->fetchColumn());
+        if ($papel === '' || !in_array($papel, sup_papeis_leitores(), true)) return;
+    } catch (Throwable $e) { return; }                // banco indisponível nunca vira bloqueio
+    http_response_code(403);
+    if (!headers_sent()) header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['error' => 'Seu acesso ao Cockpit é de CONSULTA — você visualiza o andamento de '
+        . 'suprimentos, mas não altera. Se precisa mudar alguma coisa, fale com o comprador responsável.'],
+        JSON_UNESCAPED_UNICODE);
+    exit;
+}
+sup_veta_leitor_em_post();

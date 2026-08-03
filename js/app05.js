@@ -629,13 +629,17 @@ async function t20Reseed(){ if(!confirm('Apagar TODOS os grupos e voltar aos 20 
   try{ await fetch('actions/top20.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'reseed',me:EU&&EU.bitrix_id})}); const ov=document.getElementById('t20Cf'); if(ov)ov.remove(); T20.data=null; t20Load(); }catch(e){toast('Falha');} }
 
 const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['solicitacoes','Solicitações'],['envio','Envio de Pedidos'],['buscaped','Busca Pedidos'],['obras','Obras'],['oportunidades','Oportunidades'],['top20','Top 20'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações']];
-const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',gerente:'Gerente de Suprimentos',comprador:'Suprimentos',coordenador:'Coordenador',personalizado:'Personalizado'};
+const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',gerente:'Gerente de Suprimentos',comprador:'Suprimentos',coordenador:'Coordenador',obra:'Obra (consulta)',personalizado:'Personalizado'};
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},
   diretor:{ver:'todas',edit:'nenhuma',menus:['dashboard','radar','matriz','cotacoes'],adm:0},
   gerente:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','solicitacoes','obras','oportunidades','top20'],adm:0},
   comprador:{ver:'todas',edit:'sel',menus:['radar','matriz','cotacoes'],adm:0},
   coordenador:{ver:'sel',edit:'nenhuma',menus:['radar','matriz'],adm:0},
+  /* OBRA = consulta pura (engenheiro/coordenador de obra). Vê todas as obras; menus vazio até as 3
+     telas de consulta existirem. A trava de escrita é no SERVIDOR (sup_veta_leitor_em_post no
+     db.php) — esconder menu no cliente nunca foi trava. */
+  obra:{ver:'todas',edit:'nenhuma',menus:[],adm:0},
   personalizado:null,
 };
 
@@ -1029,7 +1033,7 @@ async function envMarcoSalvar(){ const v=((document.getElementById('envMarcoD')|
 function pmAssin(){
   const ass=(PM.d.config.assinatura||{}), lista=(PM.d.assinantes||[]);
   const PAPEL={admin:'Administrador',gerente:'Gerente',comprador:'Comprador',diretor:'Diretor',
-               coordenador:'Coordenador',personalizado:'Personalizado'};
+               coordenador:'Coordenador',obra:'Obra (consulta)',personalizado:'Personalizado'};
   let h='<div class="panel">'+cotSecHead('draw','Assinaturas dos compradores',
     'quem assina e quem envia — o usuario do Bitrix logado no momento do disparo',
     '<button class="btn-prim" onclick="pmAssinSalvarTodos()" style="padding:5px 13px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar</button>');

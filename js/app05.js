@@ -628,7 +628,9 @@ async function t20CfgExcluir(){ const c=T20.cfgSel; if(!c||!c.id)return; if(!con
 async function t20Reseed(){ if(!confirm('Apagar TODOS os grupos e voltar aos 20 sugeridos?'))return;
   try{ await fetch('actions/top20.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'reseed',me:EU&&EU.bitrix_id})}); const ov=document.getElementById('t20Cf'); if(ov)ov.remove(); T20.data=null; t20Load(); }catch(e){toast('Falha');} }
 
-const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['solicitacoes','Solicitações'],['envio','Envio de Pedidos'],['buscaped','Busca Pedidos'],['obras','Obras'],['oportunidades','Oportunidades'],['top20','Top 20'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações']];
+const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['solicitacoes','Solicitações'],['envio','Envio de Pedidos'],['buscaped','Busca Pedidos'],['obras','Obras'],['oportunidades','Oportunidades'],['top20','Top 20'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações'],
+  /* telas de CONSULTA da obra (papel 'obra') — leitura, sem nenhuma ação */
+  ['ov_radar','Obra: O que vem por aí']];
 const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',gerente:'Gerente de Suprimentos',comprador:'Suprimentos',coordenador:'Coordenador',obra:'Obra (consulta)',personalizado:'Personalizado'};
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},
@@ -639,7 +641,7 @@ const PRESETS={
   /* OBRA = consulta pura (engenheiro/coordenador de obra). Vê todas as obras; menus vazio até as 3
      telas de consulta existirem. A trava de escrita é no SERVIDOR (sup_veta_leitor_em_post no
      db.php) — esconder menu no cliente nunca foi trava. */
-  obra:{ver:'todas',edit:'nenhuma',menus:[],adm:0},
+  obra:{ver:'todas',edit:'nenhuma',menus:['ov_radar'],adm:0},
   personalizado:null,
 };
 

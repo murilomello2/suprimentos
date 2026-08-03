@@ -339,6 +339,8 @@
       <a id="nav-envio" data-menu="envio" title="Envio de Pedidos de Compra aprovados" onclick="showView('envio')"><span class="material-icons">outgoing_mail</span> <span class="navtxt">Envio de Pedidos</span></a>
       <a id="nav-obras" data-menu="obras" title="Obras — ficha, características e de-para" onclick="showView('obras')"><span class="material-icons">apartment</span> <span class="navtxt">Obras</span></a>
       <a id="nav-oraculo" data-menu="oraculo" title="Radar IA — oráculo de suprimentos" onclick="showView('oraculo')"><span class="material-icons">auto_awesome</span> <span class="navtxt">Radar IA</span></a>
+      <!-- CONSULTA DA OBRA: telas de leitura para engenheiros/coordenadores (papel 'obra'). -->
+      <a id="nav-ovradar" data-menu="ov_radar" title="O que vem por aí — itens de compra e prazos da obra" onclick="showView('ovradar')"><span class="material-icons">event_available</span> <span class="navtxt">O que vem por aí</span></a>
     </nav>
     <div class="navlabel">Administração</div>
     <nav class="nav">
@@ -542,6 +544,15 @@
     <div id="cotwrap"><div class="dempty">Carregando…</div></div>
    </section>
 
+   <!-- ===== CONSULTA DA OBRA — somente leitura ===== -->
+   <section id="view-ovradar" style="display:none">
+    <div class="top">
+      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">event_available</span> O que vem por aí <span style="font-size:12.5px;font-weight:600;color:var(--muted);letter-spacing:0">· consulta da obra</span></h1>
+      <p class="sub">Os itens de compra da sua obra: quando a cotação precisa começar e quando o material é necessário. Tela de consulta — quem altera é o comprador responsável.</p>
+    </div>
+    <div id="ovRadarWrap"><div class="dempty">Carregando…</div></div>
+   </section>
+
    <section id="view-oraculo" style="display:none">
     <div class="top">
       <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">auto_awesome</span> Radar IA <span style="font-size:12.5px;font-weight:600;color:var(--muted);letter-spacing:0">· oráculo de suprimentos</span></h1>
@@ -732,5 +743,7 @@ $jsv = function ($p) { $f = __DIR__ . '/' . $p; return $p . '?v=' . (is_file($f)
   <script src="<?= $jsv('js/app04.js') ?>"></script>
   <script src="<?= $jsv('js/app05.js') ?>"></script>
   <script src="<?= $jsv('js/app06.js') ?>"></script>
+  <script src="<?= $jsv('js/app07.js') ?>"></script>   <!-- telas de consulta da obra -->
+
 </body>
 </html>

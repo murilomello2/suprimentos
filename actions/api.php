@@ -29,14 +29,20 @@
  *  - "verba" tem duas naturezas: verba_definida (curada, é a que a tela do radar mostra) e
  *    verba_estimada (herdada do orçamento inicial). Nunca somamos as duas.
  */
-if (extension_loaded('zlib') && !ini_get('zlib.output_compression')) @ob_start('ob_gzhandler');
-header('Content-Type: application/json; charset=utf-8');
-// A API é chamada por outro sistema (e possivelmente do navegador dele). A autenticação é por chave,
-// não por cookie, então liberar a origem não expõe sessão de ninguém.
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Headers: X-API-Key, Content-Type');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') { http_response_code(204); exit; }
+/* Quem inclui como BIBLIOTECA (define API_LIB_ONLY antes do require) só quer as funções que montam
+   radar/cotações/solicitações — as telas de consulta da obra reusam a MESMA régua de alerta,
+   cobertura de SC e melhor-por-item, para não existirem duas contas que divergem com o tempo.
+   Nesse modo não mandamos header nenhum (o chamador manda os dele) nem liberamos CORS. */
+if (!defined('API_LIB_ONLY')) {
+    if (extension_loaded('zlib') && !ini_get('zlib.output_compression')) @ob_start('ob_gzhandler');
+    header('Content-Type: application/json; charset=utf-8');
+    // A API é chamada por outro sistema (e possivelmente do navegador dele). A autenticação é por chave,
+    // não por cookie, então liberar a origem não expõe sessão de ninguém.
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Headers: X-API-Key, Content-Type');
+    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+    if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') { http_response_code(204); exit; }
+}
 
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/cronograma.php';
@@ -623,6 +629,8 @@ function api_solicitacoes($pdo) {
 }
 
 /* ─────────────────────────── roteador ─────────────────────────── */
+
+if (defined('API_LIB_ONLY')) return;   // biblioteca: as funções acima bastam, o endpoint não roda
 
 try {
     $metodo = $_SERVER['REQUEST_METHOD'] ?? 'GET';

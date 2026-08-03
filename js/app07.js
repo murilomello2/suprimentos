@@ -484,3 +484,176 @@ function ovCotDetRender(){
 
   w.innerHTML=h;
 }
+
+/* ─────────────────────── SOLICITAÇÕES DE COMPRA (a minha SC virou o quê?) ───────────────────────
+   O número que muda a conversa entre obra e suprimentos é DIAS EM ABERTO: é ele que transforma
+   "cadê meu material" em "a SC 1533 está há 22 dias sem cotação". Por isso ele tem coluna própria,
+   cor por faixa e um atalho de "paradas há mais de 15 dias". */
+
+OV.sc = { d:null, filt:{obra:'',status:'',comprador:'',situacao:'',aging:'',q:''}, page:1,
+          sort:{col:'dias_em_aberto',dir:-1}, aberta:null };
+
+const OV_SCST = { pendente:['#6b7c93','Pendente'], em_cotacao:['var(--dourado)','Em cotação'],
+                  cotacoes_recebidas:['#2d7d5a','Cotações recebidas'], pedido_criado:['var(--ok)','Pedido criado'],
+                  cancelado:['#8a9299','Cancelado'] };
+const OV_COB  = { vazio:['#c0392b','Sem cotação'], parcial:['var(--dourado)','Parcial'], total:['var(--ok)','Cotada'] };
+
+function ovScInit(){ if(!OV.sc.d) ovScLoad(); else ovScRender(); }
+async function ovScLoad(){
+  const w=document.getElementById('ovScWrap'); if(!w) return;
+  w.innerHTML='<div class="dempty">Lendo as solicitações de compra…</div>';
+  const p=new URLSearchParams({tela:'solicitacoes', me:decodeURIComponent(ovMe()), por_pagina:'0'});
+  if(OV.sc.filt.obra) p.set('obra_id', OV.sc.filt.obra);
+  try{
+    const d=await (await fetch('actions/obra_consulta.php?'+p.toString())).json();
+    if(d.error||d.erro){ w.innerHTML='<div class="dempty">'+esc(d.error||d.erro)+'</div>'; return; }
+    OV.sc.d=d; ovScRender();
+  }catch(e){ w.innerHTML='<div class="dempty">Falha ao carregar: '+esc(e.message)+'</div>'; }
+}
+function ovScSet(c,v){ OV.sc.filt[c]=v; OV.sc.page=1; if(c==='obra') ovScLoad(); else ovScRender(); }
+function ovScSort(col){ const s=OV.sc.sort; if(s.col===col) s.dir=-s.dir;
+  else { s.col=col; s.dir=(col==='dias_em_aberto'||col==='emissao')?-1:1; } OV.sc.page=1; ovScRender(); }
+function ovScPagina(p){ OV.sc.page=Math.max(1,p|0); ovScRender();
+  const w=document.getElementById('ovScWrap'); if(w) w.scrollIntoView({block:'start',behavior:'smooth'}); }
+function ovScLimpar(){ OV.sc.filt={obra:OV.sc.filt.obra,status:'',comprador:'',situacao:'',aging:'',q:''};
+  OV.sc.page=1; ovScRender(); }
+function ovScToggle(k){ OV.sc.aberta = (OV.sc.aberta===k) ? null : k; ovScRender(); }
+
+function ovScRender(){
+  const w=document.getElementById('ovScWrap'); if(!w) return;
+  const d=OV.sc.d; if(!d) return;
+  const f=OV.sc.filt, todos=d.dados||[];
+  const qn=(typeof opNorm==='function')?opNorm(f.q||''):(f.q||'').toLowerCase();
+  let rows=todos.filter(s=>{
+    if(f.status && s.status!==f.status) return false;
+    if(f.comprador && s.comprador!==f.comprador) return false;
+    if(f.situacao && s.cotacao_situacao!==f.situacao) return false;
+    if(f.aging==='15' && !(s.dias_em_aberto>15)) return false;
+    if(f.aging==='30' && !(s.dias_em_aberto>30)) return false;
+    if(qn){ const alvo=(s.numero||'')+' '+(s.obra||'')+' '+(s.comprador||'')+' '
+                      +(s.itens||[]).map(i=>i.produto).join(' ');
+            const nz=(typeof opNorm==='function')?opNorm(alvo):alvo.toLowerCase();
+            if(nz.indexOf(qn)<0) return false; }
+    return true;
+  });
+  const sc=OV.sc.sort.col, dir=OV.sc.sort.dir;
+  const val=s=>({numero:(s.numero||''), obra:(s.obra||'').toLowerCase(), comprador:(s.comprador||'zzz').toLowerCase(),
+    emissao:(s.emissao||''), dias_em_aberto:(s.dias_em_aberto===null?-1:+s.dias_em_aberto),
+    status:(s.status||''), cobertura:((s.itens_total?(s.itens_cotados/s.itens_total):0))}[sc]);
+  rows=rows.slice().sort((a,b)=>{ const x=val(a),y=val(b); return (x<y?-1:x>y?1:0)*dir; });
+
+  const tot=rows.length, pgs=Math.max(1,Math.ceil(tot/OV_POR_PAGINA));
+  OV.sc.page=Math.min(Math.max(1,OV.sc.page),pgs);
+  const ini=(OV.sc.page-1)*OV_POR_PAGINA, pageRows=rows.slice(ini,ini+OV_POR_PAGINA);
+  const c=d.contadores||{};
+  const card=(cor,n,tit,sub,onclick)=>'<div class="panel" style="flex:1;min-width:150px;border-left:4px solid '+cor
+    +';cursor:'+(onclick?'pointer':'default')+'" '+(onclick?('onclick="'+onclick+'"'):'')+'>'
+    +'<div style="font-size:23px;font-weight:800;line-height:1.1">'+n+'</div>'
+    +'<div style="font-weight:700;font-size:12.5px">'+tit+'</div>'
+    +'<div class="dmini" style="color:var(--muted)">'+sub+'</div></div>';
+
+  let h=cotSecHead('inbox','Solicitações de compra',
+    'o que a obra pediu e o que já virou cotação — o tempo em aberto é o que mais importa aqui',
+    '<button class="btn-ghost" style="padding:5px 12px" onclick="OV.sc.d=null;ovScLoad()">'
+    +'<span class="material-icons" style="font-size:15px;vertical-align:-3px">refresh</span> Atualizar</button>');
+  h+='<div class="bar" style="gap:10px;flex-wrap:wrap;margin-bottom:10px">'
+   + card('var(--verde)', c.total||0, 'Solicitações', 'total da(s) obra(s) selecionada(s)')
+   + card('#c0392b', c.sem_cotacao||0, 'Sem nenhuma cotação', 'ninguém começou a cotar ainda', "ovScSet('situacao','vazio')")
+   + card('var(--dourado)', c.paradas15||0, 'Há mais de 15 dias', 'abertas e ainda não resolvidas', "ovScSet('aging','15')")
+   + card('#e67e22', c.paradas30||0, 'Há mais de 30 dias', 'as mais antigas da fila', "ovScSet('aging','30')")
+   + card('#6b7c93', (c.media_dias||0)+'d', 'Tempo médio', 'média de dias em aberto')
+   + '</div>';
+
+  const opts=(l,sel)=>l.map(x=>'<option value="'+esc(x)+'"'+(String(sel)===String(x)?' selected':'')+'>'+esc(x)+'</option>').join('');
+  const obrasSel=(OV.radar.obras||[]).map(o=>'<option value="'+o.obra_id+'"'+(String(f.obra)===String(o.obra_id)?' selected':'')+'>'+esc(o.obra)+'</option>').join('');
+  h+='<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">'
+   + '<div class="search" style="min-width:230px"><span class="material-icons" style="color:var(--muted)">search</span>'
+   + '<input id="ovScQ" placeholder="Buscar nº da SC, produto ou obra…" value="'+esc(f.q)+'" '
+   + 'oninput="OV.sc.filt.q=this.value;OV.sc.page=1;ovScRender()"></div>'
+   + '<label class="muted" style="font-size:12px">Obra <select onchange="ovScSet(\'obra\',this.value)" style="margin-left:4px">'
+   + '<option value="">Todas as obras</option>'+obrasSel+'</select></label>'
+   + '<select onchange="ovScSet(\'status\',this.value)" style="font-size:12px;padding:6px"><option value="">Qualquer status</option>'
+   + Object.keys(OV_SCST).map(k=>'<option value="'+k+'"'+(f.status===k?' selected':'')+'>'+OV_SCST[k][1]+'</option>').join('')+'</select>'
+   + '<select onchange="ovScSet(\'situacao\',this.value)" style="font-size:12px;padding:6px" title="quanto da SC já foi cotado">'
+   + '<option value="">Cotada ou não</option>'
+   + Object.keys(OV_COB).map(k=>'<option value="'+k+'"'+(f.situacao===k?' selected':'')+'>'+OV_COB[k][1]+'</option>').join('')+'</select>'
+   + '<select onchange="ovScSet(\'comprador\',this.value)" style="font-size:12px;padding:6px">'
+   + '<option value="">Todos os compradores</option>'+opts(d.compradores||[], f.comprador)+'</select>'
+   + '<select onchange="ovScSet(\'aging\',this.value)" style="font-size:12px;padding:6px"><option value="">Qualquer tempo</option>'
+   + '<option value="15"'+(f.aging==='15'?' selected':'')+'>Há mais de 15 dias</option>'
+   + '<option value="30"'+(f.aging==='30'?' selected':'')+'>Há mais de 30 dias</option></select>'
+   + '<button class="btn-ghost" style="padding:6px 11px;font-size:12px" onclick="ovScLimpar()">Limpar filtros</button>'
+   + '<span class="muted" style="font-size:11.5px;margin-left:auto">'+(tot?(ini+1):0)+'–'+(ini+pageRows.length)+' de '+tot
+   + (tot!==todos.length?(' <span style="opacity:.75">(de '+todos.length+')</span>'):'')+'</span>'
+   + '</div></div>';
+
+  const arw=col=>OV.sc.sort.col===col?(OV.sc.sort.dir>0?' ▲':' ▼'):'';
+  const th=(lbl,col,ex)=>'<th '+(ex||'')+' onclick="ovScSort(\''+col+'\')" style="cursor:pointer;user-select:none;white-space:nowrap">'+lbl+arw(col)+'</th>';
+  h+='<div class="wrap" style="overflow-x:auto"><table style="width:100%;font-size:12px"><thead><tr>'
+   + '<th style="width:26px"></th>' + th('SC','numero') + th('Obra','obra') + th('Comprador','comprador')
+   + th('Emissão','emissao') + th('Em aberto','dias_em_aberto','title="dias desde a emissão da solicitação"')
+   + th('Status','status') + th('Cotação','cobertura','title="quantos itens da SC já estão cotados"')
+   + '<th>Cotações</th></tr></thead><tbody>';
+
+  for(const s of pageRows){
+    const k=s.coligada+'|'+s.numero;
+    const st=OV_SCST[s.status]||['#8a9299',s.status_texto||s.status];
+    const cb=OV_COB[s.cotacao_situacao]||['#8a9299',s.cotacao_situacao_texto||''];
+    const dias=s.dias_em_aberto;
+    const corD = dias===null?'var(--muted)':(dias>30?'#c0392b':(dias>15?'#e67e22':'var(--muted)'));
+    const pct = s.itens_total? Math.round(100*s.itens_cotados/s.itens_total) : 0;
+    const aberta = OV.sc.aberta===k;
+    h+='<tr style="cursor:pointer" onclick="ovScToggle('+jsArg(k)+')">'
+     + '<td style="text-align:center"><span class="material-icons" style="font-size:17px;color:var(--muted)">'
+     +   (aberta?'expand_less':'expand_more')+'</span></td>'
+     + '<td><b>'+esc(String(s.numero).replace(/^0+/,''))+'</b></td>'
+     + '<td class="muted">'+esc(s.obra||'—')+'</td>'
+     + '<td class="muted">'+esc(s.comprador||'—')+'</td>'
+     + '<td class="muted" style="white-space:nowrap">'+ovData(s.emissao)+'</td>'
+     + '<td style="white-space:nowrap;font-weight:700;color:'+corD+'">'+(dias===null?'—':(dias+' dias'))+'</td>'
+     + '<td><span class="dchip" style="background:'+st[0]+'">'+st[1]+'</span></td>'
+     + '<td style="min-width:130px"><div style="display:flex;align-items:center;gap:6px">'
+     +   '<div style="flex:1;height:7px;background:#eceff1;border-radius:4px;overflow:hidden">'
+     +   '<div style="width:'+pct+'%;height:100%;background:'+cb[0]+'"></div></div>'
+     +   '<span class="dmini" style="white-space:nowrap">'+s.itens_cotados+'/'+s.itens_total+'</span></div>'
+     +   '<div class="dmini" style="color:var(--muted)">'+cb[1]+'</div></td>'
+     + '<td style="white-space:nowrap">'+((s.cotacoes||[]).length
+        ? s.cotacoes.map(x=>'<button class="btn-ghost" style="padding:2px 8px;font-size:11px;margin:1px" '
+            +'onclick="event.stopPropagation();ovCotAbrir('+x.cotacao_id+')" title="'+esc(x.titulo||'')+'">'
+            +esc(x.apelido||('#'+x.cotacao_id))+'</button>').join('')
+        : '<span class="muted">—</span>')+'</td></tr>';
+    if(aberta){
+      h+='<tr><td></td><td colspan="8" style="background:#f8faf9">'
+       + '<div class="dmini" style="font-weight:700;margin-bottom:5px">Itens desta solicitação</div>'
+       + '<table style="width:100%;font-size:11.5px"><thead><tr><th>Produto</th><th style="text-align:right">Qtd</th>'
+       + '<th>Situação</th><th></th></tr></thead><tbody>';
+      for(const it of (s.itens||[])){
+        const sit=OV_COB[it.situacao==='coberto'?'total':(it.situacao==='cotando'?'parcial':'vazio')];
+        h+='<tr><td><b>'+esc(it.produto)+'</b>'+(it.observacao?('<div class="dmini" style="color:var(--muted)">'+esc(it.observacao)+'</div>'):'')+'</td>'
+         + '<td style="text-align:right;white-space:nowrap" class="muted">'+(it.quantidade!==null?(it.quantidade+' '+esc(it.unidade||'')):'—')+'</td>'
+         + '<td><span class="dchip" style="background:'+sit[0]+'">'+esc(it.situacao_texto||'')+'</span></td>'
+         + '<td style="text-align:right">'+(it.cotacao_id?('<button class="btn-ghost" style="padding:2px 8px;font-size:11px" '
+             +'onclick="event.stopPropagation();ovCotAbrir('+it.cotacao_id+')">ver cotação</button>'):'')+'</td></tr>';
+      }
+      if(!(s.itens||[]).length) h+='<tr><td colspan="4" class="empty">Sem itens.</td></tr>';
+      h+='</tbody></table>'+(s.observacoes?('<div class="dmini" style="margin-top:6px"><b>Observação:</b> '+esc(s.observacoes)+'</div>'):'')+'</td></tr>';
+    }
+  }
+  if(!rows.length) h+='<tr><td colspan="9" class="empty">'+(todos.length?'Nenhuma solicitação casa os filtros.':'Nenhuma solicitação em aberto para esta obra.')+'</td></tr>';
+  h+='</tbody></table></div>';
+  if(pgs>1){
+    const b=(p,lbl,cur)=>'<button class="'+(cur?'btn-prim':'btn-ghost')+'" style="padding:5px 10px;font-size:12px;min-width:34px" onclick="ovScPagina('+p+')">'+lbl+'</button>';
+    const n=[], a=Math.max(1,OV.sc.page-2), z=Math.min(pgs,OV.sc.page+2);
+    if(a>1){ n.push(b(1,'1',false)); if(a>2)n.push('<span class="muted" style="padding:0 2px">…</span>'); }
+    for(let p=a;p<=z;p++) n.push(b(p,String(p),p===OV.sc.page));
+    if(z<pgs){ if(z<pgs-1)n.push('<span class="muted" style="padding:0 2px">…</span>'); n.push(b(pgs,String(pgs),false)); }
+    h+='<div class="bar" style="justify-content:center;gap:6px;margin-top:10px;flex-wrap:wrap;align-items:center">'
+     + b(Math.max(1,OV.sc.page-1),'‹',false)+n.join('')+b(Math.min(pgs,OV.sc.page+1),'›',false)
+     + '<span class="muted" style="font-size:11.5px;margin-left:8px">página '+OV.sc.page+' de '+pgs+'</span></div>';
+  }
+  h+='<div class="dmini" style="margin-top:10px;color:var(--muted)">Somente consulta — clique na linha para ver os itens. '
+   + 'Quem cota é o comprador responsável.</div>';
+  const foc=document.activeElement, eraQ=foc&&foc.id==='ovScQ', car=eraQ?foc.selectionStart:null;
+  w.innerHTML=h;
+  if(eraQ){ const ni=document.getElementById('ovScQ'); if(ni){ ni.focus(); try{ ni.setSelectionRange(car,car); }catch(e){} } }
+}

@@ -342,6 +342,7 @@
       <!-- CONSULTA DA OBRA: telas de leitura para engenheiros/coordenadores (papel 'obra'). -->
       <a id="nav-ovradar" data-menu="ov_radar" title="O que vem por aí — itens de compra e prazos da obra" onclick="showView('ovradar')"><span class="material-icons">event_available</span> <span class="navtxt">O que vem por aí</span></a>
       <a id="nav-ovcot" data-menu="ov_cotacoes" title="Cotações — em que pé está a compra" onclick="showView('ovcot')"><span class="material-icons">price_check</span> <span class="navtxt">Cotações da obra</span></a>
+      <a id="nav-ovsc" data-menu="ov_solicitacoes" title="Solicitações de compra — o que a obra pediu e em que pé está" onclick="showView('ovsc')"><span class="material-icons">assignment</span> <span class="navtxt">Minhas solicitações</span></a>
     </nav>
     <div class="navlabel">Administração</div>
     <nav class="nav">
@@ -560,6 +561,14 @@
       <p class="sub">Em que pé está a compra de cada item: quais fornecedores foram chamados, quem respondeu e por quanto. Tela de consulta — quem negocia é o comprador.</p>
     </div>
     <div id="ovCotWrap"><div class="dempty">Carregando…</div></div>
+   </section>
+
+   <section id="view-ovsc" style="display:none">
+    <div class="top">
+      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">assignment</span> Minhas solicitações <span style="font-size:12.5px;font-weight:600;color:var(--muted);letter-spacing:0">· consulta</span></h1>
+      <p class="sub">O que a obra pediu e o que já virou cotação. O tempo em aberto é o número que mais importa aqui — clique numa linha para ver os itens.</p>
+    </div>
+    <div id="ovScWrap"><div class="dempty">Carregando…</div></div>
    </section>
 
    <section id="view-oraculo" style="display:none">

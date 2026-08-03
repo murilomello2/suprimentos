@@ -273,7 +273,7 @@ async function loadMatriz(force){
 
 /* ---------- view switch ---------- */
 function showView(v){
-  ['radar','matriz','oportunidades','top20','dashboards','cotacoes','solicitacoes','envio','buscaped','obras','oraculo','config','audit','updates','ovradar','ovcot'].forEach(x=>{
+  ['radar','matriz','oportunidades','top20','dashboards','cotacoes','solicitacoes','envio','buscaped','obras','oraculo','config','audit','updates','ovradar','ovcot','ovsc'].forEach(x=>{
     const el=document.getElementById('view-'+x); if(el) el.style.display=v===x?'':'none';
     const nav=document.getElementById('nav-'+x); if(nav) nav.classList.toggle('active',v===x);
   });
@@ -291,6 +291,7 @@ function showView(v){
   if(v==='radar') fitRadarHeight();
   if(v==='ovradar'){ ovObrasCarrega().then(()=>ovRadarInit()); }
   if(v==='ovcot'){   ovObrasCarrega().then(()=>ovCotInit()); }
+  if(v==='ovsc'){    ovObrasCarrega().then(()=>ovScInit()); }
   if(v==='audit') renderAudit();
   accPing(v);   // registra o uso da tela (fire-and-forget; ver accPing)
   if(v==='updates') renderUpdates();

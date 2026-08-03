@@ -24,7 +24,7 @@ function preset($papel) {
         // menus: só as telas de CONSULTA (ov_*). A trava de escrita NÃO está aqui: está em
         // sup_veta_leitor_em_post() no includes/db.php, que recusa POST deste papel em qualquer
         // endpoint (menos a telemetria) — esconder menu no cliente nunca foi trava.
-        case 'obra':        return ['ver_escopo'=>'todas','editar_escopo'=>'nenhuma','menus'=>['ov_radar','ov_cotacoes'],'perm_admin'=>0];
+        case 'obra':        return ['ver_escopo'=>'todas','editar_escopo'=>'nenhuma','menus'=>['ov_radar','ov_cotacoes','ov_solicitacoes'],'perm_admin'=>0];
         default:            return $base;
     }
 }

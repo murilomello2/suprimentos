@@ -341,6 +341,7 @@
       <a id="nav-oraculo" data-menu="oraculo" title="Radar IA — oráculo de suprimentos" onclick="showView('oraculo')"><span class="material-icons">auto_awesome</span> <span class="navtxt">Radar IA</span></a>
       <!-- CONSULTA DA OBRA: telas de leitura para engenheiros/coordenadores (papel 'obra'). -->
       <a id="nav-ovradar" data-menu="ov_radar" title="O que vem por aí — itens de compra e prazos da obra" onclick="showView('ovradar')"><span class="material-icons">event_available</span> <span class="navtxt">O que vem por aí</span></a>
+      <a id="nav-ovcot" data-menu="ov_cotacoes" title="Cotações — em que pé está a compra" onclick="showView('ovcot')"><span class="material-icons">price_check</span> <span class="navtxt">Cotações da obra</span></a>
     </nav>
     <div class="navlabel">Administração</div>
     <nav class="nav">
@@ -551,6 +552,14 @@
       <p class="sub">Os itens de compra da sua obra: quando a cotação precisa começar e quando o material é necessário. Tela de consulta — quem altera é o comprador responsável.</p>
     </div>
     <div id="ovRadarWrap"><div class="dempty">Carregando…</div></div>
+   </section>
+
+   <section id="view-ovcot" style="display:none">
+    <div class="top">
+      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">price_check</span> Cotações da obra <span style="font-size:12.5px;font-weight:600;color:var(--muted);letter-spacing:0">· consulta</span></h1>
+      <p class="sub">Em que pé está a compra de cada item: quais fornecedores foram chamados, quem respondeu e por quanto. Tela de consulta — quem negocia é o comprador.</p>
+    </div>
+    <div id="ovCotWrap"><div class="dempty">Carregando…</div></div>
    </section>
 
    <section id="view-oraculo" style="display:none">

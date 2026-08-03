@@ -45,7 +45,9 @@ async function ovRadarLoad(recarregar){
   if(recarregar) p.set('recarregar','1');
   try{
     const d=await (await fetch('actions/obra_consulta.php?'+p.toString())).json();
-    if(d.error){ w.innerHTML='<div class="dempty">'+esc(d.error)+'</div>'; return; }
+    /* o api.php (reusado como biblioteca) responde erro na chave `erro`; o obra_consulta.php usa
+       `error`. Tratar só uma deixava a tela presa em "Carregando…" sem dizer o que houve. */
+    if(d.error||d.erro){ w.innerHTML='<div class="dempty">'+esc(d.error||d.erro)+'</div>'; return; }
     OV.radar.d=d;
     /* A 1ª varredura com cache frio estoura o orçamento de tempo do servidor e volta INCOMPLETA.
        Sem isto a pessoa veria menos itens do que existem sem saber. A 2ª chamada é rápida. */
@@ -225,7 +227,9 @@ async function ovCotLoad(){
   if(OV.cot.filt.obra) p.set('obra_id', OV.cot.filt.obra);
   try{
     const d=await (await fetch('actions/obra_consulta.php?'+p.toString())).json();
-    if(d.error){ w.innerHTML='<div class="dempty">'+esc(d.error)+'</div>'; return; }
+    /* o api.php (reusado como biblioteca) responde erro na chave `erro`; o obra_consulta.php usa
+       `error`. Tratar só uma deixava a tela presa em "Carregando…" sem dizer o que houve. */
+    if(d.error||d.erro){ w.innerHTML='<div class="dempty">'+esc(d.error||d.erro)+'</div>'; return; }
     OV.cot.d=d; ovCotRender();
   }catch(e){ w.innerHTML='<div class="dempty">Falha ao carregar: '+esc(e.message)+'</div>'; }
 }
@@ -364,8 +368,8 @@ async function ovCotAbrir(id){
   w.innerHTML='<div class="dempty">Abrindo a cotação…</div>';
   try{
     const r=await (await fetch('actions/obra_consulta.php?tela=cotacao&id='+id+'&me='+ovMe())).json();
-    if(r.error){ w.innerHTML='<div class="dempty">'+esc(r.error)+'</div>'
-      +'<div class="bar" style="margin-top:10px"><button class="btn-ghost" onclick="ovCotVoltar()">Voltar</button></div>'; return; }
+    if(r.error||r.erro){ w.innerHTML='<div class="dempty">'+esc(r.error||r.erro)+'</div>'
+      +'<div class="bar" style="margin-top:10px"><button class="btn-ghost" onclick="ovCotVoltar()">Voltar para a lista</button></div>'; return; }
     OV.cot.det=r.dados; ovCotDetRender();
   }catch(e){ w.innerHTML='<div class="dempty">Falha: '+esc(e.message)+'</div>'; }
 }

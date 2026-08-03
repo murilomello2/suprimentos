@@ -20,3 +20,17 @@ data/anexos/
 data/.api_keys.json
 data/.api_radar_*.json
 data/.bp_obras.json
+
+# ─── PESO DO DEPLOY (03/08/2026) ───────────────────────────────────────────────
+# O deploy REENVIA todos os arquivos rastreados a cada vez (provado: arquivos que
+# ninguém tocou voltam com Last-Modified do último deploy). Com 35,8 MB rastreados
+# e ~64 KB/s de FTP, cada deploy levava ~9 min e estourava o timeout do MCP.
+# 94,7% desse peso era data/ — e o app de verdade tem 1,9 MB.
+#
+# Os seeds CONTINUAM no servidor (diag.php confirma seed_exists=true); só param de
+# ser reenviados. Se algum dia rodar um deploy com `clean` (que limpa o remoto),
+# reenvie data/seed/ uma vez por FTP — importar_obra.php e o seed inicial do db.php
+# dependem dele.
+data/seed/
+data/.totvs_fornecedores.json
+data/.fornecedores_cnpj.json

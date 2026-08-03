@@ -356,6 +356,35 @@ try {
         echo json_encode(['ok'=>true, 'cotacao_id'=>$cid, 'obra_id'=>$obra ?: null], JSON_UNESCAPED_UNICODE); exit;
     }
 
+    /* VINCULAR A UM ITEM DO RADAR DEPOIS DE CRIADA. Até aqui o vínculo só existia no momento da
+       criação: cotação nascida "do zero" (ou importada do sistema antigo) ficava órfã para sempre,
+       e é justamente o histórico antigo que mais precisa ser reconciliado com o radar.
+       Quem pode: a MESMA regra de gerir a cotação — admin | gerente | criador | colaborador.
+       servico_id=0 desvincula. */
+    if ($acao === 'set_servico') {
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só admin, gerente, quem criou ou quem recebeu a cotação compartilhada pode vinculá-la ao radar.'], JSON_UNESCAPED_UNICODE); exit; }
+        $sid = (int)($in['servico_id'] ?? 0);
+        $nome = '';
+        if ($sid) {
+            $q = $pdo->prepare("SELECT nome FROM servico WHERE id=?"); $q->execute([$sid]);
+            $nome = (string)$q->fetchColumn();
+            if ($nome === '') throw new Exception('item do radar não encontrado (servico_id ' . $sid . ')');
+        }
+        // se a cotação ainda não tem obra e o vínculo trouxe uma, aproveita — NUNCA sobrescreve a existente
+        $cur = $pdo->prepare("SELECT obra_id FROM cotacao WHERE id=?"); $cur->execute([$cid]);
+        $obraAtual = (int)($cur->fetchColumn() ?: 0);
+        $obraNova = (int)($in['obra_id'] ?? 0);
+        if (!$obraAtual && $obraNova) {
+            $pdo->prepare("UPDATE cotacao SET obra_id=? WHERE id=?")->execute([$obraNova, $cid]);
+            $obraAtual = $obraNova;
+        }
+        $pdo->prepare("UPDATE cotacao SET servico_id=?, updated_at=? WHERE id=?")->execute([$sid ?: null, date('c'), $cid]);
+        cot_log($pdo, $cid, $me, 'Radar', $sid ? ('Vinculada ao item do radar "' . $nome . '" (#' . $sid . ')') : 'Vínculo com o radar removido');
+        echo json_encode(['ok'=>true, 'cotacao_id'=>$cid, 'servico_id'=>$sid ?: null,
+                          'servico_nome'=>$nome, 'obra_id'=>$obraAtual ?: null], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($acao === 'reprocessar_obras') {   // ADMIN: preenche a obra das cotações antigas sem obra, pela solicitação vinculada
         $perms = user_perms($pdo, $me);
         if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }

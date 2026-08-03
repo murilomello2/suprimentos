@@ -1374,7 +1374,11 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
     : '';
   const origem=c.servico_id
     ? '<span onclick="cotVerItemRadar()" title="Nasceu do item do radar &ldquo;'+esc(c.servico_nome||'')+'&rdquo; — clique p/ abrir (verba, curadoria, cronograma)" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:var(--verde-d);font-weight:700"><span class="material-icons" style="font-size:13px">radar</span>do radar: '+esc(c.servico_nome||('item #'+c.servico_id))+'<span class="material-icons" style="font-size:12px;opacity:.6">open_in_new</span></span>'
-    : '<span title="cotação criada do zero — sem vínculo a item do radar" style="display:inline-flex;align-items:center;gap:4px;color:#8a9299"><span class="material-icons" style="font-size:13px">edit_note</span>criada do zero</span>';
+    /* Sem vínculo: quem pode gerir consegue AMARRAR AGORA, mesmo anos depois. Era o buraco das
+       cotações criadas do zero e das importadas do sistema antigo — nasciam órfãs e ficavam. */
+    : (podeGerir
+      ? '<span onclick="cotVincTardio()" title="esta cotação não nasceu de um item do radar — clique para vinculá-la agora" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:#8a9299;border-bottom:1px dashed #cfd6da"><span class="material-icons" style="font-size:13px">add_link</span>criada do zero — <b style="color:var(--verde-d)">vincular ao radar</b></span>'
+      : '<span title="cotação criada do zero — sem vínculo a item do radar" style="display:inline-flex;align-items:center;gap:4px;color:#8a9299"><span class="material-icons" style="font-size:13px">edit_note</span>criada do zero</span>');
   const meta=[
     '<span style="display:inline-flex;align-items:center;gap:4px"><span class="material-icons" style="font-size:13px;color:var(--muted)">apartment</span><span id="cotObraWrap">'+cotObraLabel(c,podeGerir)+'</span></span>',
     (c.categoria||c.tipo_servico)?'<span>'+esc([c.categoria,c.tipo_servico].filter(Boolean).join(' · '))+'</span>':'',
@@ -1470,3 +1474,92 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
   cotInboxLoad(c.id);                            // Fase 4: carrega as respostas de e-mail desta cotação (se houver)
 }
 // detecta os pedidos de compra que nasceram desta solicitação (vínculo EXATO por colidmov, que embute a coligada)
+/* ───────── VINCULAR AO RADAR DEPOIS DE CRIADA ─────────
+   Até aqui o vínculo só existia no instante da criação: cotação nascida "do zero" — ou importada
+   do sistema antigo — ficava órfã para sempre. Quem pode é a mesma regra de gerir a cotação
+   (admin | gerente | criador | colaborador); o servidor confere de novo em set_servico. */
+let VT = { itens:[], obra:'', escolhido:null };
+
+function cotVincTardio(){
+  const c=(COT.cur&&COT.cur.cotacao)||{};
+  VT={itens:[], obra:c.obra_id?String(c.obra_id):'', escolhido:null};
+  dlgAbrir('Cotações','Vincular ao radar de aquisições',
+    '<div style="max-width:620px">'
+   + '<div class="dmini" style="margin-bottom:10px">Amarra esta cotação a um item do radar. Serve para '
+   + 'reconciliar o que foi criado do zero (ou veio do sistema antigo) com a programação da obra — '
+   + 'o item passa a mostrar que tem mapa, e daqui você chega no quantitativo, na verba e no cronograma dele.</div>'
+   + cotFld('Obra','<select id="vtObra" onchange="cotVincTObra()" style="width:100%">'+cotObraOpts(VT.obra)+'</select>')
+   + cotFld('Item do radar','<input id="vtBusca" placeholder="Digite ao menos 2 letras do item…" '
+       + (VT.obra?'':'disabled ')+'oninput="cotVincTBusca()" style="width:100%">'
+       + '<div id="vtSug"></div>', 'margin-top:8px')
+   + '<div id="vtEscolha" class="dmini" style="margin-top:10px"></div>'
+   + '<div class="bar" style="justify-content:space-between;gap:8px;margin-top:14px;flex-wrap:wrap">'
+   + (c.servico_id?'<button class="btn-ghost" style="color:#c0392b" onclick="cotVincTSalvar(0)">Remover o vínculo atual</button>':'<span></span>')
+   + '<span class="bar" style="gap:8px"><button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" id="vtBtn" disabled style="opacity:.5" onclick="cotVincTSalvar()">Vincular</button></span>'
+   + '</div></div>');
+  if(VT.obra) cotVincTObra();
+}
+
+async function cotVincTObra(){
+  const sel=document.getElementById('vtObra'), inp=document.getElementById('vtBusca'), s=document.getElementById('vtSug');
+  VT.obra=(sel&&sel.value)||''; VT.itens=[]; VT.escolhido=null;
+  if(s)s.innerHTML=''; const ev=document.getElementById('vtEscolha'); if(ev)ev.innerHTML='';
+  const b=document.getElementById('vtBtn'); if(b){b.disabled=true;b.style.opacity='.5';}
+  if(inp){ inp.disabled=!VT.obra; inp.value=''; }
+  if(!VT.obra) return;
+  if(inp) inp.placeholder='Carregando os itens da obra…';
+  try{
+    const url='actions/matriz.php'+(String(VT.obra)!=='1'?('?obra='+VT.obra+'&'):'?')+'_='+Date.now();
+    const d=await (await fetch(url)).json();
+    VT.itens=d.itens||[];
+    if(inp){ inp.placeholder='Digite ao menos 2 letras do item… ('+VT.itens.length+' itens nesta obra)'; inp.focus(); }
+  }catch(e){ VT.itens=[]; if(inp) inp.placeholder='Falha ao carregar os itens desta obra'; }
+}
+
+let _vtT;
+function cotVincTBusca(){
+  clearTimeout(_vtT);
+  _vtT=setTimeout(()=>{
+    const raw=(document.getElementById('vtBusca')||{}).value||'', q=opNorm(raw), s=document.getElementById('vtSug');
+    if(!s)return;
+    if(q.length<2){ s.innerHTML=''; return; }
+    const its=(VT.itens||[]).filter(it=>opNorm((it.nome||'')+' '+(it.grupo||'')).includes(q)).slice(0,14);
+    s.innerHTML=its.length
+      ? '<div style="background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);max-height:250px;overflow:auto;margin-top:4px">'
+        + its.map(it=>'<div onclick="cotVincTPick('+it.ordem+')" style="padding:7px 10px;cursor:pointer;font-size:12.5px;border-bottom:1px solid #f1f3f2" onmouseover="this.style.background=\'#eff7f1\'" onmouseout="this.style.background=\'\'">'
+          + '<b>'+esc(it.nome)+'</b> <span class="muted" style="font-size:10.5px">· '+esc(it.grupo||'')
+          + (it.cotacao?' · <span style="color:var(--dourado);font-weight:700">já tem mapa</span>':'')+'</span></div>').join('')
+        + '</div>'
+      : '<div class="dmini" style="padding:6px">nenhum item casa "'+esc(raw)+'" nesta obra</div>';
+  },160);
+}
+
+function cotVincTPick(ordem){
+  const it=(VT.itens||[]).find(x=>Number(x.ordem)===Number(ordem)); if(!it)return;
+  VT.escolhido=it;
+  const s=document.getElementById('vtSug'); if(s)s.innerHTML='';
+  const i=document.getElementById('vtBusca'); if(i)i.value=it.nome;
+  const ev=document.getElementById('vtEscolha');
+  if(ev) ev.innerHTML='<span style="color:var(--verde-d)"><span class="material-icons" style="font-size:14px;vertical-align:-3px">link</span> '
+    + 'Vai vincular a <b>'+esc(it.nome)+'</b>'+(it.grupo?(' <span class="muted">· '+esc(it.grupo)+'</span>'):'')
+    + (it.cotacao?'<div style="color:var(--dourado);margin-top:3px">Atenção: este item já tem outro mapa de cotação vinculado. Vincular aqui não apaga o outro — o item passa a ter dois.</div>':'')
+    + '</span>';
+  const b=document.getElementById('vtBtn'); if(b){b.disabled=false;b.style.opacity='';}
+}
+
+async function cotVincTSalvar(remover){
+  const c=(COT.cur&&COT.cur.cotacao)||{};
+  const sid = (remover===0) ? 0 : (VT.escolhido?Number(VT.escolhido.ordem):0);
+  if(remover!==0 && !sid){ toast('Escolha um item do radar'); return; }
+  const b=document.getElementById('vtBtn'); if(b){b.disabled=true;b.textContent='Salvando…';}
+  try{
+    const body={acao:'set_servico',me:EU&&EU.bitrix_id,cotacao_id:c.id,servico_id:sid};
+    if(sid && VT.obra) body.obra_id=Number(VT.obra);      // só é usado se a cotação ainda não tiver obra
+    const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.error){ toast(r.error); if(b){b.disabled=false;b.textContent='Vincular';} return; }
+    closeModal(true);
+    toast(sid?('Vinculada ao radar: '+(r.servico_nome||'')):'Vínculo com o radar removido');
+    cotOpen(c.id);
+  }catch(e){ toast('Falha: '+e.message); if(b){b.disabled=false;b.textContent='Vincular';} }
+}

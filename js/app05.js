@@ -901,6 +901,8 @@ let ENV={d:null, aba:'fila', obra:'', busca:'', sel:{}};   // obra = filtro; sel
 function envMe(){ return encodeURIComponent((EU&&EU.bitrix_id)||''); }
 async function envInit(){ if(ENV.d) { envRender(); return; } envCarregar(); }
 async function envCarregar(){ const w=document.getElementById('envWrap'); if(!w) return;
+  /* voltar para a lista encerra qualquer assistente de lote em aberto (ex.: fechou o modal no meio) */
+  ENV.wiz=null;
   w.innerHTML='<div class="dempty">Lendo os pedidos aprovados no TOTVS e conferindo as travas...</div>';
   try{ ENV.d=await (await fetch('actions/envio.php?me='+envMe()+'&_='+Date.now())).json(); }
   catch(e){ w.innerHTML='<div class="panel"><div class="empty">Falha ao carregar: '+esc(e.message)+'</div></div>'; return; }
@@ -1547,10 +1549,14 @@ function envBarraSelecao(){
    + '<span style="margin-left:auto"></span>'
    + (semPdf?('<button class="btn-prim" style="background:#fff;color:var(--verde-d)" onclick="envLoteGerarPdf()">'
        + '<span class="material-icons" style="font-size:16px;vertical-align:-3px">auto_awesome</span> Gerar '+semPdf+' PDF(s)</button>'):'')
+   /* "Marcar como só para a obra" fazia parecer AÇÃO DE ENVIO. É uma classificação: o pedido é
+      regularização de material que já chegou. O destino (só a obra) é consequência, e está no diálogo. */
    + '<button class="btn-ghost" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.6)" onclick="envLoteSoObra()">'
-   + 'Marcar como só para a obra</button>'
-   + (prontos.length?('<button class="btn-prim" style="background:#fff;color:var(--verde-d)" onclick="envLoteEnviar()">'
-       + '<span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Enviar '+prontos.length+'</button>'):'')
+   + 'Marcar como regularização</button>'
+   /* "Conferir e enviar": o lote agora abre um e-mail por vez para conferência, não dispara tudo de uma vez. */
+   + (prontos.length?('<button class="btn-prim" style="background:#fff;color:var(--verde-d)" onclick="envLoteEnviar()" '
+       + 'title="abre os '+prontos.length+' e-mails um a um para você conferir e enviar">'
+       + '<span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Conferir e enviar '+prontos.length+'</button>'):'')
    + '<button class="btn-ghost" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.6)" onclick="envSelLimpar()">Limpar</button>'
    + '</div>';
 }
@@ -1606,7 +1612,7 @@ function envLinha(e){
   h+='<td style="padding:5px 8px;text-align:right;white-space:nowrap">'
    + (semPdf?('<button class="btn-prim" style="padding:3px 9px;font-size:11px" onclick="envGerarPdfLote(\''+e.chave+'\')">Gerar PDF</button> '):'')
    + '<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="envVerEmail(\''+e.chave+'\')">Ver</button> '
-   + '<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="envDecidir(\''+e.chave+'\',\'so_obra\')" title="o e-mail vai só para a obra, para lançamento — o fornecedor não recebe">Só obra</button> '
+   + '<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="envDecidir(\''+e.chave+'\',\'so_obra\')" title="marca como REGULARIZAÇÃO (material já entregue): o fornecedor não recebe nada e o e-mail passa a ir só para a obra, para lançamento. Não envia nada agora.">Só obra</button> '
    + '<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="envDecidir(\''+e.chave+'\',\'segurar\')" title="retém de propósito, com motivo e seu nome; fica visível na aba Segurados até alguém liberar">Segurar</button> '
    + (semPdf?'':'<button class="btn-prim" style="padding:3px 11px;font-size:11px" onclick="envEnviar(\''+e.chave+'\')">Enviar</button>')
    + '</td></tr>';

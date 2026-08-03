@@ -27,10 +27,14 @@ async function envLoteGerarPdf(){
 async function envLoteSoObra(){
   const sel=envSelecionados();
   if(!sel.length) return;
-  dlgAbrir('Envio de Pedidos','Marcar '+sel.length+' e-mail(s) como só para a obra',
+  const nped=sel.reduce((a,b)=>a+(b.pedidos||[]).length,0);
+  const obras=[...new Set(sel.map(e=>e.obra))];
+  dlgAbrir('Envio de Pedidos','Regularização — não enviar ao fornecedor',
     '<div style="max-width:540px"><div class="dmini" style="margin-bottom:10px">'
-   + 'O e-mail vai <b>só para a obra</b>, para lançamento. O fornecedor <b>não recebe nada</b> — é a trava '
-   + 'do material que já foi entregue.</div>'
+   + '<b>Isto não envia nada agora.</b> Marca '+nped+' pedido(s) como regularização de material que já foi '
+   + 'entregue: o fornecedor deixa de ser destinatário (não corre o risco de entregar de novo) e os pedidos '
+   + 'passam a compor <b>um único e-mail por obra</b> ('+obras.length+' obra'+(obras.length>1?'s':'')+': '
+   + esc(obras.join(', '))+'), para lançamento. Esse e-mail fica na fila e você envia depois.</div>'
    + cotFld('Motivo (fica registrado com o seu nome)','<input id="envLoteMot" placeholder="ex.: material já entregue, pedido só para lançamento" style="width:100%">')
    + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
    + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
@@ -45,64 +49,62 @@ async function envLoteSoObraSalvar(){
       body:JSON.stringify({acao:'decidir',me:(EU&&EU.bitrix_id),me_nome:(EU&&EU.nome)||'',
                            decisao:'so_obra',coligada:p.coligada_cod,numero:p.numero,motivo:m})}); n++; }catch(x){}
   }
-  closeModal(true); toast(n+' pedido(s) marcados para ir só à obra');
+  const obras=[...new Set(sel.map(e=>e.obra))];
+  closeModal(true);
+  toast(n+' pedido(s) marcados como regularização — agora formam 1 e-mail por obra ('
+      + obras.length+': '+obras.join(', ')+'). Ainda não enviados.');
   ENV.sel={}; ENV.d=null; envCarregar();
 }
+/* ============================ ENVIO EM LOTE = ASSISTENTE ============================
+   Antes: uma tabelinha de resumo e os N e-mails saíam sem ninguém ver nenhum deles. Foi assim que
+   o lote passou por cima da confirmação de remetente que o unitário respeita (mandava
+   aceito_conta_geral:1 fixo). A regra que ficou é: toda ação em lote passa pelas MESMAS perguntas
+   da unitária — e a única forma honesta disso é conferir um a um, na MESMA tela.
+   Por isso o assistente não tem tela própria: ele reabre `envEnviar` a cada passo. Um compositor
+   só, um formulário só. Dois é como nasceram os defeitos anteriores. */
+function envWizAtivo(){ return !!(ENV.wiz && ENV.wiz.lista && ENV.wiz.lista.length); }
+function envWizPasso(){ return envWizAtivo() ? (ENV.wiz.i+1) : 0; }
 async function envLoteEnviar(){
   const sel=envSelecionados().filter(e=>!(e.sem_pdf||0));
   if(!sel.length){ toast('Nenhum marcado com o PDF pronto'); return; }
-  const comAlerta=sel.filter(e=>e.alerta||e.forn_travado).length;
-  /* De onde o lote vai sair. No envio unitario o servidor PARA e pergunta quando o remetente nao e
-     pedidos@caprem.com.br; aqui isso precisa aparecer ANTES, porque um lote nao tem onde parar no
-     meio — sairiam N e-mails de um endereco que o fornecedor nao reconhece. */
-  const ct=(ENV.d&&ENV.d.conta)||{};
-  dlgAbrir('Envio de Pedidos','Enviar '+sel.length+' e-mail(s)',
-    '<div style="max-width:640px">'
-   + '<div class="dmini" style="margin-bottom:10px;padding:7px 11px;border-radius:8px;background:#f8faf9;border:1px solid var(--line)">'
-   + 'Remetente: <b>'+esc(ct.de||'(nao configurado)')+'</b></div>'
-   + (ct.e_pedidos?'':('<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:9px 12px;border-radius:0 8px 8px 0;'
-      + 'font-size:12.5px;margin-bottom:10px">Esta <b>nao</b> e a conta dos pedidos. Os fornecedores conhecem '
-      + '<b>pedidos@caprem.com.br</b>; sairao '+sel.length+' e-mail(s) de <b>'+esc(ct.de||'?')+'</b>.'
-      + '<label style="display:flex;gap:6px;align-items:center;margin-top:7px;font-weight:700">'
-      + '<input type="checkbox" id="envLoteConta"> Enviar assim mesmo</label></div>'))
-   + (comAlerta?('<div style="border-left:4px solid #c0392b;background:#fdf1ef;padding:9px 12px;border-radius:0 8px 8px 0;'
-      + 'font-size:12.5px;margin-bottom:10px"><b>'+comAlerta+' com sinal de material já em obra ou CNPJ na observação.</b> '
-      + 'Se algum for regularização, cancele e use <b>Só para a obra</b> — o fornecedor pode entregar de novo.</div>'):'')
-   + '<div style="max-height:250px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:12px">'
-   + '<table class="dtable" style="width:100%;font-size:12px"><tbody>'
-   + sel.map(x=>'<tr'+((x.alerta||x.forn_travado)?' style="background:#fdf3f3"':'')+'><td>'+esc(x.obra)+'</td><td>'+esc(x.forn_nome)+'</td>'
-       + '<td class="muted">'+esc(x.para)+'</td><td style="text-align:right">'+(x.pedidos||[]).length+' PC</td></tr>').join('')
-   + '</tbody></table></div>'
-   + '<div id="envLoteMsg" class="dmini" style="margin-bottom:8px"></div>'
-   + '<div class="bar" style="justify-content:flex-end;gap:8px">'
-   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
-   + '<button class="btn-prim" id="envLoteBtn" onclick="envLoteEnviarConfirmado()">Enviar os '+sel.length+'</button></div></div>');
+  /* NÃO recarrega a fila entre os passos: a lista é uma foto tirada agora. Recarregar no meio
+     invalidaria as chaves dos envelopes que ainda não foram conferidos. */
+  ENV.wiz={lista:sel.map(e=>e.chave), i:0, enviados:[], pulados:[], erros:[]};
+  envEnviar(ENV.wiz.lista[0]);
 }
-async function envLoteEnviarConfirmado(){
-  const sel=envSelecionados().filter(e=>!(e.sem_pdf||0));
-  const b=document.getElementById('envLoteBtn'), m=document.getElementById('envLoteMsg');
-  /* So repassa o "aceito a conta geral" se o Murilo tiver marcado a caixa. Mandar 1 fixo, como
-     estava, fazia o lote atravessar calado a trava que o envio unitario respeita. */
-  const ct=(ENV.d&&ENV.d.conta)||{};
-  const aceita=ct.e_pedidos?1:((document.getElementById('envLoteConta')||{}).checked?1:0);
-  if(!ct.e_pedidos&&!aceita){
-    if(m) m.innerHTML='<span style="color:var(--pend)">Marque <b>Enviar assim mesmo</b> para sair de '+esc(ct.de||'outra conta')+'.</span>';
-    return;
-  }
-  if(b) b.disabled=true;
-  let ok=0; const err=[];
-  for(let i=0;i<sel.length;i++){
-    if(m) m.textContent='Enviando '+(i+1)+' de '+sel.length+'...';
-    try{ const r=await (await fetch('actions/envio.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({acao:'enviar',me:(EU&&EU.bitrix_id),me_nome:(EU&&EU.nome)||'',
-                           envelope:sel[i].chave, aceito_conta_geral:aceita})})).json();
-      if(r.error) err.push(sel[i].obra+' / '+sel[i].forn_nome+': '+String(r.error).replace('CONTA_GERAL:','')); else ok++;
-    }catch(e){ err.push(sel[i].forn_nome+': '+e.message); }
-  }
-  closeModal(true);
-  toast(ok+' e-mail(s) enviado(s)'+(err.length?(' — '+err.length+' com problema'):''));
-  if(err.length) setTimeout(()=>toast(err[0]),2600);
-  ENV.sel={}; ENV.d=null; envCarregar();
+/* avança para o próximo passo (ou fecha com o resumo) */
+function envWizProximo(){
+  if(!envWizAtivo()) return;
+  ENV.wiz.i++;
+  if(ENV.wiz.i>=ENV.wiz.lista.length) return envWizFim();
+  envEnviar(ENV.wiz.lista[ENV.wiz.i]);
+}
+function envWizPular(){
+  if(!envWizAtivo()) return;
+  const e=envAchar(ENV.wiz.lista[ENV.wiz.i]);
+  ENV.wiz.pulados.push(e?(e.obra+' / '+e.forn_nome):'(envelope)');
+  envWizProximo();
+}
+function envWizParar(){
+  if(!envWizAtivo()) return;
+  /* parar no meio é legítimo: o que faltou continua na fila, nada se perde */
+  ENV.wiz.parou=ENV.wiz.lista.length-ENV.wiz.i;
+  ENV.wiz.lista=ENV.wiz.lista.slice(0,ENV.wiz.i);
+  envWizFim();
+}
+function envWizFim(){
+  const w=ENV.wiz||{}; ENV.wiz=null;
+  const lin=(cor,tit,itens)=>!itens.length?'':('<div style="margin-bottom:9px"><b style="color:'+cor+'">'+tit+' ('+itens.length+')</b>'
+    + '<div class="dmini" style="margin-top:3px">'+itens.map(esc).join('<br>')+'</div></div>');
+  dlgAbrir('Envio de Pedidos','Resumo do envio',
+    '<div style="max-width:560px">'
+   + lin('var(--ok)','Enviados',w.enviados||[])
+   + lin('var(--muted)','Pulados — continuam na fila',w.pulados||[])
+   + lin('#c0392b','Com erro — continuam na fila',w.erros||[])
+   + ((w.parou)?('<div class="dmini" style="margin-bottom:9px">Você parou antes do fim: <b>'+w.parou
+       + '</b> e-mail(s) não foram conferidos e continuam na fila.</div>'):'')
+   + '<div class="bar" style="justify-content:flex-end;margin-top:12px">'
+   + '<button class="btn-prim" onclick="closeModal(true);ENV.sel={};ENV.d=null;envCarregar()">Fechar</button></div></div>');
 }
 
 function envAchar(ch){ return (ENV.d.envelopes||[]).find(x=>x.chave===ch); }
@@ -211,9 +213,13 @@ async function envVerEmail(ch){ const e=envAchar(ch); if(!e) return;
 
 /* ---- decisoes humanas: sempre com motivo, sempre com nome ---- */
 function envDecidir(ch,dec){ const e=envAchar(ch); if(!e) return;
-  const TIT={segurar:'Segurar estes pedidos', so_obra:'Marcar como regularizacao', arquivado:'Arquivar estes pedidos'};
+  const TIT={segurar:'Segurar estes pedidos', so_obra:'Regularizacao - nao enviar ao fornecedor', arquivado:'Arquivar estes pedidos'};
+  /* A 1a frase do so_obra e "isto nao envia nada agora": o titulo antigo ("marcar como so para a
+     obra") somado a um dialogo que descrevia o e-mail fazia a tela parecer um envio. */
   const TXT={segurar:'Eles continuam visiveis na aba <b>Segurados</b> ate alguem liberar. Nao somem da fila.',
-             so_obra:'O e-mail vai <b>so para a obra</b>, para lancamento. O fornecedor nao recebe nada - e a trava do material que ja foi entregue.',
+             so_obra:'<b>Isto nao envia nada agora.</b> Marca o pedido como regularizacao de material que ja foi entregue: '
+                   + 'o fornecedor deixa de ser destinatario (nao corre o risco de entregar de novo) e o pedido passa a '
+                   + 'compor <b>um unico e-mail por obra</b>, para lancamento. Esse e-mail fica na fila e voce envia depois.',
              arquivado:'Somem da fila e das contagens, mas <b>nada e apagado</b>: o pedido continua no TOTVS e volta pela aba <b>Arquivados</b>.'};
   const tit=TIT[dec]||'Decidir', txt=TXT[dec]||'';
   dlgAbrir('Envio de Pedidos - '+esc(e.obra), tit,
@@ -236,7 +242,11 @@ async function envDecidirSalvar(ch,dec){ const e=envAchar(ch); if(!e) return;
       if(r.error) erro=r.error; }catch(err){ erro=err.message; } }
   closeModal(true);
   if(erro){ toast(erro); return; }
-  toast(dec==='segurar'?'Pedidos segurados':'Marcado para ir so a obra');
+  /* O reagrupamento e invisivel e assustava: N linhas somem e vira 1. Diz o que aconteceu. */
+  const np=(e.pedidos||[]).length;
+  toast(dec==='segurar' ? 'Pedidos segurados'
+       : (np>1 ? ('Regularização marcada — os '+np+' pedidos agora formam 1 e-mail para a obra '+e.obra+'. Ainda não enviado.')
+               : ('Regularização marcada — o pedido entra no e-mail da obra '+e.obra+'. Ainda não enviado.')));
   ENV.d=null; envCarregar();
 }
 async function envLiberar(col,num){
@@ -255,8 +265,11 @@ async function envLiberar(col,num){
 async function envEnviar(ch){
   const e=envAchar(ch); if(!e) return;
   if((e.sem_pdf||0)>0){ toast('Faltam '+e.sem_pdf+' PDF(s) — gere antes de enviar'); return; }
+  /* Mesma tela serve o envio avulso e cada passo do assistente do lote — só muda o cabeçalho e os botões. */
+  const wiz=envWizAtivo() && ENV.wiz.lista[ENV.wiz.i]===ch;
+  const tituloConf=wiz ? ('Conferir e enviar — '+envWizPasso()+' de '+ENV.wiz.lista.length) : 'Conferir e enviar';
 
-  dlgAbrir('Envio de Pedidos - '+esc(e.obra),'Conferir e enviar','<div class="dempty">Montando o e-mail…</div>');
+  dlgAbrir('Envio de Pedidos - '+esc(e.obra), tituloConf, '<div class="dempty">Montando o e-mail…</div>');
   const pcs=(e.pedidos||[]).map(p=>p.numero).join(',');
   const u='actions/envio_config.php?previa='+e.ficha_id+'&tipo='+(e.destino==='obra'?'obra':'fornecedor')
         + '&pcs='+encodeURIComponent(pcs)+'&fornecedor='+encodeURIComponent(e.forn_nome)
@@ -265,8 +278,11 @@ async function envEnviar(ch){
            E como esta tela devolve o assunto como override, o furo ia junto no envio. */
         + '&sigla='+encodeURIComponent((e.pedidos[0]||{}).coligada_sigla||'')
         + '&me='+envMe();
-  let p; try{ p=await (await fetch(u)).json(); }catch(err){ toast('Falha: '+err.message); closeModal(true); return; }
-  if(p.error){ toast(p.error); closeModal(true); return; }
+  /* Falhar ao MONTAR a prévia não pode abortar o assistente calado: vira erro registrado e segue. */
+  const falhou=msg=>{ if(wiz){ ENV.wiz.erros.push(e.obra+' / '+e.forn_nome+': '+msg); envWizProximo(); }
+                      else { toast(msg); closeModal(true); } };
+  let p; try{ p=await (await fetch(u)).json(); }catch(err){ falhou('Falha: '+err.message); return; }
+  if(p.error){ falhou(p.error); return; }
 
   const rot=t=>'<div class="dmini" style="margin:10px 0 3px;font-weight:600">'+t+'</div>';
   let h='<div style="max-width:780px">';
@@ -297,11 +313,18 @@ async function envEnviar(ch){
   h+='<div class="bar" style="justify-content:space-between;gap:8px;margin-top:12px;flex-wrap:wrap">'
    + '<span class="dmini" style="color:var(--muted)">Depois de enviado, estes pedidos entram no livro-caixa e '
    + '<b>não voltam</b> para a fila.</span>'
-   + '<span class="bar" style="gap:8px"><button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
-   + '<button class="btn-prim" id="envCBtn" onclick="envEnviarConfirmado('+jsArg(ch)+',0)">'
-   + '<span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar agora</button></span></div></div>';
+   + (wiz
+      ? ('<span class="bar" style="gap:8px">'
+       + '<button class="btn-ghost" onclick="envWizParar()" title="o que faltou continua na fila">Parar por aqui</button>'
+       + '<button class="btn-ghost" onclick="envWizPular()" title="não envia este; ele continua na fila">Pular este</button>'
+       + '<button class="btn-prim" id="envCBtn" onclick="envEnviarConfirmado('+jsArg(ch)+',0)">'
+       + '<span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar e ir para o próximo</button></span>')
+      : ('<span class="bar" style="gap:8px"><button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+       + '<button class="btn-prim" id="envCBtn" onclick="envEnviarConfirmado('+jsArg(ch)+',0)">'
+       + '<span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar agora</button></span>'))
+   + '</div></div>';
 
-  dlgAbrir('Envio de Pedidos - '+esc(e.obra),'Conferir e enviar', h);
+  dlgAbrir('Envio de Pedidos - '+esc(e.obra), tituloConf, h);
 }
 async function envEnviarConfirmado(ch, aceitaContaGeral){
   const b=document.getElementById('envCBtn'), m=document.getElementById('envCMsg');
@@ -322,6 +345,14 @@ async function envEnviarConfirmado(ch, aceitaContaGeral){
         return;
       }
       if(m) m.innerHTML='<span style="color:var(--pend)">'+esc(r.error)+'</span>';
+      return;
+    }
+    /* No assistente NÃO recarrega a fila aqui: as chaves dos envelopes ainda não conferidos
+       precisam continuar válidas até o último passo. O envCarregar acontece no resumo. */
+    if(envWizAtivo() && ENV.wiz.lista[ENV.wiz.i]===ch){
+      const e=envAchar(ch);
+      ENV.wiz.enviados.push((e?e.obra+' / '+e.forn_nome:'')+' → '+r.para+' ('+r.pedidos+' PC)');
+      envWizProximo();
       return;
     }
     closeModal(true);

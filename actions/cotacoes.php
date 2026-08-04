@@ -415,10 +415,46 @@ try {
         $cid = (int)$row->fetchColumn();
         if (!$cid) { echo json_encode(['ok'=>true, 'ja_removido'=>true], JSON_UNESCAPED_UNICODE); exit; }   // já não existe
         if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
-        $fn = $pdo->prepare("SELECT fornecedor_nome FROM cotacao_fornecedor WHERE id=?"); $fn->execute([$id]); $fn = (string)$fn->fetchColumn();
+        $cf = $pdo->prepare("SELECT fornecedor_nome, fornecedor_id FROM cotacao_fornecedor WHERE id=?"); $cf->execute([$id]);
+        $cfr = $cf->fetch() ?: []; $fn = (string)($cfr['fornecedor_nome'] ?? ''); $ffid = (int)($cfr['fornecedor_id'] ?? 0);
+
+        /* AS PROPOSTAS DELE VÃO JUNTO. Antes daqui só a linha do convidado era apagada e a proposta
+           sobrevivia — o mapa desenha a partir das PROPOSTAS, então o fornecedor "removido"
+           continuava lá, agora sem card e sem como excluir pela Concorrência. Era assim que nascia
+           coluna órfã. Mas apagar proposta é destrutivo: se houver alguma, o servidor NÃO apaga de
+           primeira — devolve o que está em jogo e o front pergunta, exigindo motivo. */
+        $q = $pdo->prepare("SELECT id, total FROM cotacao_proposta
+                            WHERE cotacao_id=? AND (ativa=1 OR ativa IS NULL)
+                              AND ((fornecedor_id IS NOT NULL AND fornecedor_id=?) OR LOWER(TRIM(fornecedor_nome))=LOWER(TRIM(?)))");
+        $q->execute([$cid, $ffid ?: -1, $fn]);
+        $props = $q->fetchAll();
+
+        if ($props && empty($in['com_propostas'])) {
+            echo json_encode(['ok'=>false, 'precisa_confirmar'=>true, 'fornecedor'=>$fn,
+                              'propostas'=>count($props),
+                              'total'=>array_sum(array_map(fn($p) => (float)$p['total'], $props))], JSON_UNESCAPED_UNICODE); exit;
+        }
+        $motivo = trim((string)($in['motivo'] ?? ''));
+        if ($props && $motivo === '') { http_response_code(400); echo json_encode(['error'=>'Escreva o motivo — a proposta será apagada e isso fica registrado no histórico.'], JSON_UNESCAPED_UNICODE); exit; }
+
+        $pdo->beginTransaction();
+        $apagadas = 0; $valor = 0.0;
+        foreach ($props as $p) {   // apaga a CADEIA de revisões de cada proposta, como no excluir_proposta
+            $raiz = (int)$p['id'];
+            $rr = $pdo->prepare("SELECT COALESCE(raiz_id, id) FROM cotacao_proposta WHERE id=?"); $rr->execute([$raiz]);
+            $raiz = (int)($rr->fetchColumn() ?: $raiz);
+            $pdo->prepare("DELETE FROM cotacao_proposta_item WHERE proposta_id IN (SELECT id FROM cotacao_proposta WHERE cotacao_id=? AND (id=? OR raiz_id=?))")->execute([$cid, $raiz, $raiz]);
+            $pdo->prepare("DELETE FROM cotacao_proposta WHERE cotacao_id=? AND (id=? OR raiz_id=?)")->execute([$cid, $raiz, $raiz]);
+            $apagadas++; $valor += (float)$p['total'];
+        }
         $pdo->prepare("DELETE FROM cotacao_fornecedor WHERE id=?")->execute([$id]);
-        cot_log($pdo, $cid, $me, 'Concorrência', 'Desconvidou ' . ($fn ?: ('convidado #' . $id)));
-        echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
+        $pdo->commit();
+
+        cot_log($pdo, $cid, $me, 'Concorrência',
+            'Removeu ' . ($fn ?: ('convidado #' . $id)) . ' da concorrência'
+            . ($apagadas ? (' — apagou ' . $apagadas . ' proposta(s), R$ ' . number_format($valor, 2, ',', '.')) : ' (não havia proposta)')
+            . ($motivo !== '' ? ' · motivo: ' . $motivo : ''));
+        echo json_encode(['ok'=>true, 'propostas_apagadas'=>$apagadas], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'apelido_salvar') {   // nome curto/descrição do criador (achar fácil) — ex.: "Pregos"
@@ -682,16 +718,26 @@ try {
 
     if ($acao === 'excluir_proposta') {
         $pid = (int)($in['proposta_id'] ?? 0); if (!$pid) throw new Exception('proposta_id obrigatório');
-        $row = $pdo->prepare("SELECT p.cotacao_id, p.raiz_id, p.fornecedor_nome, c.obra_id FROM cotacao_proposta p JOIN cotacao c ON c.id=p.cotacao_id WHERE p.id=?"); $row->execute([$pid]);
+        $row = $pdo->prepare("SELECT p.cotacao_id, p.raiz_id, p.fornecedor_nome, p.total, c.obra_id FROM cotacao_proposta p JOIN cotacao c ON c.id=p.cotacao_id WHERE p.id=?"); $row->execute([$pid]);
         $r = $row->fetch(); if (!$r) throw new Exception('proposta não encontrada');
         if (!cot_can_manage($pdo, $me, (int)$r['cotacao_id'])) { http_response_code(403); echo json_encode(['error'=>'Só o administrador ou quem criou a cotação pode editá-la.']); exit; }
+        /* Motivo só quando há VALOR a perder. Exigir justificativa para apagar uma proposta zerada,
+           digitada errada há dez segundos, é atrito sem retorno — e atrito é o que faz gente parar
+           de registrar as coisas. Com valor, fica no histórico. */
+        $motivoP = trim((string)($in['motivo'] ?? ''));
+        if ((float)($r['total'] ?? 0) > 0 && $motivoP === '') {
+            http_response_code(400);
+            echo json_encode(['error'=>'Escreva o motivo — esta proposta tem valor lançado e a exclusão fica registrada no histórico.'], JSON_UNESCAPED_UNICODE); exit;
+        }
         // exclui a CADEIA inteira de revisões (id=raiz OU raiz_id=raiz) — não deixa revisão arquivada órfã/invisível
         $cidp = (int)$r['cotacao_id']; $raiz = ((int)($r['raiz_id'] ?? 0)) ?: $pid;
         $pdo->beginTransaction();
         $pdo->prepare("DELETE FROM cotacao_proposta_item WHERE proposta_id IN (SELECT id FROM cotacao_proposta WHERE cotacao_id=? AND (id=? OR raiz_id=?))")->execute([$cidp, $raiz, $raiz]);
         $pdo->prepare("DELETE FROM cotacao_proposta WHERE cotacao_id=? AND (id=? OR raiz_id=?)")->execute([$cidp, $raiz, $raiz]);
         $pdo->commit();
-        cot_log($pdo, $cidp, $me, 'Proposta', 'Excluiu a proposta de ' . ((string)($r['fornecedor_nome'] ?? '') ?: ('#' . $pid)) . ' (cadeia de revisões inteira)');
+        cot_log($pdo, $cidp, $me, 'Proposta', 'Excluiu a proposta de ' . ((string)($r['fornecedor_nome'] ?? '') ?: ('#' . $pid))
+            . ((float)($r['total'] ?? 0) > 0 ? (' — R$ ' . number_format((float)$r['total'], 2, ',', '.')) : '')
+            . ' (cadeia de revisões inteira)' . ($motivoP !== '' ? ' · motivo: ' . $motivoP : ''));
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 

@@ -477,8 +477,37 @@ async function cotPedidoVer(numero,coligadaCod,obraId){
       <div class="dmini" style="margin-top:8px">Dados do TOTVS (somente leitura), filtrados pela coligada desta obra. O total usa preço unit × qtde quando o valor líquido ainda não foi gravado no TOTVS.</div>`);
   }catch(e){ ov.innerHTML=shell('<div class="empty">Falha ao buscar o pedido.</div>'); }
 }
-async function cotExcluirProposta(pid){ if(!confirm('Excluir esta proposta?'))return;
-  try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir_proposta',me:EU&&EU.bitrix_id,proposta_id:pid})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
+/* Apaga SÓ a proposta — o fornecedor continua convidado (é o caso "lancei errado, quero refazer").
+   Motivo só quando há valor lançado: exigir justificativa para apagar proposta zerada seria atrito
+   sem retorno. Quem quer tirar o fornecedor inteiro usa o × da Concorrência. */
+async function cotExcluirProposta(pid){
+  const p=((COT.cur&&COT.cur.propostas)||[]).find(x=>String(x.id)===String(pid));
+  const tot=p?(+p.total||0):0, nome=p?p.fornecedor_nome:'';
+  if(tot>0){ cotExcluirPropostaMotivo(pid,nome,tot); return; }
+  if(!confirm('Excluir esta proposta'+(nome?(' de "'+nome+'"'):'')+'? O fornecedor continua na concorrência.')) return;
+  cotExcluirPropostaEnviar(pid,'');
+}
+function cotExcluirPropostaMotivo(pid,nome,tot){
+  dlgAbrir('Cotações','Excluir proposta',
+    '<div style="max-width:500px">'
+   + '<div class="dmini" style="margin-bottom:10px">Apagando a proposta'+(nome?(' de <b>'+esc(nome)+'</b>'):'')
+   + ' — <b>'+BRL(tot)+'</b>, com as revisões dela. O fornecedor <b>continua</b> na concorrência.</div>'
+   + cotFld('Motivo (fica no histórico da cotação)','<input id="cotExcMot" placeholder="ex.: lancei o preço errado, vou refazer" style="width:100%">')
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" style="background:var(--pend)" onclick="cotExcluirPropostaOk('+pid+')">Excluir proposta</button></div></div>');
+}
+function cotExcluirPropostaOk(pid){
+  const m=((document.getElementById('cotExcMot')||{}).value||'').trim();
+  if(!m){ toast('Escreva o motivo'); return; }
+  closeModal(true); cotExcluirPropostaEnviar(pid,m);
+}
+async function cotExcluirPropostaEnviar(pid,motivo){
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({acao:'excluir_proposta',me:EU&&EU.bitrix_id,proposta_id:pid,motivo:motivo})})).json();
+    if(r&&r.error){ toast(r.error); return; }
+    toast('Proposta excluída'); cotOpen(COT.cur.cotacao.id);
+  }catch(e){toast('Falha: '+e.message);} }
 // ícone por tipo de anexo
 function cotAnexoIcon(mime,nome){ const m=(mime||'')+' '+(nome||'');
   if(/pdf/i.test(m))return'picture_as_pdf'; if(/png|jpe?g|image/i.test(m))return'image'; if(/sheet|excel|xls/i.test(m))return'table_view'; return'insert_drive_file'; }
@@ -697,9 +726,42 @@ async function cotDelAnexo(id){ if(!confirm('Excluir este anexo?'))return;
   try{ await fetch('actions/cotacao_anexo.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'excluir',me:EU&&EU.bitrix_id,id})}); cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha');} }
 /* --- Concorrência: convidar / desconvidar / lançar proposta de um convidado --- */
 function cotPropostaDe(ci){ const cf=((COT.cur||{}).convidados||[])[ci]; if(!cf)return; cotProposta(0); COT.prop.fornecedor_nome=cf.fornecedor_nome; cotRenderProposta(); }
-async function cotDesconvidar(id,nome){ if(!confirm('Tirar '+(nome?('"'+nome+'"'):'este fornecedor')+' da concorrência desta cotação?\n\nEle sai da tomada de preços deste processo.'))return;
-  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'desconvidar',me:EU&&EU.bitrix_id,id})})).json();
-    if(r&&r.error){toast(r.error);return;} toast('Fornecedor removido da concorrência'); await cotOpen(COT.cur.cotacao.id); }catch(e){toast('Falha: '+e.message);} }
+/* REMOVER DA CONCORRÊNCIA leva as propostas do fornecedor junto — o mapa desenha a partir das
+   PROPOSTAS, então tirar só o card deixava o fornecedor no comparativo, agora sem card e sem como
+   excluir por lá. Como apagar proposta é destrutivo, o servidor não apaga de primeira: devolve
+   quantas e quanto está em jogo, e só então perguntamos, exigindo motivo (vai para o Histórico). */
+async function cotDesconvidar(id,nome,motivo,comPropostas){
+  const body={acao:'desconvidar',me:EU&&EU.bitrix_id,id};
+  if(comPropostas){ body.com_propostas=1; body.motivo=motivo||''; }
+  else if(!confirm('Tirar '+(nome?('"'+nome+'"'):'este fornecedor')+' da concorrência desta cotação?')) return;
+  try{
+    const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r&&r.precisa_confirmar){ cotDesconvidarConfirmar(id,r); return; }
+    if(r&&r.error){toast(r.error);return;}
+    try{ closeModal(true); }catch(e){}
+    toast('Fornecedor removido'+(r.propostas_apagadas?(' — '+r.propostas_apagadas+' proposta(s) saíram do mapa'):''));
+    await cotOpen(COT.cur.cotacao.id);
+  }catch(e){toast('Falha: '+e.message);} }
+function cotDesconvidarConfirmar(id,info){
+  dlgAbrir('Cotações','Remover da concorrência',
+    '<div style="max-width:520px">'
+   + '<div style="border-left:4px solid var(--pend);background:#fdf1ef;padding:10px 13px;border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:12px">'
+   + '<b>'+esc(info.fornecedor||'Este fornecedor')+'</b> tem <b>'+info.propostas+' proposta(s)</b> lançada(s)'
+   + (info.total?(', somando <b>'+BRL(info.total)+'</b>'):'')+'. Remover da concorrência <b>apaga essas propostas</b> '
+   + 'e elas somem do mapa comparativo. Não tem como desfazer.</div>'
+   + '<div class="dmini" style="margin-bottom:8px">Se você só quer corrigir o preço, feche isto e use '
+   + '<b>editar</b> na proposta; para trocar o valor mantendo o histórico, use <b>nova revisão</b>.</div>'
+   + cotFld('Motivo (fica no histórico da cotação)','<input id="cotDescMot" placeholder="ex.: cadastrei errado, vou refazer" style="width:100%">')
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" style="background:var(--pend)" onclick="cotDesconvidarOk('+id+')">Remover e apagar as propostas</button>'
+   + '</div></div>');
+}
+function cotDesconvidarOk(id){
+  const m=((document.getElementById('cotDescMot')||{}).value||'').trim();
+  if(!m){ toast('Escreva o motivo'); return; }
+  cotDesconvidar(id,'',m,true);
+}
 let _cotCB;
 function cotConvBuscaInput(){ clearTimeout(_cotCB); const q=(document.getElementById('cotConvBusca').value||'').trim(), box=document.getElementById('cotConvSug'); if(!box)return; if(q.length<2){box.style.display='none';box.innerHTML='';return;}
   _cotCB=setTimeout(async()=>{ try{ const d=await (await fetch('actions/fornecedores.php?q='+encodeURIComponent(q)+'&limit=14')).json(); COT.convBusca=d.fornecedores||[];

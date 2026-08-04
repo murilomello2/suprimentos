@@ -34,3 +34,8 @@ data/.bp_obras.json
 data/seed/
 data/.totvs_fornecedores.json
 data/.fornecedores_cnpj.json
+
+# Cache SERVER-SIDE (30 min de TTL, refeito sozinho a partir do Supabase em solic_atendidos()).
+# Estava rastreado por engano: 552 KB reenviados a cada deploy — 20% do peso total, e o
+# deploy ja estourava o timeout do MCP. Mesma regra dos outros data/.*.json aqui de cima.
+data/.solic_atendidos.json

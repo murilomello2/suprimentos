@@ -278,7 +278,7 @@ try {
         }
         unset($o);
         obras_aplicar_crono($pdo, $obras);   // % físico + datas AO VIVO (Supabase do Planejamento)
-        echo json_encode(['ok' => true, 'obras' => $obras, 'is_admin' => !empty($perms['perm_admin'])], JSON_UNESCAPED_UNICODE); exit;
+        echo json_encode(['ok' => true, 'obras' => $obras, 'is_admin' => !empty($perms['perm_admin']), 'can_crono' => !empty($perms['perm_crono'])], JSON_UNESCAPED_UNICODE); exit;
     }
 
     $acao = $in['acao'] ?? '';
@@ -395,6 +395,88 @@ try {
             if ($upd->rowCount() > 0) $atualizadas++; else $nao[] = (string)($it['obra'] ?? $slug);
         }
         echo json_encode(['ok' => true, 'atualizadas' => $atualizadas, 'nao_casaram' => $nao], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+
+    /* ─────────────── CONFERIR / ATUALIZAR AS DATAS PELO CRONOGRAMA ───────────────
+       O vínculo com o cronograma era resolvido UMA VEZ, no onboarding (aplicar_receitas), e o
+       resultado gravado como `data_necessaria_override` — isto é, com a mesma força de uma
+       curadoria manual. Como override vence cronograma em todo lugar que lê a data, a data
+       congelava ali: o Planejamento revisava o cronograma e o cockpit seguia mostrando a data
+       antiga. Na ADARA eram 98 itens nessa situação, nenhum deles decidido por uma pessoa.
+
+       `crono_conferir` NÃO escreve nada: resolve a âncora de cada item contra o cronograma ATUAL
+       e devolve as divergências, separando o que o robô preencheu do que alguém confirmou.
+       `crono_aplicar` grava só os itens que vierem na lista — a decisão de sobrescrever curadoria
+       humana é explícita, nunca embutida. */
+    if ($acao === 'crono_conferir' || $acao === 'crono_aplicar') {
+        require_once __DIR__ . '/../includes/cronograma.php';
+        if (empty($perms['perm_admin']) && empty($perms['perm_crono'])) {
+            http_response_code(403);
+            echo json_encode(['error' => 'Só administrador ou quem tem permissão de cronograma.'], JSON_UNESCAPED_UNICODE); exit;
+        }
+        $fid = (int)($in['obra_ficha_id'] ?? 0);
+        $rid = (int)($in['obra_id'] ?? 0);
+        if (!$rid && $fid) $rid = (int)obra_radar_id($pdo, $fid);
+        if (!$rid) throw new Exception('informe obra_ficha_id ou obra_id');
+
+        $of = $pdo->prepare("SELECT nome, cronograma_id, cronograma_nome FROM obra_ficha WHERE radar_obra_id=? LIMIT 1");
+        $of->execute([$rid]); $obraF = $of->fetch() ?: [];
+        $cid = (string)($obraF['cronograma_id'] ?? '');
+        if ($cid === '') { echo json_encode(['ok'=>true, 'sem_cronograma'=>true,
+            'aviso'=>'Esta obra não tem cronograma vinculado — vincule em "Cronograma & avanço físico".'], JSON_UNESCAPED_UNICODE); exit; }
+
+        // fura o cache de 30 min: conferir tem que olhar o cronograma de agora, não o de meia hora atrás
+        if (!empty($in['recarregar'])) { @unlink(SEED_DIR . '/../.crono_' . substr($cid, 0, 8) . '.json'); }
+        $tasks = crono_tasks($cid);
+        if (!$tasks) { echo json_encode(['ok'=>true, 'sem_tarefas'=>true,
+            'aviso'=>'O cronograma vinculado não devolveu tarefas.'], JSON_UNESCAPED_UNICODE); exit; }
+
+        $st = $pdo->prepare("
+            SELECT s.id AS servico_id, s.lead_dias, s.termos_cronograma, s.marco_cronograma,
+                   COALESCE(NULLIF(r.nome_override,''), s.nome) AS nome,
+                   COALESCE(NULLIF(r.grupo_override,''), s.grupo) AS grupo,
+                   r.lead_override, r.crono_marco_override, r.data_necessaria_override, r.auto_flags
+            FROM servico s JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = ?
+            ORDER BY COALESCE(r.grupo_ordem_override, s.grupo_ordem), s.ordem");
+        $st->execute([$rid]);
+
+        $alvo = [];                                   // no aplicar: só estes servico_id
+        foreach ((array)($in['servicos'] ?? []) as $x) $alvo[(int)$x] = 1;
+
+        $difs = []; $iguais = 0; $sem = 0; $aplicados = 0;
+        $upd = $pdo->prepare("UPDATE radar_item SET data_necessaria_override=?, crono_marco_override=?, auto_flags=?, updated_at=? WHERE obra_id=? AND servico_id=?");
+        foreach ($st as $r) {
+            $auto = crono_resolver($r, $tasks);
+            $novo = $auto['data_necessaria'] ?? null;
+            if (!$novo) { $sem++; continue; }
+            $atual = (string)($r['data_necessaria_override'] ?? '');
+            if ($atual === (string)$novo) { $iguais++; continue; }
+
+            $af = !empty($r['auto_flags']) ? (json_decode($r['auto_flags'], true) ?: []) : [];
+            $porRobo = !empty($af['crono']);           // preenchido pelo robô e nunca confirmado por gente
+            $sid = (int)$r['servico_id'];
+            $linha = [
+                'servico_id' => $sid, 'item' => $r['nome'], 'grupo' => $r['grupo'],
+                'data_atual' => $atual ?: null, 'data_cronograma' => $novo,
+                'marco_atual' => $r['crono_marco_override'] ?: null, 'marco_cronograma' => $auto['marco_casado'] ?? null,
+                'confianca' => $auto['confianca'] ?? '', 'por_robo' => $porRobo,
+                'dias' => $atual ? (int)round((strtotime($novo) - strtotime($atual)) / 86400) : null,
+            ];
+            if ($acao === 'crono_aplicar' && isset($alvo[$sid])) {
+                $af['crono'] = 1;                      // volta a ser data do robô: veio do cronograma, não de gente
+                $upd->execute([$novo, $auto['marco_casado'] ?? $r['crono_marco_override'], json_encode($af), date('c'), $rid, $sid]);
+                $linha['aplicado'] = true; $aplicados++;
+                // fica no HISTÓRICO do item, com o antes e o depois — quem olhar depois entende por que a data mudou
+                try { log_historico($pdo, $rid, $sid, $r['nome'], $me, $perms['nome'] ?? '', 'Data em obra (cronograma)', $atual, $novo); } catch (Throwable $e) {}
+            }
+            $difs[] = $linha;
+        }
+        echo json_encode(['ok'=>true, 'obra'=>$obraF['nome'] ?? '', 'cronograma'=>$obraF['cronograma_nome'] ?? '',
+            'divergencias'=>$difs, 'iguais'=>$iguais, 'sem_match'=>$sem,
+            'por_robo'=>count(array_filter($difs, fn($d) => $d['por_robo'])),
+            'por_pessoa'=>count(array_filter($difs, fn($d) => !$d['por_robo'])),
+            'aplicados'=>$aplicados], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'salvar') {   // edita a ficha (características + de-para confirmado)

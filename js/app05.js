@@ -362,6 +362,10 @@ function obrasFichaAbrir(id){
       </div>`:''}
       ${o.cronograma_nome?`<div class="muted" style="font-size:10.5px;margin-top:8px"><span class="material-icons" style="font-size:12px;vertical-align:-2px">description</span> ${esc(o.cronograma_nome)}</div>`:''}
       ${(ed&&OBRAS_M.is_admin)?`<div style="margin-top:10px;padding-top:9px;border-top:1px dashed var(--line)"><label style="display:block"><span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">Vincular cronograma (Planejamento)</span><select id="obf_crono_obra_id" style="width:100%;margin-top:2px;padding:5px 8px;font-size:12.5px;box-sizing:border-box"><option value="">— automático (casar por nome) —</option>${(OBRAS_M.cronos||[]).map(c=>`<option value="${esc(c.obra_id)}" ${String(c.obra_id)===String(o.crono_obra_id||'')?'selected':''}>${esc(c.nome)}${c.pct!=null?' — '+(+c.pct).toFixed(1).replace('.',',')+'%':''}</option>`).join('')}</select></label><div class="muted" style="font-size:10px;margin-top:4px">Use p/ obras cujo nome não casa sozinho (VS2, VS4, LTB-3, Café Filho…). Deixe automático se já casou certo.</div></div>`:''}
+      ${(OBRAS_M.is_admin||OBRAS_M.can_crono)?`<div style="margin-top:10px;padding-top:9px;border-top:1px dashed var(--line)">
+        <button class="btn-ghost" style="padding:5px 12px;font-size:12px" onclick="cronoConferir(${o.id})" title="lê o cronograma AGORA e mostra quais itens do radar estão com data diferente">
+          <span class="material-icons" style="font-size:15px;vertical-align:-3px">event_repeat</span> Conferir datas do cronograma</button>
+        <div class="muted" style="font-size:10px;margin-top:4px">A data de cada item foi resolvida uma vez, no onboarding, e fica congelada. Use isto quando o Planejamento revisar o cronograma.</div></div>`:''}
     </div>`:''}
     ${bloco('link','De-para (sistemas)',
         g('1fr 150px',sel('Coligada da obra (TOTVS)','obf_coligada_cod',o.coligada_cod,colOpts,'— escolher —','obrasColigadaChange(this)')+fld('CNPJ','obf_cnpj',o.cnpj))
@@ -1740,4 +1744,96 @@ function envLinha(e){
    + (semPdf?'':'<button class="btn-prim" style="padding:3px 11px;font-size:11px" onclick="envEnviar(\''+e.chave+'\')">Enviar</button>')
    + '</td></tr>';
   return h;
+}
+
+/* ───────── CONFERIR DATAS DO CRONOGRAMA (ficha da obra) ─────────
+   A data de cada item do radar foi resolvida UMA VEZ, no onboarding, e gravada como override —
+   com a mesma força de uma curadoria manual. Por isso o Planejamento revisa o cronograma e a data
+   no cockpit não se move. Isto lê o cronograma AGORA e mostra o que divergiu.
+   Aplicar é decisão por linha: o que o robô pôs vem MARCADO; o que uma pessoa confirmou vem
+   DESMARCADO, porque sobrescrever decisão de gente tem que ser deliberado. */
+let CRN = { obra:null, dados:null };
+
+async function cronoConferir(fichaId){
+  CRN={obra:fichaId, dados:null};
+  dlgAbrir('Obras','Conferir datas do cronograma',
+    '<div style="max-width:820px"><div class="dempty">Lendo o cronograma do Planejamento agora…</div></div>');
+  try{
+    const r=await (await fetch('actions/obras.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'crono_conferir',me:EU&&EU.bitrix_id,obra_ficha_id:fichaId,recarregar:1})})).json();
+    if(r.error){ dlgAbrir('Obras','Conferir datas do cronograma','<div style="max-width:560px"><div class="dempty">'+esc(r.error)+'</div></div>'); return; }
+    CRN.dados=r; cronoRender();
+  }catch(e){ dlgAbrir('Obras','Conferir datas do cronograma','<div style="max-width:560px"><div class="dempty">Falha: '+esc(e.message)+'</div></div>'); }
+}
+
+function cronoRender(){
+  const r=CRN.dados; if(!r) return;
+  if(r.sem_cronograma||r.sem_tarefas){
+    dlgAbrir('Obras','Conferir datas do cronograma','<div style="max-width:560px"><div class="dempty">'+esc(r.aviso||'')+'</div></div>'); return;
+  }
+  const DIV=r.divergencias||[];
+  let h='<div style="max-width:860px">';
+  h+='<div class="dmini" style="margin-bottom:10px">Cronograma: <b>'+esc(r.cronograma||'—')+'</b> · '
+   + '<b>'+DIV.length+'</b> item(ns) com data diferente · '+r.iguais+' já batem'
+   + (r.sem_match?(' · '+r.sem_match+' sem tarefa correspondente'):'')+'</div>';
+  if(!DIV.length){
+    h+='<div class="dempty">Nenhuma divergência — as datas do radar já refletem o cronograma atual.</div>'
+     + '<div class="bar" style="justify-content:flex-end;margin-top:12px"><button class="btn-prim" onclick="closeModal(true)">Fechar</button></div></div>';
+    dlgAbrir('Obras','Conferir datas do cronograma',h); return;
+  }
+  h+='<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:9px 12px;border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:10px">'
+   + '<b>'+r.por_robo+'</b> foram preenchidos pelo robô no onboarding e nunca confirmados por ninguém — já vêm marcados. '
+   + '<b>'+r.por_pessoa+'</b> foram confirmados por uma pessoa e vêm <b>desmarcados</b>: marcar significa sobrescrever a decisão dela.</div>';
+  h+='<div class="bar" style="gap:8px;margin-bottom:8px">'
+   + '<button class="btn-ghost" style="padding:4px 10px;font-size:11.5px" onclick="cronoMarcar(1)">Marcar todos</button>'
+   + '<button class="btn-ghost" style="padding:4px 10px;font-size:11.5px" onclick="cronoMarcar(0)">Desmarcar todos</button>'
+   + '<button class="btn-ghost" style="padding:4px 10px;font-size:11.5px" onclick="cronoMarcar(2)">Só os do robô</button></div>';
+  h+='<div class="wrap" style="max-height:380px;overflow:auto"><table style="width:100%;font-size:12px"><thead><tr>'
+   + '<th style="width:26px"></th><th>Item</th><th>Marco no cronograma</th>'
+   + '<th style="text-align:center">Hoje</th><th style="text-align:center">Cronograma</th>'
+   + '<th style="text-align:center">Δ</th><th>Origem</th></tr></thead><tbody>';
+  for(const d of DIV){
+    const dias=d.dias, cor=dias==null?'var(--muted)':(dias>0?'#c0392b':'var(--ok)');
+    h+='<tr>'
+     + '<td style="text-align:center"><input type="checkbox" class="crnChk" data-sid="'+d.servico_id+'"'+(d.por_robo?' checked':'')+'></td>'
+     + '<td><b>'+esc(d.item)+'</b>'+(d.grupo?('<div class="dmini" style="color:var(--muted)">'+esc(d.grupo)+'</div>'):'')+'</td>'
+     + '<td class="muted" style="font-size:11.5px">'+esc(d.marco_cronograma||'—')
+     +   (d.marco_atual&&d.marco_atual!==d.marco_cronograma?('<div class="dmini" style="color:var(--dourado)">antes: '+esc(d.marco_atual)+'</div>'):'')+'</td>'
+     + '<td style="text-align:center;white-space:nowrap" class="muted">'+(d.data_atual?D(d.data_atual):'—')+'</td>'
+     + '<td style="text-align:center;white-space:nowrap"><b>'+D(d.data_cronograma)+'</b></td>'
+     + '<td style="text-align:center;white-space:nowrap;color:'+cor+';font-weight:700">'+(dias==null?'—':((dias>0?'+':'')+dias+'d'))+'</td>'
+     + '<td style="font-size:11.5px">'+(d.por_robo
+        ? '<span class="dchip" style="background:#8a9299">robô</span>'
+        : '<span class="dchip" style="background:var(--verde)">pessoa</span>')+'</td></tr>';
+  }
+  h+='</tbody></table></div>';
+  h+='<div class="dmini" style="margin-top:8px;color:var(--muted)">O que for aplicado entra no Histórico de cada item, com a data anterior e a nova.</div>';
+  h+='<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:12px">'
+   + '<button class="btn-ghost" onclick="closeModal(true)">Fechar sem aplicar</button>'
+   + '<button class="btn-prim" onclick="cronoAplicar()">Aplicar aos marcados</button></div></div>';
+  dlgAbrir('Obras','Conferir datas do cronograma', h);
+}
+
+function cronoMarcar(modo){
+  const D=(CRN.dados&&CRN.dados.divergencias)||[];
+  document.querySelectorAll('.crnChk').forEach(c=>{
+    const d=D.find(x=>String(x.servico_id)===String(c.getAttribute('data-sid')));
+    c.checked = modo===1 ? true : (modo===0 ? false : !!(d&&d.por_robo));
+  });
+}
+
+async function cronoAplicar(){
+  const sids=[...document.querySelectorAll('.crnChk')].filter(c=>c.checked).map(c=>+c.getAttribute('data-sid'));
+  if(!sids.length){ toast('Marque ao menos um item'); return; }
+  const D=(CRN.dados&&CRN.dados.divergencias)||[];
+  const gente=sids.filter(s=>{ const d=D.find(x=>x.servico_id===s); return d&&!d.por_robo; }).length;
+  if(gente && !confirm(gente+' item(ns) marcados tiveram a data confirmada por uma pessoa.\n\nAplicar vai sobrescrever essa decisão. Continuar?')) return;
+  try{
+    const r=await (await fetch('actions/obras.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'crono_aplicar',me:EU&&EU.bitrix_id,obra_ficha_id:CRN.obra,servicos:sids})})).json();
+    if(r.error){ toast(r.error); return; }
+    closeModal(true);
+    toast(r.aplicados+' data(s) atualizada(s) pelo cronograma');
+    if(typeof obrasLoad==='function') obrasLoad();
+  }catch(e){ toast('Falha: '+e.message); }
 }

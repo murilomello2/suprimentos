@@ -207,14 +207,59 @@ function rowHtml(i){
     <td onclick="event.stopPropagation()"><button class="eye" onclick="openModal(${i.ordem},${i.obra_id||1})"><span class="material-icons" style="font-size:17px;line-height:28px">visibility</span></button></td>
   </tr>`;
 }
+/* ───────── UM ITEM, VÁRIAS COTAÇÕES ─────────
+   O item do radar quase nunca vira uma cotação só: "Grua com operador" costuma virar uma cotação de
+   LOCAÇÃO e outra de OPERADOR; "prego + arame" vira uma direto de FÁBRICA e outra de DISTRIBUIDOR.
+   O vínculo (cotacao.servico_id) sempre aceitou vários — o que faltava era a tela dizer que existem e
+   deixar escolher. Quem diferencia é o TÍTULO (ou o apelido) de cada cotação. */
+const COT_ST={aberta:['var(--cot)','em cotação'],aguardando:['var(--dourado)','aguardando'],finalizada:['var(--ok)','fechada']};
+function radCotLista(i){ const c=i&&i.cotacao; if(!c) return []; return (c.lista&&c.lista.length)?c.lista:[c]; }
+// clique no chip/botão: com uma cotação abre direto; com várias, pergunta qual
+function radCotIr(ordem,obraId){
+  const i=byOrdem(ordem,obraId), L=radCotLista(i);
+  if(!L.length) return;
+  if(L.length===1){ cotAbrir(L[0].id); return; }
+  dlgAbrir('Radar de Aquisições','Cotações deste item',
+    '<div style="max-width:600px">'
+   + '<div class="dmini" style="margin-bottom:10px">Este item tem <b>'+L.length+' cotações</b> vinculadas — '
+   + 'cada uma cobre uma parte dele (ex.: locação × operador, fábrica × distribuidor). Escolha qual mapa abrir.</div>'
+   + '<div style="display:flex;flex-direction:column;gap:7px">'
+   + L.map(c=>{ const x=COT_ST[c.status]||['var(--cot)','em cotação'];
+       return '<div onclick="closeModal(true);cotAbrir('+c.id+')" style="border:1px solid var(--line);border-radius:9px;padding:9px 12px;cursor:pointer" onmouseover="this.style.background=\'#f3f7f5\'" onmouseout="this.style.background=\'\'">'
+        + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:13px">'+esc(c.titulo||('cotação #'+c.id))+'</b>'
+        + (c.apelido?'<span class="dchip" style="background:#eef6f0;color:var(--verde-d)">'+esc(c.apelido)+'</span>':'')
+        + '<span style="margin-left:auto;color:'+x[0]+';font-weight:800;font-size:11.5px">● '+x[1]+'</span></div>'
+        + '<div class="muted" style="font-size:11px;margin-top:2px">'+(c.respostas||0)+'/'+(c.convidados||0)+' responderam'
+        + (c.melhor?(' · melhor '+BRL(c.melhor)):'')+' · #'+c.id+'</div></div>'; }).join('')
+   + '</div></div>');
+}
+// dentro do card do item: com uma cotação, o botão de sempre; com várias, o painel que lista todas
+function radCotBotoes(i){
+  const L=radCotLista(i); if(!L.length) return '';
+  if(L.length===1){ const c=L[0];
+    return `<button class="btn-ghost" onclick="cotAbrir(${c.id})" title="${esc(c.titulo||'')}"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--verde)">request_quote</span> Ver mapa de cotação</button>`
+     + `<span class="muted" style="font-size:11.5px">· ${c.respostas||0}/${c.convidados||0} responderam${c.melhor?' · melhor '+BRL(c.melhor):''}</span>`;
+  }
+  return `<div style="flex-basis:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:#fbfcfc">
+    <div class="muted" style="font-size:11px;font-weight:700;margin-bottom:7px">${L.length} COTAÇÕES NESTE ITEM <span style="font-weight:400">— cada uma cobre uma parte dele (ex.: locação × operador, fábrica × distribuidor)</span></div>
+    <div style="display:flex;flex-direction:column;gap:6px">${L.map(c=>{ const x=COT_ST[c.status]||['var(--cot)','em cotação'];
+      return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="color:${x[0]};font-weight:800;font-size:11px;min-width:78px">● ${x[1]}</span>
+        <b style="font-size:12.5px">${esc(c.titulo||('cotação #'+c.id))}</b>
+        ${c.apelido?`<span class="dchip" style="background:#eef6f0;color:var(--verde-d)">${esc(c.apelido)}</span>`:''}
+        <span class="muted" style="font-size:11px">${c.respostas||0}/${c.convidados||0} responderam${c.melhor?' · melhor '+BRL(c.melhor):''}</span>
+        <button class="btn-ghost" style="padding:2px 10px;margin-left:auto" onclick="cotAbrir(${c.id})">abrir ›</button>
+      </div>`; }).join('')}</div></div>`;
+}
 // Coluna "Mapa": AUTOMÁTICA — reflete a existência REAL de um mapa de cotação vinculado ao item (servico_id).
 function cotCell(i){
   const c=i.cotacao;
   if(c){
-    const stc={aberta:['var(--cot)','em cotação'],aguardando:['var(--dourado)','aguardando'],finalizada:['var(--ok)','fechada']};
-    const x=stc[c.status]||['var(--cot)','em cotação'];
+    const x=COT_ST[c.status]||['var(--cot)','em cotação'];
     const resp=(c.convidados||c.respostas)?` <span style="font-weight:600;opacity:.85">${c.respostas||0}/${c.convidados||0}</span>`:'';
-    return `<span onclick="event.stopPropagation();cotAbrir(${c.id})" title="Abrir mapa de cotação — ${esc(c.titulo||'')}${c.melhor?(' · melhor '+BRL(c.melhor)):''}${c.n>1?(' · '+c.n+' cotações neste item'):''}" style="cursor:pointer;color:${x[0]};font-weight:800;white-space:nowrap;font-size:11.5px">● ${x[1]}${resp}</span>`;
+    // com mais de um mapa, o número aparece no chip — senão o item parecia ter só a última cotação
+    const nChip=(c.n>1)?` <span style="background:#eef4fb;color:#2a5d8f;font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px">${c.n} mapas</span>`:'';
+    return `<span onclick="event.stopPropagation();radCotIr(${i.ordem},${i.obra_id||1})" title="${c.n>1?('Este item tem '+c.n+' cotações — clique para escolher qual abrir'):('Abrir mapa de cotação — '+esc(c.titulo||''))}${c.melhor?(' · melhor '+BRL(c.melhor)):''}" style="cursor:pointer;color:${x[0]};font-weight:800;white-space:nowrap;font-size:11.5px">● ${x[1]}${resp}${nChip}</span>`;
   }
   return i.fornecedor?`<span class="mapa-on" title="fornecedor informado manualmente — ainda sem mapa de cotação vinculado">● ${esc(i.fornecedor)}</span>`:'<span class="muted">—</span>';
 }
@@ -1649,7 +1694,7 @@ function resumoTab(i){
       <div style="margin-top:4px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         ${(CAN_EDIT||podeEditarItem(i))?`<button class="btn-prim" onclick="EDITR=true;drawModal()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">edit</span> Editar</button>`
                   :`<span class="muted" style="font-size:12.5px"><span class="material-icons" style="font-size:15px;vertical-align:-3px">lock</span> Você tem acesso somente leitura${(EU&&EU.papel==='comprador')?' — este item está sob responsabilidade de '+esc(i.responsavel||'ninguém'):''}.</span>`}
-        ${i.cotacao?`<button class="btn-ghost" onclick="cotAbrir(${i.cotacao.id})" title="${esc(i.cotacao.titulo||'')}"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--verde)">request_quote</span> Ver mapa de cotação</button><span class="muted" style="font-size:11.5px">· ${i.cotacao.respostas}/${i.cotacao.convidados} responderam${i.cotacao.melhor?' · melhor '+BRL(i.cotacao.melhor):''}${i.cotacao.n>1?' · '+i.cotacao.n+' cotações':''}</span>`:''}
+        ${radCotBotoes(i)}
         ${CAN_COT?`<button class="btn-ghost" onclick="cotIniciar(${i.ordem},${i.obra_id||1})" title="Abre uma cotação já com os itens do dicionário deste serviço (editáveis)"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--dourado)">request_quote</span> ${i.cotacao?'Nova cotação':'Iniciar cotação'}</button>`:''}
         ${/* O MESMO vínculo pelo outro lado: muita cotação já existe (criada do zero ou importada do
               sistema antigo) e o que falta é só amarrar. Quem está no item é quem sabe qual é. */''}

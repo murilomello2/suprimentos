@@ -65,16 +65,23 @@ try {
     // (resiliente: se as tabelas de cotação ainda não existirem no deploy parcial, segue sem)
     $cotByServ = [];
     try {
-        $cq = $pdo->prepare("SELECT c.id, c.servico_id, c.status, c.titulo,
+        $cq = $pdo->prepare("SELECT c.id, c.servico_id, c.status, c.titulo, c.apelido,
                 (SELECT COUNT(*) FROM cotacao_fornecedor cf WHERE cf.cotacao_id=c.id) AS convidados,
-                (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id) AS respostas,
-                (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND cp.total>0) AS melhor
+                (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND (cp.ativa=1 OR cp.ativa IS NULL)) AS respostas,
+                (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND cp.total>0 AND (cp.ativa=1 OR cp.ativa IS NULL)) AS melhor
                 FROM cotacao c WHERE c.obra_id=? AND c.servico_id IS NOT NULL ORDER BY c.id DESC");
         $cq->execute([$OBRA]);
+        /* UM ITEM PODE TER VÁRIAS COTAÇÕES. Ex.: "Grua com operador" vira uma cotação só de locação e
+           outra só de operadores; "prego + arame" vira uma direto de fábrica e outra de distribuidores.
+           Por isso vai a LISTA inteira (não só a última) — quem abre o item precisa ver que há mais de
+           um mapa e escolher pelo título/apelido. */
         foreach ($cq->fetchAll() as $cr) {
             $sid = (int)$cr['servico_id'];
-            if (!isset($cotByServ[$sid])) $cotByServ[$sid] = ['n'=>0, 'ultima'=>$cr]; // 'ultima' = mais recente (ORDER BY id DESC)
+            if (!isset($cotByServ[$sid])) $cotByServ[$sid] = ['n'=>0, 'ultima'=>$cr, 'lista'=>[]]; // 'ultima' = mais recente (ORDER BY id DESC)
             $cotByServ[$sid]['n']++;
+            $cotByServ[$sid]['lista'][] = ['id'=>(int)$cr['id'], 'titulo'=>$cr['titulo'], 'apelido'=>$cr['apelido'],
+                'status'=>$cr['status'], 'convidados'=>(int)$cr['convidados'], 'respostas'=>(int)$cr['respostas'],
+                'melhor'=>$cr['melhor'] !== null ? (float)$cr['melhor'] : null];
         }
     } catch (Throwable $e) { $cotByServ = []; }
     $_ck('cotByServ');
@@ -152,6 +159,7 @@ try {
             'id'=>(int)$cs['ultima']['id'], 'n'=>$cs['n'], 'status'=>$cs['ultima']['status'], 'titulo'=>$cs['ultima']['titulo'],
             'convidados'=>(int)$cs['ultima']['convidados'], 'respostas'=>(int)$cs['ultima']['respostas'],
             'melhor'=>$cs['ultima']['melhor']!==null?(float)$cs['ultima']['melhor']:null,
+            'lista'=>$cs['lista'],   // TODAS as cotações deste item (a tela mostra e deixa escolher)
         ] : null;
         // STATUS AUTOMÁTICO: existe mapa de cotação vinculado e o status do item ainda é inicial → "Cotação Iniciada"
         // (não sobrescreve um status manual mais avançado; só destrava o "Não Iniciado"/vazio)

@@ -841,7 +841,7 @@ function cotRender(){
   w.innerHTML=html+'</tbody></table></div>'+_pager;
   if(_wasBusca){ const ni=document.getElementById('cotListBusca'); if(ni){ ni.focus(); try{ ni.setSelectionRange(_car,_car); }catch(e){} } }
 }
-function cotNovo(){ COT.mode='novo'; COT.novoServico=null; COT.novoPre=null; COT.novoConvidados=[]; COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; cotRender(); }
+function cotNovo(){ COT.mode='novo'; COT.novoServico=null; COT.novoJaTem=null; COT.novoPre=null; COT.novoConvidados=[]; COT.novoItens=[{descricao:'',unidade:'',quantidade:'',observacao:''}]; cotRender(); }
 // iniciar cotação A PARTIR de um item do radar: puxa o dicionário de cotação do serviço (itens EDITÁVEIS) + pré-preenche
 async function cotIniciar(sid, obra, nome, grupo){
   await ensureFull();   // garante composicao_sel (a cotação puxa itens da composição do radar)
@@ -855,6 +855,8 @@ async function cotIniciar(sid, obra, nome, grupo){
   const svNome=nome||(it&&it.nome)||(dic.servico&&dic.servico.nome)||'';
   const svGrupo=grupo||(it&&it.grupo)||(dic.servico&&dic.servico.grupo)||'';
   COT.novoServico=sid; COT.novoServicoNome=svNome; COT.novoConvidados=[]; COT.novoVincItem=it; COT.novoVincObra=obra?String(obra):'';
+  // o item pode já ter cotação(ões) — a nova NÃO substitui nada; o aviso lembra de dar um título que diga o recorte
+  COT.novoJaTem=(it&&it.cotacao&&it.cotacao.lista)?it.cotacao.lista:((it&&it.cotacao)?[it.cotacao]:[]);
   COT.novoPre={obra:obra?String(obra):'', titulo:svNome, categoria:svGrupo, descricao:(it&&it.escopo)||'', equalizacao:it?cotEqTexto(it):'', verba:(it&&it.verba&&it.verba>0)?it.verba:'', verba_origem:it?cotVerbaOrigem(it):''};
   // itens a cotar: quantitativo REAL da obra → dicionário do serviço → 1 item vazio
   let itens=it?await cotItensFromQuant(it, obra):[]; let src=itens.length?'quantitativo da obra':'';
@@ -876,6 +878,7 @@ function cotRenderNovo(){
   document.getElementById('cotwrap').innerHTML=`<div class="panel">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="cotLoad()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button><b style="font-size:15px">Nova cotação</b>
       ${vinc?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d)"><span class="material-icons" style="font-size:12px;vertical-align:-2px">link</span> vinculada ao radar: ${esc(COT.novoServicoNome||'')}</span>`:'<span id="cotVincChip"></span>'}</div>
+    ${(vinc&&COT.novoJaTem&&COT.novoJaTem.length)?`<div class="dmini" style="margin:-6px 0 10px;background:#eef4fb;border:1px solid #cfe0f2;padding:8px 12px;border-radius:9px">🗂️ Este item do radar já tem <b>${COT.novoJaTem.length} cotação(ões)</b>: ${COT.novoJaTem.map(c=>'<b>'+esc(c.apelido||c.titulo||('#'+c.id))+'</b>').join(' · ')}. Nada será substituído — esta entra como mais uma. Use o <b>título</b> para dizer o recorte dela (ex.: “só operadores”, “direto de fábrica”), senão ninguém distingue uma da outra na lista.</div>`:''}
     ${vinc?`<div class="dmini" style="margin:-6px 0 10px">Itens puxados do dicionário de cotação do serviço — <b>edite à vontade</b> (a puxada automática é só um ponto de partida).</div>`
           :`<div id="cotVincBox" style="margin:-4px 0 12px;padding:8px 10px;background:#f7faf8;border:1px dashed var(--line);border-radius:8px">
       <div id="cotVincClosed"><button class="btn-ghost" style="padding:3px 9px" onclick="cotVincOpen()"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">link</span> Vincular a um item do radar</button>
@@ -1047,6 +1050,7 @@ function cotVincBuscaInput(){
 function cotVincPick(ordem){
   const it=(COT.novoVincItens||[]).find(x=>Number(x.ordem)===Number(ordem)); if(!it)return;
   COT.novoServico=it.ordem; COT.novoServicoNome=it.nome; COT.novoVincItem=it;
+  COT.novoJaTem=(it.cotacao&&it.cotacao.lista)?it.cotacao.lista:(it.cotacao?[it.cotacao]:[]);   // vinculou agora a um item que já tem mapa
   const set=(id,v,onlyIfEmpty)=>{ const e=document.getElementById(id); if(e&&(!onlyIfEmpty||!(''+e.value).trim())&&v) e.value=v; };
   set('cotT',it.nome,true);
   const O=document.getElementById('cotO'); if(O&&COT.novoVincObra)O.value=COT.novoVincObra;
@@ -1121,7 +1125,7 @@ async function cotItensFromQuant(it, obra){
 function cotVincClear(){
   const g=id=>{const e=document.getElementById(id);return e?e.value:'';};
   COT.novoPre=Object.assign(COT.novoPre||{},{titulo:g('cotT'),obra:g('cotO'),categoria:g('cotC')});
-  COT.novoServico=null; COT.novoServicoNome=''; cotRenderNovo();
+  COT.novoServico=null; COT.novoServicoNome=''; COT.novoJaTem=null; cotRenderNovo();
 }
 function cotImportarTexto(){
   const t=prompt('Cole os itens, um por linha.\nFormato: descrição ; unidade ; quantidade'); if(!t)return;
@@ -1328,6 +1332,32 @@ function cotObsShow(el){ const obs=el.getAttribute('data-obs')||'', forn=el.getA
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:14px">${esc(forn)}</b><span class="material-icons" onclick="document.getElementById('obsOverlay').remove()" style="cursor:pointer;color:var(--muted)">close</span></div>
     <div class="muted" style="font-size:11.5px;margin-bottom:8px">${esc(item)}</div>
     <div style="background:#f4f7f5;border:1px solid var(--line);border-radius:8px;padding:11px 13px;font-size:13px;white-space:pre-wrap;line-height:1.5">${esc(obs)}</div></div>`; }
+/* ───────── OPÇÕES DE PROPOSTA (mesmo fornecedor, formas diferentes de apresentar o preço) ─────────
+   REVISÃO ≠ OPÇÃO. A revisão SUBSTITUI (a anterior vira histórico); a opção CONVIVE — o fornecedor
+   mandou a mesma proposta de outro jeito (com/sem bomba, global x diária) e as duas concorrem no mapa.
+   Cada opção tem a sua própria cadeia de revisões: revisar a opção 2 não encosta na opção 1. Por isso
+   o botão "nova revisão" fica em CADA linha de opção — não existe "de qual opção?" para perguntar. */
+function cotConvPropBtns(pp){ if(!pp) return '';
+  return `<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotPropostaRevisar(${pp.id})" title="o fornecedor mandou preço novo — registra a próxima revisão sem perder a atual"><span class="material-icons" style="font-size:13px;vertical-align:-2px">published_with_changes</span> nova revisão</button>`
+   + `<button class="btn-ghost" style="padding:2px 9px" onclick="cotPropostaNovaOpcao(${pp.id})" title="o fornecedor apresentou a MESMA proposta de outra forma — cadastra como opção nova, sem substituir esta"><span class="material-icons" style="font-size:13px;vertical-align:-2px">splitscreen</span> nova opção</button>`
+   + `<button class="btn-ghost" style="padding:2px 9px" onclick="cotProposta(${pp.id})" title="corrigir a revisão atual (não cria revisão nova)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">edit</span> editar</button>`
+   + `<button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="cotExcluirProposta(${pp.id})" title="apaga SÓ esta proposta (preço e revisões dela). O fornecedor continua na concorrência.">excluir proposta</button>`;
+}
+// lista as opções do fornecedor — só aparece quando há MAIS DE UMA (com uma só, os botões ficam na linha de cima)
+function cotConvOpcoes(cf,CAN_EDIT){
+  const ps=cf.propostas||[]; if(ps.length<2) return '';
+  return `<div style="margin-top:8px;padding-left:16px;display:flex;flex-direction:column;gap:6px">`
+   + ps.map(pp=>`<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;border-left:2px solid #e3e9e6;padding-left:9px">
+      <span class="dchip" style="background:#eef4fb;color:#2a5d8f;font-weight:700">opção ${pp.opcao}</span>
+      <span style="font-size:12px;font-weight:600;min-width:90px">${pp.opcao_rotulo?esc(pp.opcao_rotulo):'<span class="muted" style="font-weight:400">sem nome</span>'}</span>
+      <span style="font-size:12px;font-weight:700;color:var(--verde-d)">${pp.total!=null?BRL(pp.total):'—'}</span>
+      ${pp.prazo?`<span class="muted" style="font-size:10.5px">${esc(pp.prazo)}</span>`:''}
+      ${(pp.revisao||pp.n_historico)?`<span style="background:#eef4f0;color:var(--verde-d);font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:5px">rev ${pp.revisao||0}</span>`:''}
+      ${pp.n_historico?`<span onclick="cotHistorico(${pp.id})" style="font-size:9.5px;color:#5c7b8a;cursor:pointer;text-decoration:underline">histórico</span>`:''}
+      ${CAN_EDIT?cotConvPropBtns(pp):''}
+    </div>`).join('')
+   + `</div>`;
+}
 // FASE 2 — multi-PC por coligada: rótulo curto + cor estável por coligada, e o painel de PC por coligada
 function colCurta(n){ return String(n||'').replace(/\s+(EMPREENDIMENTO|EMPREENDIMENTOS).*/i,'').replace(/\s+SPE\b.*/i,'').trim().slice(0,16)||String(n||'').slice(0,16); }
 function coligadaCor(seed){ let s=String(seed||''),h=0; for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0; return `hsl(${h%360},42%,40%)`; }
@@ -1362,6 +1392,8 @@ async function cotDetectarPedidosColigada(c){ const CAN_EDIT=cotEditavel(); cons
     }catch(e){}
   }
 }
+// quantos FORNECEDORES distintos responderam (duas opções do mesmo fornecedor = uma resposta)
+function cotNResp(props){ const s=new Set(); (props||[]).forEach(p=>s.add(p.fornecedor_id?('i:'+p.fornecedor_id):('n:'+String(p.fornecedor_nome||'').trim().toLowerCase()))); return s.size; }
 function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
   const d=COT.cur,c=d.cotacao,itens=d.itens||[],props=d.propostas||[],m=d.mapa||{},best=m.melhor_por_item||{},w=document.getElementById('cotwrap');
   const podeGerir=CAN_EDIT;   // admin | gerente | criador | colaborador
@@ -1407,7 +1439,9 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
    +(podeGerir?'<span style="margin-left:auto">'+btn('delete','Excluir','cotExcluir()','excluir esta cotação','var(--pend)')+'</span>':'')
    +'</div>'
    +'<div style="display:flex;gap:12px;flex-wrap:wrap;padding:14px 0 2px">'
-   +cotKpi('inbox', props.length+'/'+(d.convidados||[]).length, 'propostas recebidas')
+   /* Conta FORNECEDORES que responderam, não linhas de proposta: com opções o mesmo fornecedor ocupa
+      duas colunas do mapa e o KPI mostrava "2/1" (mais propostas que convidados), que não quer dizer nada. */
+   +cotKpi('inbox', cotNResp(props)+'/'+(d.convidados||[]).length, 'propostas recebidas'+(props.length>cotNResp(props)?' · '+props.length+' com as opções':''))
    +cotKpi('emoji_events', (m.melhor_oferta?BRL(m.melhor_oferta):'—'), 'melhor fornecedor'+(m.fornecedor_destaque?' &middot; <b style="color:var(--tx)">'+esc(m.fornecedor_destaque)+'</b>':''))
    +cotKpi('savings', (c.verba?BRL(c.verba):'—')+(cotVerbaInfoBtn(c)?' '+cotVerbaInfoBtn(c):'')+(CAN_EDIT?' <span class="material-icons" onclick="cotVerbaEditar()" title="editar a verba prevista" style="font-size:13px;cursor:pointer;color:var(--verde);vertical-align:-2px">edit</span>':''), 'verba prevista')
    +'</div>'
@@ -1435,14 +1469,15 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
         <span class="dgm" style="background:${cf.respondeu?'var(--ok)':'#cfd6da'}"></span>
         <span style="flex:1;min-width:130px;font-weight:600">${esc(cf.fornecedor_nome)}${cf.categoria?` <span class="muted" style="font-size:11px;font-weight:400">· ${esc(cf.categoria)}</span>`:''}</span>
         ${cf.enviado_em?`<span class="dchip" style="background:var(--verde-d);color:#fff" title="e-mail enviado em ${D(String(cf.enviado_em).slice(0,10))}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">outbox</span> enviado</span>`:''}
-        <span class="dchip" style="background:${cf.respondeu?'var(--ok)':'#8a9299'}">${cf.respondeu?('respondeu · '+BRL(cf.proposta_total)):'aguardando'}</span>
+        <span class="dchip" style="background:${cf.respondeu?'var(--ok)':'#8a9299'}">${cf.respondeu?('respondeu · '+((cf.propostas||[]).length>1?((cf.propostas||[]).length+' opções · a partir de '):'')+BRL(cf.proposta_total)):'aguardando'}</span>
         ${cf.inbound_em?`<span class="dchip" style="background:${cf.inbound_tipo==='cotacao'?'#1f7a44':(cf.inbound_tipo==='duvida'?'var(--pend)':'#5b6b7a')};color:#fff" title="${esc(cf.inbound_resumo||'')}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">mail</span> e-mail · ${cf.inbound_tipo==='cotacao'?'cotação':(cf.inbound_tipo==='duvida'?'dúvida':'resposta')}</span>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotAnexarAbrir(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="anexar PDF, Excel ou print — arraste, cole (Ctrl+V) ou clique"><span class="material-icons" style="font-size:14px;vertical-align:-2px">attach_file</span> anexar${ax.length?` (${ax.length})`:''}</button>`:''}
         ${CAN_EDIT&&ax.length?`<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotIAPreencher(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="a IA lê os anexos e preenche a proposta (rascunho para você conferir)"><span class="material-icons" style="font-size:14px;vertical-align:-2px">auto_awesome</span> preencher com IA</button>`:''}
         ${CAN_EDIT&&!cf.respondeu?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotPropostaDe(${ci})">Lançar proposta</button>`:''}
-        ${CAN_EDIT&&cf.respondeu&&cf.proposta_id?`<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotPropostaRevisar(${cf.proposta_id})" title="o fornecedor mandou preço novo — registra a próxima revisão sem perder a atual"><span class="material-icons" style="font-size:13px;vertical-align:-2px">published_with_changes</span> nova revisão</button><button class="btn-ghost" style="padding:2px 9px" onclick="cotProposta(${cf.proposta_id})" title="corrigir a revisão atual (não cria revisão nova)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">edit</span> editar</button><button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="cotExcluirProposta(${cf.proposta_id})" title="apaga SÓ a proposta (preço e revisões). O fornecedor continua na concorrência.">excluir proposta</button>`:''}
+        ${(CAN_EDIT&&cf.respondeu&&(cf.propostas||[]).length===1)?cotConvPropBtns((cf.propostas||[])[0]):''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="cotDesconvidar(${cf.id},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="tira o fornecedor da concorrência E apaga as propostas dele do mapa">remover fornecedor</button>`:''}
       </div>
+      ${cotConvOpcoes(cf,CAN_EDIT)}
       ${cotConvContatos(cf)}
       ${ax.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;padding-left:16px">${ax.map(anexoChip).join('')}</div>`:''}
     </div>`; }).join('')+'</div>';
@@ -1456,7 +1491,12 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
     html+='<div class="panel" style="padding:15px 18px">'+cotSecHead('table_view','Mapa de cotações','comparativo · melhor preço por item','<button class="btn-ghost" style="padding:4px 10px" onclick="cotUmaPagina()" title="ver este mapa em uma página"><span class="material-icons" style="font-size:14px;vertical-align:-3px">description</span> uma página</button>')+'<div style="overflow-x:auto"><table class="mtable" style="border:none"><thead><tr><th class="svc-h" style="text-align:left">Item</th>';
     props.forEach(p=>{ const rev=p.revisao||0, hist=(p.historico||[]);
       const revChip=(rev>0||hist.length)?`<div style="margin-top:2px"><span style="background:#eef4f0;color:var(--verde-d);font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:5px">rev ${rev}</span>${hist.length?` <span onclick="cotHistorico(${p.id})" style="font-size:9px;color:#5c7b8a;cursor:pointer;text-decoration:underline">histórico</span>`:''}</div>`:'';
-      html+=`<th style="min-width:120px">${esc(p.fornecedor_nome)}${CAN_EDIT?` <span onclick="cotExcluirProposta(${p.id})" title="excluir esta proposta do mapa" style="cursor:pointer;color:var(--pend);font-weight:700">×</span>`:''}${p.prazo?`<div class="muted" style="font-size:9.5px;font-weight:400">${esc(p.prazo)}</div>`:''}${revChip}</th>`; });
+      // OPÇÃO (>1): o mesmo fornecedor aparece em mais de uma coluna — o chip diz qual é qual
+      const opcChip=(p.opcao||1)>1?`<div style="margin-top:2px"><span style="background:#eef4fb;color:#2a5d8f;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:5px">opção ${p.opcao}</span>${p.opcao_rotulo?` <span class="muted" style="font-size:9px;font-weight:400">${esc(p.opcao_rotulo)}</span>`:''}</div>`:'';
+      // OBSERVAÇÃO GERAL do fornecedor (vale p/ a proposta inteira) — logo abaixo dos dados dele, como no mapa antigo
+      const obsG=(p.observacoes||'').trim();
+      const obsChip=obsG?`<div style="margin-top:3px;font-weight:400"><span class="material-icons" data-obs="${esc(obsG)}" data-forn="${esc(p.fornecedor_nome)}" data-item="observação geral do fornecedor" onclick="cotObsShow(this)" title="${esc(obsG)}" style="font-size:12px;color:#5c7b8a;cursor:help;vertical-align:-2px">sticky_note_2</span> <span class="muted" style="font-size:9px">${esc(obsG.length>46?obsG.slice(0,46)+'…':obsG)}</span></div>`:'';
+      html+=`<th style="min-width:120px">${esc(p.fornecedor_nome)}${CAN_EDIT?` <span onclick="cotExcluirProposta(${p.id})" title="excluir esta proposta do mapa" style="cursor:pointer;color:var(--pend);font-weight:700">×</span>`:''}${p.prazo?`<div class="muted" style="font-size:9.5px;font-weight:400">${esc(p.prazo)}</div>`:''}${opcChip}${revChip}${obsChip}</th>`; });
     html+='<th style="min-width:140px;color:var(--verde-d)">🏆 Melhor Compra</th></tr></thead><tbody>';
     itens.forEach(it=>{ const b=best[it.id];
       html+=`<tr><td class="svc-c" style="text-align:left">${(c.multi_obra&&it.obra_nome)?`<span class="dchip" style="background:${obraCor(it.obra_id)};color:#fff;font-size:9px;margin-right:4px">${esc(String(it.obra_nome).slice(0,12))}</span>`:''}${(c.multi_coligada&&it.solic_coligada)?`<span class="dchip" style="background:${coligadaCor(it.solic_colidmov||it.solic_coligada)};color:#fff;font-size:9px;margin-right:4px" title="${esc(it.solic_coligada)}">${esc(colCurta(it.solic_coligada))}</span>`:''}${esc(it.descricao)}<small>${cotNum(it.quantidade)} ${esc(it.unidade||'')}${it.observacao?' · '+esc(it.observacao):''}</small></td>`;

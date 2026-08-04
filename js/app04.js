@@ -87,6 +87,12 @@ function upCard(label,val,sub,color){ return `<div style="border:1px solid var(-
   <div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#889;font-weight:700">${esc(label)}</div>
   <div style="font-size:17px;font-weight:800;color:${color};margin-top:3px">${val}</div>
   ${sub?`<div style="font-size:10.5px;color:#889;margin-top:1px">${esc(sub)}</div>`:''}</div>`; }
+// OPÇÃO do fornecedor (quando ele mandou a proposta de mais de uma forma) e OBSERVAÇÃO GERAL dele —
+// as duas saem junto do nome no comparativo impresso, como no mapa antigo.
+function upOpc(p){ return (p.opcao||1)>1?`<div style="font-weight:700;font-size:9px;color:#2a5d8f">opção ${p.opcao}${p.opcao_rotulo?' · '+esc(p.opcao_rotulo):''}</div>`:''; }
+// nome da coluna quando o fornecedor tem mais de uma opção (senão duas colunas ficariam com o mesmo nome)
+function cotPropNome(p){ return esc(p.fornecedor_nome)+((p.opcao||1)>1?` <span style="font-weight:400;font-size:9.5px;color:#2a5d8f">· opção ${p.opcao}${p.opcao_rotulo?' ('+esc(p.opcao_rotulo)+')':''}</span>`:''); }
+function upObsG(p){ const o=(p.observacoes||'').trim(); return o?`<div style="margin-top:3px;background:#eef1f3;border:1px solid #dde2e6;border-radius:5px;padding:4px 6px;font-size:8.5px;font-weight:400;color:#4a5560;text-align:left;line-height:1.35;white-space:pre-wrap">${esc(o)}</div>`:''; }
 // Comparativo de PREÇOS adaptativo: se há mais FORNECEDORES que itens, vira a tabela (fornecedores nas LINHAS,
 // ranqueados pelo total) — fica uma lista vertical que cabe na página; senão itens nas linhas (estilo clássico).
 function upPrecos(itens,props,m,best,verba){
@@ -100,7 +106,7 @@ function upPrecos(itens,props,m,best,verba){
     itens.forEach(it=>{ const dsc=String(it.descricao||''); h+=`<th style="min-width:88px" title="${esc(dsc)}">${esc(dsc.slice(0,36))}${dsc.length>36?'…':''}<div style="font-weight:400;font-size:9px;color:#889">${cotNum(it.quantidade)} ${esc(it.unidade||'')}</div></th>`; });
     h+=`<th>Total</th>${verba>0?'<th>vs verba</th>':''}</tr></thead><tbody>`;
     ranked.forEach((p,idx)=>{ const win=p.total!=null&&p.total===cheapest;
-      h+=`<tr style="${win?'background:#eafaf0':''}"><td style="font-weight:700;text-align:center">${win?'🏆':(idx+1)}</td><td style="text-align:left;font-weight:${win?'800':'600'}">${esc(p.fornecedor_nome)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}</td>`;
+      h+=`<tr style="${win?'background:#eafaf0':''}"><td style="font-weight:700;text-align:center">${win?'🏆':(idx+1)}</td><td style="text-align:left;font-weight:${win?'800':'600'}">${esc(p.fornecedor_nome)}${upOpc(p)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}${upObsG(p)}</td>`;
       itens.forEach(it=>{ const pi=(p.itens||{})[it.id], bb=best[it.id], isBI=bb&&bb.proposta_id===p.id;
         h+=`<td style="${isBI?'background:#d9f2e3;font-weight:700':''};vertical-align:top">${pi&&pi.preco_unit!=null?`${BRLp(pi.preco_unit)}${pi.observacao?`<div style="margin-top:3px;background:#eef1f3;border:1px solid #dde2e6;border-radius:5px;padding:4px 6px;font-size:8.5px;font-weight:400;color:#4a5560;text-align:left;line-height:1.35;white-space:normal">${esc(pi.observacao)}</div>`:''}`:'<span style="color:#bbb">—</span>'}</td>`; });
       const vv=(verba>0&&p.total!=null)?verba-p.total:null;
@@ -111,7 +117,7 @@ function upPrecos(itens,props,m,best,verba){
   } else {
     // ---- ITENS nas linhas (poucos fornecedores) ----
     h+=`<thead><tr><th style="text-align:left;min-width:150px;max-width:260px">Item</th><th style="width:40px">Qtd</th><th style="width:34px">Un</th>`;
-    props.forEach(p=>{ h+=`<th style="min-width:92px">${esc(p.fornecedor_nome)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}</th>`; });
+    props.forEach(p=>{ h+=`<th style="min-width:92px">${esc(p.fornecedor_nome)}${upOpc(p)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}${upObsG(p)}</th>`; });
     h+=`<th style="background:#eafaf0;color:var(--verde-d)">Melhor preço</th></tr></thead><tbody>`;
     itens.forEach(it=>{ const b=best[it.id];
       h+=`<tr><td style="text-align:left">${esc(it.descricao)}</td><td>${cotNum(it.quantidade)}</td><td>${esc(it.unidade||'')}</td>`;
@@ -131,12 +137,12 @@ function upEqualiza(props,pontos){
     h+=`<thead><tr><th style="text-align:left;min-width:150px">Fornecedor</th>`;
     pontos.forEach(pt=>{ h+=`<th style="min-width:90px" title="${esc(pt)}">${esc(pt.slice(0,34))}${pt.length>34?'…':''}</th>`; });
     h+=`</tr></thead><tbody>`;
-    props.forEach(p=>{ h+=`<tr><td style="text-align:left;font-weight:600">${esc(p.fornecedor_nome)}</td>`;
+    props.forEach(p=>{ h+=`<tr><td style="text-align:left;font-weight:600">${cotPropNome(p)}</td>`;
       pontos.forEach(pt=>{ const v=((p.equaliza||{})[pt])||''; h+=`<td style="text-align:left">${v?esc(v):'<span style="color:#bbb">—</span>'}</td>`; });
       h+='</tr>'; });
   } else {
     h+=`<thead><tr><th style="text-align:left;min-width:180px">Ponto a conferir</th>`;
-    props.forEach(p=>{ h+=`<th style="min-width:92px">${esc(p.fornecedor_nome)}</th>`; });
+    props.forEach(p=>{ h+=`<th style="min-width:92px">${cotPropNome(p)}</th>`; });
     h+=`</tr></thead><tbody>`;
     pontos.forEach(pt=>{ h+=`<tr><td style="text-align:left;font-weight:600">${esc(pt)}</td>`;
       props.forEach(p=>{ const v=((p.equaliza||{})[pt])||''; h+=`<td style="text-align:left">${v?esc(v):'<span style="color:#bbb">—</span>'}</td>`; });
@@ -199,7 +205,7 @@ function cotEqualizaPanel(d){ const CAN_EDIT=cotEditavel();
       <div style="margin-top:6px"><button class="btn-prim" style="padding:5px 12px" onclick="cotEqualizaPontosSave()">Salvar pontos</button> <button class="btn-ghost" style="padding:5px 12px" onclick="document.getElementById('cotEqEdit').style.display='none'">Cancelar</button></div></div>`;
   if(!props.length){ h+='<ul style="margin:8px 0 0 18px;padding:0">'+pontos.map(p=>`<li style="font-size:12.5px;margin-bottom:3px">${esc(p)}</li>`).join('')+'</ul><div class="dmini" style="margin-top:6px">Cadastre propostas para preencher cada ponto por fornecedor.</div></div>'; return h; }
   h+=(editV?'<div class="dmini" style="margin-top:8px;color:var(--verde-d)">Modo edição — ajuste os valores e clique <b>Salvar valores</b>.</div>':'')+'<div style="overflow-x:auto;margin-top:8px"><table class="mtable" style="border:none"><thead><tr><th class="svc-h" style="text-align:left;min-width:200px">Ponto a conferir</th>';
-  props.forEach(p=>{ h+=`<th style="min-width:140px">${esc(p.fornecedor_nome)}</th>`; });
+  props.forEach(p=>{ h+=`<th style="min-width:140px">${cotPropNome(p)}</th>`; });
   h+='</tr></thead><tbody>';
   pontos.forEach(pt=>{ h+=`<tr><td class="svc-c" style="text-align:left;font-size:12px">${esc(pt)}</td>`;
     props.forEach(p=>{ const v=((p.equaliza||{})[pt])||''; h+=`<td style="padding:4px 6px">${editV?`<input data-eqpid="${p.id}" data-eqpt="${esc(pt)}" value="${esc(v)}" style="width:100%;font-size:11.5px;padding:3px 5px;border:1px solid var(--line);border-radius:5px" placeholder="—">`:`<span style="font-size:11.5px">${esc(v||'—')}</span>`}</td>`; });
@@ -240,8 +246,8 @@ async function cotEqualizaPontosSave(){
 }
 function cotProposta(pid){
   const d=COT.cur; let ex=null; if(pid) ex=(d.propostas||[]).find(p=>String(p.id)===String(pid));   // id vem STRING do PDO MySQL
-  COT.prop={id:pid||0, precos:{}};
-  (d.itens||[]).forEach(it=>{ const pi=ex?(ex.itens||{})[it.id]:null; COT.prop.precos[it.id]={preco_unit:pi&&pi.preco_unit!=null?pi.preco_unit:'',preco_total:pi&&pi.preco_total!=null?pi.preco_total:''}; });
+  COT.prop={id:pid||0, precos:{}, opcao:ex?(ex.opcao||1):1, opcao_rotulo:ex?(ex.opcao_rotulo||''):''};
+  (d.itens||[]).forEach(it=>{ const pi=ex?(ex.itens||{})[it.id]:null; COT.prop.precos[it.id]={preco_unit:pi&&pi.preco_unit!=null?pi.preco_unit:'',preco_total:pi&&pi.preco_total!=null?pi.preco_total:'',observacao:(pi&&pi.observacao)||''}; });
   COT.prop.fornecedor_nome=ex?ex.fornecedor_nome:''; COT.prop.prazo=ex?ex.prazo:''; COT.prop.observacoes=ex?ex.observacoes:'';
   /* EDITANDO: restaura o vínculo com o cadastro. Sem isto, abrir e salvar uma proposta já
      vinculada a transformava em "manual" — o UPDATE grava fornecedor_id=NULL quando não vem nada.
@@ -290,8 +296,13 @@ function cotFornPick(i){
 function cotFornBlur(){ setTimeout(()=>{ const drop=document.getElementById('prFDrop'); if(drop) drop.style.display='none'; },160); }
 function cotRenderProposta(){
   const d=COT.cur,c=d.cotacao,itens=d.itens||[],pr=COT.prop;
-  const ehRev=!!pr.revisarDe, titulo=ehRev?('Nova revisão (rev '+((pr.revisaoBase||0)+1)+')'):(pr.id?'Editar':'Cadastrar')+' proposta';
-  const banner=ehRev?`<div class="dmini" style="margin-bottom:10px;background:#fff8ec;border:1px solid #f0e2c2;padding:8px 12px;border-radius:9px">📝 Você está registrando a <b>revisão ${(pr.revisaoBase||0)+1}</b> de <b>${esc(pr.fornecedor_nome||'')}</b>. Os preços vieram da revisão anterior — ajuste o que o fornecedor mudou. A anterior fica guardada no histórico (não se perde).</div>`:'';
+  const ehRev=!!pr.revisarDe, ehOpc=!!pr.novaOpcao;
+  const opcTag=(pr.opcao||1)>1?(' · opção '+pr.opcao):'';
+  const titulo=ehOpc?('Nova opção (opção '+(pr.opcao||2)+')')
+    :(ehRev?('Nova revisão (rev '+((pr.revisaoBase||0)+1)+')'+opcTag):((pr.id?'Editar':'Cadastrar')+' proposta'+opcTag));
+  const banner=ehOpc
+    ? `<div class="dmini" style="margin-bottom:10px;background:#eef4fb;border:1px solid #cfe0f2;padding:8px 12px;border-radius:9px">🗂️ Você está cadastrando a <b>opção ${pr.opcao||2}</b> de <b>${esc(pr.fornecedor_nome||'')}</b> — outra forma que ele apresentou a mesma proposta. Ela <b>não substitui</b> a opção anterior: as duas ficam vigentes e concorrem lado a lado no mapa. Dê um nome curto à opção para diferenciar (ex.: “com bomba inclusa”, “global”).</div>`
+    : (ehRev?`<div class="dmini" style="margin-bottom:10px;background:#fff8ec;border:1px solid #f0e2c2;padding:8px 12px;border-radius:9px">📝 Você está registrando a <b>revisão ${(pr.revisaoBase||0)+1}</b>${(pr.opcao||1)>1?` da <b>opção ${pr.opcao}</b>${pr.opcao_rotulo?' ('+esc(pr.opcao_rotulo)+')':''}`:''} de <b>${esc(pr.fornecedor_nome||'')}</b>. Os preços vieram da revisão anterior — ajuste o que o fornecedor mudou. A anterior fica guardada no histórico (não se perde).</div>`:'');
   document.getElementById('cotwrap').innerHTML=`<div class="panel">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="cotRenderDetalhe()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar ao mapa</button><b style="font-size:15px">${titulo} · ${esc(c.titulo)}</b></div>
     ${banner}
@@ -300,16 +311,38 @@ function cotRenderProposta(){
       ${cotFld('Fornecedor *','<div style="position:relative"><input id="prF" autocomplete="off" oninput="cotFornSearch(this)" onfocus="cotFornSearch(this)" onblur="cotFornBlur()" style="width:100%" value="'+esc(pr.fornecedor_nome||'')+'" placeholder="Digite o nome do fornecedor…"><div id="prFDrop" style="display:none;position:absolute;left:0;right:0;top:calc(100% + 3px);z-index:60;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.16);max-height:290px;overflow:auto"></div></div>')}
       ${cotFld('Prazo de entrega','<input id="prP" style="width:100%" value="'+esc(pr.prazo||'')+'" placeholder="Ex.: 15 dias">')}
     </div>
-    ${cotFld('Observações','<textarea id="prO" rows="2" style="width:100%">'+esc(pr.observacoes||'')+'</textarea>','margin-top:8px')}
-    <div style="margin-top:14px"><b style="font-size:13px">Preços por item</b> <span class="muted" style="font-size:11px">(preencha o unitário — o total calcula pela quantidade)</span></div>
+    ${((pr.opcao||1)>1||ehOpc)?cotFld('Nome desta opção'+(ehOpc?' *':''),'<input id="prOpR" style="width:100%" value="'+esc(pr.opcao_rotulo||'')+'" placeholder="Ex.: com bomba inclusa · preço global · sem mobilização">','margin-top:8px'):''}
+    ${cotFld('Observação geral do fornecedor','<textarea id="prO" rows="2" style="width:100%" placeholder="Vale para a proposta inteira — aparece no cabeçalho da coluna dele no mapa. Ex.: só consegue iniciar em outubro/2026.">'+esc(pr.observacoes||'')+'</textarea>','margin-top:8px')}
+    <div style="margin-top:14px"><b style="font-size:13px">Preços por item</b> <span class="muted" style="font-size:11px">(preencha o unitário — o total calcula pela quantidade; use <span class="material-icons" style="font-size:12px;vertical-align:-2px">sticky_note_2</span> para anotar um detalhe do item)</span></div>
     <div style="margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden">
       <div style="display:grid;grid-template-columns:minmax(0,1fr) 130px 150px;gap:10px;padding:7px 12px;background:#fafbfb;border-bottom:1px solid var(--line);font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.3px"><span>Item</span><span style="text-align:right">Preço unit.</span><span style="text-align:right">Preço total</span></div>
-      ${itens.map((it,ix)=>`<div style="display:grid;grid-template-columns:minmax(0,1fr) 130px 150px;gap:10px;align-items:center;padding:9px 12px;${ix<itens.length-1?'border-bottom:1px solid #f1f3f2':''}">
-      <div><b style="font-size:12.5px">${esc(it.descricao)}</b> <span class="muted" style="font-size:11px">· ${cotNum(it.quantidade)} ${esc(it.unidade||'')}</span>${it.observacao?`<div class="muted" style="font-size:10.5px;margin-top:1px">${esc(it.observacao)}</div>`:''}</div>
+      ${itens.map((it,ix)=>{ const ob=pr.precos[it.id].observacao||'';
+      return `<div style="padding:9px 12px;${ix<itens.length-1?'border-bottom:1px solid #f1f3f2':''}">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 130px 150px;gap:10px;align-items:center">
+      <div><b style="font-size:12.5px">${esc(it.descricao)}</b> <span class="muted" style="font-size:11px">· ${cotNum(it.quantidade)} ${esc(it.unidade||'')}</span>
+        <span class="material-icons" id="prObsB${it.id}" onclick="cotObsItemToggle(${it.id})" title="observação DESTE item na proposta deste fornecedor (ex.: até 40 m³ por diária) — aparece no mapa" style="font-size:14px;cursor:pointer;vertical-align:-3px;color:${ob?'var(--verde-d)':'#c3cbd1'}">sticky_note_2</span>
+        ${it.observacao?`<div class="muted" style="font-size:10.5px;margin-top:1px">${esc(it.observacao)}</div>`:''}</div>
       <input type="text" inputmode="decimal" id="prU${it.id}" value="${pr.precos[it.id].preco_unit!==''?fmtMoneyN(pr.precos[it.id].preco_unit,4):''}" oninput="cotPrecoIn(${it.id},'u',this)" onblur="moneyBlurN(this,4)" placeholder="0,00" title="aceita até 4 casas decimais" style="width:100%;text-align:right">
-      <input type="text" inputmode="decimal" id="prT${it.id}" value="${pr.precos[it.id].preco_total!==''?fmtMoneyN(pr.precos[it.id].preco_total,4):''}" oninput="cotPrecoIn(${it.id},'t',this)" onblur="moneyBlurN(this,4)" placeholder="0,00" style="width:100%;text-align:right"></div>`).join('')}</div>
+      <input type="text" inputmode="decimal" id="prT${it.id}" value="${pr.precos[it.id].preco_total!==''?fmtMoneyN(pr.precos[it.id].preco_total,4):''}" oninput="cotPrecoIn(${it.id},'t',this)" onblur="moneyBlurN(this,4)" placeholder="0,00" style="width:100%;text-align:right"></div>
+      <div id="prObsW${it.id}" style="display:${ob?'block':'none'};margin-top:6px">
+        <textarea id="prObs${it.id}" rows="2" oninput="cotObsItemIn(${it.id},this)" placeholder="Detalhe deste item nesta proposta — ex.: bombeamento por diária de R$ 2.000,00 até 40 m³" style="width:100%;font-size:11.5px">${esc(ob)}</textarea>
+      </div></div>`; }).join('')}</div>
     <div style="margin-top:14px"><button id="prSalvarBtn" class="btn-prim" onclick="cotSalvarProposta()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar proposta</button></div>
     </div></div>`;
+}
+/* OBSERVAÇÃO POR ITEM (item × fornecedor) — o "quadro cinza" do mapa antigo. Fica escondida até
+   clicar no bloquinho: a lista de preços continua limpa para quem só vai digitar valor. */
+function cotObsItemToggle(iid){
+  const w=document.getElementById('prObsW'+iid); if(!w)return;
+  const abrir=w.style.display==='none';
+  w.style.display=abrir?'block':'none';
+  if(abrir){ const t=document.getElementById('prObs'+iid); if(t)t.focus(); }
+  else { const t=document.getElementById('prObs'+iid); if(t&&!t.value.trim()) cotObsItemIn(iid,t); }   // fechou vazia = sem observação
+}
+function cotObsItemIn(iid,el){
+  const p=COT.prop.precos[iid]; if(!p)return;
+  p.observacao=el.value;
+  const b=document.getElementById('prObsB'+iid); if(b) b.style.color=el.value.trim()?'var(--verde-d)':'#c3cbd1';
 }
 function cotPrecoIn(iid,which,el){
   maskMoneyInputN(el,4);                            // reformata ao vivo, aceitando até 4 casas decimais
@@ -321,11 +354,13 @@ function cotPrecoIn(iid,which,el){
 async function cotSalvarProposta(){
   if(COT._savingProp) return;   // trava DUPLO-SUBMIT (duplo-clique criava 2 propostas iguais 1s de diferença)
   const forn=val('prF').trim(); if(!forn){toast('Informe o fornecedor');return;}
-  const itens=Object.entries(COT.prop.precos).map(([iid,p])=>({cotacao_item_id:Number(iid),preco_unit:p.preco_unit!==''?Number(p.preco_unit):'',preco_total:p.preco_total!==''?Number(p.preco_total):''}));
+  const rotulo=(document.getElementById('prOpR')?val('prOpR').trim():(COT.prop.opcao_rotulo||''));
+  if(COT.prop.novaOpcao && !rotulo){ toast('Dê um nome à opção (ex.: "com bomba inclusa") para diferenciar da anterior'); const e=document.getElementById('prOpR'); if(e)e.focus(); return; }
+  const itens=Object.entries(COT.prop.precos).map(([iid,p])=>({cotacao_item_id:Number(iid),preco_unit:p.preco_unit!==''?Number(p.preco_unit):'',preco_total:p.preco_total!==''?Number(p.preco_total):'',observacao:p.observacao||''}));
   const body=COT.prop.revisarDe
-    ? {acao:'proposta_revisar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:COT.prop.revisarDe,fornecedor_nome:forn,fornecedor_id:COT.prop.fornecedor_id||undefined,prazo:val('prP'),observacoes:val('prO'),itens}
+    ? {acao:'proposta_revisar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:COT.prop.revisarDe,fornecedor_nome:forn,fornecedor_id:COT.prop.fornecedor_id||undefined,prazo:val('prP'),observacoes:val('prO'),opcao_rotulo:rotulo,itens}
     // fornecedor_id ia SÓ no ramo de revisão; sem ele aqui, toda proposta nova saía "manual"
-    : {acao:'proposta',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:COT.prop.id||undefined,fornecedor_nome:forn,fornecedor_id:COT.prop.fornecedor_id||undefined,prazo:val('prP'),observacoes:val('prO'),itens};
+    : {acao:'proposta',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:COT.prop.id||undefined,fornecedor_nome:forn,fornecedor_id:COT.prop.fornecedor_id||undefined,prazo:val('prP'),observacoes:val('prO'),nova_opcao:COT.prop.novaOpcao?1:undefined,opcao_rotulo:rotulo,itens};
   COT._savingProp=true; const _sb=document.getElementById('prSalvarBtn'); if(_sb){_sb.disabled=true;_sb.style.opacity='.6';}
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error); COT._savingProp=false; if(_sb){_sb.disabled=false;_sb.style.opacity='';} return;}
@@ -347,7 +382,7 @@ async function cotSalvarProposta(){
       try{ await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'equaliza_salvar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,proposta_id:r.proposta_id,equaliza:merged})}); }catch(e){}
     }
     COT._savingProp=false;
-    toast(COT.prop.revisarDe?('Revisão '+(r.revisao||'')+' registrada'):'Proposta salva'); cotOpen(COT.cur.cotacao.id);
+    toast(COT.prop.revisarDe?('Revisão '+(r.revisao||'')+' registrada'):(COT.prop.novaOpcao?('Opção '+(r.opcao||'')+' cadastrada'):'Proposta salva')); cotOpen(COT.cur.cotacao.id);
   }catch(e){toast('Falha: '+e.message); COT._savingProp=false; if(_sb){_sb.disabled=false;_sb.style.opacity='';}}
 }
 // abre o form pré-preenchido com a proposta VIGENTE p/ registrar a próxima revisão (a anterior fica no histórico)
@@ -355,9 +390,25 @@ function cotPropostaRevisar(pid){
   const d=COT.cur, ex=(d.propostas||[]).find(p=>String(p.id)===String(pid)); if(!ex){toast('Proposta não encontrada');return;}   // id STRING no MySQL
   // _fornPick p/ a regra "trocou o texto, perdeu o vínculo" valer também na revisão
   COT.prop={id:0, revisarDe:pid, revisaoBase:ex.revisao||0, fornecedor_id:ex.fornecedor_id||null, precos:{},
+            opcao:ex.opcao||1, opcao_rotulo:ex.opcao_rotulo||'',
             _fornPick: ex.fornecedor_id?{id:ex.fornecedor_id, nome:ex.fornecedor_nome}:null};
-  (d.itens||[]).forEach(it=>{ const pi=(ex.itens||{})[it.id]; COT.prop.precos[it.id]={preco_unit:pi&&pi.preco_unit!=null?pi.preco_unit:'',preco_total:pi&&pi.preco_total!=null?pi.preco_total:''}; });
+  (d.itens||[]).forEach(it=>{ const pi=(ex.itens||{})[it.id]; COT.prop.precos[it.id]={preco_unit:pi&&pi.preco_unit!=null?pi.preco_unit:'',preco_total:pi&&pi.preco_total!=null?pi.preco_total:'',observacao:(pi&&pi.observacao)||''}; });
   COT.prop.fornecedor_nome=ex.fornecedor_nome; COT.prop.prazo=ex.prazo||''; COT.prop.observacoes=ex.observacoes||'';
+  COT.mode='proposta'; cotRenderProposta();
+}
+/* NOVA OPÇÃO — o mesmo fornecedor apresentou a proposta de outra forma (com/sem bomba, global x diária).
+   Diferente da REVISÃO: nada é arquivado. A opção nasce como uma proposta vigente própria (opção 2, 3…),
+   com sua própria cadeia de revisões, e entra no mapa como mais uma coluna concorrendo com a opção 1.
+   Os preços vêm da opção de origem só como ponto de partida — o rótulo é obrigatório p/ diferenciar. */
+function cotPropostaNovaOpcao(pid){
+  const d=COT.cur, ex=(d.propostas||[]).find(p=>String(p.id)===String(pid)); if(!ex){toast('Proposta não encontrada');return;}
+  const nz=s=>String(s||'').trim().toLowerCase();
+  const irmas=(d.propostas||[]).filter(p=>(ex.fornecedor_id&&String(p.fornecedor_id)===String(ex.fornecedor_id))||nz(p.fornecedor_nome)===nz(ex.fornecedor_nome));
+  const prox=Math.max(...irmas.map(p=>Number(p.opcao)||1),1)+1;
+  COT.prop={id:0, novaOpcao:true, opcao:prox, opcao_rotulo:'', fornecedor_id:ex.fornecedor_id||null, precos:{},
+            _fornPick: ex.fornecedor_id?{id:ex.fornecedor_id, nome:ex.fornecedor_nome}:null};
+  (d.itens||[]).forEach(it=>{ const pi=(ex.itens||{})[it.id]; COT.prop.precos[it.id]={preco_unit:pi&&pi.preco_unit!=null?pi.preco_unit:'',preco_total:pi&&pi.preco_total!=null?pi.preco_total:'',observacao:(pi&&pi.observacao)||''}; });
+  COT.prop.fornecedor_nome=ex.fornecedor_nome; COT.prop.prazo=ex.prazo||''; COT.prop.observacoes='';
   COT.mode='proposta'; cotRenderProposta();
 }
 // linha do tempo das revisões de um fornecedor, com % que subiu/desceu por item vs a revisão anterior
@@ -376,7 +427,7 @@ function cotHistorico(pid){
   chain.forEach(r=>{ const t=r.total; const dl=pt!=null?delta(pct(t,pt)):''; h+=`<td style="text-align:center;white-space:nowrap">${t!=null?BRL(t):'—'}${dl}</td>`; pt=t; });
   h+='</tr></tbody></table>';
   let ov=document.getElementById('cotHistOv'); if(!ov){ov=document.createElement('div');ov.id='cotHistOv';ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto';document.body.appendChild(ov);} ov.onclick=e=>{if(e.target===ov)ov.remove();};
-  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:940px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:16px">Histórico de revisões · ${esc(cur.fornecedor_nome)}</b><span class="material-icons" style="cursor:pointer;color:var(--muted)" onclick="document.getElementById('cotHistOv').remove()">close</span></div><div class="muted" style="font-size:12px;margin:4px 0 10px">Cada revisão que o fornecedor enviou. <span style="color:#1a8a4a">▼ caiu</span> · <span style="color:#c0392b">▲ subiu</span> vs a revisão anterior. A <b>vigente</b> é a que entra no mapa comparativo.</div><div style="overflow:auto;max-height:70vh">${h}</div></div>`;
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:940px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:16px">Histórico de revisões · ${esc(cur.fornecedor_nome)}${(cur.opcao||1)>1?` <span style="font-size:12px;color:var(--muted)">· opção ${cur.opcao}${cur.opcao_rotulo?' ('+esc(cur.opcao_rotulo)+')':''}</span>`:''}</b><span class="material-icons" style="cursor:pointer;color:var(--muted)" onclick="document.getElementById('cotHistOv').remove()">close</span></div><div class="muted" style="font-size:12px;margin:4px 0 10px">Cada revisão que o fornecedor enviou. <span style="color:#1a8a4a">▼ caiu</span> · <span style="color:#c0392b">▲ subiu</span> vs a revisão anterior. A <b>vigente</b> é a que entra no mapa comparativo.</div><div style="overflow:auto;max-height:70vh">${h}</div></div>`;
 }
 async function cotFinalizar(){ const c=COT.cur.cotacao, novo=c.status==='finalizada'?'aguardando':'finalizada';
   let numPedido;
@@ -576,18 +627,19 @@ async function cotIAAplicar(fornNome,draft,meta,fornId){ const d=COT.cur; draft=
   const fidIA = fornId || (ex&&ex.fornecedor_id) || null;
   COT.prop={id:ex?ex.id:0, precos:{}, fornecedor_id:fidIA,
             _fornPick: fidIA?{id:fidIA, nome:fornNome}:null};
-  (d.itens||[]).forEach(it=>{ COT.prop.precos[it.id]={preco_unit:'',preco_total:''}; });
+  COT.prop.opcao=ex?(ex.opcao||1):1; COT.prop.opcao_rotulo=ex?(ex.opcao_rotulo||''):'';
+  (d.itens||[]).forEach(it=>{ COT.prop.precos[it.id]={preco_unit:'',preco_total:'',observacao:''}; });
   const byId={}; (draft.itens||[]).forEach(x=>{ if(x&&x.item_id!=null)byId[x.item_id]=x; });
   let preench=0;
-  (d.itens||[]).forEach(it=>{ const x=byId[it.id]; if(x&&x.preco_unit!=null&&x.preco_unit!==''){ const u=Number(x.preco_unit);
+  (d.itens||[]).forEach(it=>{ const x=byId[it.id]; if(!x)return;
+    if(x.observacao) COT.prop.precos[it.id].observacao=String(x.observacao);   // detalhe do item vai p/ o campo do item (aparece no mapa), não p/ o texto geral
+    if(x.preco_unit!=null&&x.preco_unit!==''){ const u=Number(x.preco_unit);
     if(!isNaN(u)){ COT.prop.precos[it.id].preco_unit=u; const q=it.quantidade?Number(it.quantidade):null; if(q)COT.prop.precos[it.id].preco_total=+(u*q).toFixed(4); preench++; } } });
   COT.prop.fornecedor_nome=fornNome; COT.prop.prazo=draft.prazo_entrega||'';
   const partes=[];
   if(Array.isArray(draft.extras)&&draft.extras.length) partes.push('Custos adicionais: '+draft.extras.map(e=>`${e.descricao||'extra'}${(e.valor!=null&&e.valor!=='')?' '+BRL(Number(e.valor)):''}`).join('; '));
   if(draft.condicao_pagamento) partes.push('Pagamento: '+draft.condicao_pagamento);
   if(draft.validade) partes.push('Validade: '+draft.validade);
-  const itObs=(draft.itens||[]).filter(x=>x&&x.observacao&&x.item_id!=null).map(x=>{ const it=(d.itens||[]).find(i=>String(i.id)===String(x.item_id)); return '• '+((it&&it.descricao?it.descricao.slice(0,32)+': ':''))+x.observacao; });
-  if(itObs.length) partes.push('Observações por item:\n'+itObs.join('\n'));
   if(draft.observacao_geral) partes.push(draft.observacao_geral);
   let obs='⚠ Rascunho gerado por IA'+(meta&&meta.usados&&meta.usados.length?' (fonte: '+meta.usados.join(', ')+')':'')+' — confira os valores antes de salvar.';
   if(partes.length) obs+='\n\n'+partes.join('\n');
@@ -1189,7 +1241,12 @@ function solRenderLista(){
       <td style="white-space:nowrap"><button class="btn-ghost" style="padding:2px 6px" title="Copiar mensagem para orçamento" onclick="solCopiar('${esc(key)}')"><span class="material-icons" style="font-size:15px">content_copy</span></button>
         ${(s.cotacoes&&s.cotacoes.length)
           ? s.cotacoes.map(x=>`<button class="btn-ghost" style="padding:2px 7px;color:var(--verde-d);font-weight:700;font-size:11px" title="Ver cotação #${x.id}: ${esc(x.titulo||'')}" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${x.id}),200)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">request_quote</span>#${x.id}</button>`).join('')
-          : (s.cotacao_id?`<button class="btn-ghost" style="padding:2px 6px;color:var(--verde-d)" title="Ver cotação gerada" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${s.cotacao_id}),200)"><span class="material-icons" style="font-size:15px">request_quote</span></button>`:(CAN_COT?`<button class="btn-ghost" style="padding:2px 6px" title="Gerar cotação desta solicitação" onclick="solGerar('${esc(key)}')"><span class="material-icons" style="font-size:15px;color:var(--verde)">playlist_add</span></button>`:''))}</td></tr>`;
+          : (s.cotacao_id?`<button class="btn-ghost" style="padding:2px 6px;color:var(--verde-d)" title="Ver cotação gerada" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${s.cotacao_id}),200)"><span class="material-icons" style="font-size:15px">request_quote</span></button>`:'')}
+        ${/* UMA SC PODE VIRAR VÁRIAS COTAÇÕES (ex.: prego direto de fábrica numa, arame com distribuidor
+             noutra). Antes, o botão de gerar sumia assim que existia a primeira e a segunda ficava
+             impossível pela lista. Agora ele fica sempre: o seletor de itens já vem com os que estão
+             cobertos DESMARCADOS, então a próxima cotação nasce só com o que sobrou. */''}
+        ${CAN_COT?`<button class="btn-ghost" style="padding:2px 6px" title="${(s.cotacoes&&s.cotacoes.length)||s.cotacao_id?'Gerar OUTRA cotação desta solicitação (itens já cotados vêm desmarcados)':'Gerar cotação desta solicitação'}" onclick="solGerar('${esc(key)}')"><span class="material-icons" style="font-size:15px;color:var(--verde)">playlist_add</span></button>`:''}</td></tr>`;
     if(ex) html+=`<tr><td colspan="11" style="background:#fafbfb;padding:8px 14px"><b style="font-size:11px;color:var(--muted)">ITENS</b> <span class="muted" style="font-size:10px">⚪ sem cotação · 🟡 em cotação · 🟢 finalizada</span>${s.itens.map(it=>{
           /* Item que ja virou PEDIDO fica RISCADO, com o numero do PC. Nao some: sumir sem explicacao
              e o que faz o comprador desconfiar da tela — e se o cruzamento errar, some um item que

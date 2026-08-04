@@ -3,7 +3,15 @@
    cada deploy levar de 5 a 10 minutos e falhar calado. O corte respeita fronteiras de nivel
    superior e cada parte foi validada pelo parser antes de existir. A ORDEM importa: os
    arquivos sao carregados na sequencia em que foram cortados. */
-async function solGerar(key){ const s=solFind(key); if(!s)return; if(!confirm('Gerar uma cotação no Mapa com os '+s.n_itens+' itens desta solicitação?'))return;
+/* UMA SC, VÁRIAS COTAÇÕES. Na primeira vez o caminho é curto: pega os itens todos e vai.
+   Se a solicitação JÁ tem cotação (ex.: os pregos foram direto pra fábrica e falta o arame),
+   cai no seletor de itens — que vem com os já cotados desmarcados — para a segunda cotação
+   nascer só com o que sobrou, em vez de duplicar o que já está cotado. */
+async function solGerar(key){ const s=solFind(key); if(!s)return;
+  const jaTem=((s.cotacoes||[]).length>0)||!!s.cotacao_id;
+  if(jaTem){ SOL.sel={}; SOL.sel[key]=true; solRenderLista(); solGerarMulti();
+    toast('Esta SC já tem cotação — escolha os itens que vão para a nova (os já cotados vêm desmarcados)'); return; }
+  if(!confirm('Gerar uma cotação no Mapa com os '+s.n_itens+' itens desta solicitação?'))return;
   try{ const r=await (await fetch('actions/solicitacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'gerar_cotacao',me:EU&&EU.bitrix_id,coligada:s.coligada,numero:s.numero})})).json();
     if(r.error){toast(r.error);return;} toast('Cotação gerada!'); s.cotacao_id=r.cotacao_id; s.status='em_cotacao'; showView('cotacoes'); setTimeout(()=>cotAbrir(r.cotacao_id),250);
   }catch(e){toast('Falha: '+e.message);} }

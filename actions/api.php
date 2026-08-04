@@ -475,12 +475,14 @@ function api_cotacao_detalhe($pdo, $id) {
 
     // propostas VIGENTES (revisões arquivadas ficam de fora — senão o comparativo mostra preço velho)
     $props = [];
-    $q = $pdo->prepare("SELECT id, fornecedor_id, fornecedor_nome, prazo, observacoes, data_resposta, total, revisao
+    $q = $pdo->prepare("SELECT id, fornecedor_id, fornecedor_nome, prazo, observacoes, data_resposta, total, revisao, opcao, opcao_rotulo
                         FROM cotacao_proposta WHERE cotacao_id=? AND (ativa=1 OR ativa IS NULL) ORDER BY (total IS NULL), total, id");
     $q->execute([$id]);
+    // opcao: o MESMO fornecedor pode ter mais de uma proposta vigente (formas diferentes de apresentar o preço)
     foreach ($q as $p) $props[(int)$p['id']] = ['proposta_id' => (int)$p['id'], 'fornecedor_id' => $p['fornecedor_id'] ? (int)$p['fornecedor_id'] : null,
         'fornecedor' => $p['fornecedor_nome'], 'prazo' => $p['prazo'] ?: null, 'observacoes' => trim((string)$p['observacoes']) ?: null,
-        'recebida_em' => $p['data_resposta'] ?: null, 'total' => api_num($p['total']), 'revisao' => (int)$p['revisao'], 'precos' => []];
+        'recebida_em' => $p['data_resposta'] ?: null, 'total' => api_num($p['total']), 'revisao' => (int)$p['revisao'],
+        'opcao' => (int)($p['opcao'] ?? 1) ?: 1, 'opcao_rotulo' => trim((string)$p['opcao_rotulo']) ?: null, 'precos' => []];
 
     if ($props) {
         $in = implode(',', array_map('intval', array_keys($props)));

@@ -7,7 +7,8 @@
  * GET  ?id=N                      -> cotação completa (header + itens + propostas + mapa computado)
  * GET  (?obra=N opcional)         -> lista de cotações (+ resumo por cotação: n_propostas, melhor_oferta)
  * POST {acao:'criar', me, obra_id?, servico_id?, titulo, categoria, tipo_servico, verba, descricao, itens[]}
- * POST {acao:'proposta', me, cotacao_id, proposta_id?, fornecedor_id?, fornecedor_nome, prazo, observacoes, itens[]}
+ * POST {acao:'proposta', me, cotacao_id, proposta_id?, fornecedor_id?, fornecedor_nome, prazo, observacoes, itens[],
+ *       nova_opcao?, opcao_rotulo?}   nova_opcao=1 → 2ª/3ª forma de o MESMO fornecedor apresentar a proposta
  * POST {acao:'status', me, cotacao_id, status?, aprovacao?}
  * POST {acao:'excluir', me, cotacao_id}
  * POST {acao:'excluir_proposta', me, proposta_id}
@@ -210,7 +211,7 @@ function cot_get_full($pdo, $id) {
     $histChain = [];
     foreach ($allProp as $p) {
         if ($isAtiva($p)) continue;
-        $histChain[$chain($p)][] = ['id'=>(int)$p['id'], 'revisao'=>(int)($p['revisao'] ?? 0),
+        $histChain[$chain($p)][] = ['id'=>(int)$p['id'], 'revisao'=>(int)($p['revisao'] ?? 0), 'opcao'=>(int)($p['opcao'] ?? 1),
             'total'=>$p['total']!==null?(float)$p['total']:null, 'prazo'=>$p['prazo'], 'observacoes'=>$p['observacoes'],
             'created_at'=>$p['created_at'], 'itens'=>$byp[(int)$p['id']] ?? []];
     }
@@ -220,6 +221,9 @@ function cot_get_full($pdo, $id) {
         $p['total'] = $p['total']!==null?(float)$p['total']:null; $p['itens'] = $byp[(int)$p['id']] ?? [];
         $p['equaliza'] = !empty($p['equaliza'] ?? '') ? (json_decode($p['equaliza'], true) ?: []) : [];
         $p['revisao'] = (int)($p['revisao'] ?? 0);
+        // OPÇÃO: o mesmo fornecedor pode ter mais de uma proposta vigente (formas diferentes de apresentar o preço)
+        $p['opcao'] = (int)($p['opcao'] ?? 1) ?: 1;
+        $p['opcao_rotulo'] = trim((string)($p['opcao_rotulo'] ?? ''));
         $p['historico'] = $histChain[$chain($p)] ?? [];
     }
     unset($p);
@@ -229,11 +233,20 @@ function cot_get_full($pdo, $id) {
                          FROM cotacao_fornecedor cf LEFT JOIN cot_fornecedor f ON f.id=cf.fornecedor_id WHERE cf.cotacao_id=? ORDER BY cf.fornecedor_nome"); $cf->execute([$id]);
     $convidados = $cf->fetchAll();
     foreach ($convidados as &$c) {
-        $resp = null; $cn = strtolower(trim((string)$c['fornecedor_nome']));
+        // TODAS as propostas vigentes do fornecedor — com OPÇÕES, ele pode ter mais de uma (opção 1, 2, 3…).
+        // A "principal" (proposta_id/total do chip) segue sendo a mais barata: $propostas já vem ordenada por total.
+        $resp = null; $cn = strtolower(trim((string)$c['fornecedor_nome'])); $minhas = [];
         foreach ($propostas as $p) {
             if (($c['fornecedor_id'] && (int)$p['fornecedor_id'] === (int)$c['fornecedor_id'])
-                || ($cn !== '' && strtolower(trim((string)$p['fornecedor_nome'])) === $cn)) { $resp = $p; break; }
+                || ($cn !== '' && strtolower(trim((string)$p['fornecedor_nome'])) === $cn)) {
+                if ($resp === null) $resp = $p;
+                $minhas[] = ['id'=>(int)$p['id'], 'opcao'=>(int)$p['opcao'], 'opcao_rotulo'=>$p['opcao_rotulo'],
+                             'revisao'=>(int)$p['revisao'], 'total'=>$p['total'], 'prazo'=>$p['prazo'],
+                             'n_historico'=>count($p['historico'] ?? [])];
+            }
         }
+        usort($minhas, fn($a, $b) => ($a['opcao'] <=> $b['opcao']) ?: ($a['id'] <=> $b['id']));
+        $c['propostas'] = $minhas;
         $c['respondeu'] = $resp ? 1 : 0; $c['proposta_id'] = $resp['id'] ?? null; $c['proposta_total'] = $resp['total'] ?? null;
         // contatos p/ a conferência (mestre cot_fornecedor quando há vínculo; senão o snapshot do convite)
         $c['email'] = ($c['f_email'] ?? '') !== '' ? $c['f_email'] : ($c['email'] ?? '');
@@ -561,21 +574,43 @@ try {
         $now = date('c');
         $pdo->beginTransaction();
         $pid = (int)($in['proposta_id'] ?? 0);
+        // NOVA OPÇÃO: o mesmo fornecedor apresentando a proposta de OUTRA FORMA (ex.: com bomba x sem bomba,
+        // global x por diária). Não substitui nada — nasce como opção 2, 3… e concorre no mapa junto com a 1.
+        // Por isso pula o dedup abaixo: aqui "já existe proposta desse fornecedor" é exatamente o esperado.
+        $novaOpcao = !empty($in['nova_opcao']);
+        $rotulo = trim((string)($in['opcao_rotulo'] ?? ''));
         // DEDUP: proposta NOVA (sem proposta_id) de um fornecedor que JÁ tem proposta vigente nesta cotação
         // → atualiza a existente em vez de criar outra (mata o duplo-submit/duplo-clique e o cadastro repetido).
-        if (!$pid) {
+        if (!$pid && !$novaOpcao) {
             $fid = (int)($in['fornecedor_id'] ?? 0);
-            if ($fid) { $q = $pdo->prepare("SELECT id FROM cotacao_proposta WHERE cotacao_id=? AND fornecedor_id=? AND (ativa=1 OR ativa IS NULL) ORDER BY id DESC LIMIT 1"); $q->execute([$cid, $fid]); }
-            else { $q = $pdo->prepare("SELECT id FROM cotacao_proposta WHERE cotacao_id=? AND LOWER(TRIM(fornecedor_nome))=? AND (ativa=1 OR ativa IS NULL) ORDER BY id DESC LIMIT 1"); $q->execute([$cid, strtolower(trim($forn))]); }
-            $pid = (int)$q->fetchColumn();
+            if ($fid) { $q = $pdo->prepare("SELECT id FROM cotacao_proposta WHERE cotacao_id=? AND fornecedor_id=? AND (ativa=1 OR ativa IS NULL) ORDER BY id DESC"); $q->execute([$cid, $fid]); }
+            else { $q = $pdo->prepare("SELECT id FROM cotacao_proposta WHERE cotacao_id=? AND LOWER(TRIM(fornecedor_nome))=? AND (ativa=1 OR ativa IS NULL) ORDER BY id DESC"); $q->execute([$cid, strtolower(trim($forn))]); }
+            $vig = $q->fetchAll(PDO::FETCH_COLUMN);
+            /* Com MAIS DE UMA opção vigente não dá para adivinhar qual o usuário quis atualizar —
+               e escolher sozinho sobrescreveria uma opção inteira em silêncio. Melhor parar e mandar
+               ele usar "editar" na opção certa (ou "nova opção", se for mesmo mais uma). */
+            if (count($vig) > 1) {
+                $pdo->rollBack();
+                echo json_encode(['error'=>'Este fornecedor já tem ' . count($vig) . ' opções de proposta nesta cotação. Use "editar" na opção certa, ou "nova opção" no card dele — assim nenhuma é sobrescrita.',
+                                  'opcoes'=>count($vig)], JSON_UNESCAPED_UNICODE); exit;
+            }
+            $pid = (int)($vig[0] ?? 0);
         }
+        $opcao = 1;
         if ($pid) {
-            $pdo->prepare("UPDATE cotacao_proposta SET fornecedor_id=?, fornecedor_nome=?, prazo=?, observacoes=?, total=? WHERE id=? AND cotacao_id=?")
-                ->execute([($in['fornecedor_id'] ?? null) ?: null, $forn, trim((string)($in['prazo'] ?? '')), trim((string)($in['observacoes'] ?? '')), $total ?: null, $pid, $cid]);
+            $pdo->prepare("UPDATE cotacao_proposta SET fornecedor_id=?, fornecedor_nome=?, prazo=?, observacoes=?, opcao_rotulo=?, total=? WHERE id=? AND cotacao_id=?")
+                ->execute([($in['fornecedor_id'] ?? null) ?: null, $forn, trim((string)($in['prazo'] ?? '')), trim((string)($in['observacoes'] ?? '')), $rotulo ?: null, $total ?: null, $pid, $cid]);
             $pdo->prepare("DELETE FROM cotacao_proposta_item WHERE proposta_id=?")->execute([$pid]);
+            $opcao = (int)$pdo->query("SELECT COALESCE(opcao,1) FROM cotacao_proposta WHERE id=" . $pid)->fetchColumn() ?: 1;
         } else {
-            $pdo->prepare("INSERT INTO cotacao_proposta (cotacao_id, fornecedor_id, fornecedor_nome, prazo, observacoes, data_resposta, total, created_at) VALUES (?,?,?,?,?,?,?,?)")
-                ->execute([$cid, ($in['fornecedor_id'] ?? null) ?: null, $forn, trim((string)($in['prazo'] ?? '')), trim((string)($in['observacoes'] ?? '')), $now, $total ?: null, $now]);
+            // nº da opção = MAX das opções desse fornecedor nesta cotação + 1 (conta as arquivadas também: o número não se repete)
+            // COALESCE(opcao,1) por dentro: linhas antigas (anteriores à coluna) contam como opção 1
+            $mo = $pdo->prepare("SELECT COALESCE(MAX(COALESCE(opcao,1)),0) FROM cotacao_proposta WHERE cotacao_id=?
+                                 AND ((fornecedor_id IS NOT NULL AND fornecedor_id=?) OR LOWER(TRIM(fornecedor_nome))=?)");
+            $mo->execute([$cid, (int)($in['fornecedor_id'] ?? 0) ?: -1, strtolower(trim($forn))]);
+            $opcao = max(1, (int)$mo->fetchColumn() + 1);
+            $pdo->prepare("INSERT INTO cotacao_proposta (cotacao_id, fornecedor_id, fornecedor_nome, prazo, observacoes, data_resposta, total, opcao, opcao_rotulo, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+                ->execute([$cid, ($in['fornecedor_id'] ?? null) ?: null, $forn, trim((string)($in['prazo'] ?? '')), trim((string)($in['observacoes'] ?? '')), $now, $total ?: null, $opcao, $rotulo ?: null, $now]);
             $pid = (int)$pdo->lastInsertId();
         }
         $insPI = $pdo->prepare("INSERT INTO cotacao_proposta_item (proposta_id, cotacao_item_id, preco_unit, preco_total, observacao) VALUES (?,?,?,?,?)");
@@ -587,8 +622,9 @@ try {
         }
         $pdo->prepare("UPDATE cotacao SET status=CASE WHEN status='aberta' THEN 'aguardando' ELSE status END, updated_at=? WHERE id=?")->execute([$now, $cid]);
         $pdo->commit();
-        cot_log($pdo, $cid, $me, 'Proposta', 'Proposta de ' . $forn . ' salva — total R$ ' . number_format($total, 2, ',', '.') . ' (' . count($itens) . ' item(ns))');
-        echo json_encode(['ok'=>true, 'proposta_id'=>$pid, 'total'=>round($total, 2)], JSON_UNESCAPED_UNICODE); exit;
+        $selo = $opcao > 1 ? (' [opção ' . $opcao . ($rotulo !== '' ? ' · ' . $rotulo : '') . ']') : '';
+        cot_log($pdo, $cid, $me, 'Proposta', 'Proposta de ' . $forn . $selo . ' salva — total R$ ' . number_format($total, 2, ',', '.') . ' (' . count($itens) . ' item(ns))');
+        echo json_encode(['ok'=>true, 'proposta_id'=>$pid, 'opcao'=>$opcao, 'total'=>round($total, 2)], JSON_UNESCAPED_UNICODE); exit;
     }
 
     // NOVA REVISÃO de uma proposta: arquiva a vigente (ativa=0) e cria a próxima revisão como vigente,
@@ -614,8 +650,12 @@ try {
         $pdo->beginTransaction();
         // arquiva TODA a cadeia como não-vigente (defensivo: garante uma só ativa) e cria a nova
         $pdo->prepare("UPDATE cotacao_proposta SET ativa=0 WHERE cotacao_id=? AND (id=? OR raiz_id=?)")->execute([$cid, $raiz, $raiz]);
-        $pdo->prepare("INSERT INTO cotacao_proposta (cotacao_id, fornecedor_id, fornecedor_nome, prazo, observacoes, data_resposta, total, revisao, raiz_id, ativa, created_at) VALUES (?,?,?,?,?,?,?,?,?,1,?)")
-            ->execute([$cid, $fid, $forn, trim((string)($in['prazo'] ?? '')), trim((string)($in['observacoes'] ?? '')), $now, $total ?: null, $rev, $raiz, $now]);
+        // a revisão herda a OPÇÃO da proposta revisada — revisar a opção 2 gera a rev seguinte DA OPÇÃO 2
+        // (cada opção é uma cadeia própria; as outras opções do mesmo fornecedor não são tocadas)
+        $opc = (int)($cur['opcao'] ?? 1) ?: 1;
+        $rot = array_key_exists('opcao_rotulo', $in) ? trim((string)$in['opcao_rotulo']) : trim((string)($cur['opcao_rotulo'] ?? ''));
+        $pdo->prepare("INSERT INTO cotacao_proposta (cotacao_id, fornecedor_id, fornecedor_nome, prazo, observacoes, data_resposta, total, revisao, raiz_id, ativa, opcao, opcao_rotulo, created_at) VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?)")
+            ->execute([$cid, $fid, $forn, trim((string)($in['prazo'] ?? '')), trim((string)($in['observacoes'] ?? '')), $now, $total ?: null, $rev, $raiz, $opc, $rot ?: null, $now]);
         $novo = (int)$pdo->lastInsertId();
         $insPI = $pdo->prepare("INSERT INTO cotacao_proposta_item (proposta_id, cotacao_item_id, preco_unit, preco_total, observacao) VALUES (?,?,?,?,?)");
         foreach ($itens as $it) {
@@ -626,8 +666,10 @@ try {
         }
         $pdo->prepare("UPDATE cotacao SET updated_at=? WHERE id=?")->execute([$now, $cid]);
         $pdo->commit();
-        cot_log($pdo, $cid, $me, 'Proposta', 'Revisão ' . $rev . ' da proposta de ' . $forn . ' — total R$ ' . number_format($total, 2, ',', '.'));
-        echo json_encode(['ok'=>true, 'proposta_id'=>$novo, 'revisao'=>$rev, 'total'=>round($total, 2)], JSON_UNESCAPED_UNICODE); exit;
+        cot_log($pdo, $cid, $me, 'Proposta', 'Revisão ' . $rev . ' da proposta de ' . $forn
+            . ($opc > 1 ? (' [opção ' . $opc . ($rot !== '' ? ' · ' . $rot : '') . ']') : '')
+            . ' — total R$ ' . number_format($total, 2, ',', '.'));
+        echo json_encode(['ok'=>true, 'proposta_id'=>$novo, 'revisao'=>$rev, 'opcao'=>$opc, 'total'=>round($total, 2)], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'status') {

@@ -565,7 +565,8 @@ function ovScRender(){
   const sc=OV.sc.sort.col, dir=OV.sc.sort.dir;
   const val=s=>({numero:(s.numero||''), obra:(s.obra||'').toLowerCase(), comprador:(s.comprador||'zzz').toLowerCase(),
     emissao:(s.emissao||''), dias_em_aberto:(s.dias_em_aberto===null?-1:+s.dias_em_aberto),
-    status:(s.status||''), cobertura:((s.itens_total?(s.itens_cotados/s.itens_total):0))}[sc]);
+    status:(s.status||''), cobertura:((s.itens_total?(s.itens_cotados/s.itens_total):0)),
+    itens:(+s.itens_total||0)}[sc]);
   rows=rows.slice().sort((a,b)=>{ const x=val(a),y=val(b); return (x<y?-1:x>y?1:0)*dir; });
 
   const tot=rows.length, pgs=Math.max(1,Math.ceil(tot/OV_POR_PAGINA));
@@ -615,57 +616,64 @@ function ovScRender(){
 
   const arw=col=>OV.sc.sort.col===col?(OV.sc.sort.dir>0?' ▲':' ▼'):'';
   const th=(lbl,col,ex)=>'<th '+(ex||'')+' onclick="ovScSort(\''+col+'\')" style="cursor:pointer;user-select:none;white-space:nowrap">'+lbl+arw(col)+'</th>';
+  /* Mesmo desenho da tela INTERNA de Solicitações (que já funciona bem), em modo leitura:
+     ponto colorido da cobertura + nº da SC, contagem de itens, descrição do 1º item, obra,
+     emissão, pílula de dias, status, comprador e a anotação dele. Reusa SOL_COT/SOL_ST/SOL_BK e
+     solCotDot/solPill do app04 — duas réguas de cor para a mesma coisa acabariam divergindo. */
   h+='<div class="wrap" style="overflow-x:auto"><table style="width:100%;font-size:12px"><thead><tr>'
-   + '<th style="width:26px"></th>' + th('SC','numero') + th('Obra','obra') + th('Comprador','comprador')
-   + th('Emissão','emissao') + th('Em aberto','dias_em_aberto','title="dias desde a emissão da solicitação"')
-   + th('Status','status') + th('Cotação','cobertura','title="quantos itens da SC já estão cotados"')
-   + '<th>Cotações</th></tr></thead><tbody>';
+   + th('SC','numero') + th('Itens','itens','style="text-align:center"')
+   + '<th>Descrição</th>' + th('Obra','obra')
+   + th('Emissão','emissao') + th('Dias','dias_em_aberto','style="text-align:center" title="dias desde a emissão da solicitação"')
+   + th('Status','status','style="text-align:center"') + th('Comprador','comprador')
+   + '<th>Observações</th><th>Cotações</th></tr></thead><tbody>';
 
-  for(const s of pageRows){
-    const k=s.coligada+'|'+s.numero;
-    const st=OV_SCST[s.status]||['#8a9299',s.status_texto||s.status];
-    const cb=OV_COB[s.cotacao_situacao]||['#8a9299',s.cotacao_situacao_texto||''];
-    const dias=s.dias_em_aberto;
-    const corD = dias===null?'var(--muted)':(dias>30?'#c0392b':(dias>15?'#e67e22':'var(--muted)'));
-    const pct = s.itens_total? Math.round(100*s.itens_cotados/s.itens_total) : 0;
-    const aberta = OV.sc.aberta===k;
-    h+='<tr style="cursor:pointer" onclick="ovScToggle('+jsArg(k)+')">'
-     + '<td style="text-align:center"><span class="material-icons" style="font-size:17px;color:var(--muted)">'
-     +   (aberta?'expand_less':'expand_more')+'</span></td>'
-     + '<td><b>'+esc(String(s.numero).replace(/^0+/,''))+'</b></td>'
-     + '<td class="muted">'+esc(s.obra||'—')+'</td>'
-     + '<td class="muted">'+esc(s.comprador||'—')+'</td>'
-     + '<td class="muted" style="white-space:nowrap">'+ovData(s.emissao)+'</td>'
-     + '<td style="white-space:nowrap;font-weight:700;color:'+corD+'">'+(dias===null?'—':(dias+' dias'))+'</td>'
-     + '<td><span class="dchip" style="background:'+st[0]+'">'+st[1]+'</span></td>'
-     + '<td style="min-width:130px"><div style="display:flex;align-items:center;gap:6px">'
-     +   '<div style="flex:1;height:7px;background:#eceff1;border-radius:4px;overflow:hidden">'
-     +   '<div style="width:'+pct+'%;height:100%;background:'+cb[0]+'"></div></div>'
-     +   '<span class="dmini" style="white-space:nowrap">'+s.itens_cotados+'/'+s.itens_total+'</span></div>'
-     +   '<div class="dmini" style="color:var(--muted)">'+cb[1]+'</div></td>'
-     + '<td style="white-space:nowrap">'+((s.cotacoes||[]).length
-        ? s.cotacoes.map(x=>'<button class="btn-ghost" style="padding:2px 8px;font-size:11px;margin:1px" '
-            +'onclick="event.stopPropagation();ovCotAbrir('+x.cotacao_id+')" title="'+esc(x.titulo||'')+'">'
-            +esc(x.apelido||('#'+x.cotacao_id))+'</button>').join('')
+  for(const sc of pageRows){
+    const key=sc.coligada+'|'+sc.numero, ex=(OV.sc.aberta===key);
+    const st=(typeof SOL_ST!=='undefined'&&SOL_ST[sc.status])||['#8a9299',sc.status_texto||sc.status,'#f2f4f5'];
+    const dias=sc.dias_em_aberto;
+    const bk = dias===null?'r':(dias<7?'r':(dias<15?'a':(dias<30?'l':'c')));
+    const pill=(typeof solPill==='function')?solPill({bucket:bk,dias:dias})
+      :('<span class="dchip">'+(dias!=null?dias+' dias':'—')+'</span>');
+    const dot=(k,extra)=>(typeof solCotDot==='function')?solCotDot(k,extra)
+      :'<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#8a9299;margin-right:6px"></span>';
+    const prim=((sc.itens||[])[0]||{}).produto||'';
+    const obs=sc.observacoes||'';
+    h+='<tr>'
+     + '<td><b style="cursor:pointer;white-space:nowrap" onclick="ovScToggle('+jsArg(key)+')">'+(ex?'▾':'▸')+' '
+     +   dot(sc.cotacao_situacao, sc.itens_cotados+'/'+sc.itens_total+' itens')
+     +   esc(String(sc.numero).replace(/^0+/,'')||sc.numero)+'</b></td>'
+     + '<td style="text-align:center">'+sc.itens_total+'</td>'
+     + '<td style="max-width:230px"><span title="'+esc(prim)+'">'+esc(prim.slice(0,44))+(prim.length>44?'…':'')+'</span></td>'
+     + '<td class="muted" style="font-size:11.5px">'+esc(sc.obra||'—')+'</td>'
+     + '<td class="muted" style="font-size:11.5px;white-space:nowrap">'+ovData(sc.emissao)+'</td>'
+     + '<td style="text-align:center">'+pill+'</td>'
+     + '<td style="text-align:center;background:'+(st[2]||'')+';border-left:3px solid '+st[0]+'">'
+     +   '<span class="dchip" style="background:'+st[0]+';color:#fff;font-weight:700">'+esc(st[1])+'</span></td>'
+     + '<td class="muted" style="font-size:11.5px">'+esc(sc.comprador||'—')+'</td>'
+     /* anotação do comprador: aqui é SÓ LEITURA — a tela da obra não escreve nada */
+     + '<td class="muted" style="font-size:11.5px;max-width:170px"><span title="'+esc(obs)+'">'
+     +   (obs?esc(obs.slice(0,34))+(obs.length>34?'…':''):'—')+'</span></td>'
+     + '<td style="white-space:nowrap">'+((sc.cotacoes||[]).length
+        ? sc.cotacoes.map(x=>'<button class="btn-ghost" style="padding:2px 7px;color:var(--verde-d);font-weight:700;font-size:11px" '
+            +'title="'+esc(x.titulo||'')+'" onclick="ovCotAbrir('+x.cotacao_id+')">#'+x.cotacao_id+'</button>').join('')
         : '<span class="muted">—</span>')+'</td></tr>';
-    if(aberta){
-      h+='<tr><td></td><td colspan="8" style="background:#f8faf9">'
-       + '<div class="dmini" style="font-weight:700;margin-bottom:5px">Itens desta solicitação</div>'
-       + '<table style="width:100%;font-size:11.5px"><thead><tr><th>Produto</th><th style="text-align:right">Qtd</th>'
-       + '<th>Situação</th><th></th></tr></thead><tbody>';
-      for(const it of (s.itens||[])){
-        const sit=OV_COB[it.situacao==='coberto'?'total':(it.situacao==='cotando'?'parcial':'vazio')];
-        h+='<tr><td><b>'+esc(it.produto)+'</b>'+(it.observacao?('<div class="dmini" style="color:var(--muted)">'+esc(it.observacao)+'</div>'):'')+'</td>'
-         + '<td style="text-align:right;white-space:nowrap" class="muted">'+(it.quantidade!==null?(it.quantidade+' '+esc(it.unidade||'')):'—')+'</td>'
-         + '<td><span class="dchip" style="background:'+sit[0]+'">'+esc(it.situacao_texto||'')+'</span></td>'
-         + '<td style="text-align:right">'+(it.cotacao_id?('<button class="btn-ghost" style="padding:2px 8px;font-size:11px" '
-             +'onclick="event.stopPropagation();ovCotAbrir('+it.cotacao_id+')">ver cotação</button>'):'')+'</td></tr>';
-      }
-      if(!(s.itens||[]).length) h+='<tr><td colspan="4" class="empty">Sem itens.</td></tr>';
-      h+='</tbody></table>'+(s.observacoes?('<div class="dmini" style="margin-top:6px"><b>Observação:</b> '+esc(s.observacoes)+'</div>'):'')+'</td></tr>';
+    if(ex){
+      h+='<tr><td colspan="10" style="background:#fafbfb;padding:8px 14px">'
+       + '<b style="font-size:11px;color:var(--muted)">ITENS</b> '
+       + '<span class="muted" style="font-size:10px">⚪ sem cotação · 🟡 em cotação · 🟢 cotada</span>'
+       + (sc.itens||[]).map(it=>'<div style="font-size:12px;padding:2px 0">'
+           + dot(it.situacao==='coberto'?'coberto':(it.situacao==='cotando'?'cotando':'vazio'))
+           + (it.quantidade!=null?(cotNum(it.quantidade)+' '+esc(it.unidade||'')+' — '):'')
+           + '<b>'+esc(it.produto)+'</b>'
+           + (it.cotacao_id?(' <button class="btn-ghost" style="padding:0 5px;color:var(--verde-d);font-size:10px;font-weight:700;vertical-align:1px" '
+               +'onclick="ovCotAbrir('+it.cotacao_id+')">#'+it.cotacao_id+'</button>'):'')
+           + (it.observacao?(' <span class="muted">('+esc(it.observacao)+')</span>'):'')
+           + '</div>').join('')
+       + (!(sc.itens||[]).length?'<div class="dmini">Sem itens.</div>':'')
+       + '</td></tr>';
     }
   }
-  if(!rows.length) h+='<tr><td colspan="9" class="empty">'+(todos.length?'Nenhuma solicitação casa os filtros.':'Nenhuma solicitação em aberto para esta obra.')+'</td></tr>';
+  if(!rows.length) h+='<tr><td colspan="10" class="empty">'+(todos.length?'Nenhuma solicitação casa os filtros.':'Nenhuma solicitação em aberto para esta obra.')+'</td></tr>';
   h+='</tbody></table></div>';
   if(pgs>1){
     const b=(p,lbl,cur)=>'<button class="'+(cur?'btn-prim':'btn-ghost')+'" style="padding:5px 10px;font-size:12px;min-width:34px" onclick="ovScPagina('+p+')">'+lbl+'</button>';

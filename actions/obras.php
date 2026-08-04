@@ -420,7 +420,11 @@ try {
         if (!$rid && $fid) $rid = (int)obra_radar_id($pdo, $fid);
         if (!$rid) throw new Exception('informe obra_ficha_id ou obra_id');
 
-        $of = $pdo->prepare("SELECT nome, cronograma_id, cronograma_nome FROM obra_ficha WHERE radar_obra_id=? LIMIT 1");
+        /* cronograma_id mora na tabela do RADAR (`obra`), nao na ficha — a ficha guarda so o NOME
+           do cronograma casado. Foi onde eu errei na 1a versao. */
+        $of = $pdo->prepare("SELECT o.nome, o.cronograma_id, f.cronograma_nome
+                             FROM obra o LEFT JOIN obra_ficha f ON f.radar_obra_id = o.id
+                             WHERE o.id=? LIMIT 1");
         $of->execute([$rid]); $obraF = $of->fetch() ?: [];
         $cid = (string)($obraF['cronograma_id'] ?? '');
         if ($cid === '') { echo json_encode(['ok'=>true, 'sem_cronograma'=>true,

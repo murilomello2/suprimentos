@@ -100,7 +100,9 @@ function ovRadarRender(){
     status:(l.status||''), alerta:(ORD_ALERTA[l.alerta]!==undefined?ORD_ALERTA[l.alerta]:9),
     responsavel:(l.responsavel||'zzz').toLowerCase(),
     /* sem data vai para o FIM em qualquer direção: "não sei quando" não é "chega logo" */
-    data_em_obra:(l.data_em_obra||'9999-12-31'), inicio_cotacao:(l.inicio_cotacao||'9999-12-31')}[sc]);
+    data_em_obra:(l.data_em_obra||'9999-12-31'), inicio_cotacao:(l.inicio_cotacao||'9999-12-31'),
+    fim_cotacao:(l.fim_cotacao||'9999-12-31'),
+    verba:(l.verba_definida!=null?+l.verba_definida:(l.verba_estimada!=null?+l.verba_estimada:-1))}[sc]);
   rows=rows.slice().sort((a,b)=>{ const x=val(a),y=val(b); return (x<y?-1:x>y?1:0)*dir; });
 
   const tot=rows.length, pgs=Math.max(1,Math.ceil(tot/OV_POR_PAGINA));
@@ -149,45 +151,69 @@ function ovRadarRender(){
    + '<option value="1"'+(f.cot==='1'?' selected':'')+'>Só com cotação</option>'
    + '<option value="0"'+(f.cot==='0'?' selected':'')+'>Só sem cotação</option></select>'
    + '<button class="btn-ghost" style="padding:6px 11px;font-size:12px" onclick="ovRadarLimpar()">Limpar filtros</button>'
+   + '<button class="btn-ghost" style="padding:6px 11px;font-size:12px" onclick="ovColsAbrir()" title="escolher quais colunas aparecem">'
+   + '<span class="material-icons" style="font-size:14px;vertical-align:-3px">view_column</span> Colunas</button>'
    + '<span class="muted" style="font-size:11.5px;margin-left:auto">'+(tot?(ini+1):0)+'–'+(ini+pageRows.length)+' de '+tot
    + (tot!==todos.length?(' <span style="opacity:.75">(de '+todos.length+')</span>'):'')+'</span>'
    + '</div></div>';
 
+  OV.radar._pag = pageRows;                       // os "olhinhos" leem daqui pelo índice da linha
+  const VIS = ovColsGet();
   const arw=col=>OV.radar.sort.col===col?(OV.radar.sort.dir>0?' ▲':' ▼'):'';
   const th=(lbl,col,extra)=>'<th '+(extra||'')+' onclick="ovRadarSort(\''+col+'\')" style="cursor:pointer;user-select:none;white-space:nowrap">'+lbl+arw(col)+'</th>';
-
+  /* cabeçalho e corpo saem da MESMA lista de colunas visíveis — some a chance de a ordem divergir */
+  const CAB={
+    item:   ()=>th('Item','item'),
+    obra:   ()=>th('Obra','obra'),
+    grupo:  ()=>th('Grupo','grupo'),
+    status: ()=>th('Status','status','title="em que pé está a compra"'),
+    prazo:  ()=>th('Prazo','alerta','title="se a cotação está dentro do prazo"'),
+    cotar:  ()=>th('Cotar até','fim_cotacao','title="prazo final da cotação — abaixo, quando ela deveria começar"'),
+    emobra: ()=>th('Prazo em obra','data_em_obra','title="quando o item precisa estar em obra (material, serviço, equipamento ou empreitada)"'),
+    verba:  ()=>th('Verba','verba','style="text-align:right"'),
+    resp:   ()=>th('Responsável','responsavel'),
+    cot:    ()=>'<th>Cotação</th>',
+  };
   h+='<div class="wrap" style="overflow-x:auto"><table style="width:100%;font-size:12px"><thead><tr>'
-   + th('Item','item') + th('Obra','obra') + th('Grupo','grupo')
-   + th('Prazo','alerta','title="situação do prazo de cotação"')
-   + th('Começar a cotar','inicio_cotacao')
-   + th('Material em obra','data_em_obra','title="data em que o material precisa estar na obra"')
-   + th('Comprador','responsavel')
-   + '<th>Cotação</th></tr></thead><tbody>';
+   + VIS.map(k=>CAB[k]?CAB[k]():'').join('') + '</tr></thead><tbody>';
 
-  for(const l of pageRows){
+  pageRows.forEach((l,ix)=>{
     const dias=ovDias(l.data_em_obra);
     const corDias = dias===null ? 'var(--muted)' : (dias<0 ? '#c0392b' : (dias<=30 ? 'var(--dourado)' : 'var(--muted)'));
     const txtDias = dias===null ? '' : (dias<0 ? ('há '+Math.abs(dias)+'d') : ('em '+dias+'d'));
     const cot=l.cotacao;
-    h+='<tr>'
-     + '<td style="max-width:280px"><div style="font-weight:700">'+esc(l.item)+'</div>'
-     +   (l.fornecedor?('<div class="dmini" style="color:var(--muted)">'+esc(l.fornecedor)+'</div>'):'')+'</td>'
-     + '<td class="muted">'+esc(l.obra||'—')+'</td>'
-     + '<td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(l.grupo||'')+'">'+esc(l.grupo||'—')+'</td>'
-     + '<td>'+ovChipAlerta(l.alerta)+'</td>'
-     + '<td class="muted" style="white-space:nowrap">'+ovData(l.inicio_cotacao)+'</td>'
-     + '<td style="white-space:nowrap"><b>'+ovData(l.data_em_obra)+'</b>'
-     +   (txtDias?('<div class="dmini" style="color:'+corDias+'">'+txtDias+'</div>'):'')
-     +   (l.data_em_obra_origem==='sem data'?'<div class="dmini" style="color:var(--muted)">sem cronograma</div>':'')+'</td>'
-     + '<td class="muted" style="white-space:nowrap">'+esc(l.responsavel||'—')+'</td>'
-     + '<td style="white-space:nowrap">'+(cot
-        ? ('<button class="btn-ghost" style="padding:2px 8px;font-size:11px" onclick="ovCotAbrir('+cot.cotacao_id+')" '
-           +'title="'+esc(cot.titulo||'')+' — '+esc(cot.status_texto||'')+'">'
-           +cot.propostas_recebidas+'/'+cot.fornecedores_convidados+' propostas'
-           +(cot.melhor_oferta?(' · '+BRL(cot.melhor_oferta)):'')+'</button>')
-        : '<span class="muted">—</span>')+'</td></tr>';
-  }
-  if(!rows.length) h+='<tr><td colspan="8" class="empty">'+(todos.length?'Nenhum item casa os filtros.':'Nenhum item no radar desta obra.')+'</td></tr>';
+    const verba = l.verba_definida!=null ? l.verba_definida : l.verba_estimada;
+    const olho = fn=>'<span class="material-icons" onclick="event.stopPropagation();'+fn+'" title="ver como isto foi apurado" style="font-size:14px;vertical-align:-3px;cursor:pointer;color:var(--verde);margin-left:3px">visibility</span>';
+    const CEL={
+      item:  ()=>'<td style="max-width:270px"><div style="font-weight:700">'+esc(l.item)+'</div>'
+                + (l.fornecedor?('<div class="dmini" style="color:var(--muted)">'+esc(l.fornecedor)+'</div>'):'')+'</td>',
+      obra:  ()=>'<td class="muted">'+esc(l.obra||'—')+'</td>',
+      grupo: ()=>'<td class="muted" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(l.grupo||'')+'">'+esc(l.grupo||'—')+'</td>',
+      status:()=>'<td>'+ovChipStatus(l)+'</td>',
+      /* item concluído não tem prazo a cumprir — mostrar "Concluído" aqui era o que embaralhava
+         as duas leituras. O status já diz isso na coluna ao lado. */
+      prazo: ()=>'<td>'+(l.alerta==='finalizado'
+                ? '<span class="muted" title="item concluído — prazo não se aplica">—</span>'
+                : ovChipAlerta(l.alerta))+'</td>',
+      cotar: ()=>'<td style="white-space:nowrap"><b>'+ovData(l.fim_cotacao)+'</b>'
+                + '<div class="dmini" style="color:var(--muted)">início '+ovData(l.inicio_cotacao)+'</div></td>',
+      emobra:()=>'<td style="white-space:nowrap"><b>'+ovData(l.data_em_obra)+'</b>'+olho('ovVerCrono('+ix+')')
+                + (txtDias?('<div class="dmini" style="color:'+corDias+'">'+txtDias+'</div>'):'')
+                + (l.data_em_obra_origem==='sem data'?'<div class="dmini" style="color:var(--muted)">sem cronograma</div>':'')+'</td>',
+      verba: ()=>'<td style="text-align:right;white-space:nowrap">'
+                + (verba!=null?('<b>'+BRL(verba)+'</b>'+olho('ovVerVerba('+ix+')')):'<span class="muted">—</span>')
+                + (verba!=null&&l.verba_definida==null?'<div class="dmini" style="color:var(--muted)">estimada</div>':'')+'</td>',
+      resp:  ()=>'<td class="muted" style="white-space:nowrap">'+esc(l.responsavel||'—')+'</td>',
+      cot:   ()=>'<td style="white-space:nowrap">'+(cot
+                ? ('<button class="btn-ghost" style="padding:2px 8px;font-size:11px" onclick="ovCotAbrir('+cot.cotacao_id+')" '
+                  +'title="'+esc(cot.titulo||'')+' — '+esc(cot.status_texto||'')+'">'
+                  +cot.propostas_recebidas+'/'+cot.fornecedores_convidados+' propostas'
+                  +(cot.melhor_oferta?(' · '+BRL(cot.melhor_oferta)):'')+'</button>')
+                : '<span class="muted">—</span>')+'</td>',
+    };
+    h+='<tr>'+VIS.map(k=>CEL[k]?CEL[k]():'').join('')+'</tr>';
+  });
+  if(!rows.length) h+='<tr><td colspan="'+VIS.length+'" class="empty">'+(todos.length?'Nenhum item casa os filtros.':'Nenhum item no radar desta obra.')+'</td></tr>';
   h+='</tbody></table></div>';
 
   if(pgs>1){
@@ -656,4 +682,141 @@ function ovScRender(){
   const foc=document.activeElement, eraQ=foc&&foc.id==='ovScQ', car=eraQ?foc.selectionStart:null;
   w.innerHTML=h;
   if(eraQ){ const ni=document.getElementById('ovScQ'); if(ni){ ni.focus(); try{ ni.setSelectionRange(car,car); }catch(e){} } }
+}
+/* ─────────────────────────── RADAR (Status - Curva A e B) ───────────────────────────
+   STATUS e PRAZO são coisas diferentes e agora têm colunas próprias: o status diz em que pé está
+   a compra (não iniciou / em cotação / concluído), o prazo diz se está atrasado. Misturar os dois
+   num chip só era o que confundia — "Concluído" em cinza no meio de prazos verdes não se lia. */
+
+const OV_STATUS = {
+  'Não Iniciado':     ['#8a9299', 'Não iniciado'],
+  'Cotação Iniciada': ['var(--dourado)', 'Em cotação'],
+  'Em Andamento':     ['#2d7d5a', 'Em andamento'],
+  'Com Pendências':   ['#e67e22', 'Com pendências'],
+  'Finalizado':       ['var(--ok)', 'Concluído'],
+  'Não se aplica':    ['#c9ced2', 'Não se aplica'],
+};
+function ovChipStatus(l){
+  const x = OV_STATUS[l.status] || ['#8a9299', l.status || '—'];
+  const auto = l.status_automatico ? ' title="deduzido pela existência de uma cotação — ninguém digitou este status"' : '';
+  return '<span class="dchip" style="background:'+x[0]+'"'+auto+'>'+esc(x[1])+(l.status_automatico?' •':'')+'</span>';
+}
+
+/* COLUNAS CONFIGURÁVEIS — o pessoal da obra não precisa das mesmas colunas que suprimentos.
+   A escolha fica no navegador de cada um (localStorage), não no cadastro: é preferência de tela. */
+const OV_COLS = [
+  {k:'item',   lbl:'Item',           fixa:true},
+  {k:'obra',   lbl:'Obra'},
+  {k:'grupo',  lbl:'Grupo'},
+  {k:'status', lbl:'Status'},
+  {k:'prazo',  lbl:'Prazo'},
+  {k:'cotar',  lbl:'Cotar até'},
+  {k:'emobra', lbl:'Prazo em obra'},
+  {k:'verba',  lbl:'Verba'},
+  {k:'resp',   lbl:'Responsável'},
+  {k:'cot',    lbl:'Cotação'},
+];
+const OV_COLS_PADRAO = ['item','obra','grupo','status','prazo','cotar','emobra','verba','resp','cot'];
+function ovColsGet(){
+  if(OV.radar.cols) return OV.radar.cols;
+  let v=null; try{ v=JSON.parse(localStorage.getItem('sup_ovradar_cols')||'null'); }catch(e){}
+  OV.radar.cols = Array.isArray(v)&&v.length ? v.filter(k=>OV_COLS.some(c=>c.k===k)) : OV_COLS_PADRAO.slice();
+  if(!OV.radar.cols.includes('item')) OV.radar.cols.unshift('item');
+  return OV.radar.cols;
+}
+function ovColsSalvar(){ try{ localStorage.setItem('sup_ovradar_cols', JSON.stringify(OV.radar.cols||[])); }catch(e){} }
+function ovColsVisivel(k){ return ovColsGet().includes(k); }
+function ovColsAbrir(){
+  const on=ovColsGet();
+  dlgAbrir('Status - Curva A e B','Escolher colunas',
+    '<div style="max-width:420px"><div class="dmini" style="margin-bottom:10px">Desmarque o que não quiser ver. '
+   + 'Vale só para você, neste navegador.</div>'
+   + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
+   + OV_COLS.map(c=>'<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;padding:5px 8px;border:1px solid var(--line);border-radius:8px'
+       + (c.fixa?';opacity:.55':'')+'">'
+       + '<input type="checkbox" '+(on.includes(c.k)?'checked ':'')+(c.fixa?'disabled ':'')
+       + 'onchange="ovColsToggle(\''+c.k+'\',this.checked)"> '+esc(c.lbl)+(c.fixa?' <span class="muted" style="font-size:10px">(fixa)</span>':'')+'</label>').join('')
+   + '</div>'
+   + '<div class="bar" style="justify-content:space-between;gap:8px;margin-top:14px">'
+   + '<button class="btn-ghost" onclick="ovColsReset()">Restaurar padrão</button>'
+   + '<button class="btn-prim" onclick="closeModal(true)">Pronto</button></div></div>');
+}
+function ovColsToggle(k,on){
+  const L=ovColsGet();
+  if(on){ if(!L.includes(k)) OV.radar.cols=OV_COLS.map(c=>c.k).filter(x=>L.includes(x)||x===k); }
+  else   { OV.radar.cols=L.filter(x=>x!==k); }
+  ovColsSalvar(); ovRadarRender();
+}
+function ovColsReset(){ OV.radar.cols=OV_COLS_PADRAO.slice(); ovColsSalvar(); closeModal(true); ovRadarRender(); }
+
+/* ── "olhinho" do prazo em obra: de onde saiu a data e como o resto foi calculado ── */
+function ovVerCrono(idx){
+  const l=(OV.radar._pag||[])[idx]; if(!l) return;
+  const ORIG={curada:'digitada por suprimentos (sobrepõe o cronograma)',
+              cronograma:'veio do cronograma vivo do Planejamento',
+              'sem data':'não há data — nem no cronograma, nem digitada'};
+  dlgAbrir('Status - Curva A e B','De onde vem o prazo · '+esc(l.item),
+    '<div style="max-width:560px">'
+   + (l.data_em_obra
+      ? '<div style="font-size:15px;font-weight:800;margin-bottom:2px">'+ovData(l.data_em_obra)+'</div>'
+        + '<div class="dmini" style="margin-bottom:12px">data em que o item precisa estar em obra · '
+        + esc(ORIG[l.data_em_obra_origem]||l.data_em_obra_origem||'')+'</div>'
+      : '<div style="font-size:15px;font-weight:800;color:#8a9299;margin-bottom:12px">sem data em obra</div>')
+   + (l.marco_cronograma?('<div class="dmini" style="margin-bottom:10px"><b>Marco do cronograma:</b> '+esc(l.marco_cronograma)+'</div>'):'')
+   + '<div style="border:1px solid var(--line);border-radius:9px;overflow:hidden">'
+   + [['Necessário em obra', ovData(l.data_em_obra), 'a data-alvo'],
+      ['− lead time de '+(l.lead_dias||0)+' dias', ovData(l.fim_cotacao), 'prazo final para a cotação estar fechada'],
+      ['− 30 dias', ovData(l.inicio_cotacao), 'quando a cotação precisa começar']]
+      .map((r,i)=>'<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 12px;'
+        +(i<2?'border-bottom:1px solid #f1f3f2;':'')+(i===0?'background:#f8faf9':'')+'">'
+        +'<span style="font-size:12.5px">'+esc(r[0])+'<div class="dmini" style="color:var(--muted)">'+esc(r[2])+'</div></span>'
+        +'<b style="white-space:nowrap">'+r[1]+'</b></div>').join('')
+   + '</div>'
+   + '<div class="dmini" style="margin-top:10px;color:var(--muted)">O lead time é o tempo entre fechar a compra e o item chegar/começar. '
+   + 'Quem ajusta essas datas é suprimentos, no radar.</div>'
+   + '<div class="bar" style="justify-content:flex-end;margin-top:12px"><button class="btn-prim" onclick="closeModal(true)">Fechar</button></div></div>');
+}
+
+/* ── "olhinho" da verba: quais linhas/insumos do orçamento formaram o valor ── */
+async function ovVerVerba(idx){
+  const l=(OV.radar._pag||[])[idx]; if(!l) return;
+  const v = l.verba_definida!=null ? l.verba_definida : l.verba_estimada;
+  dlgAbrir('Status - Curva A e B','Como a verba foi apurada · '+esc(l.item),
+    '<div style="max-width:640px"><div class="dempty">Buscando a memória de cálculo…</div></div>');
+  let d=null;
+  try{ d=await (await fetch('actions/obra_consulta.php?tela=verba&ordem='+l.item_id+'&obra_id='+l.obra_id+'&me='+ovMe())).json(); }catch(e){}
+  const bd=(d&&d.dados)||null;
+  let h='<div style="max-width:640px">';
+  h+='<div style="font-size:17px;font-weight:800">'+(v!=null?BRL(v):'—')+'</div>'
+   + '<div class="dmini" style="margin-bottom:12px">'
+   + (l.verba_definida!=null
+      ? ('verba definida'+(l.verba_confirmada?' e conferida por suprimentos':' (ainda não conferida)'))
+      : (l.verba_estimada!=null?'estimativa herdada do orçamento — ainda não definida':'sem verba'))
+   + '</div>';
+  if(!bd || (!(bd.linhas||[]).length && !bd.total)){
+    h+='<div class="dempty">Esta verba não veio do orçamento analítico — foi digitada direto, então não há '
+     + 'memória de cálculo para abrir.'+((d&&(d.error||d.erro))?('<div class="dmini" style="margin-top:6px">'+esc(d.error||d.erro)+'</div>'):'')+'</div>';
+  }else{
+    const T=bd.tot_por_tipo||{};
+    const rot={material:'Material', mo:'Mão de obra', mat_mo:'Material + MO', equip:'Equipamento'};
+    const tot=Object.keys(rot).filter(k=>+T[k]);
+    if(tot.length) h+='<div class="bar" style="gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+      + tot.map(k=>'<div class="panel" style="flex:1;min-width:110px;padding:8px 11px"><div class="dmini" style="color:var(--muted)">'
+        + rot[k]+'</div><b>'+BRL(T[k])+'</b></div>').join('')+'</div>';
+    h+='<div class="wrap" style="max-height:330px;overflow:auto"><table style="width:100%;font-size:12px"><thead><tr>'
+     + '<th>Linha do orçamento</th><th style="text-align:right">Valor</th></tr></thead><tbody>';
+    for(const ln of (bd.linhas||[])){
+      h+='<tr><td><b>'+esc(ln.descricao||'—')+'</b>'
+       + (ln.path?('<div class="dmini" style="color:var(--muted)">'+esc(ln.path)+'</div>'):'')
+       + (ln.sem_composicao?'<div class="dmini" style="color:var(--dourado)">sem composição detalhada</div>':'')
+       + ((ln.insumos||[]).length?('<div class="dmini" style="color:var(--muted)">'+ln.insumos.length+' insumo(s): '
+           + esc(ln.insumos.slice(0,4).map(x=>x.desc).join(' · '))+(ln.insumos.length>4?' …':'')+'</div>'):'')
+       + '</td><td style="text-align:right;white-space:nowrap"><b>'+BRL(ln.valor||0)+'</b></td></tr>';
+    }
+    h+='</tbody><tfoot><tr style="border-top:2px solid var(--line)"><td><b>TOTAL</b></td>'
+     + '<td style="text-align:right"><b>'+BRL(bd.total||0)+'</b></td></tr></tfoot></table></div>';
+  }
+  h+='<div class="dmini" style="margin-top:10px;color:var(--muted)">Tela de consulta — quem ajusta a verba é suprimentos.</div>'
+   + '<div class="bar" style="justify-content:flex-end;margin-top:12px"><button class="btn-prim" onclick="closeModal(true)">Fechar</button></div></div>';
+  dlgAbrir('Status - Curva A e B','Como a verba foi apurada · '+esc(l.item), h);
 }

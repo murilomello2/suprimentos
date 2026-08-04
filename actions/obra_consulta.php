@@ -120,6 +120,24 @@ try {
                 'grupos' => array_keys($grupos), 'responsaveis' => array_keys($resps), 'dados' => $pagina]);
     }
 
+    /* COMO A VERBA FOI APURADA (o "olhinho" da coluna Verba). Passa pelo obra_consulta, e não
+       direto no verba_breakdown.php, para o recorte por obra valer também aqui — quem só enxerga
+       Diamond não pode abrir a memória de cálculo de um item da Licel.
+       `obra_id` aqui é o id da FICHA (é o que o radar da API devolve); o breakdown quer o id do
+       RADAR, então a conversão é feita aqui dentro. */
+    if ($tela === 'verba') {
+        $ordem = (int)($_GET['ordem'] ?? 0); if (!$ordem) oc_erro('Informe ?ordem=<item>.');
+        $fid   = (int)($_GET['obra_id'] ?? 0); if (!$fid) oc_erro('Informe ?obra_id=<obra>.');
+        if ($pedidas !== null && !in_array($fid, $pedidas, true)) oc_erro('Obra fora do seu acesso.', 403);
+        $todas = api_obras($pdo);
+        $radarId = (int)($todas[$fid]['_radar_id'] ?? 0);
+        if (!$radarId) oc_erro('Esta obra ainda não está no radar.', 404);
+        require_once __DIR__ . '/../includes/verba.php';
+        $bd = verba_breakdown_data($pdo, $ordem, $radarId);
+        if (isset($bd['error'])) oc_erro($bd['error'], 404);
+        oc_out(['ok' => true, 'tela' => 'verba', 'ordem' => $ordem, 'dados' => $bd]);
+    }
+
     if ($tela === 'cotacoes') {
         $lista = api_cotacoes_lista($pdo);
         $fStatus = trim((string)($_GET['status'] ?? ''));

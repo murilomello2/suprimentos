@@ -1787,31 +1787,35 @@ function cronoRender(){
      a data vai junto — tendo sido o robô ou uma pessoa que amarrou. Só data sem marco nenhum
      fica de fora, porque aí é prazo definido por fora do cronograma. */
   h+='<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:9px 12px;border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:10px">'
-   + '<b>'+r.com_ancora+'</b> têm marco vinculado no cronograma — a data é a da tarefa, então já vêm <b>marcados</b>.'
-   + (r.sem_ancora?(' <b>'+r.sem_ancora+'</b> não têm marco nenhum (data posta na mão, por fora do cronograma) e vêm <b>desmarcados</b>.'):'')+'</div>';
+   + '<b>'+r.com_ancora+'</b> seguem a tarefa que está vinculada a eles — a tarefa mudou de data no cronograma, então já vêm <b>marcados</b>.'
+   + (r.ancora_sumida?(' <b>'+r.ancora_sumida+'</b> tinham vínculo com uma tarefa que <b>não existe mais</b> no cronograma novo (renomeada ou removida): a data sugerida veio de casamento por palavra, então confira antes.'):'')
+   + (r.sem_ancora?(' <b>'+r.sem_ancora+'</b> não têm vínculo nenhum — data posta na mão, por fora do cronograma — e vêm <b>desmarcados</b>.'):'')+'</div>';
   h+='<div class="bar" style="gap:8px;margin-bottom:8px">'
    + '<button class="btn-ghost" style="padding:4px 10px;font-size:11.5px" onclick="cronoMarcar(1)">Marcar todos</button>'
    + '<button class="btn-ghost" style="padding:4px 10px;font-size:11.5px" onclick="cronoMarcar(0)">Desmarcar todos</button>'
-   + '<button class="btn-ghost" style="padding:4px 10px;font-size:11.5px" onclick="cronoMarcar(2)">Só os com marco</button></div>';
+   + '<button class="btn-ghost" style="padding:4px 10px;font-size:11.5px" onclick="cronoMarcar(2)">Só os com tarefa vinculada</button></div>';
   h+='<div class="wrap" style="max-height:380px;overflow:auto"><table style="width:100%;font-size:12px"><thead><tr>'
-   + '<th style="width:26px"></th><th>Item</th><th>Marco no cronograma</th>'
+   + '<th style="width:26px"></th><th>Item</th><th>Tarefa no cronograma</th>'
    + '<th style="text-align:center">Hoje</th><th style="text-align:center">Cronograma</th>'
    + '<th style="text-align:center">Δ</th><th>Origem</th></tr></thead><tbody>';
   for(const d of DIV){
     const dias=d.dias, cor=dias==null?'var(--muted)':(dias>0?'#c0392b':'var(--ok)');
     h+='<tr>'
-     + '<td style="text-align:center"><input type="checkbox" class="crnChk" data-sid="'+d.servico_id+'"'+(d.tem_ancora?' checked':'')+'></td>'
+     + '<td style="text-align:center"><input type="checkbox" class="crnChk" data-sid="'+d.servico_id+'"'+(d.via_ancora?' checked':'')+'></td>'
      + '<td><b>'+esc(d.item)+'</b>'+(d.grupo?('<div class="dmini" style="color:var(--muted)">'+esc(d.grupo)+'</div>'):'')+'</td>'
      + '<td class="muted" style="font-size:11.5px">'+esc(d.marco_cronograma||'—')
      +   (d.marco_atual&&d.marco_atual!==d.marco_cronograma?('<div class="dmini" style="color:var(--dourado)">antes: '+esc(d.marco_atual)+'</div>'):'')+'</td>'
      + '<td style="text-align:center;white-space:nowrap" class="muted">'+(d.data_atual?D(d.data_atual):'—')+'</td>'
      + '<td style="text-align:center;white-space:nowrap"><b>'+D(d.data_cronograma)+'</b></td>'
      + '<td style="text-align:center;white-space:nowrap;color:'+cor+';font-weight:700">'+(dias==null?'—':((dias>0?'+':'')+dias+'d'))+'</td>'
-     + '<td style="font-size:11.5px">'+(d.tem_ancora
-        ? '<span class="dchip" style="background:var(--verde)">marco vinculado</span>'
-          + '<div class="dmini" style="color:var(--muted);margin-top:2px">amarrado '+(d.por_robo?'pelo robô':'por uma pessoa')+'</div>'
-        : '<span class="dchip" style="background:var(--dourado)">sem marco</span>'
-          + '<div class="dmini" style="color:var(--muted);margin-top:2px">data posta na mão</div>')+'</td></tr>';
+     + '<td style="font-size:11.5px">'+(d.via_ancora
+        ? '<span class="dchip" style="background:var(--verde)">tarefa vinculada</span>'
+          + '<div class="dmini" style="color:var(--muted);margin-top:2px">amarrada '+(d.por_robo?'pelo robô':'por uma pessoa')+'</div>'
+        : (d.ancora_sumiu
+          ? '<span class="dchip" style="background:var(--pend)">vínculo órfão</span>'
+            + '<div class="dmini" style="color:var(--muted);margin-top:2px">a tarefa saiu do cronograma</div>'
+          : '<span class="dchip" style="background:var(--dourado)">sem vínculo</span>'
+            + '<div class="dmini" style="color:var(--muted);margin-top:2px">data posta na mão</div>'))+'</td></tr>';
   }
   h+='</tbody></table></div>';
   h+='<div class="dmini" style="margin-top:8px;color:var(--muted)">O que for aplicado entra no Histórico de cada item, com a data anterior e a nova.</div>';
@@ -1825,7 +1829,7 @@ function cronoMarcar(modo){
   const D=(CRN.dados&&CRN.dados.divergencias)||[];
   document.querySelectorAll('.crnChk').forEach(c=>{
     const d=D.find(x=>String(x.servico_id)===String(c.getAttribute('data-sid')));
-    c.checked = modo===1 ? true : (modo===0 ? false : !!(d&&d.tem_ancora));
+    c.checked = modo===1 ? true : (modo===0 ? false : !!(d&&d.via_ancora));
   });
 }
 
@@ -1833,8 +1837,8 @@ async function cronoAplicar(){
   const sids=[...document.querySelectorAll('.crnChk')].filter(c=>c.checked).map(c=>+c.getAttribute('data-sid'));
   if(!sids.length){ toast('Marque ao menos um item'); return; }
   const D=(CRN.dados&&CRN.dados.divergencias)||[];
-  const solto=sids.filter(s=>{ const d=D.find(x=>x.servico_id===s); return d&&!d.tem_ancora; }).length;
-  if(solto && !confirm(solto+' item(ns) marcados não têm marco vinculado — a data foi posta na mão, por fora do cronograma.\n\nAplicar vai substituí-la pela data da tarefa que o sistema encontrou. Continuar?')) return;
+  const solto=sids.filter(s=>{ const d=D.find(x=>x.servico_id===s); return d&&!d.via_ancora; }).length;
+  if(solto && !confirm(solto+' item(ns) marcados NÃO seguem uma tarefa vinculada: ou o vínculo saiu do cronograma, ou a data foi posta na mão.\n\nA data proposta pra eles veio de casamento por palavra e pode não ser a certa. Continuar?')) return;
   try{
     const r=await (await fetch('actions/obras.php',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({acao:'crono_aplicar',me:EU&&EU.bitrix_id,obra_ficha_id:CRN.obra,servicos:sids})})).json();

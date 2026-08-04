@@ -506,31 +506,45 @@ try {
         $difs = []; $iguais = 0; $sem = 0; $aplicados = 0;
         $upd = $pdo->prepare("UPDATE radar_item SET data_necessaria_override=?, crono_marco_override=?, auto_flags=?, updated_at=? WHERE obra_id=? AND servico_id=?");
         foreach ($st as $r) {
-            $auto = crono_resolver($r, $tasks);
-            $novo = $auto['data_necessaria'] ?? null;
+            /* Se o item tem tarefa vinculada, a data é A DELA — busca a tarefa pelo nome no
+               cronograma de agora. Só quem não tem vínculo cai no casamento por termo.
+               (Antes isto re-casava por termo SEMPRE, ignorando o vínculo: era assim que
+               "Concreto para Fundação Profunda", ancorado em Fundação, ia parar em "PISO DE
+               CONCRETO - CONCRETAGEM" 456 dias adiante. Seguir o vínculo é o pedido; re-casar
+               por palavra é outra coisa, e bem pior.) */
+            $marcoFix  = trim((string)($r['crono_marco_override'] ?? ''));
+            $temAncora = $marcoFix !== '';
+            $novo = null; $marcoNovo = null; $viaAncora = false; $conf = '';
+            if ($temAncora) {
+                $d = crono_data_por_nome($marcoFix, $tasks);
+                if ($d) { $novo = substr((string)$d, 0, 10); $marcoNovo = $marcoFix; $viaAncora = true; $conf = 'tarefa vinculada'; }
+            }
+            if (!$novo) {
+                $auto = crono_resolver($r, $tasks);
+                $novo = $auto['data_necessaria'] ? substr((string)$auto['data_necessaria'], 0, 10) : null;
+                $marcoNovo = $auto['marco_casado'] ?? null;
+                $conf = $auto['confianca'] ?? '';
+            }
+            // âncora que não existe mais no cronograma novo: o vínculo ficou órfão (tarefa renomeada/removida)
+            $ancoraSumiu = $temAncora && !$viaAncora;
             if (!$novo) { $sem++; continue; }
-            $atual = (string)($r['data_necessaria_override'] ?? '');
+            $atual = substr((string)($r['data_necessaria_override'] ?? ''), 0, 10);
             if ($atual === (string)$novo) { $iguais++; continue; }
 
             $af = !empty($r['auto_flags']) ? (json_decode($r['auto_flags'], true) ?: []) : [];
             $porRobo = !empty($af['crono']);           // quem preencheu: robô no onboarding × pessoa
-            /* O que decide se a data SEGUE o cronograma não é quem a preencheu, é existir marco
-               vinculado. Ter marco significa "esta data é a da tarefa X" — quando o Planejamento
-               move a tarefa X, a data tem de ir junto, tenha sido o robô ou uma pessoa que amarrou.
-               Só fica imune a data digitada sem marco nenhum: aí é um prazo que alguém definiu por
-               fora do cronograma, e o cronograma não tem o que dizer sobre ela. */
-            $temAncora = trim((string)($r['crono_marco_override'] ?? '')) !== '';
             $sid = (int)$r['servico_id'];
             $linha = [
                 'servico_id' => $sid, 'item' => $r['nome'], 'grupo' => $r['grupo'],
                 'data_atual' => $atual ?: null, 'data_cronograma' => $novo,
-                'marco_atual' => $r['crono_marco_override'] ?: null, 'marco_cronograma' => $auto['marco_casado'] ?? null,
-                'confianca' => $auto['confianca'] ?? '', 'por_robo' => $porRobo, 'tem_ancora' => $temAncora,
+                'marco_atual' => $marcoFix ?: null, 'marco_cronograma' => $marcoNovo,
+                'confianca' => $conf, 'por_robo' => $porRobo,
+                'tem_ancora' => $temAncora, 'via_ancora' => $viaAncora, 'ancora_sumiu' => $ancoraSumiu,
                 'dias' => $atual ? (int)round((strtotime($novo) - strtotime($atual)) / 86400) : null,
             ];
             if ($acao === 'crono_aplicar' && isset($alvo[$sid])) {
                 $af['crono'] = 1;                      // volta a ser data do robô: veio do cronograma, não de gente
-                $upd->execute([$novo, $auto['marco_casado'] ?? $r['crono_marco_override'], json_encode($af), date('c'), $rid, $sid]);
+                $upd->execute([$novo, $marcoNovo ?: $marcoFix, json_encode($af), date('c'), $rid, $sid]);
                 $linha['aplicado'] = true; $aplicados++;
                 // fica no HISTÓRICO do item, com o antes e o depois — quem olhar depois entende por que a data mudou
                 try { log_historico($pdo, $rid, $sid, $r['nome'], $me, $perms['nome'] ?? '', 'Data em obra (cronograma)', $atual, $novo); } catch (Throwable $e) {}
@@ -540,8 +554,9 @@ try {
         echo json_encode(['ok'=>true, 'obra'=>$obraF['nome'] ?? '', 'cronograma'=>$obraF['cronograma_nome'] ?? '',
             'repontou'=>$repontou,
             'divergencias'=>$difs, 'iguais'=>$iguais, 'sem_match'=>$sem,
-            'com_ancora'=>count(array_filter($difs, fn($d) => $d['tem_ancora'])),
-            'sem_ancora'=>count(array_filter($difs, fn($d) => !$d['tem_ancora'])),
+            'com_ancora'=>count(array_filter($difs, fn($d) => $d['via_ancora'])),          // seguiram a tarefa vinculada
+            'ancora_sumida'=>count(array_filter($difs, fn($d) => $d['ancora_sumiu'])),     // vínculo órfão no cronograma novo
+            'sem_ancora'=>count(array_filter($difs, fn($d) => !$d['tem_ancora'])),         // data posta na mão, sem vínculo
             'por_robo'=>count(array_filter($difs, fn($d) => $d['por_robo'])),
             'por_pessoa'=>count(array_filter($difs, fn($d) => !$d['por_robo'])),
             'aplicados'=>$aplicados], JSON_UNESCAPED_UNICODE); exit;

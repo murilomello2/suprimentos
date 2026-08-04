@@ -90,6 +90,22 @@ function crono_resolver($servico, $tasks) {
     ];
 }
 
+/** Data de início da tarefa VINCULADA (crono_marco_override): acha pelo nome exato e pega a
+    primeira data. É a regra "buscar_nome_pegar_primeira_data" que o resto do sistema já declara
+    (receitas.php) — quando o item tem âncora, quem manda é a âncora; casar por termo é o caminho
+    de quem não tem. Devolve null se a tarefa não existe mais no cronograma (foi renomeada ou saiu),
+    e nesse caso quem chamou tem de tratar como vínculo órfão, não cair no termo em silêncio. */
+function crono_data_por_nome($nome, $tasks) {
+    $alvo = _norm_txt($nome); if (trim($alvo) === '') return null;
+    $best = null;
+    foreach ($tasks as $tk) {
+        if (($tk['_n'] ?? _norm_txt($tk['nome'] ?? '')) !== $alvo) continue;
+        $st = $tk['start'] ?? null; if (!$st) continue;
+        if ($best === null || $st < $best) $best = $st;
+    }
+    return $best;
+}
+
 /** WBS de uma tarefa pelo nome (1ª que casar). */
 function crono_wbs_por_nome($nome, $tasks) {
     $alvo = _norm_txt($nome);

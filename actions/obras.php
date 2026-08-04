@@ -72,6 +72,34 @@ function crono_headers_all() {
     } catch (Throwable $e) { return []; }
 }
 
+/** Cabeçalho ATIVO (revisão mais recente) do cronograma desta obra do radar, ou null.
+    Ordem de confiança: 1) a obra do Planejamento gravada na ficha (`crono_obra_id`) — é o mesmo
+    vínculo que alimenta o bloco AO VIVO da ficha e o admin pode corrigir no dropdown, então já
+    vem validado pelo uso diário; 2) a obra do cabeçalho que o radar aponta hoje — só serve se
+    esse cabeçalho ainda existir na lista; 3) casamento por nome (incerto).
+    O caminho (2) sozinho tem um furo que só aparece no pior caso: quando o Planejamento
+    republica, o cabeçalho antigo some da lista e não há de quem perguntar "que obra era essa" —
+    exatamente quando a gente mais precisa da resposta. Daí a ficha vir primeiro. */
+function crono_header_ativo($pdo, $obraRadarId, &$origem = null) {
+    $all = crono_headers_all();
+    if (!$all) { $origem = 'sem_fonte'; return null; }
+    $ativo = []; $hdr2oid = [];
+    foreach ($all as $r) {
+        $hid = (string)($r['id'] ?? ''); $oid = (string)($r['obra_id'] ?? ''); if ($hid === '') continue;
+        if ($oid !== '') $hdr2oid[$hid] = $oid;
+        if (!empty($r['is_active']) && $oid !== '' && !isset($ativo[$oid])) $ativo[$oid] = $r;   // order desc → 1º ativo = mais recente
+    }
+    $q = $pdo->prepare("SELECT o.nome, o.cronograma_id, f.crono_obra_id
+                        FROM obra o LEFT JOIN obra_ficha f ON f.radar_obra_id = o.id WHERE o.id=? LIMIT 1");
+    $q->execute([(int)$obraRadarId]); $o = $q->fetch() ?: [];
+    $oid = (string)($o['crono_obra_id'] ?? '');
+    if ($oid !== '' && isset($ativo[$oid]))                    { $origem = 'ficha';     return $ativo[$oid]; }
+    $cur = (string)($o['cronograma_id'] ?? '');
+    if ($cur !== '' && isset($hdr2oid[$cur], $ativo[$hdr2oid[$cur]])) { $origem = 'cabecalho'; return $ativo[$hdr2oid[$cur]]; }
+    if (($m = obras_crono_match((string)($o['nome'] ?? ''), $ativo)) !== null) { $origem = 'nome'; return $ativo[$m]; }
+    $origem = 'nenhum'; return null;
+}
+
 /** Marcos vinculados na mão (crono_marco_override) desta obra que NÃO existem no cronograma novo (ficariam órfãos). */
 function crono_orfaos_no_novo($pdo, $obraId, $novoHeader) {
     $q = $pdo->prepare("SELECT DISTINCT crono_marco_override FROM radar_item WHERE obra_id=? AND crono_marco_override IS NOT NULL AND crono_marco_override<>''");
@@ -232,11 +260,20 @@ try {
         foreach ($all as $r) { $hid = (string)($r['id'] ?? ''); $oid = (string)($r['obra_id'] ?? ''); if ($hid === '') continue;
             $hdrById[$hid] = $r; if ($oid !== '') $hdr2oid[$hid] = $oid;
             if (!empty($r['is_active']) && $oid !== '' && !isset($ativoPorOid[$oid])) $ativoPorOid[$oid] = $r; }   // 1º ativo = mais recente (order desc)
-        $obras = $pdo->query("SELECT id, nome, cronograma_id FROM obra WHERE cronograma_id IS NOT NULL AND cronograma_id<>'' AND id>=2 ORDER BY nome")->fetchAll();
+        $obras = $pdo->query("SELECT o.id, o.nome, o.cronograma_id, f.crono_obra_id
+                              FROM obra o LEFT JOIN obra_ficha f ON f.radar_obra_id = o.id
+                              WHERE o.cronograma_id IS NOT NULL AND o.cronograma_id<>'' AND o.id>=2 ORDER BY o.nome")->fetchAll();
         $out = [];
         foreach ($obras as $o) {
             $cur = (string)$o['cronograma_id'];
-            $oidCerto = $hdr2oid[$cur] ?? null;               // obra do Planejamento do cabeçalho ATUAL = casamento com CERTEZA
+            /* Duas formas de saber COM CERTEZA de que obra do Planejamento se trata:
+               a) o vínculo gravado na ficha (crono_obra_id), que é o mesmo que alimenta o bloco AO VIVO;
+               b) a obra do cabeçalho que o radar aponta hoje — mas essa só existe enquanto o cabeçalho
+                  estiver na lista. Quando o Planejamento republica, o antigo some e (b) evapora
+                  justamente nas obras que precisam ser atualizadas: era por isso que 8 das 9 caíam no
+                  casamento por nome e ficavam eternamente "pendentes de conferência". */
+            $oidCerto = (!empty($o['crono_obra_id']) && isset($ativoPorOid[(string)$o['crono_obra_id']]))
+                ? (string)$o['crono_obra_id'] : ($hdr2oid[$cur] ?? null);
             $novo = null; $mesmaObra = false;
             if ($oidCerto !== null && isset($ativoPorOid[$oidCerto])) { $novo = $ativoPorOid[$oidCerto]; $mesmaObra = true; }
             elseif (($m = obras_crono_match((string)$o['nome'], $ativoPorOid)) !== null) { $novo = $ativoPorOid[$m]; $mesmaObra = false; }   // incerto: casa por nome
@@ -432,9 +469,27 @@ try {
 
         // fura o cache de 30 min: conferir tem que olhar o cronograma de agora, não o de meia hora atrás
         if (!empty($in['recarregar'])) { @unlink(SEED_DIR . '/../.crono_' . substr($cid, 0, 8) . '.json'); }
-        $tasks = crono_tasks($cid);
+        $tasks = crono_tasks($cid); $repontou = null; $origem = null;
+        if (!$tasks) {
+            /* O cabeçalho que o radar aponta não devolve mais tarefa — foi o caso da ADARA: o
+               Planejamento republicou o cronograma, o cabeçalho antigo saiu da lista e a obra ficou
+               presa num id morto. O estrago é silencioso: sem tarefa, TODA leitura de data ao vivo
+               desta obra devolve vazio e ninguém é avisado. Um cabeçalho que não devolve nada não
+               tem o que preservar, então re-aponta pra revisão ativa — desde que dê pra dizer com
+               certeza de que obra do Planejamento estamos falando (nunca no casamento por nome). */
+            $novo = crono_header_ativo($pdo, $rid, $origem);
+            if ($novo && in_array($origem, ['ficha', 'cabecalho'], true) && (string)$novo['id'] !== $cid) {
+                $t2 = crono_tasks((string)$novo['id']);
+                if ($t2) {
+                    $pdo->prepare("UPDATE obra SET cronograma_id=? WHERE id=?")->execute([(string)$novo['id'], $rid]);
+                    $tasks = $t2; $cid = (string)$novo['id'];
+                    $repontou = (string)($novo['nome'] ?? $novo['project_name'] ?? '');
+                    $obraF['cronograma_nome'] = $repontou;
+                }
+            }
+        }
         if (!$tasks) { echo json_encode(['ok'=>true, 'sem_tarefas'=>true,
-            'aviso'=>'O cronograma vinculado não devolveu tarefas.'], JSON_UNESCAPED_UNICODE); exit; }
+            'aviso'=>'O cronograma que esta obra aponta não devolve tarefas — quase sempre porque o Planejamento publicou uma revisão nova e o cabeçalho antigo saiu do ar. Use "Verificar cronogramas", no topo da tela de Obras, para re-apontar esta obra.'], JSON_UNESCAPED_UNICODE); exit; }
 
         $st = $pdo->prepare("
             SELECT s.id AS servico_id, s.lead_dias, s.termos_cronograma, s.marco_cronograma,
@@ -458,13 +513,19 @@ try {
             if ($atual === (string)$novo) { $iguais++; continue; }
 
             $af = !empty($r['auto_flags']) ? (json_decode($r['auto_flags'], true) ?: []) : [];
-            $porRobo = !empty($af['crono']);           // preenchido pelo robô e nunca confirmado por gente
+            $porRobo = !empty($af['crono']);           // quem preencheu: robô no onboarding × pessoa
+            /* O que decide se a data SEGUE o cronograma não é quem a preencheu, é existir marco
+               vinculado. Ter marco significa "esta data é a da tarefa X" — quando o Planejamento
+               move a tarefa X, a data tem de ir junto, tenha sido o robô ou uma pessoa que amarrou.
+               Só fica imune a data digitada sem marco nenhum: aí é um prazo que alguém definiu por
+               fora do cronograma, e o cronograma não tem o que dizer sobre ela. */
+            $temAncora = trim((string)($r['crono_marco_override'] ?? '')) !== '';
             $sid = (int)$r['servico_id'];
             $linha = [
                 'servico_id' => $sid, 'item' => $r['nome'], 'grupo' => $r['grupo'],
                 'data_atual' => $atual ?: null, 'data_cronograma' => $novo,
                 'marco_atual' => $r['crono_marco_override'] ?: null, 'marco_cronograma' => $auto['marco_casado'] ?? null,
-                'confianca' => $auto['confianca'] ?? '', 'por_robo' => $porRobo,
+                'confianca' => $auto['confianca'] ?? '', 'por_robo' => $porRobo, 'tem_ancora' => $temAncora,
                 'dias' => $atual ? (int)round((strtotime($novo) - strtotime($atual)) / 86400) : null,
             ];
             if ($acao === 'crono_aplicar' && isset($alvo[$sid])) {
@@ -477,7 +538,10 @@ try {
             $difs[] = $linha;
         }
         echo json_encode(['ok'=>true, 'obra'=>$obraF['nome'] ?? '', 'cronograma'=>$obraF['cronograma_nome'] ?? '',
+            'repontou'=>$repontou,
             'divergencias'=>$difs, 'iguais'=>$iguais, 'sem_match'=>$sem,
+            'com_ancora'=>count(array_filter($difs, fn($d) => $d['tem_ancora'])),
+            'sem_ancora'=>count(array_filter($difs, fn($d) => !$d['tem_ancora'])),
             'por_robo'=>count(array_filter($difs, fn($d) => $d['por_robo'])),
             'por_pessoa'=>count(array_filter($difs, fn($d) => !$d['por_robo'])),
             'aplicados'=>$aplicados], JSON_UNESCAPED_UNICODE); exit;

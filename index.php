@@ -19,7 +19,17 @@
   *{box-sizing:border-box}
   body{margin:0;font-family:-apple-system,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--txt);font-size:14px}
   .app{display:flex;min-height:100vh}
-  .side{width:230px;background:var(--verde);color:#eafaef;flex-shrink:0;position:sticky;top:0;height:100vh;display:flex;flex-direction:column}
+  /* overflow-y no PRÓPRIO menu: ele tem altura fixa de 100vh e, quando os itens passam disso
+     (o papel 'obra' somou três telas novas), o excesso era simplesmente cortado — não dava para
+     chegar em Configurações. Agora o menu rola sozinho, independente do conteúdo da direita. */
+  .side{width:230px;background:var(--verde);color:#eafaef;flex-shrink:0;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.28) transparent}
+  .side::-webkit-scrollbar{width:7px}
+  .side::-webkit-scrollbar-thumb{background:rgba(255,255,255,.24);border-radius:4px}
+  .side::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.4)}
+  .side::-webkit-scrollbar-track{background:transparent}
+  /* o brand fica preso no topo enquanto o resto rola — sem isso o botão de recolher some */
+  .side .brand{position:sticky;top:0;z-index:2;background:var(--verde)}
+  .side .whoami{position:sticky;bottom:0;background:var(--verde)}
   .brand{padding:18px;font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(255,255,255,.12)}
   .brand .material-icons{color:var(--dourado)}
   .navlabel{font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;color:#bfe6cd;padding:16px 18px 6px;opacity:.85}

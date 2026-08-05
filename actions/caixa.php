@@ -101,7 +101,7 @@ try {
         $q = $pdo->prepare("SELECT * FROM caixa_msg WHERE id=? LIMIT 1"); $q->execute([$id]);
         $m = $q->fetch(); if (!$m) { http_response_code(404); echo json_encode(['error' => 'mensagem não encontrada']); exit; }
 
-        $cfg = caixa_cfg(); $corpo = null; $anexos = []; $aviso = '';
+        $cfg = caixa_cfg(); $corpo = null; $anexos = []; $aviso = ''; $embutidos = 0;
         [$mbox, $err] = inbox_conectar($cfg, (string)$m['pasta']);
         if (!$mbox) { $aviso = 'Não consegui abrir a caixa agora (' . $err . ') — mostrando só a prévia guardada.'; }
         else {
@@ -114,8 +114,12 @@ try {
                     $p = inbox_parse_msg($mbox, (int)$m['imap_uid'], 200000);
                     if ($p) {
                         $corpo = (string)($p['corpo'] ?? '');
-                        foreach ((array)($p['anexos'] ?? []) as $i => $an)
+                        /* O índice `i` tem de ser a posição REAL na mensagem — é por ele que o
+                           download busca depois. Filtrar antes de indexar baixaria o arquivo errado. */
+                        foreach ((array)($p['anexos'] ?? []) as $i => $an) {
+                            if (!empty($an['inline'])) { $embutidos++; continue; }
                             $anexos[] = ['i' => $i, 'nome' => (string)($an['nome'] ?? 'anexo'), 'bytes' => strlen((string)($an['bytes'] ?? ''))];
+                        }
                     }
                 }
             } catch (Throwable $e) { $aviso = 'Falha ao ler a mensagem: ' . $e->getMessage(); }
@@ -123,7 +127,7 @@ try {
         }
         unset($m['dedup_key']);
         echo json_encode(['ok' => true, 'msg' => $m, 'corpo' => $corpo, 'preview' => $m['preview'],
-            'anexos' => $anexos, 'aviso' => $aviso], JSON_UNESCAPED_UNICODE); exit;
+            'anexos' => $anexos, 'embutidos' => $embutidos, 'aviso' => $aviso], JSON_UNESCAPED_UNICODE); exit;
     }
 
     // ───────────────────────── ANEXO ─────────────────────────

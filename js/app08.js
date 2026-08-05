@@ -198,7 +198,10 @@ async function caixaAbrir(id){
             href="actions/caixa.php?anexo=${m.id}&i=${a.i}&me=${encodeURIComponent((EU&&EU.bitrix_id)||'')}">
             <span class="material-icons" style="font-size:14px;vertical-align:-3px">attach_file</span> ${esc(a.nome)}
             <span class="muted">(${Math.max(1,Math.round(a.bytes/1024))} KB)</span></a>`;
+    if(d.embutidos) h+=`<span class="muted" style="font-size:11.5px;align-self:center">+${d.embutidos} imagem(ns) da assinatura</span>`;
     h+='</div>';
+  } else if(d.embutidos){
+    h+=`<div class="dmini" style="color:var(--muted);margin-bottom:10px">Sem anexo — as ${d.embutidos} imagens desta mensagem são da assinatura do remetente.</div>`;
   }
   const corpo=(d.corpo!==null&&d.corpo!==undefined&&d.corpo!=='')?d.corpo:(d.preview||'(sem texto)');
   h+=`<div style="white-space:pre-wrap;font-size:13px;line-height:1.55;border:1px solid var(--line);border-radius:10px;padding:13px 15px;max-height:52vh;overflow:auto">${esc(corpo)}</div>`;

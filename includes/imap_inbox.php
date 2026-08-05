@@ -166,7 +166,14 @@ function inbox_parse_msg($mbox, $uid, $cap = 40000) {
         if (!$isAttach && $nome === '' && $type !== 3 && $type !== 5) return;   // não é anexo
         $bytes = inbox_anexo_bytes($mbox, $uid, $sec, $st->encoding ?? 0);
         if ($bytes === '') return;                                 // vazio/>25MB -> ignora
-        $anexos[] = ['nome' => $nome !== '' ? $nome : 'anexo', 'bytes' => $bytes];
+        /* EMBUTIDO ≠ ANEXO. Logo e ícone de assinatura chegam como partes de imagem com
+           Content-ID (ou disposition inline) e são exibidos DENTRO do corpo. Contá-los como anexo
+           faz o clipe aparecer em quase todo e-mail e afoga o que importa: um fornecedor mandou
+           1 proposta em PDF junto de 13 "image.png" de assinatura. Campo novo; quem já usa a
+           função e ignora o flag continua enxergando tudo, como antes. */
+        $inline = (!empty($st->ifdisposition) && strtolower((string)$st->disposition) === 'inline')
+               || !empty($st->ifid);
+        $anexos[] = ['nome' => $nome !== '' ? $nome : 'anexo', 'bytes' => $bytes, 'inline' => $inline];
     };
     if ($struct) $collect($struct, '');
     return [

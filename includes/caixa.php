@@ -164,8 +164,9 @@ function caixa_sync_pasta($pdo, $cfg, $mbox, $pasta, $direcao, $max = CAIXA_MAX_
         try { $m = inbox_parse_msg($mbox, $uid, CAIXA_PREVIEW); } catch (Throwable $e) { continue; }
         if (!$m) continue;
 
+        // só anexo DE VERDADE conta para o clipe: imagem embutida de assinatura não é anexo
         $anexNomes = [];
-        foreach ((array)($m['anexos'] ?? []) as $a) $anexNomes[] = (string)($a['nome'] ?? 'anexo');
+        foreach ((array)($m['anexos'] ?? []) as $a) if (empty($a['inline'])) $anexNomes[] = (string)($a['nome'] ?? 'anexo');
 
         $origem = ''; $cotId = null; $refTipo = ''; $refVal = ''; $quem = '';
         if ($direcao === 'out') {

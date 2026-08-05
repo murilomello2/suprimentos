@@ -55,6 +55,38 @@ function caixa_log_saida($pdo, $msgid, $tipo, $refValor, $bitrixId, $quem, $assu
     } catch (Throwable $e) {}
 }
 
+/**
+ * Arquiva na pasta Enviados uma cópia do que acabamos de mandar.
+ *
+ * Enviar por SMTP não põe cópia em lugar nenhum — quem põe é o cliente de e-mail. Como o cockpit
+ * fala SMTP direto, tudo que ele mandou até hoje simplesmente não existe na pasta Enviados da
+ * conta: nem aqui, nem no webmail que o time abre. Medido em 05/08/2026: INBOX.Sent com 0
+ * mensagens numa conta que dispara carta de cotação e pedido de compra.
+ *
+ * Esta é a ÚNICA escrita que o cockpit faz na caixa, e ela só ACRESCENTA. Continua não havendo
+ * caminho que apague, mova ou marque mensagem existente. Falhar aqui nunca pode derrubar o envio:
+ * o e-mail já saiu, e perder a cópia é bem menos grave do que dizer ao comprador que não enviou.
+ */
+function caixa_arquivar_enviado($cfg, $raw) {
+    if (!$raw || !inbox_ext_ok()) return false;
+    $user = trim((string)($cfg['user'] ?? '')); $pass = (string)($cfg['senha'] ?? '');
+    if ($user === '' || $pass === '') return false;
+    $mbox = null;
+    try {
+        // conexão PRÓPRIA e sem OP_READONLY: a de leitura é read-only de propósito e não serve para append
+        $mbox = @imap_open(inbox_mailbox_str($cfg, 'INBOX'), $user, $pass, 0, 0,
+                           ['DISABLE_AUTHENTICATOR' => ['GSSAPI', 'NTLM']]);
+        imap_errors(); imap_alerts();
+        if (!$mbox) return false;
+        $pasta = caixa_pasta_enviados($mbox, $cfg);
+        if (!$pasta) return false;
+        $ok = @imap_append($mbox, inbox_mailbox_str($cfg, $pasta), str_replace("\n", "\r\n", str_replace("\r\n", "\n", (string)$raw)), "\\Seen");
+        imap_errors(); imap_alerts();
+        return (bool)$ok;
+    } catch (Throwable $e) { return false; }
+    finally { if ($mbox) { @imap_close($mbox); imap_errors(); imap_alerts(); } }
+}
+
 /** A pasta de enviados muda de nome conforme o servidor (Sent, INBOX.Sent, "Sent Items",
     "Enviados"...). Descobre pela lista real em vez de chutar — chutar erra e a tela fica vazia
     sem explicar por quê. Prefere a que o servidor marca com \Sent (RFC 6154), quando existe. */
@@ -103,8 +135,9 @@ function caixa_pessoas_txt($lista) {
  * Devolve [novas, total_disponivel, erro].
  */
 function caixa_sync_pasta($pdo, $cfg, $mbox, $pasta, $direcao, $max = CAIXA_MAX_SYNC) {
-    if (!@imap_reopen($mbox, inbox_mailbox_str($cfg, $pasta))) { imap_errors(); return [0, 0, 'não consegui abrir a pasta ' . $pasta]; }
+    if (!@imap_reopen($mbox, inbox_mailbox_str($cfg, $pasta))) { imap_errors(); return [0, 0, 'não consegui abrir a pasta ' . $pasta, 0]; }
     imap_errors();
+    $naPasta = (int)@imap_num_msg($mbox); imap_errors();   // quantas a pasta TEM (≠ quantas são novas p/ nós)
     $uv   = inbox_uidvalidity($mbox, $cfg, $pasta);
     $kUv  = 'caixa_uv_' . md5($pasta);
     $kUid = 'caixa_uid_' . md5($pasta);
@@ -114,7 +147,7 @@ function caixa_sync_pasta($pdo, $cfg, $mbox, $pasta, $direcao, $max = CAIXA_MAX_
     if ($uv !== $uvAnt) { $last = 0; caixa_meta_set($pdo, $kUv, $uv); }
 
     [$uids, $total] = inbox_buscar_novos($mbox, date('c', strtotime(CAIXA_JANELA)), $last, $max);
-    if (!$uids) return [0, 0, ''];
+    if (!$uids) return [0, 0, '', $naPasta];
 
     $ja  = $pdo->prepare("SELECT id FROM caixa_msg WHERE dedup_key=? LIMIT 1");
     $ins = $pdo->prepare("INSERT INTO caixa_msg
@@ -158,5 +191,5 @@ function caixa_sync_pasta($pdo, $cfg, $mbox, $pasta, $direcao, $max = CAIXA_MAX_
         if ($uid > $last) $last = $uid;
     }
     caixa_meta_set($pdo, $kUid, $last);
-    return [$novas, $total, ''];
+    return [$novas, $total, '', $naPasta];
 }

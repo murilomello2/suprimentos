@@ -104,12 +104,13 @@ try {
                 if (!filter_var($em, FILTER_VALIDATE_EMAIL)) { $falhas[] = $c['fornecedor_nome'] . ' (sem e-mail)'; continue; }
                 $token = bin2hex(random_bytes(9));
                 $msgid = '<cot-' . $cid . '-' . ((int)$c['id']) . '-' . $token . '@capremconstrutora.com.br>';
-                [$ok, $msg] = smtp_send($cfg, $em, $assunto, $corpo, $anexos, ['Message-ID' => $msgid]);
+                [$ok, $msg, $raw] = smtp_send($cfg, $em, $assunto, $corpo, $anexos, ['Message-ID' => $msgid]);
                 if ($ok) {
                     $upd->execute([$now, $me, (int)$c['id']]); $enviados++;
                     try { $insOut->execute([$cid, (int)$c['id'], $c['fornecedor_id'] ?: null, $c['fornecedor_nome'], $em, $msgid, $token, $assunto, $now]); } catch (Throwable $e) {}
                     // espelha na Caixa de E-mail: é o que liga a mensagem na pasta Enviados a QUEM disparou
                     caixa_log_saida($pdo, $msgid, 'cotacao', (string)$cid, $me, (string)($perms['nome'] ?? ''), $assunto, $em, $cid);
+                    caixa_arquivar_enviado($cfg, $raw);   // sem isto o disparo não existe na pasta Enviados da conta
                 } else $falhas[] = $c['fornecedor_nome'] . ': ' . $msg;
             }
             echo json_encode(['ok' => true, 'enviados' => $enviados, 'falhas' => $falhas], JSON_UNESCAPED_UNICODE); exit;

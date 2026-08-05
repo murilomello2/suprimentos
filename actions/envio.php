@@ -1016,7 +1016,8 @@ try {
            "quem disparou este pedido". Com ele, o sync casa a mensagem com quem apertou o botão. */
         require_once __DIR__ . '/../includes/caixa.php';
         $msgidPed = caixa_msgid($cfgS);
-        try { list($ok, $erro) = smtp_send($cfgS, $paraFinal, $assuntoFinal, $c['html'], $anexos,
+        $rawPed = '';
+        try { list($ok, $erro, $rawPed) = smtp_send($cfgS, $paraFinal, $assuntoFinal, $c['html'], $anexos,
                                            ['Message-ID' => $msgidPed], ['html' => true, 'cc' => $ccFinal]); }
         catch (Throwable $e) { $erro = $e->getMessage(); }
 
@@ -1027,6 +1028,7 @@ try {
             else $pdo->prepare("DELETE FROM envio_registro WHERE coligada_cod=? AND pedido_numero=? AND destino=? AND resultado='enviando'")
                      ->execute([$p['coligada_cod'], $p['numero'], $env['destino']]);
         }
+        if ($ok) caixa_arquivar_enviado($cfgS, $rawPed);   // cópia na pasta Enviados: o SMTP não põe
         if ($ok) caixa_log_saida($pdo, $msgidPed, 'pedido',
             implode(', ', array_map(fn($p) => (string)$p['numero'], $env['pedidos'])),
             $quem, $quemNome, $assuntoFinal, $paraFinal);

@@ -93,5 +93,5 @@ function smtp_send($cfg, $to, $subject, $body, $attachments = [], $extraHeaders 
     fwrite($fp, $h . $m . "\r\n.\r\n");   // base64 não tem linha começando com '.', dispensa dot-stuffing
     $r = $read(); $ok = $is($r, 250);
     $cmd('QUIT'); fclose($fp);
-    return [$ok, $ok ? 'enviado' : ('servidor recusou o envio: ' . trim($r))];
+    return [$ok, $ok ? 'enviado' : ('servidor recusou o envio: ' . trim($r)), $h . $m];
 }

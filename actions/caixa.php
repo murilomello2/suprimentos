@@ -54,9 +54,10 @@ try {
             foreach (caixa_pastas_entrada($mbox, $cfg) as $p) $alvos[] = [$p, 'in'];
             if ($env) $alvos[] = [$env, 'out'];
             foreach ($alvos as [$pasta, $dir]) {
-                [$n, $tot, $e] = caixa_sync_pasta($pdo, $cfg, $mbox, $pasta, $dir);
+                [$n, $tot, $e, $naPasta] = caixa_sync_pasta($pdo, $cfg, $mbox, $pasta, $dir);
                 if ($e) { $res['avisos'][] = $e; continue; }
                 $res['novas'] += $n; $res['pastas'][$pasta] = $n;
+                $res['na_pasta'][$pasta] = $naPasta;   // quantas a pasta tem ao todo — separa "vazia" de "não achei"
                 if ($tot > $n && $n > 0) $res['avisos'][] = 'Ainda há mensagens antigas em ' . $pasta . ' — varra de novo para continuar.';
             }
         } finally { inbox_fechar($mbox); }

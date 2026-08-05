@@ -637,7 +637,7 @@ function t20ExpBox(gid){
   h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:wrap">'
    + '<b style="font-size:12.5px">'+lista.length+' tipo(s) de item</b>'
    + '<span class="dmini muted">— soma de todas as obras, mês a mês. Clique no item para abrir por obra.</span>'
-   + '<button class="btn-ghost" style="margin-left:auto;padding:4px 11px;font-size:11.5px" onclick="event.stopPropagation();t20Excel('+gid+')">'
+   + '<button class="btn-ghost" style="margin-left:auto;padding:4px 11px;font-size:11.5px" onclick="event.stopPropagation();t20ExcelTela()">'
    +   '<span class="material-icons" style="font-size:14px;vertical-align:-3px">download</span> Exportar p/ Excel</button></div>';
 
   h+='<table class="mtable" style="border:none;width:100%;min-width:1100px"><thead><tr>'
@@ -673,65 +673,102 @@ function t20ExpBox(gid){
   return h;
 }
 
-/* ══════ EXPORTAR PARA EXCEL ══════
-   CSV com BOM e separador ';' — é o que o Excel em português abre com um duplo-clique, sem
-   assistente de importação e sem quebrar acento. Biblioteca de xlsx aqui significaria dependência
-   nova no servidor por causa de uma tabela; não compensa.
-   O arquivo sai com QUANTIDADE e VALOR lado a lado: na frente do fornecedor a conversa é volume,
-   mas a hora de decidir é R$, e ninguém quer exportar duas vezes. */
-function t20Excel(gid){
-  const its=T20.expData[gid]||[];
-  if(!its.length){ toast('Nada para exportar'); return; }
-  const g=((T20.data&&T20.data.grupos)||[]).find(x=>x.id===gid);
-  const keys=t20MesesKeys(), lista=t20Agrega(its);
+
+/* ══════ EXPORTAR P/ EXCEL — o que está NA TELA ══════
+   A 1ª versão exportava um grupo, e só depois de expandir. O pedido é outro: exportar a visão
+   atual — o filtro que está aplicado e o nível que a pessoa abriu. Quem está com tudo fechado
+   quer o resumo por grupo; quem abriu um item quer aquele item por obra. Exportar sempre a folha
+   inteira devolve o mesmo problema que a tela tinha antes de ser arrumada.
+
+   Nível 1  grupo fechado          -> uma linha por grupo
+   Nível 2  grupo expandido        -> + uma linha por item
+   Nível 3  item expandido também  -> + uma linha por obra */
+
+function t20CelQV(c){
+  if(!c) return {q:{}, v:0};
+  return { q: c.q || c.quant || {}, v: (c.v!==undefined ? c.v : (c.verba||0)) };
+}
+function t20UnidDe(mesesObj){
+  for(const k in mesesObj){ const u=Object.keys(t20CelQV(mesesObj[k]).q); if(u.length) return u[0]; }
+  return '';
+}
+
+function t20ExcelTela(){
+  if(!T20.data){ toast('Ainda carregando'); return; }
+  const keys=t20MesesKeys();
+  const tot=g=>{ let v=0; const gm=(T20.data.matriz||{})[g.id]||{}; for(const k in gm) v+=gm[k].verba||0; return v; };
+  const todos=(T20.data.grupos||[]).filter(g=>(g.categoria||'material')===T20.tab).sort((a,b)=>tot(b)-tot(a));
+  const gs=T20.grupoFiltro?todos.filter(g=>g.id===T20.grupoFiltro):todos;
+  if(!gs.length){ toast('Nada na tela para exportar'); return; }
+
   const num=v=>(v||v===0)?String(Number(v).toFixed(2)).replace('.',','):'';
-  const q1=c=>{ const u=Object.keys(c.q||{}); if(!u.length) return ''; return num(c.q[u[0]]); };
-  const un=o=>{ for(const k in o.meses){ const u=Object.keys(o.meses[k].q||{}); if(u.length) return u[0]; } return ''; };
-  const esc2=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
+  const q1=c=>{ const {q}=t20CelQV(c); const u=Object.keys(q); return u.length?num(q[u[0]]):''; };
+  const somaQ=(mesesObj)=>{ let s=0; keys.forEach(k=>{ const {q}=t20CelQV(mesesObj[k]); const u=Object.keys(q); if(u.length) s+=q[u[0]]; }); return s; };
+  const somaV=(mesesObj)=>{ let s=0; keys.forEach(k=>{ s+=t20CelQV(mesesObj[k]).v; }); return s; };
+  const E=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
 
   const L=[];
-  L.push([esc2(g?g.nome:'Grupo'),esc2('Volumes por mês — próximos 12 meses'),esc2('gerado em '+new Date().toLocaleDateString('pt-BR'))].join(';'));
+  const aba=T20.tab==='servico'?'Serviços & Equipamentos':'Materiais';
+  L.push([E('Top 20 — Volumes p/ Negociação'), E(aba),
+          E(T20.grupoFiltro?('filtro: '+(gs[0]?gs[0].nome:'')):'todos os grupos'),
+          E(T20.fin?'incluindo finalizados':'sem finalizados'),
+          E('gerado em '+new Date().toLocaleDateString('pt-BR'))].join(';'));
   L.push('');
-  const cab=['Item','Obra','Unid.'];
-  keys.forEach(k=>cab.push((k==='sem'?'sem data':t20MesLbl(k))+' (qtd)'));
-  cab.push('TOTAL qtd'); keys.forEach(k=>cab.push((k==='sem'?'sem data':t20MesLbl(k))+' (R$)')); cab.push('TOTAL R$');
-  L.push(cab.map(esc2).join(';'));
 
-  lista.forEach(it=>{
-    const [tq,tv]=t20TotalLinha(it.meses);
-    const linha=[esc2(it.nome),esc2('TODAS AS OBRAS'),esc2(un(it))];
-    keys.forEach(k=>linha.push(esc2(q1(it.meses[k]))));
-    let sq=0; keys.forEach(k=>{ const u=Object.keys(it.meses[k].q||{}); if(u.length) sq+=it.meses[k].q[u[0]]; });
-    linha.push(esc2(num(sq)));
-    keys.forEach(k=>linha.push(esc2(num(it.meses[k].v))));
-    linha.push(esc2(num(tv)));
-    L.push(linha.join(';'));
-    it.listaObras.forEach(ob=>{
-      const [oq,ov]=t20TotalLinha(ob.meses);
-      const l2=[esc2(''),esc2(ob.nome),esc2(un(ob))];
-      keys.forEach(k=>l2.push(esc2(q1(ob.meses[k]))));
-      let s2=0; keys.forEach(k=>{ const u=Object.keys(ob.meses[k].q||{}); if(u.length) s2+=ob.meses[k].q[u[0]]; });
-      l2.push(esc2(num(s2)));
-      keys.forEach(k=>l2.push(esc2(num(ob.meses[k].v))));
-      l2.push(esc2(num(ov)));
-      L.push(l2.join(';'));
+  const cab=['Nível','Grupo','Item','Obra','Unid.'];
+  keys.forEach(k=>cab.push((k==='sem'?'sem data':t20MesLbl(k))+' (qtd)'));
+  cab.push('TOTAL qtd');
+  keys.forEach(k=>cab.push((k==='sem'?'sem data':t20MesLbl(k))+' (R$)'));
+  cab.push('TOTAL R$');
+  L.push(cab.map(E).join(';'));
+
+  const linha=(nivel,grupo,item,obra,unid,mesesObj)=>{
+    const l=[E(nivel),E(grupo),E(item),E(obra),E(unid)];
+    keys.forEach(k=>l.push(E(q1(mesesObj[k]))));
+    l.push(E(num(somaQ(mesesObj))));
+    keys.forEach(k=>l.push(E(num(t20CelQV(mesesObj[k]).v))));
+    l.push(E(num(somaV(mesesObj))));
+    return l.join(';');
+  };
+
+  let nG=0, nI=0, nO=0;
+  gs.forEach(g=>{
+    const gm=(T20.data.matriz||{})[g.id]||{};
+    L.push(linha('GRUPO', g.nome, '', '', t20UnidDe(gm), gm)); nG++;
+
+    if(!T20.exp.has(g.id)) return;                    // grupo fechado na tela → não desce
+    const its=T20.expData[g.id];
+    if(its===undefined || !its.length) return;        // ainda carregando ou vazio
+    const gg=(T20.data.grupos||[]).find(x=>x.id===g.id);
+    if(gg && gg.modo==='data_final' && its.some(x=>x.fim)){
+      // grupo "por data final": a grade de meses não se aplica — exporta a fila de fechamento
+      its.slice().sort((a,b)=>String(a.fim||'9999').localeCompare(String(b.fim||'9999'))).forEach(x=>{
+        const l=[E('FECHAMENTO'),E(g.nome),E(x.item),E(x.obra),E(x.unidade||'')];
+        keys.forEach(()=>l.push(E('')));
+        l.push(E(x.quant_total!=null?num(x.quant_total):''));
+        keys.forEach(()=>l.push(E('')));
+        l.push(E(num(x.verba_total)));
+        L.push(l.join(';')+';'+E('fecha em '+(x.fim||'—'))); nI++;
+      });
+      return;
+    }
+
+    t20Agrega(its).forEach(it=>{
+      L.push(linha('ITEM', g.nome, it.nome, 'TODAS AS OBRAS', t20UnidDe(it.meses), it.meses)); nI++;
+      if(!T20.expItem || !T20.expItem.has(t20ItemKey(g.id, it.nome))) return;   // item fechado → não desce
+      it.listaObras.forEach(ob=>{ L.push(linha('OBRA', g.nome, it.nome, ob.nome, t20UnidDe(ob.meses), ob.meses)); nO++; });
     });
   });
 
-  const somaG=t20SomaMeses(lista), [,gv]=t20TotalLinha(somaG);
-  const lt=[esc2('TOTAL DO GRUPO'),esc2(''),esc2('')];
-  keys.forEach(k=>lt.push(esc2('')));
-  lt.push(esc2(''));
-  keys.forEach(k=>lt.push(esc2(num(somaG[k].v))));
-  lt.push(esc2(num(gv)));
-  L.push(''); L.push(lt.join(';'));
-
-  const nome=(g?g.nome:'top20').replace(/[^\wÀ-ÿ ]+/g,'').replace(/\s+/g,'_')+'_volumes_'+new Date().toISOString().slice(0,10)+'.csv';
-  const blob=new Blob(['\ufeff'+L.join('\r\n')],{type:'text/csv;charset=utf-8'});   // BOM: sem ele o Excel come o acento
+  const nome='top20_'+(T20.tab==='servico'?'servicos':'materiais')
+    + (T20.grupoFiltro&&gs[0]?('_'+gs[0].nome.replace(/[^\wÀ-ÿ ]+/g,'').replace(/\s+/g,'_')):'')
+    + '_'+new Date().toISOString().slice(0,10)+'.csv';
+  // BOM + ';' : é o que o Excel em português abre no duplo-clique, sem assistente e sem comer acento
+  const blob=new Blob(['﻿'+L.join('\r\n')],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=nome; document.body.appendChild(a); a.click();
   setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },1500);
-  toast('Exportado: '+nome);
+  toast('Exportado: '+nG+' grupo(s)'+(nI?', '+nI+' item(ns)':'')+(nO?', '+nO+' linha(s) por obra':''));
 }
 
 async function t20Drill(gid,mes){

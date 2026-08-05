@@ -766,6 +766,7 @@ if (sup_etag_bate($SUP_ETAG)) { http_response_code(304); exit; }
         <button class="btn-ghost" onclick="t20Modo()"><span class="material-icons" style="font-size:16px">swap_horiz</span> <span id="t20ModoTxt">Ver R$</span></button>
         <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"><input type="checkbox" onchange="t20FinToggle(this.checked)"> incluir finalizados</label>
         <button class="btn-ghost" onclick="t20Cfg()"><span class="material-icons" style="font-size:16px">tune</span> Configurar grupos</button>
+        <button class="btn-ghost" onclick="t20ExcelTela()" title="Exporta exatamente o que está na tela: o filtro de grupo e os níveis que você expandiu"><span class="material-icons" style="font-size:16px">download</span> Exportar p/ Excel</button>
         <button class="btn-ghost" onclick="window.print()"><span class="material-icons" style="font-size:16px">print</span> Imprimir</button>
         <button class="btn-ghost" onclick="T20.data=null;t20Init()"><span class="material-icons" style="font-size:16px">refresh</span> Atualizar</button>
       </div>

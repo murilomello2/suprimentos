@@ -310,11 +310,19 @@ function db_schema_mysql($pdo) {
         // rodada de atualização das datas pelo cronograma: 1 linha por obra por rodada (auto ou manual)
         $pdo->exec("CREATE TABLE IF NOT EXISTS crono_auto_log (
             id INT NOT NULL AUTO_INCREMENT, obra_id INT NOT NULL, obra_nome VARCHAR(255),
-            quando VARCHAR(40), mes_ref VARCHAR(10), modo VARCHAR(20), por VARCHAR(191),
+            quando VARCHAR(40), mes_ref VARCHAR(40), modo VARCHAR(20), por VARCHAR(191),
             cronograma_id VARCHAR(100), cronograma_nome VARCHAR(255), repontou VARCHAR(255),
             aplicadas INT, orfaos INT, sem_vinculo INT, iguais INT, aviso TEXT,
             PRIMARY KEY (id), KEY idx_cal_obra (obra_id), KEY idx_cal_mes (mes_ref)
         ) $E");
+        /* mes_ref nasceu VARCHAR(10) e o MySQL truncava CALADO: "teste-2026-08-05" virava
+           "teste-2026", a consulta de pendências nunca casava e a mesma obra ficava eternamente
+           na fila. Vale para qualquer instalação que já criou a tabela com o tamanho antigo. */
+        try {
+            $ml = $pdo->query("SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS
+                               WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='crono_auto_log' AND COLUMN_NAME='mes_ref'")->fetchColumn();
+            if ($ml !== false && (int)$ml < 40) $pdo->exec("ALTER TABLE crono_auto_log MODIFY mes_ref VARCHAR(40)");
+        } catch (Throwable $e) {}
         if ($cc && !isset($cc['verba_origem'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN verba_origem VARCHAR(40)");
         if ($cc && !isset($cc['num_solicitacao'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_solicitacao VARCHAR(60)");
         if ($cc && !isset($cc['num_pedido'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_pedido VARCHAR(60)");

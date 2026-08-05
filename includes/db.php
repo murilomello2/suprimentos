@@ -334,6 +334,49 @@ function db_schema_mysql($pdo) {
             bitrix_id VARCHAR(64), quem VARCHAR(191), enviado_em VARCHAR(40),
             PRIMARY KEY (id), KEY idx_cxs_mid (message_id)
         ) $E");
+        // toda chamada de LLM: sem isto não há como responder "qual modelo saiu mais barato"
+        $pdo->exec("CREATE TABLE IF NOT EXISTS llm_uso (
+            id INT NOT NULL AUTO_INCREMENT, quando VARCHAR(40), perfil VARCHAR(32),
+            provedor VARCHAR(32), modelo VARCHAR(120), tokens_in INT, tokens_out INT,
+            custo DOUBLE, ms INT, ok INT, erro VARCHAR(400), contexto VARCHAR(60), ref VARCHAR(60),
+            PRIMARY KEY (id), KEY idx_llm_q (quando), KEY idx_llm_m (modelo)
+        ) $E");
+
+        /* ───────── WHATSAPP: conversa por (cotação × fornecedor) ─────────
+           Uma linha por negociação. O WhatsApp tem UMA thread por número, então quando o mesmo
+           fornecedor está em duas cotações, uma delas espera — daí o estado 'em_fila' e a
+           posição. `janela_ate` é a regra da Meta: fora das 24h desde a última mensagem DELE,
+           só template aprovado passa. Sem esse campo o sistema tentaria texto livre e levaria
+           erro da API sem entender por quê. */
+        $pdo->exec("CREATE TABLE IF NOT EXISTS wa_conversa (
+            id INT NOT NULL AUTO_INCREMENT, cotacao_id INT, fornecedor_id INT,
+            fornecedor_nome VARCHAR(255), wa_e164 VARCHAR(20),
+            estado VARCHAR(24) DEFAULT 'em_fila', dono VARCHAR(10) DEFAULT 'ia',
+            janela_ate VARCHAR(40), ultima_msg_em VARCHAR(40), ultima_msg_dir VARCHAR(4),
+            nao_lidas INT DEFAULT 0, fila_pos INT,
+            proposta_json MEDIUMTEXT, itens_faltantes MEDIUMTEXT, resumo TEXT, motivo_duvida VARCHAR(400),
+            criado_por VARCHAR(64), criado_nome VARCHAR(191), created_at VARCHAR(40), updated_at VARCHAR(40),
+            PRIMARY KEY (id), UNIQUE KEY uq_wa_cot_forn (cotacao_id, fornecedor_id),
+            KEY idx_wa_estado (estado), KEY idx_wa_num (wa_e164)
+        ) $E");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS wa_msg (
+            id INT NOT NULL AUTO_INCREMENT, conversa_id INT NOT NULL,
+            direcao VARCHAR(4), tipo VARCHAR(16) DEFAULT 'texto',
+            texto MEDIUMTEXT, template_nome VARCHAR(120), midia_nome VARCHAR(255), midia_id VARCHAR(191),
+            wamid VARCHAR(191), status VARCHAR(16) DEFAULT 'fila', erro VARCHAR(400),
+            autor VARCHAR(12), autor_nome VARCHAR(191), custo DOUBLE DEFAULT 0,
+            quando VARCHAR(40), created_at VARCHAR(40),
+            PRIMARY KEY (id), KEY idx_wam_conv (conversa_id), KEY idx_wam_st (status), KEY idx_wam_wamid (wamid)
+        ) $E");
+        // templates: fora da janela de 24h só passa texto APROVADO pela Meta, então eles são ativo do sistema
+        $pdo->exec("CREATE TABLE IF NOT EXISTS wa_template (
+            id INT NOT NULL AUTO_INCREMENT, nome VARCHAR(120), idioma VARCHAR(12) DEFAULT 'pt_BR',
+            categoria VARCHAR(24) DEFAULT 'UTILITY', corpo TEXT, variaveis TEXT,
+            status VARCHAR(16) DEFAULT 'rascunho', meta_id VARCHAR(120), obs TEXT,
+            created_at VARCHAR(40), updated_at VARCHAR(40),
+            PRIMARY KEY (id), UNIQUE KEY uq_wa_tpl (nome, idioma)
+        ) $E");
+
         // rodada de atualização das datas pelo cronograma: 1 linha por obra por rodada (auto ou manual)
         $pdo->exec("CREATE TABLE IF NOT EXISTS crono_auto_log (
             id INT NOT NULL AUTO_INCREMENT, obra_id INT NOT NULL, obra_nome VARCHAR(255),
@@ -616,6 +659,12 @@ function db_schema($pdo) {
     $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_caixa_dedup ON caixa_msg(dedup_key)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_caixa_dir ON caixa_msg(direcao)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS caixa_saida (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT, tipo TEXT, ref_valor TEXT, cotacao_id INTEGER, assunto TEXT, para TEXT, bitrix_id TEXT, quem TEXT, enviado_em TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS llm_uso (id INTEGER PRIMARY KEY AUTOINCREMENT, quando TEXT, perfil TEXT, provedor TEXT, modelo TEXT, tokens_in INTEGER, tokens_out INTEGER, custo REAL, ms INTEGER, ok INTEGER, erro TEXT, contexto TEXT, ref TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS wa_conversa (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER, fornecedor_id INTEGER, fornecedor_nome TEXT, wa_e164 TEXT, estado TEXT DEFAULT 'em_fila', dono TEXT DEFAULT 'ia', janela_ate TEXT, ultima_msg_em TEXT, ultima_msg_dir TEXT, nao_lidas INTEGER DEFAULT 0, fila_pos INTEGER, proposta_json TEXT, itens_faltantes TEXT, resumo TEXT, motivo_duvida TEXT, criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
+    $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_wa_cot_forn ON wa_conversa(cotacao_id, fornecedor_id)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS wa_msg (id INTEGER PRIMARY KEY AUTOINCREMENT, conversa_id INTEGER NOT NULL, direcao TEXT, tipo TEXT DEFAULT 'texto', texto TEXT, template_nome TEXT, midia_nome TEXT, midia_id TEXT, wamid TEXT, status TEXT DEFAULT 'fila', erro TEXT, autor TEXT, autor_nome TEXT, custo REAL DEFAULT 0, quando TEXT, created_at TEXT)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_wam_conv ON wa_msg(conversa_id)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS wa_template (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT, idioma TEXT DEFAULT 'pt_BR', categoria TEXT DEFAULT 'UTILITY', corpo TEXT, variaveis TEXT, status TEXT DEFAULT 'rascunho', meta_id TEXT, obs TEXT, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_cxs_mid ON caixa_saida(message_id)");
     if (!isset($ccols['num_solicitacao'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_solicitacao TEXT");
     if (!isset($ccols['num_pedido'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_pedido TEXT");

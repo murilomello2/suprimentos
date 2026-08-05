@@ -91,6 +91,7 @@ function db_schema_mysql($pdo) {
         ver_escopo VARCHAR(16), editar_escopo VARCHAR(16), obras_ver TEXT, obras_editar TEXT, menus TEXT,
         perm_admin INT DEFAULT 0, ativo INT DEFAULT 1, updated_at VARCHAR(40),
         perm_crono INT DEFAULT 0, perm_orcamento INT DEFAULT 0, perm_quant INT DEFAULT 0, perm_dicionario INT DEFAULT 0,
+        perm_email INT DEFAULT 0,
         perm_responsaveis INT DEFAULT 0,
         dashboard VARCHAR(32) DEFAULT '',
         PRIMARY KEY (bitrix_id)
@@ -283,7 +284,7 @@ function db_schema_mysql($pdo) {
     // permissão granular perm_responsaveis (atribuição de responsável EM LOTE) — self-heal p/ tabela usuario já existente
     $uc = [];
     foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='usuario'") as $c) $uc[$c['COLUMN_NAME']] = true;
-    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis'] as $pc)
+    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email'] as $pc)
         if (!isset($uc[$pc])) $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INT DEFAULT 0");
     // dashboard atribuído por usuário (''=padrão | comprador | gerente | diretor) — landing + conteúdo do painel
     if (!isset($uc['dashboard'])) $pdo->exec("ALTER TABLE usuario ADD COLUMN dashboard VARCHAR(32) DEFAULT ''");
@@ -306,6 +307,31 @@ function db_schema_mysql($pdo) {
         $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_historico (
             id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, bitrix_id VARCHAR(64), usuario_nome VARCHAR(191),
             acao VARCHAR(80), detalhe TEXT, created_at VARCHAR(40), PRIMARY KEY (id), KEY idx_ch_cot (cotacao_id)
+        ) $E");
+        /* CAIXA DE E-MAIL do suprimentos@ — índice da caixa REAL (IMAP), nas duas direções.
+           Não substitui cotacao_email_in (aquilo é o fluxo da cotação: IA, rascunho, status);
+           isto é a caixa como caixa, para o time ver o que saiu e o que entrou, inclusive o que
+           alguém escreveu direto pelo webmail. Guarda só cabeçalho + prévia: corpo e anexo são
+           buscados no IMAP na hora de abrir, como qualquer cliente de e-mail faz. */
+        $pdo->exec("CREATE TABLE IF NOT EXISTS caixa_msg (
+            id INT NOT NULL AUTO_INCREMENT, direcao VARCHAR(4), pasta VARCHAR(191),
+            imap_uid INT, uidvalidity INT, dedup_key VARCHAR(191),
+            message_id VARCHAR(191), in_reply_to VARCHAR(191),
+            de_email VARCHAR(191), de_nome VARCHAR(191), para TEXT, cc TEXT,
+            assunto VARCHAR(500), data_email VARCHAR(40),
+            tem_anexo INT DEFAULT 0, anexos_nomes TEXT, preview TEXT,
+            origem VARCHAR(20), cotacao_id INT, ref_tipo VARCHAR(20), ref_valor VARCHAR(191),
+            disparado_por VARCHAR(191), created_at VARCHAR(40),
+            PRIMARY KEY (id), UNIQUE KEY uq_caixa_dedup (dedup_key),
+            KEY idx_caixa_dir (direcao), KEY idx_caixa_data (data_email), KEY idx_caixa_mid (message_id)
+        ) $E");
+        /* O que o COCKPIT disparou, gravado no ato do envio. Sem isto não há como dizer quem
+           mandou: o IMAP guarda a mensagem, não a pessoa que apertou o botão. Casa por Message-ID. */
+        $pdo->exec("CREATE TABLE IF NOT EXISTS caixa_saida (
+            id INT NOT NULL AUTO_INCREMENT, message_id VARCHAR(191), tipo VARCHAR(20),
+            ref_valor VARCHAR(191), cotacao_id INT, assunto VARCHAR(500), para TEXT,
+            bitrix_id VARCHAR(64), quem VARCHAR(191), enviado_em VARCHAR(40),
+            PRIMARY KEY (id), KEY idx_cxs_mid (message_id)
         ) $E");
         // rodada de atualização das datas pelo cronograma: 1 linha por obra por rodada (auto ou manual)
         $pdo->exec("CREATE TABLE IF NOT EXISTS crono_auto_log (
@@ -580,6 +606,11 @@ function db_schema($pdo) {
     if (!isset($ccols['colaboradores'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN colaboradores TEXT");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_historico (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, bitrix_id TEXT, usuario_nome TEXT, acao TEXT, detalhe TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS crono_auto_log (id INTEGER PRIMARY KEY AUTOINCREMENT, obra_id INTEGER NOT NULL, obra_nome TEXT, quando TEXT, mes_ref TEXT, modo TEXT, por TEXT, cronograma_id TEXT, cronograma_nome TEXT, repontou TEXT, aplicadas INTEGER, orfaos INTEGER, sem_vinculo INTEGER, iguais INTEGER, aviso TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS caixa_msg (id INTEGER PRIMARY KEY AUTOINCREMENT, direcao TEXT, pasta TEXT, imap_uid INTEGER, uidvalidity INTEGER, dedup_key TEXT, message_id TEXT, in_reply_to TEXT, de_email TEXT, de_nome TEXT, para TEXT, cc TEXT, assunto TEXT, data_email TEXT, tem_anexo INTEGER DEFAULT 0, anexos_nomes TEXT, preview TEXT, origem TEXT, cotacao_id INTEGER, ref_tipo TEXT, ref_valor TEXT, disparado_por TEXT, created_at TEXT)");
+    $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_caixa_dedup ON caixa_msg(dedup_key)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_caixa_dir ON caixa_msg(direcao)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS caixa_saida (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT, tipo TEXT, ref_valor TEXT, cotacao_id INTEGER, assunto TEXT, para TEXT, bitrix_id TEXT, quem TEXT, enviado_em TEXT)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_cxs_mid ON caixa_saida(message_id)");
     if (!isset($ccols['num_solicitacao'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_solicitacao TEXT");
     if (!isset($ccols['num_pedido'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_pedido TEXT");
     if (!isset($ccols['solic_coligada'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_coligada TEXT");
@@ -620,7 +651,7 @@ function db_schema($pdo) {
     // estas liberam capacidades específicas POR USUÁRIO:
     $ucols = [];
     foreach ($pdo->query("PRAGMA table_info(usuario)") as $c) $ucols[$c['name']] = true;
-    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis'] as $pc) {
+    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email'] as $pc) {
         if (!isset($ucols[$pc])) $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INTEGER DEFAULT 0");
     }
     if (!isset($ucols['dashboard'])) $pdo->exec("ALTER TABLE usuario ADD COLUMN dashboard TEXT DEFAULT ''");
@@ -721,7 +752,8 @@ function user_perms($pdo, $bid) {
             'perm_orcamento'=>(int)($u['perm_orcamento'] ?? 0),
             'perm_quant'=>(int)($u['perm_quant'] ?? 0),
             'perm_dicionario'=>(int)($u['perm_dicionario'] ?? 0),
-            'perm_responsaveis'=>(int)($u['perm_responsaveis'] ?? 0)];
+            'perm_responsaveis'=>(int)($u['perm_responsaveis'] ?? 0),
+            'perm_email'=>(int)($u['perm_email'] ?? 0)];
 }
 function can_edit_obra($perms, $obra_id) {
     if (!empty($perms['perm_admin'])) return true;

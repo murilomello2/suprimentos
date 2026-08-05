@@ -1011,8 +1011,13 @@ try {
                  'user' => $cfg['user'], 'senha' => $cfg['senha'], 'from' => $cfg['user'],
                  'from_name' => trim((string)($cfg['nome'] ?? '')) ?: 'Caprem - Suprimentos'];
         $ok = false; $erro = '';
-        try { list($ok, $erro) = smtp_send($cfgS, $paraFinal, $assuntoFinal, $c['html'], $anexos, [],
-                                           ['html' => true, 'cc' => $ccFinal]); }
+        /* Message-ID PRÓPRIO: sem ele o servidor gera um id que nunca vemos, e na Caixa de E-mail
+           o pedido fica indistinguível de um e-mail escrito à mão no webmail — some a resposta de
+           "quem disparou este pedido". Com ele, o sync casa a mensagem com quem apertou o botão. */
+        require_once __DIR__ . '/../includes/caixa.php';
+        $msgidPed = caixa_msgid($cfgS);
+        try { list($ok, $erro) = smtp_send($cfgS, $paraFinal, $assuntoFinal, $c['html'], $anexos,
+                                           ['Message-ID' => $msgidPed], ['html' => true, 'cc' => $ccFinal]); }
         catch (Throwable $e) { $erro = $e->getMessage(); }
 
         // ---- 4. confirma, ou desfaz para o pedido voltar à fila
@@ -1022,6 +1027,9 @@ try {
             else $pdo->prepare("DELETE FROM envio_registro WHERE coligada_cod=? AND pedido_numero=? AND destino=? AND resultado='enviando'")
                      ->execute([$p['coligada_cod'], $p['numero'], $env['destino']]);
         }
+        if ($ok) caixa_log_saida($pdo, $msgidPed, 'pedido',
+            implode(', ', array_map(fn($p) => (string)$p['numero'], $env['pedidos'])),
+            $quem, $quemNome, $assuntoFinal, $paraFinal);
         if (!$ok) throw new Exception('O servidor de e-mail recusou: ' . ($erro ?: 'motivo não informado') . '. Nada foi enviado e os pedidos continuam na fila.');
 
         echo json_encode(['ok' => true, 'para' => $paraFinal, 'cc' => count($ccFinal),

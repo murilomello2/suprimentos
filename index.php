@@ -364,6 +364,7 @@ if (sup_etag_bate($SUP_ETAG)) { http_response_code(304); exit; }
       <a id="nav-cotacoes" data-menu="cotacoes" title="Cotações" onclick="showView('cotacoes')"><span class="material-icons">request_quote</span> <span class="navtxt">Cotações</span></a>
       <a id="nav-solicitacoes" data-menu="solicitacoes" title="Solicitações de Compra" onclick="showView('solicitacoes')"><span class="material-icons">inbox</span> <span class="navtxt">Solicitações</span></a>
       <a id="nav-envio" data-menu="envio" title="Envio de Pedidos de Compra aprovados" onclick="showView('envio')"><span class="material-icons">outgoing_mail</span> <span class="navtxt">Envio de Pedidos</span></a>
+      <a id="nav-caixa" data-menu="caixa" title="Caixa de e-mail do suprimentos@ — enviados e recebidos (só leitura)" onclick="showView('caixa')"><span class="material-icons">mail</span> <span class="navtxt">Caixa de E-mail</span></a>
       <a id="nav-obras" data-menu="obras" title="Obras — ficha, características e de-para" onclick="showView('obras')"><span class="material-icons">apartment</span> <span class="navtxt">Obras</span></a>
       <a id="nav-oraculo" data-menu="oraculo" title="Radar IA — oráculo de suprimentos" onclick="showView('oraculo')"><span class="material-icons">auto_awesome</span> <span class="navtxt">Radar IA</span></a>
       <!-- CONSULTA DA OBRA: telas de leitura para engenheiros/coordenadores (papel 'obra'). -->
@@ -704,6 +705,12 @@ if (sup_etag_bate($SUP_ETAG)) { http_response_code(304); exit; }
     <div id="auditwrap" style="margin:8px 26px 30px"><div class="empty">Carregando…</div></div>
    </section>
 
+   <section id="view-caixa" style="display:none">
+    <div class="top">
+      <h1 class="h1"><span class="material-icons" style="color:var(--verde)">mail</span> Caixa de E-mail</h1>
+    </div>
+    <div class="wrap" id="caixaWrap"></div>
+   </section>
    <section id="view-envio" style="display:none">
     <div class="wrap" id="envWrap"></div>
    </section>
@@ -789,7 +796,8 @@ $jsv = function ($p) { $f = __DIR__ . '/' . $p; return $p . '?v=' . (is_file($f)
   <script src="<?= $jsv('js/app04.js') ?>"></script>
   <script src="<?= $jsv('js/app05.js') ?>"></script>
   <script src="<?= $jsv('js/app06.js') ?>"></script>
-  <script src="<?= $jsv('js/app07.js') ?>"></script>   <!-- telas de consulta da obra -->
+  <script src="<?= $jsv('js/app07.js') ?>"></script>
+  <script src="<?= $jsv('js/app08.js') ?>"></script>   <!-- caixa de e-mail -->   <!-- telas de consulta da obra -->
 
 </body>
 </html>

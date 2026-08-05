@@ -273,7 +273,7 @@ async function loadMatriz(force){
 
 /* ---------- view switch ---------- */
 function showView(v){
-  ['radar','matriz','oportunidades','top20','dashboards','cotacoes','solicitacoes','envio','buscaped','obras','oraculo','config','audit','updates','ovradar','ovcot','ovsc'].forEach(x=>{
+  ['radar','matriz','oportunidades','top20','dashboards','cotacoes','solicitacoes','envio','buscaped','obras','caixa','oraculo','config','audit','updates','ovradar','ovcot','ovsc'].forEach(x=>{
     const el=document.getElementById('view-'+x); if(el) el.style.display=v===x?'':'none';
     const nav=document.getElementById('nav-'+x); if(nav) nav.classList.toggle('active',v===x);
   });
@@ -282,6 +282,7 @@ function showView(v){
   if(v==='solicitacoes') solInit();
   if(v==='oraculo') oracInit();
   if(v==='envio') envInit();
+  if(v==='caixa') caixaInit();
   if(v==='buscaped') bpInit();
   if(v==='top20') t20Init();
   if(v==='dashboards') dashInit();

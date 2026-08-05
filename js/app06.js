@@ -909,7 +909,7 @@ function userForm(bid){
   const menus=u?(u.menus||[]):PRESETS.coordenador.menus;
   const obrasVer=u?(u.obras_ver||[]):[], obrasEdit=u?(u.obras_editar||[]):[];
   const adm=u?u.perm_admin:0, ativo=u?u.ativo:1;
-  const pc=u?u.perm_crono:0, po=u?u.perm_orcamento:0, pq=u?u.perm_quant:0, pd=u?u.perm_dicionario:0, pr=u?u.perm_responsaveis:0;
+  const pc=u?u.perm_crono:0, po=u?u.perm_orcamento:0, pq=u?u.perm_quant:0, pd=u?u.perm_dicionario:0, pr=u?u.perm_responsaveis:0, pe=u?u.perm_email:0;
   const dash=u?(u.dashboard||''):'';
   const obrasChk=(pref,sel)=>CFG.obras.map(o=>`<label class="ckl"><input type="checkbox" id="${pref}-${o.id}" ${sel.includes(o.id)?'checked':''}> ${esc(o.nome)}</label>`).join('');
   document.getElementById('modal').innerHTML=`
@@ -948,6 +948,7 @@ function userForm(bid){
           <label class="ckl"><input type="checkbox" id="pQuant" ${pq?'checked':''}> Vínculo de quantitativo</label>
           <label class="ckl"><input type="checkbox" id="pDic" ${pd?'checked':''}> Editar dicionário</label>
           <label class="ckl"><input type="checkbox" id="pRespLote" ${pr?'checked':''}> Atribuir responsáveis em lote</label>
+          <label class="ckl" title="abre a caixa de e-mail do suprimentos@ — enviados e recebidos. Só leitura: ninguém apaga e-mail por aqui."><input type="checkbox" id="pEmail" ${pe?'checked':''}> Ver a caixa de e-mail</label>
         </div></div>
       <label class="ckl" style="margin:4px 0 12px"><input type="checkbox" id="uAdmin" ${adm?'checked':''}> É administrador (acessa Configurações e edita tudo)</label>
       <div style="display:flex;gap:8px"><button class="btn-prim" onclick="userSave()">Salvar usuário</button>
@@ -959,7 +960,7 @@ function userPreset(){
   const p=PRESETS[val('uPapel')]; if(!p)return; // 'personalizado' (null) mantém o que está marcado
   document.getElementById('uVer').value=p.ver; document.getElementById('uEdit').value=p.edit;
   document.getElementById('uAdmin').checked=!!p.adm;
-  ['pCrono','pOrc','pQuant','pDic','pRespLote'].forEach(id=>{const e=document.getElementById(id); if(e)e.checked=false;}); // presets definidos zeram as específicas
+  ['pCrono','pOrc','pQuant','pDic','pRespLote','pEmail'].forEach(id=>{const e=document.getElementById(id); if(e)e.checked=false;}); // presets definidos zeram as específicas
   MENUS.forEach(m=>{const e=document.getElementById('mn-'+m[0]); if(e)e.checked=p.menus.includes(m[0]);});
   userToggleObras();
 }
@@ -1000,6 +1001,7 @@ async function userLote(){
           <div id="ltEditObras" class="ckgrid" style="display:none">${CFG.obras.map(o=>`<label class="ckl"><input type="checkbox" id="loe-${o.id}"> ${esc(o.nome)}</label>`).join('')}</div></div></div>`)}
       ${sec('ltApPerms','Aplicar: Permissões específicas',`<div class="ckgrid" style="margin-top:0">
         <label class="ckl"><input type="checkbox" id="lp-crono"> Vínculo de cronograma</label>
+        <label class="ckl"><input type="checkbox" id="lp-email"> Ver a caixa de e-mail</label>
         <label class="ckl"><input type="checkbox" id="lp-orc"> Vínculo de orçamento (verba)</label>
         <label class="ckl"><input type="checkbox" id="lp-quant"> Vínculo de quantitativo</label>
         <label class="ckl"><input type="checkbox" id="lp-dic"> Editar dicionário</label>
@@ -1045,7 +1047,7 @@ async function userLoteSave(){
     campos.ver_escopo=val('ltVer'); campos.obras_ver=campos.ver_escopo==='sel'?CFG.obras.filter(o=>ck('lov-'+o.id)).map(o=>o.id):[];
     campos.editar_escopo=val('ltEdit'); campos.obras_editar=campos.editar_escopo==='sel'?CFG.obras.filter(o=>ck('loe-'+o.id)).map(o=>o.id):[];
   }
-  if(ck('ltApPerms')){ campos.perm_crono=ck('lp-crono')?1:0; campos.perm_orcamento=ck('lp-orc')?1:0; campos.perm_quant=ck('lp-quant')?1:0; campos.perm_dicionario=ck('lp-dic')?1:0; campos.perm_responsaveis=ck('lp-resp')?1:0; }
+  if(ck('ltApPerms')){ campos.perm_crono=ck('lp-crono')?1:0; campos.perm_orcamento=ck('lp-orc')?1:0; campos.perm_quant=ck('lp-quant')?1:0; campos.perm_dicionario=ck('lp-dic')?1:0; campos.perm_responsaveis=ck('lp-resp')?1:0; campos.perm_email=ck('lp-email')?1:0; }
   if(ck('ltApDash')) campos.dashboard=val('ltDash');
   if(!Object.keys(campos).length){toast('Marque ao menos uma seção pra aplicar');return;}
   if(!confirm('Aplicar este pacote a '+rotulo+'?')) return;
@@ -1084,6 +1086,7 @@ async function userSave(){
     perm_quant:document.getElementById('pQuant').checked?1:0,
     perm_dicionario:document.getElementById('pDic').checked?1:0,
     perm_responsaveis:document.getElementById('pRespLote').checked?1:0,
+    perm_email:document.getElementById('pEmail').checked?1:0,
     dashboard:val('uDash'),
     ativo:parseInt(val('uAtivo'))};
   const d=await (await fetch('actions/usuarios.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();

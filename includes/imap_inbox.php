@@ -137,6 +137,18 @@ function inbox_parse_msg($mbox, $uid, $cap = 40000) {
         $fn = isset($a->personal) ? inbox_hdr_decode($a->personal) : '';
     }
     $irt = trim((string)($hdr->in_reply_to ?? '')); if ($irt !== '' && preg_match('/<[^>]+>/', $irt, $m)) $irt = $m[0];
+    /* To/Cc: irrelevantes para o fluxo da cotação (quem lê já sabe que foi para a conta), mas são
+       A informação da tela de Enviados — "para quem foi". Campos NOVOS; nada acima depende deles. */
+    $lista = function ($arr) {
+        $out = [];
+        foreach ((array)$arr as $a) {
+            $em = strtolower(trim(((string)($a->mailbox ?? '')) . '@' . ((string)($a->host ?? ''))));
+            if ($em === '@' || $em === '') continue;
+            $nm = isset($a->personal) ? inbox_hdr_decode($a->personal) : '';
+            $out[] = ['email' => $em, 'nome' => $nm];
+        }
+        return $out;
+    };
     $refs = []; if ($hdr && !empty($hdr->references)) { preg_match_all('/<[^>]+>/', (string)$hdr->references, $mm); $refs = $mm[0]; }
     $struct = @imap_fetchstructure($mbox, $uid, FT_UID); imap_errors();
     $anexos = [];
@@ -160,6 +172,7 @@ function inbox_parse_msg($mbox, $uid, $cap = 40000) {
     return [
         'uid' => (int)$uid,
         'from_email' => $fe, 'from_nome' => $fn,
+        'to' => $hdr ? $lista($hdr->to ?? []) : [], 'cc' => $hdr ? $lista($hdr->cc ?? []) : [],
         'subject' => inbox_hdr_decode($hdr->subject ?? ''),
         'message_id' => trim((string)($hdr->message_id ?? '')),
         'in_reply_to' => $irt, 'references' => $refs,

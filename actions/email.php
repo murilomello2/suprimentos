@@ -6,6 +6,7 @@
  */
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/caixa.php';
 if (!function_exists('cot_pode_gerir')) { function cot_pode_gerir($pdo,$me,$cid){ $p=user_perms($pdo,$me); if(empty($p['autorizado']))return false; if(!empty($p['perm_admin'])||(($p['papel']??'')==='gerente'))return true; if($me===null||$me==='')return false; try{$r=$pdo->prepare('SELECT criado_por,colaboradores FROM cotacao WHERE id=?');$r->execute([(int)$cid]);$r=$r->fetch();}catch(Throwable $e){return false;} if(!$r)return false; if((string)($r['criado_por']??'')===(string)$me)return true; foreach((array)(json_decode((string)($r['colaboradores']??''),true)?:[]) as $b) if(trim((string)$b)===trim((string)$me))return true; return false; } }
 require_once __DIR__ . '/../includes/mailer.php';
 define('EMAIL_CFG_FILE', __DIR__ . '/../data/.email.json');
@@ -107,6 +108,8 @@ try {
                 if ($ok) {
                     $upd->execute([$now, $me, (int)$c['id']]); $enviados++;
                     try { $insOut->execute([$cid, (int)$c['id'], $c['fornecedor_id'] ?: null, $c['fornecedor_nome'], $em, $msgid, $token, $assunto, $now]); } catch (Throwable $e) {}
+                    // espelha na Caixa de E-mail: é o que liga a mensagem na pasta Enviados a QUEM disparou
+                    caixa_log_saida($pdo, $msgid, 'cotacao', (string)$cid, $me, (string)($perms['nome'] ?? ''), $assunto, $em, $cid);
                 } else $falhas[] = $c['fornecedor_nome'] . ': ' . $msg;
             }
             echo json_encode(['ok' => true, 'enviados' => $enviados, 'falhas' => $falhas], JSON_UNESCAPED_UNICODE); exit;

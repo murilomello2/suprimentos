@@ -684,7 +684,8 @@ async function getCurrentUser(){
   CAN_ORC   = IS_ADMIN || _ger || !!(EU && EU.perm_orcamento);
   CAN_QUANT = IS_ADMIN || _ger || !!(EU && EU.perm_quant);
   CAN_DIC   = IS_ADMIN || _ger || !!(EU && EU.perm_dicionario);
-  CAN_RESP  = IS_ADMIN || _ger || !!(EU && EU.perm_responsaveis);   // atribuir responsável em lote (independe de editar_escopo)
+  CAN_RESP  = IS_ADMIN || _ger || !!(EU && EU.perm_responsaveis);
+  CAN_EMAIL = IS_ADMIN || !!(EU && EU.perm_email);      // caixa do suprimentos@ (só leitura)   // atribuir responsável em lote (independe de editar_escopo)
   applyMenus(); updateWhoami();
   /* rodada mensal do cronograma: dispara em segundo plano, sem travar o carregamento da tela.
      O servidor é quem decide se é hora (dia escolhido + trava de "já rodei este mês"). */
@@ -713,7 +714,8 @@ function applyMenus(){
   document.querySelectorAll('.nav a[data-menu]').forEach(a=>{
     const m=a.getAttribute('data-menu');
     let show;
-    if(!ehLeitor && (m==='oraculo'||m==='solicitacoes'||m==='obras')) show = auth;  // p/ suprimentos, referência sempre à mão
+    if(m==='caixa') show = IS_ADMIN || !!(EU&&EU.perm_email);   // uma chave só: a permissão específica
+    else if(!ehLeitor && (m==='oraculo'||m==='solicitacoes'||m==='obras')) show = auth;  // p/ suprimentos, referência sempre à mão
     else if(m==='config') show = IS_ADMIN||allow.includes('config')||CAN_RESP;  // Config nunca some p/ admin
     else if(adminSel) show = allow.includes(m);                            // admin escolheu → mostra só o marcado
     else show = IS_ADMIN||allow.includes(m);

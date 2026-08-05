@@ -1918,7 +1918,11 @@ function cronoAutoRender(){
     const u=o.ultima;
     const pend=(u?(u.orfaos||0)+(u.sem_vinculo||0):0);
     let alerta='';
-    if(o.sem_cronograma) alerta='<span class="dchip" style="background:#8a9299">sem cronograma</span>';
+    /* "sem cronograma" no radar ≠ "não existe cronograma". Quando o Planejamento TEM revisão ativa
+       e o radar não aponta nada, o recado útil é "dá pra vincular", não "não tem". */
+    if(o.sem_cronograma) alerta = o.ativo_id
+      ? '<span class="dchip" style="background:var(--dourado)" title="o Planejamento tem cronograma ativo, mas o radar desta obra não aponta nenhum — vincule em Cronograma &amp; avanço físico">não vinculada</span>'
+      : '<span class="dchip" style="background:#8a9299">sem cronograma</span>';
     else if(o.defasado)  alerta='<span class="dchip" style="background:var(--pend)" title="a obra aponta uma revisão antiga">revisão nova disponível</span>';
     h+='<tr>'
      + '<td><b>'+esc(o.obra)+'</b>'+(alerta?('<div style="margin-top:3px">'+alerta+'</div>'):'')+'</td>'

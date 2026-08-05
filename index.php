@@ -1,5 +1,22 @@
-<?php /* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php. (republicado) */ ?>
-<?php /* build: cotacoes-concorrencia-2026-07-07 */ ?>
+<?php
+/* Cockpit de Suprimentos — front. Sem segredos aqui; consome actions/*.php.
+   ─────────────────────────────────────────────────────────────────────────────
+   CACHE (05/08/2026): este arquivo não mandava cabeçalho de cache NENHUM. Sem instrução, o
+   navegador aplica cache heurístico e reusa o HTML antigo — e como é o HTML que carrega o
+   ?v= de cada .js, um index velho congela o app INTEIRO numa versão antiga. Era o que o
+   Murilo via: cockpit de semanas atrás, só destravando com Ctrl+Shift+R. O versionamento
+   dos .js sempre esteve certo; ninguém chegava a lê-lo.
+
+   Correção: revalidação obrigatória + ETag do build. Quando nada mudou o servidor responde
+   304 (uns bytes) e o navegador reusa — não custa os 70 KB deste arquivo a cada navegação.
+   Quando mudou, vem inteiro, com os ?v= novos. */
+require_once __DIR__ . '/includes/versao.php';
+$SUP_VER  = sup_versao();
+$SUP_ETAG = '"sup-' . $SUP_VER . '"';
+header('Cache-Control: no-cache, must-revalidate');
+header('ETag: ' . $SUP_ETAG);
+if (sup_etag_bate($SUP_ETAG)) { http_response_code(304); exit; }
+?>
 <!doctype html>
 <html lang="pt-br">
 <head>
@@ -765,6 +782,7 @@
 <?php /* versao do arquivo na URL: o navegador so rebaixa o cache quando o .js muda */
 $jsv = function ($p) { $f = __DIR__ . '/' . $p; return $p . '?v=' . (is_file($f) ? filemtime($f) : time()); };
 ?>
+  <script>window.APP_VER = <?= (int)$SUP_VER ?>;</script>
   <script src="<?= $jsv('js/app01.js') ?>"></script>
   <script src="<?= $jsv('js/app02.js') ?>"></script>
   <script src="<?= $jsv('js/app03.js') ?>"></script>

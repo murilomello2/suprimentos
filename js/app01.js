@@ -919,3 +919,48 @@ function toggleAllGroups(){
   if(anyOpen) groups.forEach(g=>COLLAPSED.add(g)); else COLLAPSED.clear();
   saveCollapsed(); render();
 }
+/* ═════════ VERSÃO NOVA PUBLICADA → A ABA SE ATUALIZA ═════════
+   O ETag no index.php resolve quem ABRE o cockpit. Não resolve quem deixou a aba aberta a
+   semana toda — e é assim que o time trabalha. Aqui a aba pergunta o carimbo do build de vez
+   em quando; se mudou, ela se recarrega.
+
+   Recarregar na cara de quem está no meio de uma cotação perde trabalho, então só recarrega
+   sozinha quando é seguro (aba em segundo plano, ou sem modal aberto e sem edição pendente).
+   Caso contrário aparece uma barra discreta e a pessoa decide a hora. */
+let VER_ULT = 0;
+
+async function verCheck(){
+  if(!window.APP_VER) return;
+  const agora = Date.now();
+  if(agora - VER_ULT < 120000) return;          // no máx. 1 consulta a cada 2 min
+  VER_ULT = agora;
+  let v;
+  try{ v = (await (await fetch('actions/versao.php?_='+agora, {cache:'no-store'})).json()).v; }
+  catch(e){ return; }                            // sem rede/servidor fora: não é problema nosso agora
+  if(!v || String(v) === String(window.APP_VER)) return;
+
+  const modalAberto = !!document.querySelector('#ov.open')
+                   || !!document.getElementById('caOv') || !!document.getElementById('vcOv');
+  const editando = (typeof anyEditing === 'function') && anyEditing();
+  if(document.hidden || (!modalAberto && !editando)){ location.reload(); return; }
+  verBarra();
+}
+
+function verBarra(){
+  if(document.getElementById('verBar')) return;
+  const b = document.createElement('div');
+  b.id = 'verBar';
+  b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:99999;'
+    + 'background:var(--verde,#1e5b3f);color:#fff;padding:10px 14px;border-radius:10px;'
+    + 'box-shadow:0 8px 28px rgba(0,0,0,.28);display:flex;align-items:center;gap:12px;font-size:13px';
+  b.innerHTML = '<span>Saiu uma versão nova do cockpit.</span>'
+    + '<button onclick="location.reload()" style="background:#fff;color:var(--verde-d,#14402c);border:0;'
+    + 'padding:5px 12px;border-radius:7px;font-weight:700;cursor:pointer;font-size:12.5px">Atualizar agora</button>'
+    + '<span onclick="this.parentNode.remove()" style="cursor:pointer;opacity:.75;font-size:17px;line-height:1">&times;</span>';
+  document.body.appendChild(b);
+}
+
+/* Duas oportunidades de perceber: de hora em hora, e quando a pessoa volta pra aba —
+   que é o momento natural de a tela se refazer sem incomodar ninguém. */
+setInterval(verCheck, 3600000);
+document.addEventListener('visibilitychange', () => { if(!document.hidden) verCheck(); });

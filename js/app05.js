@@ -409,7 +409,7 @@ async function obrasExtrairCrono(id){ const b=document.getElementById('obfExtrai
   }catch(e){toast('Falha: '+e.message); if(b){b.disabled=false;b.innerHTML='<span class="material-icons" style="font-size:14px;vertical-align:-3px">auto_awesome</span> Extrair do cronograma';}} }
 /* ========== TOP 20 — volumes consolidados p/ negociação (grupos × 12 meses) ========== */
 let T20={data:null,modo:'quant',fin:false,tab:'material',cat:null,cfgSel:null,grupoFiltro:null,exp:new Set(),expData:{}};
-function t20Tab(t){ T20.tab=t; T20.grupoFiltro=null; T20.exp=new Set(); const m=document.getElementById('t20TabMat'),s=document.getElementById('t20TabSrv');
+function t20Tab(t){ T20.tab=t; T20.grupoFiltro=null; T20.exp=new Set(); T20.expItem=new Set(); const m=document.getElementById('t20TabMat'),s=document.getElementById('t20TabSrv');
   if(m)m.style.fontWeight=t==='material'?'700':'400'; if(s)s.style.fontWeight=t==='servico'?'700':'400';
   if(m)m.style.background=t==='material'?'#fff':''; if(s)s.style.background=t==='servico'?'#fff':'';
   t20Render(); }
@@ -558,19 +558,182 @@ function t20Pill(cor,bg,tit,sub){ return '<div style="background:'+bg+';border-r
   +'<div style="font-size:12px;font-weight:800;color:'+cor+'">'+esc(tit)+'</div>'
   +'<div style="font-size:11.5px;font-weight:700;color:#33404a">'+sub+'</div></div>'; }
 
+/* ══════ EXPANSÃO DO GRUPO — dois níveis, na grade de meses ══════
+   A 1ª versão despejava a folha (item × obra × mês) numa lista. Para conferir a conta serve;
+   para NEGOCIAR não: quem senta na frente do fornecedor de argamassa precisa saber
+   "revestimento externo, tanto por mês, tanto no total" — não 40 linhas repetindo o mesmo item
+   uma vez por obra.
+
+   Nível 1 (grupo)  → já é a linha de cima, na mesma grade de meses.
+   Nível 2 (item)   → aqui: soma TODAS as obras, mês a mês. É a visão da negociação.
+   Nível 3 (obra)   → só quando o comprador pedir, expandindo o item.
+
+   A grade de meses é a MESMA do cabeçalho, senão as colunas não batem com a linha do grupo e a
+   tabela mente na comparação visual. */
+
+function t20MesesKeys(){ const d=T20.data||{}; return [...(d.meses||[]),'12+','sem']; }
+
+/** Agrega o detalhe do grupo: por item, e dentro dele por obra. */
+function t20Agrega(its){
+  const keys=t20MesesKeys();
+  const zero=()=>{ const o={}; keys.forEach(k=>o[k]={q:{},v:0,n:0}); return o; };
+  const soma=(alvo,mk,x)=>{
+    const c=alvo[mk]; if(!c) return;
+    c.v += (+x.alocado_verba||0); c.n++;
+    if(x.alocado_quant!=null){ const u=x.unidade||''; c.q[u]=(c.q[u]||0)+(+x.alocado_quant||0); }
+  };
+  const itens={};
+  its.forEach(x=>{
+    const nome=x.item||'—';
+    if(!itens[nome]) itens[nome]={nome, meses:zero(), obras:{}, unidade:x.unidade||''};
+    const it=itens[nome];
+    soma(it.meses, x.mes, x);
+    if(!it.obras[x.obra]) it.obras[x.obra]={nome:x.obra, meses:zero()};
+    soma(it.obras[x.obra].meses, x.mes, x);
+  });
+  // ordena pelo que pesa em R$ — é a ordem que interessa numa negociação
+  const tot=o=>{ let v=0; for(const k in o.meses) v+=o.meses[k].v; return v; };
+  const lista=Object.values(itens).sort((a,b)=>tot(b)-tot(a));
+  lista.forEach(it=>{ it.total=tot(it); it.listaObras=Object.values(it.obras).sort((a,b)=>tot(b)-tot(a)); });
+  return lista;
+}
+
+function t20CelVal(c){
+  if(!c || (!c.v && !Object.keys(c.q||{}).length)) return '—';
+  if(T20.modo==='quant'){ const r=t20Q(c.q); return r[0]||'<span class="muted" style="font-size:10px">só R$</span>'; }
+  return BRL(c.v);
+}
+function t20SomaMeses(objs){
+  const keys=t20MesesKeys(); const out={}; keys.forEach(k=>out[k]={q:{},v:0,n:0});
+  objs.forEach(o=>keys.forEach(k=>{ const c=o.meses[k]; if(!c)return;
+    out[k].v+=c.v; out[k].n+=c.n; for(const u in c.q) out[k].q[u]=(out[k].q[u]||0)+c.q[u]; }));
+  return out;
+}
+function t20TotalLinha(meses){
+  const q={}; let v=0;
+  for(const k in meses){ v+=meses[k].v; for(const u in meses[k].q) q[u]=(q[u]||0)+meses[k].q[u]; }
+  return [t20Q(q), v];
+}
+
+function t20ItemKey(gid,nome){ return gid+'|'+nome; }
+function t20ExpItem(gid,nome){
+  const k=t20ItemKey(gid,nome);
+  if(!T20.expItem) T20.expItem=new Set();
+  T20.expItem.has(k)?T20.expItem.delete(k):T20.expItem.add(k);
+  t20Render();
+}
+
 function t20ExpBox(gid){
   const its=T20.expData[gid];
   if(its===undefined) return '<div class="dmini" style="padding:11px 14px">Carregando os itens…</div>';
   if(!its.length) return '<div class="dmini" style="padding:11px 14px">Sem itens neste grupo (no recorte atual).</div>';
   const g=((T20.data&&T20.data.grupos)||[]).find(x=>x.id===gid);
-  if(g && g.modo==='data_final' && its.some(x=>x.fim)) return t20Fila(gid);
-  const rows=its.map(x=>'<tr><td style="text-align:left">'+esc(x.item)+'</td><td style="text-align:left">'+esc(x.obra)+'</td><td style="white-space:nowrap">'+t20MesLbl(x.mes)+'</td>'
-    +'<td style="text-align:left;white-space:nowrap"><span style="color:'+t20StCor(x.status)+';font-weight:700">'+esc(x.status||'—')+'</span></td>'
-    +'<td class="muted" style="text-align:left;font-size:11px">'+esc(x.janela||'')+(x.pct_fonte==='data final'?'':(x.consumido?' · andou '+x.consumido+'%':''))+'</td>'
-    +'<td class="r">'+(x.alocado_quant!=null?Number(x.alocado_quant).toLocaleString('pt-BR',{maximumFractionDigits:1})+' '+esc(x.unidade||''):'—')+'</td>'
-    +'<td class="r"><b>'+BRL(x.alocado_verba)+'</b></td></tr>').join('');
-  return '<div style="padding:8px 14px 12px"><table class="dtable" style="width:100%"><thead><tr><th style="text-align:left">Item</th><th style="text-align:left">Obra</th><th>Mês</th><th style="text-align:left">Status</th><th style="text-align:left">Janela / fecha</th><th class="r">Quant.</th><th class="r">Verba</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  if(g && g.modo==='data_final' && its.some(x=>x.fim)) return t20Fila(gid);   // compra de uma vez: grade de meses não diz nada
+
+  const keys=t20MesesKeys(), lista=t20Agrega(its);
+  if(!T20.expItem) T20.expItem=new Set();
+
+  let h='<div style="padding:9px 12px 12px">';
+  h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:wrap">'
+   + '<b style="font-size:12.5px">'+lista.length+' tipo(s) de item</b>'
+   + '<span class="dmini muted">— soma de todas as obras, mês a mês. Clique no item para abrir por obra.</span>'
+   + '<button class="btn-ghost" style="margin-left:auto;padding:4px 11px;font-size:11.5px" onclick="event.stopPropagation();t20Excel('+gid+')">'
+   +   '<span class="material-icons" style="font-size:14px;vertical-align:-3px">download</span> Exportar p/ Excel</button></div>';
+
+  h+='<table class="mtable" style="border:none;width:100%;min-width:1100px"><thead><tr>'
+   + '<th class="svc-h" style="text-align:left;min-width:250px">Item</th>';
+  keys.forEach(k=>h+='<th style="min-width:64px">'+(k==='sem'?'sem data':t20MesLbl(k))+'</th>');
+  h+='<th style="min-width:92px;background:#eafaf0">TOTAL quant.</th><th style="min-width:104px;background:#eafaf0">TOTAL R$</th></tr></thead><tbody>';
+
+  lista.forEach(it=>{
+    const aberto=T20.expItem.has(t20ItemKey(gid,it.nome));
+    const [tq,tv]=t20TotalLinha(it.meses);
+    h+='<tr style="cursor:pointer" onclick="event.stopPropagation();t20ExpItem('+gid+',\''+esc(it.nome).replace(/'/g,"\\'")+'\')">'
+     + '<td class="svc-c" style="text-align:left"><span class="material-icons" style="font-size:14px;vertical-align:-3px;color:var(--muted)">'+(aberto?'expand_more':'chevron_right')+'</span>'
+     +   '<b>'+esc(it.nome)+'</b><small>'+it.listaObras.length+' obra(s)</small></td>';
+    keys.forEach(k=>h+='<td class="t20c">'+t20CelVal(it.meses[k])+'</td>');
+    h+='<td style="background:#f2faf5;font-weight:700;text-align:center" title="'+esc(tq[1])+'">'+(tq[0]||'—')+'</td>'
+     + '<td style="background:#f2faf5;font-weight:800;text-align:center">'+BRL(tv)+'</td></tr>';
+
+    if(aberto) it.listaObras.forEach(ob=>{
+      const [oq,ov]=t20TotalLinha(ob.meses);
+      h+='<tr style="background:#fbfdfb"><td style="text-align:left;padding-left:34px;font-size:12px;color:var(--muted)">'+esc(ob.nome)+'</td>';
+      keys.forEach(k=>h+='<td class="t20c" style="font-size:11.5px;color:var(--muted)">'+t20CelVal(ob.meses[k])+'</td>');
+      h+='<td style="text-align:center;font-size:11.5px;color:var(--muted)">'+(oq[0]||'—')+'</td>'
+       + '<td style="text-align:center;font-size:11.5px;color:var(--muted)">'+BRL(ov)+'</td></tr>';
+    });
+  });
+
+  // total do grupo REFEITO a partir dos itens — se divergir da linha de cima, algo está errado e é bom ver
+  const somaG=t20SomaMeses(lista), [gq,gv]=t20TotalLinha(somaG);
+  h+='<tr style="border-top:2px solid #cfe0d5;background:#f2faf5"><td style="text-align:left"><b>TOTAL DO GRUPO</b></td>';
+  keys.forEach(k=>h+='<td class="t20c" style="font-weight:700">'+t20CelVal(somaG[k])+'</td>');
+  h+='<td style="font-weight:800;text-align:center">'+(gq[0]||'—')+'</td><td style="font-weight:800;text-align:center">'+BRL(gv)+'</td></tr>';
+  h+='</tbody></table></div>';
+  return h;
 }
+
+/* ══════ EXPORTAR PARA EXCEL ══════
+   CSV com BOM e separador ';' — é o que o Excel em português abre com um duplo-clique, sem
+   assistente de importação e sem quebrar acento. Biblioteca de xlsx aqui significaria dependência
+   nova no servidor por causa de uma tabela; não compensa.
+   O arquivo sai com QUANTIDADE e VALOR lado a lado: na frente do fornecedor a conversa é volume,
+   mas a hora de decidir é R$, e ninguém quer exportar duas vezes. */
+function t20Excel(gid){
+  const its=T20.expData[gid]||[];
+  if(!its.length){ toast('Nada para exportar'); return; }
+  const g=((T20.data&&T20.data.grupos)||[]).find(x=>x.id===gid);
+  const keys=t20MesesKeys(), lista=t20Agrega(its);
+  const num=v=>(v||v===0)?String(Number(v).toFixed(2)).replace('.',','):'';
+  const q1=c=>{ const u=Object.keys(c.q||{}); if(!u.length) return ''; return num(c.q[u[0]]); };
+  const un=o=>{ for(const k in o.meses){ const u=Object.keys(o.meses[k].q||{}); if(u.length) return u[0]; } return ''; };
+  const esc2=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
+
+  const L=[];
+  L.push([esc2(g?g.nome:'Grupo'),esc2('Volumes por mês — próximos 12 meses'),esc2('gerado em '+new Date().toLocaleDateString('pt-BR'))].join(';'));
+  L.push('');
+  const cab=['Item','Obra','Unid.'];
+  keys.forEach(k=>cab.push((k==='sem'?'sem data':t20MesLbl(k))+' (qtd)'));
+  cab.push('TOTAL qtd'); keys.forEach(k=>cab.push((k==='sem'?'sem data':t20MesLbl(k))+' (R$)')); cab.push('TOTAL R$');
+  L.push(cab.map(esc2).join(';'));
+
+  lista.forEach(it=>{
+    const [tq,tv]=t20TotalLinha(it.meses);
+    const linha=[esc2(it.nome),esc2('TODAS AS OBRAS'),esc2(un(it))];
+    keys.forEach(k=>linha.push(esc2(q1(it.meses[k]))));
+    let sq=0; keys.forEach(k=>{ const u=Object.keys(it.meses[k].q||{}); if(u.length) sq+=it.meses[k].q[u[0]]; });
+    linha.push(esc2(num(sq)));
+    keys.forEach(k=>linha.push(esc2(num(it.meses[k].v))));
+    linha.push(esc2(num(tv)));
+    L.push(linha.join(';'));
+    it.listaObras.forEach(ob=>{
+      const [oq,ov]=t20TotalLinha(ob.meses);
+      const l2=[esc2(''),esc2(ob.nome),esc2(un(ob))];
+      keys.forEach(k=>l2.push(esc2(q1(ob.meses[k]))));
+      let s2=0; keys.forEach(k=>{ const u=Object.keys(ob.meses[k].q||{}); if(u.length) s2+=ob.meses[k].q[u[0]]; });
+      l2.push(esc2(num(s2)));
+      keys.forEach(k=>l2.push(esc2(num(ob.meses[k].v))));
+      l2.push(esc2(num(ov)));
+      L.push(l2.join(';'));
+    });
+  });
+
+  const somaG=t20SomaMeses(lista), [,gv]=t20TotalLinha(somaG);
+  const lt=[esc2('TOTAL DO GRUPO'),esc2(''),esc2('')];
+  keys.forEach(k=>lt.push(esc2('')));
+  lt.push(esc2(''));
+  keys.forEach(k=>lt.push(esc2(num(somaG[k].v))));
+  lt.push(esc2(num(gv)));
+  L.push(''); L.push(lt.join(';'));
+
+  const nome=(g?g.nome:'top20').replace(/[^\wÀ-ÿ ]+/g,'').replace(/\s+/g,'_')+'_volumes_'+new Date().toISOString().slice(0,10)+'.csv';
+  const blob=new Blob(['\ufeff'+L.join('\r\n')],{type:'text/csv;charset=utf-8'});   // BOM: sem ele o Excel come o acento
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=nome; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },1500);
+  toast('Exportado: '+nome);
+}
+
 async function t20Drill(gid,mes){
   const g=(T20.data.grupos||[]).find(x=>x.id===gid);
   let d; try{ d=await (await fetch('actions/top20.php?detalhe='+gid+'&mes='+encodeURIComponent(mes)+'&_='+Date.now()+(T20.fin?'&fin=1':''))).json(); }catch(e){ toast('Falha'); return; }

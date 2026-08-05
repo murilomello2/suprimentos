@@ -715,6 +715,7 @@ function applyMenus(){
     const m=a.getAttribute('data-menu');
     let show;
     if(m==='caixa') show = IS_ADMIN || !!(EU&&EU.perm_email);   // uma chave só: a permissão específica
+    else if(m==='whats') show = IS_ADMIN || ['gerente','comprador'].includes((EU&&EU.papel)||'');
     else if(!ehLeitor && (m==='oraculo'||m==='solicitacoes'||m==='obras')) show = auth;  // p/ suprimentos, referência sempre à mão
     else if(m==='config') show = IS_ADMIN||allow.includes('config')||CAN_RESP;  // Config nunca some p/ admin
     else if(adminSel) show = allow.includes(m);                            // admin escolheu → mostra só o marcado
@@ -754,15 +755,17 @@ function cfgTab(t){
   const cp=document.getElementById('cfg-pedmail'); if(cp) cp.style.display = t==='pedmail'?'':'none';
   const ca=document.getElementById('cfg-acessos'); if(ca) ca.style.display = t==='acessos'?'':'none';
   const ck=document.getElementById('cfg-api'); if(ck) ck.style.display = t==='api'?'':'none';
+  const ci=document.getElementById('cfg-ia'); if(ci) ci.style.display = t==='ia'?'':'none';
   const ab=document.getElementById('cfgAddBtn'); if(ab) ab.style.display = (t==='users'&&IS_ADMIN)?'':'none';
   const lb=document.getElementById('cfgLoteBtn'); if(lb) lb.style.display = (t==='users'&&IS_ADMIN)?'':'none';
-  ['users','resp','receitas','pedmail','email','acessos','api'].forEach(x=>{ const b=document.getElementById('cfgtab-'+x); if(b){ b.style.background = x===t?'var(--verde)':''; b.style.color = x===t?'#fff':''; } });
+  ['users','resp','receitas','pedmail','email','acessos','api','ia'].forEach(x=>{ const b=document.getElementById('cfgtab-'+x); if(b){ b.style.background = x===t?'var(--verde)':''; b.style.color = x===t?'#fff':''; } });
   if(t==='receitas') renderReceitas();
   if(t==='resp') renderRespLote();
   if(t==='email') cfgEmailLoad();
   if(t==='pedmail') pmLoad();
   if(t==='acessos') cfgAcessosLoad();
   if(t==='api') cfgApiLoad();
+  if(t==='ia') wcfgLoad();
 }
 
 /* ===== Config » Chaves de API =====

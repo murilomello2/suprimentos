@@ -364,6 +364,7 @@ if (sup_etag_bate($SUP_ETAG)) { http_response_code(304); exit; }
       <a id="nav-cotacoes" data-menu="cotacoes" title="Cotações" onclick="showView('cotacoes')"><span class="material-icons">request_quote</span> <span class="navtxt">Cotações</span></a>
       <a id="nav-solicitacoes" data-menu="solicitacoes" title="Solicitações de Compra" onclick="showView('solicitacoes')"><span class="material-icons">inbox</span> <span class="navtxt">Solicitações</span></a>
       <a id="nav-envio" data-menu="envio" title="Envio de Pedidos de Compra aprovados" onclick="showView('envio')"><span class="material-icons">outgoing_mail</span> <span class="navtxt">Envio de Pedidos</span></a>
+      <a id="nav-whats" data-menu="whats" title="Assistente que cota por WhatsApp — kanban das conversas" onclick="showView('whats')"><span class="material-icons">smart_toy</span> <span class="navtxt">Assistente WhatsApp</span></a>
       <a id="nav-caixa" data-menu="caixa" title="Caixa de e-mail do suprimentos@ — enviados e recebidos (só leitura)" onclick="showView('caixa')"><span class="material-icons">mail</span> <span class="navtxt">Caixa de E-mail</span></a>
       <a id="nav-obras" data-menu="obras" title="Obras — ficha, características e de-para" onclick="showView('obras')"><span class="material-icons">apartment</span> <span class="navtxt">Obras</span></a>
       <a id="nav-oraculo" data-menu="oraculo" title="Radar IA — oráculo de suprimentos" onclick="showView('oraculo')"><span class="material-icons">auto_awesome</span> <span class="navtxt">Radar IA</span></a>
@@ -624,11 +625,13 @@ if (sup_etag_bate($SUP_ETAG)) { http_response_code(304); exit; }
       <button class="btn-ghost" id="cfgtab-email" onclick="cfgTab('email')" style="padding:6px 14px">📧 E-mail (disparo)</button>
       <button class="btn-ghost" id="cfgtab-acessos" onclick="cfgTab('acessos')" style="padding:6px 14px">👁 Acessos</button>
       <button class="btn-ghost" id="cfgtab-api" onclick="cfgTab('api')" style="padding:6px 14px">🔑 Chaves de API</button>
+      <button class="btn-ghost" id="cfgtab-ia" onclick="cfgTab('ia')" style="padding:6px 14px">🤖 IA &amp; WhatsApp</button>
     </div>
     <div id="cfg-pedmail" style="display:none"><div class="wrap" id="cfgPedMailWrap"></div></div>
     <div id="cfg-email" style="display:none"><div class="wrap" id="cfgEmailWrap"></div></div>
     <div id="cfg-acessos" style="display:none"><div class="wrap" id="cfgAcessosWrap"></div></div>
     <div id="cfg-api" style="display:none"><div class="wrap" id="cfgApiWrap"></div></div>
+    <div id="cfg-ia" style="display:none"></div>
     <div id="cfg-users">
       <div class="panel">
         <h3>O que cada papel faz</h3>
@@ -705,6 +708,12 @@ if (sup_etag_bate($SUP_ETAG)) { http_response_code(304); exit; }
     <div id="auditwrap" style="margin:8px 26px 30px"><div class="empty">Carregando…</div></div>
    </section>
 
+   <section id="view-whats" style="display:none">
+    <div class="top">
+      <h1 class="h1"><span class="material-icons" style="color:var(--verde)">smart_toy</span> Assistente WhatsApp</h1>
+    </div>
+    <div class="wrap" id="waWrap"></div>
+   </section>
    <section id="view-caixa" style="display:none">
     <div class="top">
       <h1 class="h1"><span class="material-icons" style="color:var(--verde)">mail</span> Caixa de E-mail</h1>
@@ -797,7 +806,8 @@ $jsv = function ($p) { $f = __DIR__ . '/' . $p; return $p . '?v=' . (is_file($f)
   <script src="<?= $jsv('js/app05.js') ?>"></script>
   <script src="<?= $jsv('js/app06.js') ?>"></script>
   <script src="<?= $jsv('js/app07.js') ?>"></script>
-  <script src="<?= $jsv('js/app08.js') ?>"></script>   <!-- caixa de e-mail -->   <!-- telas de consulta da obra -->
+  <script src="<?= $jsv('js/app08.js') ?>"></script>
+  <script src="<?= $jsv('js/app09.js') ?>"></script>   <!-- assistente de whatsapp -->   <!-- caixa de e-mail -->   <!-- telas de consulta da obra -->
 
 </body>
 </html>

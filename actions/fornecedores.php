@@ -228,6 +228,46 @@ try {
     /* FUNDIR duplicados: repontua o histórico para o cadastro que fica e apaga os outros.
        Não existe FK/CASCADE no banco (nenhuma tabela cot* tem), então o repontamento é manual e
        explícito — e por isso mesmo cada tabela tocada é registrada na resposta. */
+    /* ───────────── NORMALIZAR O NÚMERO DE WHATSAPP DA BASE ─────────────
+       Medido em 05/08/2026: 60 fornecedores, 53 com telefone e ZERO com o campo whatsapp
+       preenchido. O número do WhatsApp quase sempre É o do campo telefone, mas copiar cru
+       levaria telefone FIXO para uma fila de disparo — e falharia calado, fornecedor por
+       fornecedor. Então: normaliza para E.164, classifica celular × fixo × 0800, e só promove
+       a WhatsApp o que é celular. O resto fica visível com o motivo, para alguém arrumar.
+       `simular` (padrão) não escreve nada — mostra o que faria. */
+    if ($acao === 'normalizar_whatsapp') {
+        if (!$perms) { http_response_code(403); echo json_encode(['error' => 'Sem permissão.']); exit; }
+        require_once __DIR__ . '/../includes/fone.php';
+        $aplicar = !empty($in['aplicar']);
+        $sobrescrever = !empty($in['sobrescrever']);   // por padrão NÃO mexe em quem já tem número curado
+        $q = $pdo->query("SELECT id, nome, telefone, whatsapp, wa_e164 FROM cot_fornecedor WHERE (ativo=1 OR ativo IS NULL) ORDER BY nome");
+        $upd = $pdo->prepare("UPDATE cot_fornecedor SET whatsapp=?, wa_e164=?, wa_tipo=?, wa_nota=?, wa_origem=? WHERE id=?");
+        $res = ['ok' => true, 'aplicado' => $aplicar, 'total' => 0,
+                'celular' => 0, 'suspeito' => 0, 'fixo' => 0, 'especial' => 0, 'invalido' => 0, 'sem_fonte' => 0,
+                'ja_tinha' => 0, 'amostra' => []];
+        foreach ($q as $f) {
+            $res['total']++;
+            if (!$sobrescrever && trim((string)$f['wa_e164']) !== '') { $res['ja_tinha']++; continue; }
+            // fonte: o campo whatsapp (se alguém já digitou algo) tem prioridade sobre o telefone
+            $fonte = trim((string)$f['whatsapp']) !== '' ? $f['whatsapp'] : $f['telefone'];
+            if (trim((string)$fonte) === '') { $res['sem_fonte']++; continue; }
+            $r = fone_melhor_whatsapp($fonte);
+            $tipo = $r['tipo'];
+            $chave = ($tipo === 'celular' && !empty($r['suspeito'])) ? 'suspeito' : $tipo;
+            $res[$chave] = ($res[$chave] ?? 0) + 1;
+            $e164 = ($tipo === 'celular') ? ($r['e164'] ?? '') : '';   // só celular vira número de disparo
+            if (count($res['amostra']) < 25)
+                $res['amostra'][] = ['id' => (int)$f['id'], 'nome' => $f['nome'], 'origem' => trim((string)$fonte),
+                    'e164' => $e164, 'bonito' => $e164 ? fone_bonito($e164) : '', 'tipo' => $tipo,
+                    'nota' => $r['nota'] ?? '', 'suspeito' => !empty($r['suspeito'])];
+            if ($aplicar)
+                $upd->execute([$e164 ? fone_bonito($e164) : (string)$f['whatsapp'], $e164, $tipo,
+                               substr((string)($r['nota'] ?? ''), 0, 190),
+                               trim((string)$f['whatsapp']) !== '' ? 'whatsapp' : 'telefone', (int)$f['id']]);
+        }
+        echo json_encode($res, JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($acao === 'fundir_fornecedores') {
         if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
         $fica = (int)($in['manter_id'] ?? 0);

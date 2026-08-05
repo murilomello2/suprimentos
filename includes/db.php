@@ -119,6 +119,7 @@ function db_schema_mysql($pdo) {
         id INT NOT NULL AUTO_INCREMENT, nome VARCHAR(255) NOT NULL, categoria VARCHAR(191), cidade VARCHAR(120),
         contato VARCHAR(191), telefone VARCHAR(60), whatsapp VARCHAR(60), email VARCHAR(191),
         itens TEXT, tipo VARCHAR(60), cnpj VARCHAR(40), contatos_at TEXT, ativo INT DEFAULT 1, ext_id VARCHAR(64), created_at VARCHAR(40),
+        wa_e164 VARCHAR(20), wa_tipo VARCHAR(12), wa_nota VARCHAR(191), wa_origem VARCHAR(20),
         PRIMARY KEY (id), KEY idx_forn_cat (categoria)
     ) $E");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao (
@@ -401,6 +402,9 @@ function db_schema_mysql($pdo) {
         if ($ac && !isset($ac['url'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN url VARCHAR(500)");   // anexo por LINK (ex.: PDF importado do storage antigo) — sem arquivo local
         $fc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cot_fornecedor'") as $c) $fc[$c['COLUMN_NAME']] = true;
         if ($fc && !isset($fc['contatos_at'])) $pdo->exec("ALTER TABLE cot_fornecedor ADD COLUMN contatos_at TEXT");
+        // qualidade do número p/ WhatsApp: E.164 normalizado + se é celular/fixo + por que + de onde veio
+        foreach (['wa_e164' => 'VARCHAR(20)', 'wa_tipo' => 'VARCHAR(12)', 'wa_nota' => 'VARCHAR(191)', 'wa_origem' => 'VARCHAR(20)'] as $c => $t)
+            if ($fc && !isset($fc[$c])) $pdo->exec("ALTER TABLE cot_fornecedor ADD COLUMN $c $t");
         $cfc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cotacao_fornecedor'") as $c) $cfc[$c['COLUMN_NAME']] = true;
         if ($cfc && !isset($cfc['enviado_em'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN enviado_em VARCHAR(40)");
         if ($cfc && !isset($cfc['enviado_canal'])) $pdo->exec("ALTER TABLE cotacao_fornecedor ADD COLUMN enviado_canal VARCHAR(20)");
@@ -569,7 +573,9 @@ function db_schema($pdo) {
 
     // ---- MAPA DE COTAÇÕES (reconstruído no cockpit) ----
     $pdo->exec("CREATE TABLE IF NOT EXISTS cot_categoria (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL UNIQUE, ext_id TEXT, created_at TEXT)");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS cot_fornecedor (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, categoria TEXT, cidade TEXT, contato TEXT, telefone TEXT, whatsapp TEXT, email TEXT, itens TEXT, tipo TEXT, cnpj TEXT, contatos_at TEXT, ativo INTEGER DEFAULT 1, ext_id TEXT, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cot_fornecedor (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, categoria TEXT, cidade TEXT, contato TEXT, telefone TEXT, whatsapp TEXT, email TEXT, itens TEXT, tipo TEXT, cnpj TEXT, contatos_at TEXT, ativo INTEGER DEFAULT 1, ext_id TEXT, created_at TEXT, wa_e164 TEXT, wa_tipo TEXT, wa_nota TEXT, wa_origem TEXT)");
+    $fcols = []; foreach ($pdo->query("PRAGMA table_info(cot_fornecedor)") as $c) $fcols[$c['name']] = true;
+    foreach (['wa_e164','wa_tipo','wa_nota','wa_origem'] as $col) if (!isset($fcols[$col])) $pdo->exec("ALTER TABLE cot_fornecedor ADD COLUMN $col TEXT");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao (id INTEGER PRIMARY KEY AUTOINCREMENT, obra_id INTEGER, servico_id INTEGER, titulo TEXT NOT NULL, apelido TEXT, colaboradores TEXT, categoria TEXT, tipo_servico TEXT, verba REAL, verba_origem TEXT, descricao TEXT, equalizacao TEXT, num_solicitacao TEXT, num_pedido TEXT, solic_coligada TEXT, solic_obra_cod TEXT, status TEXT DEFAULT 'rascunho', aprovacao TEXT DEFAULT 'aguardando', criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_item (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, quantidade REAL, observacao TEXT, ordem INTEGER)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, prazo TEXT, observacoes TEXT, equaliza TEXT, data_resposta TEXT, total REAL, revisao INTEGER DEFAULT 0, raiz_id INTEGER, ativa INTEGER DEFAULT 1, opcao INTEGER DEFAULT 1, opcao_rotulo TEXT, created_at TEXT)");

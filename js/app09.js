@@ -1,29 +1,25 @@
-/* ═══════════ ASSISTENTE DE WHATSAPP — kanban + conversa ═══════════
-   O kanban não é funil de venda: as colunas são ESTADOS DA CONVERSA. "Em fila" existe porque o
-   WhatsApp tem uma thread por número — se o mesmo fornecedor está em duas cotações, uma espera.
-   "Dúvida IA" é onde a assistente desiste e chama gente, que é o comportamento que a gente quer:
-   melhor ela parar do que improvisar em nome da Caprem. */
+/* ═══════════ ASSISTENTE DE WHATSAPP ═══════════
+   DOIS NÍVEIS, e a ordem importa:
 
-let WA = { kanban:null, conv:null, q:'', carregando:false, enviando:false };
+   1) PAINEL — um card por COTAÇÃO. É assim que o comprador pensa: "disparei a SC 3609 para 10
+      fornecedores, 4 já responderam". A 1ª versão listava cada conversa solta e o Murilo cortou
+      na hora — dez cartões sem parentesco não dizem nada sobre a negociação.
+   2) NEGOCIAÇÃO ABERTA — fornecedores à esquerda (com o valor de cada proposta), conversa no
+      meio, detalhes/proposta à direita, e o mapa se montando conforme as respostas chegam.
+
+   O estado da cotação é DERIVADO das conversas: basta uma pedir socorro para a cotação inteira
+   aparecer em "Precisa de você". */
+
+let WA = { tela:'painel', painel:null, neg:null, convId:0, conv:null, q:'', carregando:false, enviando:false };
 
 const WA_COR = { em_fila:'#8a9299', aguardando:'#6b8fb5', ativa:'var(--verde)',
                  duvida_ia:'var(--pend)', parada:'#c0392b', concluida:'#5a6b60', falhou:'#c0392b' };
-const WA_ICONE = { em_fila:'schedule', aguardando:'hourglass_empty', ativa:'chat',
-                   duvida_ia:'priority_high', parada:'pause_circle', concluida:'check_circle', falhou:'error' };
+const WA_NCOR = { atencao:'var(--pend)', andamento:'var(--verde)', aguardando:'#6b8fb5', concluida:'#5a6b60' };
+const WA_NICO = { atencao:'priority_high', andamento:'trending_up', aguardando:'hourglass_empty', concluida:'check_circle' };
+const WA_EST  = { em_fila:'Em fila', aguardando:'Aguardando', ativa:'Ativa', duvida_ia:'Dúvida IA',
+                  parada:'Parada', concluida:'Concluída', falhou:'Falhou' };
 
-function waInit(){ waKanban(); }
-
-async function waKanban(){
-  WA.carregando=true; waRender();
-  try{
-    const p=new URLSearchParams({kanban:'1', me:(EU&&EU.bitrix_id)||''});
-    if(WA.q) p.set('q',WA.q);
-    WA.kanban=await (await fetch('actions/whats.php?'+p)).json();
-  }catch(e){ WA.kanban={error:'Falha ao carregar: '+e.message}; }
-  WA.carregando=false; waRender();
-}
-
-function waBusca(){ const e=document.getElementById('waQ'); WA.q=e?e.value.trim():''; waKanban(); }
+function waInit(){ WA.tela='painel'; waPainel(); }
 
 function waQuando(iso){
   if(!iso) return '';
@@ -33,189 +29,285 @@ function waQuando(iso){
   const h=Math.floor(min/60); if(h<24) return h+'h';
   return Math.floor(h/24)+'d';
 }
+function waRS(v){ return v===null||v===undefined ? '—' : 'R$ '+(+v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+/* ─────────────── NÍVEL 1: PAINEL DE NEGOCIAÇÕES ─────────────── */
+async function waPainel(){
+  WA.tela='painel'; WA.carregando=true; waRender();
+  try{
+    const p=new URLSearchParams({negociacoes:'1', me:(EU&&EU.bitrix_id)||''});
+    if(WA.q) p.set('q',WA.q);
+    WA.painel=await (await fetch('actions/whats.php?'+p)).json();
+  }catch(e){ WA.painel={error:'Falha ao carregar: '+e.message}; }
+  WA.carregando=false; waRender();
+}
+function waBusca(){ const e=document.getElementById('waQ'); WA.q=e?e.value.trim():''; waPainel(); }
 
 function waRender(){
   const w=document.getElementById('waWrap'); if(!w) return;
-  const k=WA.kanban;
+  if(WA.tela==='negociacao'){ waNegRender(); return; }
+  const k=WA.painel;
   if(WA.carregando && !k){ w.innerHTML='<div class="dempty">Carregando…</div>'; return; }
   if(!k || k.error){ w.innerHTML='<div class="dempty">'+esc((k&&k.error)||'Falha')+'</div>'; return; }
 
   let h='';
   if(k.modo==='simulador')
     h+='<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:9px 12px;border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:12px">'
-     + '<b>Modo simulador.</b> Nenhuma mensagem sai de verdade — dá para testar a conversa inteira antes de o número da Meta existir. '
-     + 'Dentro da conversa você pode escrever <b>como se fosse o fornecedor</b> e ver a assistente responder. '
+     + '<b>Modo simulador.</b> Nenhuma mensagem sai de verdade. Dentro de cada conversa você pode responder <b>como se fosse o fornecedor</b> e ver a assistente trabalhar. '
      + (IS_ADMIN?'O modo real liga em Configurações › IA &amp; WhatsApp.':'')+'</div>';
 
   h+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">'
    + '<div class="search" style="border:1px solid var(--line);flex:1 1 260px;max-width:420px"><span class="material-icons" style="color:var(--muted)">search</span>'
-   + '<input id="waQ" value="'+esc(WA.q)+'" placeholder="fornecedor, número ou cotação…" onkeydown="if(event.key===\'Enter\')waBusca()"></div>'
+   + '<input id="waQ" value="'+esc(WA.q)+'" placeholder="cotação, solicitação ou obra…" onkeydown="if(event.key===\'Enter\')waBusca()"></div>'
    + '<button class="btn-ghost" style="padding:6px 12px;font-size:12.5px" onclick="waBusca()">Filtrar</button>'
-   + '<button class="btn-ghost" style="padding:6px 12px;font-size:12.5px" onclick="waKanban()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">refresh</span> Atualizar</button>'
-   + '</div>';
+   + '<button class="btn-ghost" style="padding:6px 12px;font-size:12.5px" onclick="waPainel()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">refresh</span> Atualizar</button></div>';
 
-  const ordem=['duvida_ia','ativa','aguardando','em_fila','parada','concluida','falhou'];
+  const ordem=['atencao','andamento','aguardando','concluida'];
   h+='<div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:6px;align-items:flex-start">';
   let vazio=true;
   for(const est of ordem){
     const cs=(k.colunas&&k.colunas[est])||[];
-    if(!cs.length && ['falhou','parada','concluida'].includes(est)) continue;   // colunas frias só aparecem com conteúdo
+    if(!cs.length && est==='concluida') continue;
     if(cs.length) vazio=false;
-    const cor=WA_COR[est]||'#8a9299';
-    h+='<div style="flex:0 0 268px;background:#f6f8f7;border-radius:11px;padding:9px;max-height:66vh;display:flex;flex-direction:column">'
+    const cor=WA_NCOR[est];
+    h+='<div style="flex:0 0 300px;background:#f6f8f7;border-radius:11px;padding:9px;max-height:68vh;display:flex;flex-direction:column">'
      + '<div style="display:flex;align-items:center;gap:6px;padding:2px 4px 9px">'
-     +   '<span class="material-icons" style="font-size:16px;color:'+cor+'">'+(WA_ICONE[est]||'chat')+'</span>'
-     +   '<b style="font-size:12.5px">'+esc(k.rotulos[est]||est)+'</b>'
+     +   '<span class="material-icons" style="font-size:16px;color:'+cor+'">'+WA_NICO[est]+'</span>'
+     +   '<b style="font-size:12.5px">'+esc(k.rotulos[est])+'</b>'
      +   '<span style="margin-left:auto;background:'+cor+';color:#fff;border-radius:9px;padding:0 7px;font-size:11px;font-weight:700">'+cs.length+'</span></div>'
-     + '<div style="overflow-y:auto;display:flex;flex-direction:column;gap:7px">';
-    for(const c of cs){
-      h+='<div onclick="waAbrir('+c.id+')" style="background:#fff;border:1px solid var(--line);border-left:3px solid '+cor+';border-radius:9px;padding:8px 10px;cursor:pointer">'
-       + '<div style="display:flex;align-items:center;gap:5px"><b style="font-size:12.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(c.fornecedor||'—')+'</b>'
-       +   (c.nao_lidas?'<span style="background:var(--verde);color:#fff;border-radius:9px;padding:0 6px;font-size:10.5px;font-weight:700">'+c.nao_lidas+'</span>':'')+'</div>'
-       + '<div class="dmini" style="color:var(--muted);margin-top:2px">'+esc(c.numero||'')+'</div>'
-       + (c.cotacao?'<div class="dmini" style="color:var(--muted);margin-top:2px">'+esc(String(c.cotacao).slice(0,34))+(c.obra?(' · '+esc(c.obra)):'')+'</div>':'')
-       + (c.fila_pos!==null&&c.fila_pos!==undefined?'<div class="dmini" style="color:var(--dourado);margin-top:3px">aguardando a vez · posição '+c.fila_pos+'</div>':'')
-       + (est==='duvida_ia'&&c.motivo?'<div class="dmini" style="color:var(--pend);margin-top:3px">'+esc(String(c.motivo).slice(0,70))+'</div>':'')
-       + '<div style="display:flex;align-items:center;gap:6px;margin-top:5px">'
-       +   (c.dono==='humano'?'<span class="dchip" style="background:#6b8fb5">na mão</span>':'')
-       +   (!c.janela_aberta&&['ativa','aguardando'].includes(est)?'<span class="dchip" style="background:#8a9299" title="fora das 24h: só template aprovado passa">janela fechada</span>':'')
-       +   '<span class="dmini" style="margin-left:auto;color:var(--muted)">'+esc(waQuando(c.ultima))+'</span></div>'
+     + '<div style="overflow-y:auto;display:flex;flex-direction:column;gap:8px">';
+    for(const g of cs){
+      const pct = g.total ? Math.round(g.responderam/g.total*100) : 0;
+      h+='<div onclick="waAbrirNegociacao('+g.cotacao_id+')" style="background:#fff;border:1px solid var(--line);border-left:3px solid '+cor+';border-radius:9px;padding:9px 11px;cursor:pointer">'
+       + '<div style="display:flex;align-items:center;gap:5px"><b style="font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(g.titulo)+'</b>'
+       +   (g.nao_lidas?'<span style="background:var(--verde);color:#fff;border-radius:9px;padding:0 6px;font-size:10.5px;font-weight:700">'+g.nao_lidas+'</span>':'')+'</div>'
+       + '<div class="dmini" style="color:var(--muted);margin-top:2px">'
+       +   (g.obra?esc(g.obra):'')+(g.solicitacao?(' · SC '+esc(g.solicitacao)):'')+'</div>'
+       // barra de respostas: é o número que o comprador procura primeiro
+       + '<div style="margin-top:7px"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">'
+       +   '<span class="muted"><b style="color:var(--texto)">'+g.responderam+'</b> de '+g.total+' responderam</span>'
+       +   (g.propostas?('<span class="muted">'+g.propostas+' proposta(s)</span>'):'')+'</div>'
+       +   '<div style="height:5px;background:#e8ecea;border-radius:3px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+cor+'"></div></div></div>'
+       + (g.melhor!==null?('<div style="margin-top:7px;font-size:12px"><span class="muted">melhor até agora</span> <b>'+esc(waRS(g.melhor))+'</b>'
+       +   (g.economia?('<span class="dchip" style="background:var(--verde);margin-left:6px">'+g.economia+'% abaixo do maior</span>'):'')+'</div>'):'')
+       + '<div style="display:flex;align-items:center;gap:6px;margin-top:6px">'
+       +   (g.duvida?('<span class="dchip" style="background:var(--pend)">'+g.duvida+' pedindo ajuda</span>'):'')
+       +   (g.fila?('<span class="dchip" style="background:#8a9299">'+g.fila+' na fila</span>'):'')
+       +   '<span class="dmini" style="margin-left:auto;color:var(--muted)">'+esc(waQuando(g.ultima))+'</span></div>'
        + '</div>';
     }
     if(!cs.length) h+='<div class="dmini" style="color:var(--muted);padding:6px 4px">vazio</div>';
     h+='</div></div>';
   }
   h+='</div>';
-  if(vazio) h+='<div class="dempty" style="margin-top:14px">Nenhuma conversa ainda. Abra uma cotação, convide os fornecedores e use <b>“Disparar no WhatsApp”</b>.</div>';
+  if(vazio) h+='<div class="dempty" style="margin-top:14px">Nenhuma negociação ainda. Abra uma cotação, convide os fornecedores e use <b>“Disparar no WhatsApp”</b>.</div>';
   w.innerHTML=h;
 }
 
-/* ───────────── CONVERSA ───────────── */
-async function waAbrir(id){
-  dlgAbrir('Assistente','Conversa','<div style="max-width:820px"><div class="dempty">Abrindo…</div></div>');
-  try{ WA.conv=await (await fetch('actions/whats.php?conversa='+id+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json(); }
-  catch(e){ WA.conv={error:e.message}; }
-  waConvRender();
+/* ─────────────── NÍVEL 2: A NEGOCIAÇÃO ABERTA ─────────────── */
+async function waAbrirNegociacao(cotacaoId){
+  WA.tela='negociacao'; WA.neg=null; WA.conv=null; WA.convId=0;
+  const w=document.getElementById('waWrap'); if(w) w.innerHTML='<div class="dempty">Abrindo negociação…</div>';
+  try{ WA.neg=await (await fetch('actions/whats.php?negociacao='+cotacaoId+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json(); }
+  catch(e){ WA.neg={error:e.message}; }
+  const f=(WA.neg&&WA.neg.fornecedores)||[];
+  if(f.length){ const alvo=f.find(x=>x.nao_lidas>0)||f.find(x=>x.estado==='duvida_ia')||f[0]; await waCarregarConversa(alvo.id); }
+  else waNegRender();
 }
 
-function waConvRender(){
-  const d=WA.conv;
-  if(!d || d.error){ dlgAbrir('Assistente','Conversa','<div style="max-width:600px"><div class="dempty">'+esc((d&&d.error)||'Falha')+'</div></div>'); return; }
-  const c=d.conversa;
-  let h='<div style="max-width:840px">';
+async function waCarregarConversa(id){
+  WA.convId=id;
+  try{ WA.conv=await (await fetch('actions/whats.php?conversa='+id+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json(); }
+  catch(e){ WA.conv={error:e.message}; }
+  waNegRender();
+}
 
-  h+='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px">'
-   + '<div style="min-width:0"><b style="font-size:14.5px">'+esc(c.fornecedor||'—')+'</b>'
-   +   '<div class="dmini" style="color:var(--muted)">'+esc(c.numero)+(c.cotacao?(' · '+esc(c.cotacao)):'')+(c.obra?(' · '+esc(c.obra)):'')+'</div></div>'
-   + '<div style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
-   +   '<span class="dchip" style="background:'+(WA_COR[c.estado]||'#8a9299')+'">'+esc((WA.kanban&&WA.kanban.rotulos&&WA.kanban.rotulos[c.estado])||c.estado)+'</span>'
-   +   (c.dono==='humano'?'<span class="dchip" style="background:#6b8fb5">você assumiu</span>':'<span class="dchip" style="background:var(--verde)">assistente</span>')
+function waNegRender(){
+  const w=document.getElementById('waWrap'); if(!w) return;
+  const n=WA.neg;
+  if(!n || n.error){ w.innerHTML='<div class="dempty">'+esc((n&&n.error)||'Falha')+'</div>'; return; }
+  const c=n.cotacao, forn=n.fornecedores||[];
+  const respondeu=forn.filter(f=>f.total!==null||['ativa','concluida'].includes(f.estado)).length;
+
+  let h='';
+  // ── cabeçalho da negociação ──
+  h+='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">'
+   + '<button class="btn-ghost" style="padding:6px 11px" onclick="waPainel()"><span class="material-icons" style="font-size:17px;vertical-align:-4px">arrow_back</span></button>'
+   + '<div style="min-width:0"><b style="font-size:16px">'+esc(c.titulo)+'</b>'
+   +   '<div class="dmini" style="color:var(--muted)">'+(c.obra?esc(c.obra):'')+(c.solicitacao?(' · SC '+esc(c.solicitacao)):'')+' · '+n.itens.length+' item(ns)</div></div>'
+   + '<div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+   +   '<div style="text-align:right"><div class="dmini" style="color:var(--muted)">respostas</div><b style="font-size:14px">'+respondeu+' de '+forn.length+'</b></div>'
+   +   (n.melhor!==null?'<div style="text-align:right;padding-left:14px;border-left:1px solid var(--line)"><div class="dmini" style="color:var(--muted)">melhor proposta</div><b style="font-size:14px;color:var(--verde-d)">'+esc(waRS(n.melhor))+'</b></div>':'')
+   +   '<button class="btn-prim" style="padding:7px 13px;font-size:12.5px" onclick="cotAbrir('+c.id+')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">table_chart</span> Mapa de cotação</button>'
    + '</div></div>';
 
-  if(!c.janela_aberta)
-    h+='<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:8px 12px;border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:10px">'
-     + '<b>Janela de 24h fechada.</b> A Meta só deixa mandar texto livre até 24h depois da última mensagem do fornecedor. '
-     + 'Agora, só um <b>template aprovado</b> reabre a conversa.</div>';
-  if(c.motivo)
-    h+='<div style="border-left:4px solid var(--pend);background:#fdeeee;padding:8px 12px;border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:10px">'
-     + '<b>A assistente pediu ajuda:</b> '+esc(c.motivo)+'</div>';
+  // ── três colunas: fornecedores | conversa | proposta ──
+  h+='<div style="display:flex;gap:12px;align-items:stretch;height:calc(100vh - 250px);min-height:440px">';
 
-  // ── histórico ──
-  h+='<div id="waMsgs" style="border:1px solid var(--line);border-radius:10px;padding:12px;max-height:44vh;overflow:auto;background:#f7f9f8">';
+  // 1) lista de fornecedores
+  h+='<div style="flex:0 0 262px;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#fff">'
+   + '<div style="padding:9px 11px;border-bottom:1px solid var(--line);background:#f6f8f7"><b style="font-size:12.5px">Fornecedores</b>'
+   +   '<span class="muted" style="font-size:11.5px;margin-left:6px">'+forn.length+'</span></div>'
+   + '<div style="overflow-y:auto;flex:1">';
+  for(const f of forn){
+    const sel=f.id===WA.convId;
+    h+='<div onclick="waCarregarConversa('+f.id+')" style="padding:9px 11px;border-bottom:1px solid var(--line);cursor:pointer;'
+     +   (sel?'background:#eef5f1;border-left:3px solid var(--verde)':'border-left:3px solid transparent')+'">'
+     + '<div style="display:flex;align-items:center;gap:5px">'
+     +   '<b style="font-size:12.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(f.fornecedor)+'</b>'
+     +   (f.nao_lidas?'<span style="background:var(--verde);color:#fff;border-radius:9px;padding:0 5px;font-size:10px;font-weight:700">'+f.nao_lidas+'</span>':'')+'</div>'
+     + (f.total!==null?('<div style="font-size:12.5px;margin-top:2px"><b>'+esc(waRS(f.total))+'</b>'
+     +   (f.melhor?'<span class="dchip" style="background:var(--verde);margin-left:5px">melhor</span>':'')+'</div>')
+     :  '<div class="dmini" style="color:var(--muted);margin-top:2px">sem proposta ainda</div>')
+     + '<div style="display:flex;align-items:center;gap:5px;margin-top:4px">'
+     +   '<span class="dchip" style="background:'+(WA_COR[f.estado]||'#8a9299')+'">'+esc(WA_EST[f.estado]||f.estado)+'</span>'
+     +   (f.fila_pos!==null&&f.fila_pos!==undefined?'<span class="dmini" style="color:var(--dourado)">vez '+f.fila_pos+'</span>':'')
+     +   (f.nao_fornece&&f.nao_fornece.length?'<span class="dmini" style="color:var(--muted)">'+f.nao_fornece.length+' item(ns) não</span>':'')
+     + '</div></div>';
+  }
+  if(!forn.length) h+='<div class="dmini" style="color:var(--muted);padding:12px">nenhum fornecedor nesta negociação</div>';
+  h+='</div></div>';
+
+  // 2) conversa
+  h+='<div style="flex:1;min-width:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#fff">'
+   + waConvPainel()
+   + '</div>';
+
+  // 3) detalhes da proposta
+  h+='<div style="flex:0 0 258px;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#fff">'
+   + waPropostaPainel()
+   + '</div>';
+
+  h+='</div>';
+  w.innerHTML=h;
+  const box=document.getElementById('waMsgs'); if(box) box.scrollTop=box.scrollHeight;
+}
+
+function waConvPainel(){
+  const d=WA.conv;
+  if(!d) return '<div class="dempty" style="margin:auto">Escolha um fornecedor à esquerda.</div>';
+  if(d.error) return '<div class="dempty" style="margin:auto">'+esc(d.error)+'</div>';
+  const c=d.conversa;
+  let h='';
+  h+='<div style="padding:9px 12px;border-bottom:1px solid var(--line);background:#f6f8f7;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+   + '<div style="min-width:0"><b style="font-size:13.5px">'+esc(c.fornecedor)+'</b>'
+   +   '<div class="dmini" style="color:var(--muted)">'+esc(c.numero)+'</div></div>'
+   + '<div style="margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap">'
+   +   (c.dono==='humano'?'<span class="dchip" style="background:#6b8fb5">você assumiu</span>':'<span class="dchip" style="background:var(--verde)">assistente</span>')
+   +   (c.dono==='ia'
+        ? '<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="waAcao(\'assumir\')">Assumir</button>'
+        : '<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="waAcao(\'devolver_ia\')">Devolver p/ IA</button>')
+   +   (c.estado!=='parada'?'<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="waAcao(\'parar\')">Parar</button>'
+                           :'<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="waAcao(\'retomar\')">Retomar</button>')
+   +   (c.estado!=='concluida'?'<button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="waAcao(\'concluir\')">Encerrar</button>':'')
+   + '</div></div>';
+
+  if(c.motivo)
+    h+='<div style="border-left:4px solid var(--pend);background:#fdeeee;padding:7px 11px;font-size:12px"><b>A assistente pediu ajuda:</b> '+esc(c.motivo)+'</div>';
+  if(!c.janela_aberta)
+    h+='<div style="border-left:4px solid var(--dourado);background:#fdf9ec;padding:7px 11px;font-size:12px">'
+     + '<b>Janela de 24h fechada</b> — só um template aprovado reabre a conversa.</div>';
+
+  h+='<div id="waMsgs" style="flex:1;overflow-y:auto;padding:12px;background:#f7f9f8">';
   for(const m of (d.mensagens||[])){
-    if(m.tipo==='sistema'){
-      h+='<div class="dmini" style="text-align:center;color:var(--muted);margin:8px 0">'+esc(m.texto)+'</div>'; continue;
-    }
+    if(m.tipo==='sistema'){ h+='<div class="dmini" style="text-align:center;color:var(--muted);margin:8px 0">'+esc(m.texto)+'</div>'; continue; }
     const meu=m.direcao==='out';
-    const bg = meu ? (m.autor==='ia'?'#e3f0e8':'#dbe7f3') : '#fff';
+    const bg=meu?(m.autor==='ia'?'#e3f0e8':'#dbe7f3'):'#fff';
     h+='<div style="display:flex;justify-content:'+(meu?'flex-end':'flex-start')+';margin-bottom:7px">'
-     + '<div style="max-width:74%;background:'+bg+';border:1px solid var(--line);border-radius:11px;padding:7px 11px">'
+     + '<div style="max-width:78%;background:'+bg+';border:1px solid var(--line);border-radius:11px;padding:7px 11px">'
      +   (meu?'<div class="dmini" style="color:var(--muted);margin-bottom:2px">'+esc(m.autor==='ia'?'Assistente':(m.autor_nome||'você'))+(m.tipo==='template'?' · template':'')+'</div>':'')
      +   '<div style="font-size:13px;white-space:pre-wrap">'+esc(m.texto||'')+'</div>'
      +   '<div class="dmini" style="color:var(--muted);margin-top:3px;text-align:right">'+esc(waQuando(m.quando))
      +     (m.status==='falhou'?' · <span style="color:var(--pend)">falhou</span>':'')+'</div>'
-     +   (m.erro?'<div class="dmini" style="color:var(--pend)">'+esc(m.erro)+'</div>':'')
      + '</div></div>';
   }
   h+='</div>';
 
-  // ── proposta coletada ──
-  if(c.proposta && (c.proposta.total || c.proposta.prazo_entrega)){
-    const p=c.proposta;
-    h+='<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:10px;background:#fbfdfc">'
-     + '<b style="font-size:12.5px">O que a assistente coletou</b>'
-     + '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px;font-size:12.5px">'
-     +   (p.total?'<div><span class="muted">total</span> <b>R$ '+esc(String(p.total))+'</b></div>':'')
-     +   (p.prazo_entrega?'<div><span class="muted">entrega</span> <b>'+esc(p.prazo_entrega)+'</b></div>':'')
-     +   (p.pagamento?'<div><span class="muted">pagamento</span> <b>'+esc(p.pagamento)+'</b></div>':'')
-     +   (p.frete?'<div><span class="muted">frete</span> <b>'+esc(p.frete)+'</b></div>':'')
-     + '</div>'
-     + '<div class="dmini" style="color:var(--muted);margin-top:6px">Ainda não entrou no mapa — a decisão de lançar é do comprador.</div></div>';
-  }
-
-  // ── ações ──
-  const podeEscrever = c.estado!=='concluida';
-  h+='<div style="margin-top:10px">';
-  if(podeEscrever){
-    h+='<div style="display:flex;gap:6px;align-items:flex-end">'
-     + '<textarea id="waTxt" rows="2" placeholder="Escrever como Caprem…" style="flex:1;padding:7px 9px;font-size:13px;resize:vertical;box-sizing:border-box"></textarea>'
-     + '<button class="btn-prim" style="padding:8px 14px" onclick="waResponder()">Enviar</button></div>';
+  if(c.estado!=='concluida'){
+    h+='<div style="padding:9px;border-top:1px solid var(--line)">'
+     + '<div style="display:flex;gap:6px"><input id="waTxt" placeholder="Escrever como Caprem…" style="flex:1;padding:7px 9px;font-size:13px" onkeydown="if(event.key===\'Enter\')waResponder()">'
+     + '<button class="btn-prim" style="padding:7px 13px" onclick="waResponder()">Enviar</button></div>';
     if(d.modo==='simulador')
-      h+='<div style="display:flex;gap:6px;align-items:flex-end;margin-top:8px;border-top:1px dashed var(--line);padding-top:8px">'
-       + '<textarea id="waSim" rows="2" placeholder="Escrever COMO SE FOSSE o fornecedor (só no simulador)…" style="flex:1;padding:7px 9px;font-size:13px;background:#fffdf5;resize:vertical;box-sizing:border-box"></textarea>'
-       + '<button class="btn-ghost" style="padding:8px 14px" onclick="waSimular()">Responder como fornecedor</button></div>';
+      h+='<div style="display:flex;gap:6px;margin-top:7px"><input id="waSim" placeholder="Responder COMO SE FOSSE o fornecedor…" style="flex:1;padding:7px 9px;font-size:13px;background:#fffdf5" onkeydown="if(event.key===\'Enter\')waSimular()">'
+       + '<button class="btn-ghost" style="padding:7px 13px;white-space:nowrap" onclick="waSimular()">Como fornecedor</button></div>';
+    h+='</div>';
   }
-  h+='<div class="bar" style="gap:6px;margin-top:12px;flex-wrap:wrap">'
-   + (c.dono==='ia'
-      ? '<button class="btn-ghost" style="padding:5px 12px;font-size:12.5px" onclick="waAcao(\'assumir\')">Assumir na mão (para a assistente)</button>'
-      : '<button class="btn-ghost" style="padding:5px 12px;font-size:12.5px" onclick="waAcao(\'devolver_ia\')">Devolver para a assistente</button>')
-   + (c.estado!=='parada'?'<button class="btn-ghost" style="padding:5px 12px;font-size:12.5px" onclick="waAcao(\'parar\')">Parar</button>':'<button class="btn-ghost" style="padding:5px 12px;font-size:12.5px" onclick="waAcao(\'retomar\')">Retomar</button>')
-   + (c.estado!=='concluida'?'<button class="btn-ghost" style="padding:5px 12px;font-size:12.5px" onclick="waAcao(\'concluir\')">Encerrar</button>':'')
-   + '<button class="btn-prim" style="margin-left:auto;padding:5px 12px;font-size:12.5px" onclick="closeModal(true);waKanban()">Fechar</button></div>';
-  h+='</div></div>';
-  dlgAbrir('Assistente','Conversa', h);
-  const box=document.getElementById('waMsgs'); if(box) box.scrollTop=box.scrollHeight;
+  return h;
 }
 
+function waPropostaPainel(){
+  const d=WA.conv;
+  if(!d||d.error||!d.conversa) return '<div class="dmini" style="color:var(--muted);padding:12px">—</div>';
+  const c=d.conversa, p=c.proposta||{};
+  const n=WA.neg, itens=(n&&n.itens)||[];
+  const f=(n&&n.fornecedores||[]).find(x=>x.id===c.id)||{};
+  let h='<div style="padding:10px 12px;border-bottom:1px solid var(--line);background:#f6f8f7"><b style="font-size:12.5px">Proposta do fornecedor</b></div>'
+      + '<div style="overflow-y:auto;flex:1;padding:11px 12px">';
+  if(!p.total && !p.prazo_entrega){
+    h+='<div class="dmini" style="color:var(--muted)">Nada coletado ainda. O que a assistente extrair da conversa aparece aqui.</div>';
+  } else {
+    const linha=(r,v)=>v?'<div style="display:flex;justify-content:space-between;gap:8px;font-size:12.5px;margin-bottom:6px"><span class="muted">'+r+'</span><b style="text-align:right">'+esc(String(v))+'</b></div>':'';
+    h+='<div style="background:#eef5f1;border-radius:9px;padding:10px;margin-bottom:10px;text-align:center">'
+     + '<div class="dmini" style="color:var(--muted)">valor total</div>'
+     + '<b style="font-size:19px;color:var(--verde-d)">'+esc(waRS(p.total))+'</b>'
+     + (f.melhor?'<div><span class="dchip" style="background:var(--verde);margin-top:5px">melhor proposta</span></div>':'')
+     + '</div>'
+     + linha('Prazo de entrega',p.prazo_entrega) + linha('Pagamento',p.pagamento) + linha('Frete',p.frete);
+  }
+  if(f.nao_fornece&&f.nao_fornece.length){
+    h+='<div style="border-top:1px dashed var(--line);margin-top:10px;padding-top:9px">'
+     + '<div class="dmini" style="color:var(--muted);margin-bottom:5px">Não trabalha com</div>';
+    for(const i of f.nao_fornece){
+      const it=itens[(+i)-1];
+      h+='<div class="dmini" style="color:var(--pend)">• '+esc(it?String(it.descricao).slice(0,44):('item '+i))+'</div>';
+    }
+    h+='</div>';
+  }
+  h+='<div class="dmini" style="color:var(--muted);margin-top:12px;border-top:1px dashed var(--line);padding-top:9px">'
+   + 'Ainda <b>não entrou no mapa</b> — lançar a proposta é decisão do comprador.</div>';
+  h+='</div>';
+  return h;
+}
+
+/* ─────────────── AÇÕES ─────────────── */
 async function waPost(body){
-  const r=await (await fetch('actions/whats.php',{method:'POST',headers:{'Content-Type':'application/json'},
+  return await (await fetch('actions/whats.php',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(Object.assign({me:EU&&EU.bitrix_id}, body))})).json();
-  return r;
 }
-
+async function waRecarregar(){
+  const cid=WA.neg&&WA.neg.cotacao&&WA.neg.cotacao.id;
+  if(!cid) return;
+  try{ WA.neg=await (await fetch('actions/whats.php?negociacao='+cid+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json(); }catch(e){}
+  await waCarregarConversa(WA.convId);
+}
 async function waResponder(){
   const t=document.getElementById('waTxt'); const txt=t?t.value.trim():'';
-  if(!txt) return;
-  if(WA.enviando) return; WA.enviando=true;
-  const r=await waPost({acao:'responder', id:WA.conv.conversa.id, texto:txt});
+  if(!txt||WA.enviando) return; WA.enviando=true; t.value='';
+  const r=await waPost({acao:'responder', id:WA.convId, texto:txt});
   WA.enviando=false;
   if(r.error||r.erro){ toast(r.error||r.erro); return; }
-  waAbrir(WA.conv.conversa.id);
+  waRecarregar();
 }
-
 async function waSimular(){
   const t=document.getElementById('waSim'); const txt=t?t.value.trim():'';
-  if(!txt) return;
-  if(WA.enviando) return; WA.enviando=true;
-  t.disabled=true; t.value='';
+  if(!txt||WA.enviando) return; WA.enviando=true; t.value=''; t.disabled=true;
   toast('A assistente está pensando…');
-  const r=await waPost({acao:'simular_entrada', id:WA.conv.conversa.id, texto:txt});
+  const r=await waPost({acao:'simular_entrada', id:WA.convId, texto:txt});
   WA.enviando=false;
   if(r.error){ toast(r.error); t.disabled=false; return; }
   const a=r.assistente;
   if(a&&a.erro) toast('A assistente falhou: '+a.erro);
-  else if(a&&a.acao==='chamar_humano') toast('A assistente pediu ajuda — a conversa foi para “Dúvida IA”.');
-  else if(a&&a.acao==='concluir') toast('A assistente encerrou a conversa.');
-  waAbrir(WA.conv.conversa.id);
+  else if(a&&a.acao==='chamar_humano') toast('A assistente pediu ajuda.');
+  else if(a&&a.acao==='concluir') toast('A assistente encerrou com este fornecedor.');
+  waRecarregar();
 }
-
 async function waAcao(acao){
-  const rot={assumir:'assumir a conversa',devolver_ia:'devolver para a assistente',parar:'parar',retomar:'retomar',concluir:'encerrar'}[acao]||acao;
+  const rot={assumir:'assumir',devolver_ia:'devolver para a assistente',parar:'parar',retomar:'retomar',concluir:'encerrar'}[acao]||acao;
   if((acao==='parar'||acao==='concluir') && !confirm('Confirma '+rot+' esta conversa?')) return;
-  const r=await waPost({acao, id:WA.conv.conversa.id});
+  const r=await waPost({acao, id:WA.convId});
   if(r.error){ toast(r.error); return; }
-  if(r.promovida) toast('Conversa encerrada — a próxima da fila com este número foi liberada.');
-  waAbrir(WA.conv.conversa.id);
+  if(r.promovida) toast('Encerrada — a próxima da fila com este número foi liberada.');
+  waRecarregar();
 }
 
 /* Chamado do botão dentro da cotação: cria uma conversa por fornecedor convidado. */

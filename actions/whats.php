@@ -158,7 +158,101 @@ try {
         echo json_encode(['ok' => true, 'criadas' => $criadas, 'puladas' => $puladas, 'modo' => wa_modo()], JSON_UNESCAPED_UNICODE); exit;
     }
 
-    // ─────────────── KANBAN ───────────────
+    /* ─────────────── PAINEL: uma linha por COTAÇÃO, não por conversa ───────────────
+       A primeira versão listava cada conversa solta no kanban. Errado: quem dispara uma cotação
+       para 10 fornecedores quer ver UMA negociação andando, com "4 de 10 responderam" — não 10
+       cartões sem parentesco entre si. O estado da negociação é DERIVADO das conversas dela:
+       basta uma pedir socorro para a cotação inteira pedir atenção. */
+    if ($method === 'GET' && isset($_GET['negociacoes'])) {
+        $w = []; $a = [];
+        if (($q = trim((string)($_GET['q'] ?? ''))) !== '') {
+            $w[] = "(c.titulo LIKE ? OR c.num_solicitacao LIKE ? OR o.nome LIKE ?)";
+            $a[] = "%$q%"; $a[] = "%$q%"; $a[] = "%$q%";
+        }
+        $where = $w ? ('WHERE ' . implode(' AND ', $w)) : '';
+        $st = $pdo->prepare("SELECT v.*, c.titulo, c.num_solicitacao, c.categoria, o.nome AS obra
+                             FROM wa_conversa v LEFT JOIN cotacao c ON c.id=v.cotacao_id
+                             LEFT JOIN obra o ON o.id=c.obra_id $where ORDER BY v.cotacao_id, v.id");
+        $st->execute($a);
+        $porCot = [];
+        foreach ($st as $r) {
+            $cid = (int)$r['cotacao_id'];
+            if (!isset($porCot[$cid])) $porCot[$cid] = [
+                'cotacao_id' => $cid, 'titulo' => $r['titulo'] ?: ('Cotação ' . $cid),
+                'solicitacao' => $r['num_solicitacao'], 'obra' => $r['obra'], 'categoria' => $r['categoria'],
+                'total' => 0, 'responderam' => 0, 'concluidas' => 0, 'duvida' => 0, 'fila' => 0,
+                'paradas' => 0, 'propostas' => 0, 'melhor' => null, 'pior' => null,
+                'inicio' => $r['created_at'], 'ultima' => $r['ultima_msg_em'], 'nao_lidas' => 0];
+            $g =& $porCot[$cid];
+            $g['total']++;
+            $g['nao_lidas'] += (int)$r['nao_lidas'];
+            if ($r['ultima_msg_em'] && $r['ultima_msg_em'] > (string)$g['ultima']) $g['ultima'] = $r['ultima_msg_em'];
+            if ($r['estado'] === 'duvida_ia') $g['duvida']++;
+            if ($r['estado'] === 'em_fila')   $g['fila']++;
+            if ($r['estado'] === 'parada')    $g['paradas']++;
+            if ($r['estado'] === 'concluida') $g['concluidas']++;
+            if ($r['ultima_msg_dir'] === 'in' || in_array($r['estado'], ['ativa', 'concluida'], true)) $g['responderam']++;
+            $p = $r['proposta_json'] ? json_decode($r['proposta_json'], true) : null;
+            $tot = $p && !empty($p['total']) ? (float)$p['total'] : null;
+            if ($tot !== null && $tot > 0) {
+                $g['propostas']++;
+                if ($g['melhor'] === null || $tot < $g['melhor']) $g['melhor'] = $tot;
+                if ($g['pior'] === null || $tot > $g['pior'])     $g['pior'] = $tot;
+            }
+            unset($g);
+        }
+        // estado da NEGOCIAÇÃO derivado das conversas: uma pedindo socorro puxa a cotação inteira
+        $col = ['atencao' => [], 'andamento' => [], 'aguardando' => [], 'concluida' => []];
+        foreach ($porCot as $g) {
+            $ativas = $g['total'] - $g['concluidas'] - $g['paradas'];
+            if ($g['duvida'] > 0)            $e = 'atencao';
+            elseif ($ativas <= 0)            $e = 'concluida';
+            elseif ($g['responderam'] > 0)   $e = 'andamento';
+            else                             $e = 'aguardando';
+            $g['estado'] = $e;
+            $g['economia'] = ($g['melhor'] !== null && $g['pior'] !== null && $g['pior'] > 0)
+                ? round((1 - $g['melhor'] / $g['pior']) * 100, 1) : null;
+            $col[$e][] = $g;
+        }
+        foreach ($col as $k => $v) usort($col[$k], fn($x, $y) => strcmp((string)$y['ultima'], (string)$x['ultima']));
+        echo json_encode(['ok' => true, 'colunas' => $col, 'modo' => wa_modo(),
+            'rotulos' => ['atencao' => 'Precisa de você', 'andamento' => 'Recebendo propostas',
+                          'aguardando' => 'Aguardando resposta', 'concluida' => 'Encerradas']], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    /* Uma negociação aberta: as conversas daquele disparo + o resumo de preços. É a tela do print
+       — lista de fornecedores à esquerda, conversa no meio, proposta à direita. */
+    if ($method === 'GET' && isset($_GET['negociacao'])) {
+        $cid = (int)$_GET['negociacao'];
+        $c = $pdo->prepare("SELECT c.*, o.nome AS obra FROM cotacao c LEFT JOIN obra o ON o.id=c.obra_id WHERE c.id=? LIMIT 1");
+        $c->execute([$cid]); $cot = $c->fetch();
+        if (!$cot) { http_response_code(404); echo json_encode(['error' => 'cotação não encontrada']); exit; }
+        $it = $pdo->prepare("SELECT id, descricao, unidade, quantidade FROM cotacao_item WHERE cotacao_id=? ORDER BY ordem, id");
+        $it->execute([$cid]); $itens = $it->fetchAll();
+        $q = $pdo->prepare("SELECT * FROM wa_conversa WHERE cotacao_id=? ORDER BY id");
+        $q->execute([$cid]);
+        $forn = []; $melhor = null;
+        foreach ($q as $r) {
+            $p = $r['proposta_json'] ? json_decode($r['proposta_json'], true) : null;
+            $tot = $p && !empty($p['total']) ? (float)$p['total'] : null;
+            if ($tot !== null && $tot > 0 && ($melhor === null || $tot < $melhor)) $melhor = $tot;
+            $forn[] = ['id' => (int)$r['id'], 'fornecedor' => $r['fornecedor_nome'],
+                'numero' => fone_bonito((string)$r['wa_e164']), 'estado' => $r['estado'], 'dono' => $r['dono'],
+                'nao_lidas' => (int)$r['nao_lidas'], 'fila_pos' => $r['fila_pos'], 'motivo' => $r['motivo_duvida'],
+                'janela_aberta' => wa_janela_aberta($r), 'ultima' => $r['ultima_msg_em'],
+                'total' => $tot, 'proposta' => $p,
+                'nao_fornece' => $r['itens_faltantes'] ? (json_decode($r['itens_faltantes'], true) ?: []) : []];
+        }
+        foreach ($forn as &$f) $f['melhor'] = ($melhor !== null && $f['total'] !== null && abs($f['total'] - $melhor) < 0.005);
+        unset($f);
+        echo json_encode(['ok' => true, 'modo' => wa_modo(),
+            'cotacao' => ['id' => $cid, 'titulo' => $cot['titulo'], 'obra' => $cot['obra'],
+                          'solicitacao' => $cot['num_solicitacao'], 'categoria' => $cot['categoria'],
+                          'status' => $cot['status'], 'verba' => $cot['verba']],
+            'itens' => $itens, 'fornecedores' => $forn, 'melhor' => $melhor], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    // ─────────────── KANBAN (por conversa — mantido para busca por fornecedor) ───────────────
     if ($method === 'GET' && isset($_GET['kanban'])) {
         $w = []; $a = [];
         if (($q = trim((string)($_GET['q'] ?? ''))) !== '') {

@@ -380,6 +380,8 @@ try {
        editar, porque `cot_can_manage` compara criado_por com quem está logado. Serve também para
        o caso normal de alguém sair da empresa e as cotações dele precisarem de dono. */
     if ($acao === 'trocar_criador') {
+        // resolve aqui: cada bloco deste roteador dá exit, então $perms de outro bloco nunca chega
+        $perms = user_perms($pdo, $me);
         if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores.']); exit; }
         $cid = (int)($in['cotacao_id'] ?? 0);
         $novo = trim((string)($in['bitrix_id'] ?? ''));

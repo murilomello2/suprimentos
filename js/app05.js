@@ -745,8 +745,9 @@ function cfgTab(t){
   const eb=document.getElementById('cfgtab-email'); if(eb) eb.style.display = IS_ADMIN?'':'none';
   const pb=document.getElementById('cfgtab-pedmail'); if(pb) pb.style.display = IS_ADMIN?'':'none';
   const ac=document.getElementById('cfgtab-acessos'); if(ac) ac.style.display = IS_ADMIN?'':'none';
+  const ib=document.getElementById('cfgtab-ia'); if(ib) ib.style.display = IS_ADMIN?'':'none';
   const ak=document.getElementById('cfgtab-api'); if(ak) ak.style.display = IS_ADMIN?'':'none';
-  const permitida={users:IS_ADMIN, receitas:IS_ADMIN, resp:canR, email:IS_ADMIN, pedmail:IS_ADMIN, acessos:IS_ADMIN, api:IS_ADMIN};
+  const permitida={users:IS_ADMIN, receitas:IS_ADMIN, resp:canR, email:IS_ADMIN, pedmail:IS_ADMIN, acessos:IS_ADMIN, api:IS_ADMIN, ia:IS_ADMIN};
   if(!permitida[t]) t = IS_ADMIN?'users':(canR?'resp':'users');
   document.getElementById('cfg-users').style.display = t==='users'?'':'none';
   document.getElementById('cfg-receitas').style.display = t==='receitas'?'':'none';

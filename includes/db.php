@@ -307,6 +307,14 @@ function db_schema_mysql($pdo) {
             id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, bitrix_id VARCHAR(64), usuario_nome VARCHAR(191),
             acao VARCHAR(80), detalhe TEXT, created_at VARCHAR(40), PRIMARY KEY (id), KEY idx_ch_cot (cotacao_id)
         ) $E");
+        // rodada de atualização das datas pelo cronograma: 1 linha por obra por rodada (auto ou manual)
+        $pdo->exec("CREATE TABLE IF NOT EXISTS crono_auto_log (
+            id INT NOT NULL AUTO_INCREMENT, obra_id INT NOT NULL, obra_nome VARCHAR(255),
+            quando VARCHAR(40), mes_ref VARCHAR(10), modo VARCHAR(20), por VARCHAR(191),
+            cronograma_id VARCHAR(100), cronograma_nome VARCHAR(255), repontou VARCHAR(255),
+            aplicadas INT, orfaos INT, sem_vinculo INT, iguais INT, aviso TEXT,
+            PRIMARY KEY (id), KEY idx_cal_obra (obra_id), KEY idx_cal_mes (mes_ref)
+        ) $E");
         if ($cc && !isset($cc['verba_origem'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN verba_origem VARCHAR(40)");
         if ($cc && !isset($cc['num_solicitacao'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_solicitacao VARCHAR(60)");
         if ($cc && !isset($cc['num_pedido'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_pedido VARCHAR(60)");
@@ -563,6 +571,7 @@ function db_schema($pdo) {
     if (!isset($ccols['apelido'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN apelido TEXT");
     if (!isset($ccols['colaboradores'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN colaboradores TEXT");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_historico (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, bitrix_id TEXT, usuario_nome TEXT, acao TEXT, detalhe TEXT, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS crono_auto_log (id INTEGER PRIMARY KEY AUTOINCREMENT, obra_id INTEGER NOT NULL, obra_nome TEXT, quando TEXT, mes_ref TEXT, modo TEXT, por TEXT, cronograma_id TEXT, cronograma_nome TEXT, repontou TEXT, aplicadas INTEGER, orfaos INTEGER, sem_vinculo INTEGER, iguais INTEGER, aviso TEXT)");
     if (!isset($ccols['num_solicitacao'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_solicitacao TEXT");
     if (!isset($ccols['num_pedido'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN num_pedido TEXT");
     if (!isset($ccols['solic_coligada'])) $pdo->exec("ALTER TABLE cotacao ADD COLUMN solic_coligada TEXT");

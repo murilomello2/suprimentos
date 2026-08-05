@@ -208,7 +208,7 @@ function obrStatusChip(s){ const c={'Em Andamento':'var(--verde)','Iniciando':'v
 function obrCarResumo(o){ const p=[]; if(+o.torres)p.push(o.torres+(+o.torres===1?' torre':' torres')); if(+o.pavimentos)p.push(o.pavimentos+' pav'); if(+o.unidades)p.push(o.unidades+' un'); return p.join(' · '); }
 function obrasRender(){ const w=document.getElementById('obrasWrap'); if(!w)return;
   const tab=(t,lbl,ic)=>`<button class="btn-ghost" style="padding:7px 14px;border-radius:9px 9px 0 0;${OBRAS_M.tab===t?'background:#fff;border-bottom:2px solid var(--verde);font-weight:700;color:var(--verde-d)':'color:var(--muted)'}" onclick="OBRAS_M.tab='${t}';obrasRender()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">${ic}</span> ${lbl}</button>`;
-  w.innerHTML=`<div style="display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px;align-items:center">${tab('ficha','Ficha das Obras','apartment')}${tab('depara','De-para & Configuração','link')}${IS_ADMIN?'<button class="btn-ghost" style="margin-left:auto;padding:6px 12px" onclick="obrasVerificarCrono()" title="Detecta obras cujo cronograma do Planejamento foi reprogramado (XML novo) e re-aponta — mantendo os vínculos"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--verde)">sync</span> Verificar cronogramas</button>':''}</div>`+(OBRAS_M.tab==='ficha'?obrasTabFicha():obrasTabDepara());
+  w.innerHTML=`<div style="display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px;align-items:center">${tab('ficha','Ficha das Obras','apartment')}${tab('depara','De-para & Configuração','link')}${IS_ADMIN?'<button class="btn-ghost" style="margin-left:auto;padding:6px 12px" onclick="cronoAutoAbrir()" title="Quando cada obra foi atualizada pela última vez, qual cronograma está ativo no Planejamento e quando ele mudou — e o prazo da rodada mensal"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--verde)">update</span> Atualização automática</button><button class="btn-ghost" style="padding:6px 12px" onclick="obrasVerificarCrono()" title="Detecta obras cujo cronograma do Planejamento foi reprogramado (XML novo) e re-aponta — mantendo os vínculos"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--verde)">sync</span> Verificar cronogramas</button>':''}</div>`+(OBRAS_M.tab==='ficha'?obrasTabFicha():obrasTabDepara());
 }
 /* ===== Verificar/atualizar cronogramas reprogramados (XML novo do Planejamento) — 24/jul/2026 ===== */
 async function obrasVerificarCrono(){
@@ -686,6 +686,9 @@ async function getCurrentUser(){
   CAN_DIC   = IS_ADMIN || _ger || !!(EU && EU.perm_dicionario);
   CAN_RESP  = IS_ADMIN || _ger || !!(EU && EU.perm_responsaveis);   // atribuir responsável em lote (independe de editar_escopo)
   applyMenus(); updateWhoami();
+  /* rodada mensal do cronograma: dispara em segundo plano, sem travar o carregamento da tela.
+     O servidor é quem decide se é hora (dia escolhido + trava de "já rodei este mês"). */
+  setTimeout(()=>{ try{ cronoAutoTick(); }catch(e){} }, 4000);
 }
 function updateWhoami(){
   const el=document.getElementById('whoami'); if(!el)return;
@@ -1754,13 +1757,15 @@ function envLinha(e){
    DESMARCADO, porque sobrescrever decisão de gente tem que ser deliberado. */
 let CRN = { obra:null, dados:null };
 
-async function cronoConferir(fichaId){
-  CRN={obra:fichaId, dados:null};
+/* Chamado de dois lugares: da ficha (que conhece o id da FICHA) e do painel de atualização
+   automática (que trabalha com o id do RADAR). O back aceita os dois — daí o 2º parâmetro. */
+async function cronoConferir(fichaId, radarObraId){
+  CRN={obra:fichaId, radar:radarObraId||0, dados:null};
   dlgAbrir('Obras','Conferir datas do cronograma',
     '<div style="max-width:820px"><div class="dempty">Lendo o cronograma do Planejamento agora…</div></div>');
   try{
     const r=await (await fetch('actions/obras.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({acao:'crono_conferir',me:EU&&EU.bitrix_id,obra_ficha_id:fichaId,recarregar:1})})).json();
+      body:JSON.stringify({acao:'crono_conferir',me:EU&&EU.bitrix_id,obra_ficha_id:fichaId||0,obra_id:radarObraId||0,recarregar:1})})).json();
     if(r.error){ dlgAbrir('Obras','Conferir datas do cronograma','<div style="max-width:560px"><div class="dempty">'+esc(r.error)+'</div></div>'); return; }
     CRN.dados=r; cronoRender();
   }catch(e){ dlgAbrir('Obras','Conferir datas do cronograma','<div style="max-width:560px"><div class="dempty">Falha: '+esc(e.message)+'</div></div>'); }
@@ -1841,10 +1846,133 @@ async function cronoAplicar(){
   if(solto && !confirm(solto+' item(ns) marcados NÃO seguem uma tarefa vinculada: ou o vínculo saiu do cronograma, ou a data foi posta na mão.\n\nA data proposta pra eles veio de casamento por palavra e pode não ser a certa. Continuar?')) return;
   try{
     const r=await (await fetch('actions/obras.php',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({acao:'crono_aplicar',me:EU&&EU.bitrix_id,obra_ficha_id:CRN.obra,servicos:sids})})).json();
+      body:JSON.stringify({acao:'crono_aplicar',me:EU&&EU.bitrix_id,obra_ficha_id:CRN.obra||0,obra_id:CRN.radar||0,servicos:sids})})).json();
     if(r.error){ toast(r.error); return; }
     closeModal(true);
     toast(r.aplicados+' data(s) atualizada(s) pelo cronograma');
     if(typeof obrasLoad==='function') obrasLoad();
   }catch(e){ toast('Falha: '+e.message); }
+}
+
+/* ═════════ ATUALIZAÇÃO AUTOMÁTICA DO CRONOGRAMA (rodada mensal) ═════════
+   O servidor não tem cron, então o disparo é oportunista: passou do dia escolhido e ainda não
+   rodou no mês? A primeira pessoa que abrir o cockpit dispara. Uma obra por chamada — ler o
+   cronograma de 9 obras numa requisição só estoura o tempo do PHP e morre no meio.
+   Roda calado: se der erro, some. Ninguém precisa saber que a faxina passou. */
+async function cronoAutoTick(){
+  if(!EU || !EU.bitrix_id) return;
+  for(let i=0;i<40;i++){                       // trava de segurança: no máx. 40 obras por sessão
+    let d; try{
+      d = await (await fetch('actions/obras.php?crono_auto_tick=1&me='+encodeURIComponent(EU.bitrix_id)+'&_='+Date.now())).json();
+    }catch(e){ return; }
+    if(!d || d.error || d.inativo || d.cedo || d.ja_rodou || d.sem_permissao || d.fim) return;
+    if(!d.restantes) return;
+  }
+}
+
+let CA = null;
+async function cronoAutoAbrir(recarregar){
+  let ov=document.getElementById('caOv');
+  if(!ov){ ov=document.createElement('div'); ov.id='caOv';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.onclick=e=>{if(e.target===ov)ov.remove();}; document.body.appendChild(ov); }
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:1000px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()"><div class="dempty">Consultando o Planejamento…</div></div>';
+  try{ CA=await (await fetch('actions/obras.php?crono_auto_status=1&me='+encodeURIComponent(EU&&EU.bitrix_id)+(recarregar?'&recarregar=1':'')+'&_='+Date.now())).json(); }
+  catch(e){ CA={error:'Falha ao consultar'}; }
+  cronoAutoRender();
+}
+
+function caQuando(iso){
+  if(!iso) return '—';
+  const d=new Date(iso); if(isNaN(d)) return String(iso).slice(0,10);
+  const dias=Math.floor((Date.now()-d.getTime())/86400000);
+  const txt=d.toLocaleDateString('pt-BR');
+  return txt+(dias<=0?' (hoje)':(dias===1?' (ontem)':' ('+dias+' dias)'));
+}
+
+function cronoAutoRender(){
+  const ov=document.getElementById('caOv'); if(!ov)return;
+  const box='<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:1000px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22);max-height:88vh;overflow:auto" onclick="event.stopPropagation()">';
+  const head='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+    +'<b style="font-size:16px"><span class="material-icons" style="font-size:19px;vertical-align:-4px;color:var(--verde)">update</span> Atualização automática do cronograma</b>'
+    +'<span class="material-icons" style="cursor:pointer;color:var(--muted)" onclick="document.getElementById(&quot;caOv&quot;).remove()">close</span></div>';
+  if(!CA || CA.error){ ov.innerHTML=box+head+'<div class="dempty">'+esc((CA&&CA.error)||'Falha')+'</div></div>'; return; }
+
+  let h=box+head;
+  // ── configuração ──
+  h+='<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:12px">'
+   + '<label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="caAtivo"'+(CA.ativo?' checked':'')+'> <b>Rodar sozinho todo mês</b></label>'
+   + '<label style="display:flex;align-items:center;gap:6px;font-size:13px">a partir do dia <input type="number" id="caDia" min="1" max="28" value="'+(CA.dia||10)+'" style="width:58px;padding:4px 6px;font-size:13px"></label>'
+   + '<button class="btn-ghost" style="padding:5px 12px;font-size:12.5px" onclick="cronoAutoSalvar()">Salvar</button>'
+   + '<span style="margin-left:auto;display:flex;gap:8px">'
+   +   '<button class="btn-ghost" style="padding:5px 12px;font-size:12.5px" onclick="cronoAutoAbrir(1)"><span class="material-icons" style="font-size:14px;vertical-align:-3px">refresh</span> Reler Planejamento</button>'
+   +   (IS_ADMIN||CAN_CRONO?'<button class="btn-prim" style="padding:5px 12px;font-size:12.5px" onclick="cronoAutoRodarAgora()">Rodar agora</button>':'')
+   + '</span></div>';
+  h+='<div class="dmini" style="color:var(--muted);margin-bottom:10px">A rodada atualiza sozinha só as datas cujo <b>vínculo com a tarefa está íntegro</b> — a tarefa mudou de data no cronograma, a data do radar segue. Vínculo órfão (tarefa renomeada ou removida) e data posta na mão <b>nunca</b> são tocados: ficam te esperando em “Conferir datas do cronograma”, na ficha da obra. Tudo entra no Histórico do item, com o antes e o depois.</div>';
+
+  // ── lista por obra ──
+  h+='<div class="wrap" style="max-height:52vh;overflow:auto"><table style="width:100%;font-size:12px"><thead><tr>'
+   + '<th>Obra</th><th>Cronograma ativo no Planejamento</th><th style="text-align:center">Publicado</th>'
+   + '<th>Nossa última atualização</th><th style="text-align:center">Pendências</th><th></th></tr></thead><tbody>';
+  for(const o of (CA.obras||[])){
+    const u=o.ultima;
+    const pend=(u?(u.orfaos||0)+(u.sem_vinculo||0):0);
+    let alerta='';
+    if(o.sem_cronograma) alerta='<span class="dchip" style="background:#8a9299">sem cronograma</span>';
+    else if(o.defasado)  alerta='<span class="dchip" style="background:var(--pend)" title="a obra aponta uma revisão antiga">revisão nova disponível</span>';
+    h+='<tr>'
+     + '<td><b>'+esc(o.obra)+'</b>'+(alerta?('<div style="margin-top:3px">'+alerta+'</div>'):'')+'</td>'
+     + '<td style="font-size:11.5px">'+esc(o.ativo_nome||'—')
+     +   (o.ativo_pct!=null?('<div class="dmini" style="color:var(--muted)">'+(+o.ativo_pct).toFixed(1).replace('.',',')+'% · medição '+esc((o.ativo_medicao||'—').slice(0,10))+'</div>'):'')+'</td>'
+     + '<td style="text-align:center;white-space:nowrap;font-size:11.5px" class="muted">'+esc(caQuando(o.ativo_atualizado))+'</td>'
+     + '<td style="font-size:11.5px">'+(u
+        ? esc(caQuando(u.quando))+'<div class="dmini" style="color:var(--muted)">'
+          + (u.aplicadas?('<b>'+u.aplicadas+'</b> data(s) atualizada(s)'):'nada a mudar')
+          + ' · '+esc(u.modo==='auto'?'automático':('manual — '+(u.por||'')))
+          + (u.repontou?'<br>re-apontado para a revisão nova':'')
+          + (u.aviso?('<br><span style="color:var(--pend)">'+esc(String(u.aviso).slice(0,90))+'…</span>'):'')+'</div>'
+        : '<span class="muted">nunca</span>')+'</td>'
+     + '<td style="text-align:center">'+(pend?('<span class="dchip" style="background:var(--dourado)" title="itens que precisam do seu olho">'+pend+'</span>'):'<span class="muted">—</span>')+'</td>'
+     + '<td style="text-align:right"><button class="btn-ghost" style="padding:3px 9px;font-size:11px" onclick="cronoAutoConferir('+o.obra_id+')">Conferir</button></td>'
+     + '</tr>';
+  }
+  h+='</tbody></table></div>';
+  h+='<div class="dmini" style="margin-top:9px;color:var(--muted)">Última rodada do sistema: <b>'+esc(caQuando(CA.ultimo_ts))+'</b>'
+   + (CA.mes_fechado===CA.mes_atual?' · a rodada deste mês já foi concluída':'')+'</div>';
+  h+='<div id="caProg" class="dmini" style="margin-top:6px;color:var(--verde-d)"></div></div>';
+  ov.innerHTML=h;
+}
+
+async function cronoAutoSalvar(){
+  const ativo=document.getElementById('caAtivo').checked, dia=+document.getElementById('caDia').value||10;
+  try{
+    const r=await (await fetch('actions/obras.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'crono_auto_salvar',me:EU&&EU.bitrix_id,ativo,dia})})).json();
+    if(r.error){ toast(r.error); return; }
+    toast(ativo?('Vai rodar sozinho a partir do dia '+r.dia+' de cada mês'):'Rodada automática desligada');
+    cronoAutoAbrir();
+  }catch(e){ toast('Falha: '+e.message); }
+}
+
+/* "Rodar agora": ignora o dia e a trava do mês, mas NÃO refaz o que já rodou nesta rodada —
+   por isso manda um mes_ref próprio, com carimbo de hora: é uma rodada avulsa, não a mensal. */
+async function cronoAutoRodarAgora(){
+  const p=document.getElementById('caProg'); const mesRef='avulsa-'+Date.now();
+  for(let i=0;i<40;i++){
+    if(p) p.textContent='Rodando… ('+i+' obra(s) processada(s))';
+    let d; try{
+      d=await (await fetch('actions/obras.php',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({acao:'crono_auto_rodar',me:EU&&EU.bitrix_id,forcar:1,mes_ref:mesRef})})).json();
+    }catch(e){ if(p)p.textContent='Falha: '+e.message; return; }
+    if(d.error){ if(p)p.textContent=d.error; return; }
+    if(d.fim||!d.restantes){ break; }
+    if(p) p.textContent='Rodando… acabei de processar '+(d.obra||'')+' — faltam '+d.restantes;
+  }
+  if(p) p.textContent='Rodada concluída.';
+  cronoAutoAbrir();
+}
+
+function cronoAutoConferir(radarObraId){
+  const ov=document.getElementById('caOv'); if(ov) ov.remove();
+  cronoConferir(null, radarObraId);
 }

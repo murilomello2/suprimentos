@@ -114,6 +114,199 @@ function crono_orfaos_no_novo($pdo, $obraId, $novoHeader) {
     return $orf;
 }
 
+/* ─────────── NÚCLEO: conferir (e opcionalmente aplicar) as datas de UMA obra ───────────
+   Um só corpo para os dois usos — o botão "Conferir datas" (interativo, o admin decide linha a
+   linha) e a rodada mensal (automática, aplica sozinha só o que segue vínculo íntegro). Se
+   fossem duas implementações, divergiriam no primeiro ajuste e o automático passaria a fazer
+   coisa diferente do que a tela mostra.
+
+   $opts: alvo (array servico_id=>1, só esses aplicam) | aplicar_seguras (bool, aplica todo item
+   que segue vínculo íntegro) | recarregar (fura o cache de 30 min) | me/quem (autoria no histórico) */
+function crono_pass($pdo, $rid, $opts = []) {
+    require_once __DIR__ . '/../includes/cronograma.php';
+    $of = $pdo->prepare("SELECT o.nome, o.cronograma_id, f.cronograma_nome
+                         FROM obra o LEFT JOIN obra_ficha f ON f.radar_obra_id = o.id WHERE o.id=? LIMIT 1");
+    $of->execute([(int)$rid]); $obraF = $of->fetch() ?: [];
+    $cid = (string)($obraF['cronograma_id'] ?? '');
+    if ($cid === '') return ['ok'=>true, 'obra'=>$obraF['nome'] ?? '', 'sem_cronograma'=>true,
+        'aviso'=>'Esta obra não tem cronograma vinculado — vincule em "Cronograma & avanço físico".'];
+
+    if (!empty($opts['recarregar'])) @unlink(SEED_DIR . '/../.crono_' . substr($cid, 0, 8) . '.json');
+    $tasks = crono_tasks($cid); $repontou = null; $origem = null;
+    if (!$tasks) {
+        /* Cabeçalho morto: o Planejamento republicou, o antigo saiu da lista e a obra ficou presa
+           num id que não devolve nada — e o estrago é silencioso, toda leitura de data ao vivo
+           volta vazia sem avisar. Um cabeçalho que não devolve nada não tem o que preservar, então
+           re-aponta pra revisão ativa — só quando dá pra dizer COM CERTEZA de que obra se trata. */
+        $novoH = crono_header_ativo($pdo, $rid, $origem);
+        if ($novoH && in_array($origem, ['ficha', 'cabecalho'], true) && (string)$novoH['id'] !== $cid) {
+            $t2 = crono_tasks((string)$novoH['id']);
+            if ($t2) {
+                $pdo->prepare("UPDATE obra SET cronograma_id=? WHERE id=?")->execute([(string)$novoH['id'], (int)$rid]);
+                $tasks = $t2; $cid = (string)$novoH['id'];
+                $repontou = (string)($novoH['nome'] ?? $novoH['project_name'] ?? '');
+                $obraF['cronograma_nome'] = $repontou;
+            }
+        }
+    }
+    if (!$tasks) return ['ok'=>true, 'obra'=>$obraF['nome'] ?? '', 'sem_tarefas'=>true,
+        'aviso'=>'O cronograma que esta obra aponta não devolve tarefas — quase sempre porque o Planejamento publicou uma revisão nova e o cabeçalho antigo saiu do ar. Use "Verificar cronogramas", no topo da tela de Obras, para re-apontar esta obra.'];
+
+    $st = $pdo->prepare("
+        SELECT s.id AS servico_id, s.lead_dias, s.termos_cronograma, s.marco_cronograma,
+               COALESCE(NULLIF(r.nome_override,''), s.nome) AS nome,
+               COALESCE(NULLIF(r.grupo_override,''), s.grupo) AS grupo,
+               r.lead_override, r.crono_marco_override, r.data_necessaria_override, r.auto_flags
+        FROM servico s JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = ?
+        ORDER BY COALESCE(r.grupo_ordem_override, s.grupo_ordem), s.ordem");
+    $st->execute([(int)$rid]);
+
+    $alvo   = $opts['alvo'] ?? null;                 // null = não aplica nada por lista
+    $segAut = !empty($opts['aplicar_seguras']);
+    $me     = $opts['me'] ?? null; $quem = (string)($opts['quem'] ?? '');
+    $difs = []; $iguais = 0; $sem = 0; $aplicados = 0;
+    $upd = $pdo->prepare("UPDATE radar_item SET data_necessaria_override=?, crono_marco_override=?, auto_flags=?, updated_at=? WHERE obra_id=? AND servico_id=?");
+    foreach ($st as $r) {
+        /* Item com tarefa vinculada: a data é A DELA — busca a tarefa pelo nome no cronograma de
+           agora (regra buscar_nome_pegar_primeira_data). Casar por termo é o caminho de quem NÃO
+           tem vínculo; usá-lo em quem tem re-ancoraria o item em silêncio. */
+        $marcoFix  = trim((string)($r['crono_marco_override'] ?? ''));
+        $temAncora = $marcoFix !== '';
+        $novo = null; $marcoNovo = null; $viaAncora = false; $conf = '';
+        if ($temAncora) {
+            $d = crono_data_por_nome($marcoFix, $tasks);
+            if ($d) { $novo = substr((string)$d, 0, 10); $marcoNovo = $marcoFix; $viaAncora = true; $conf = 'tarefa vinculada'; }
+        }
+        if (!$novo) {
+            $auto = crono_resolver($r, $tasks);
+            $novo = $auto['data_necessaria'] ? substr((string)$auto['data_necessaria'], 0, 10) : null;
+            $marcoNovo = $auto['marco_casado'] ?? null;
+            $conf = $auto['confianca'] ?? '';
+        }
+        $ancoraSumiu = $temAncora && !$viaAncora;    // vínculo órfão: a tarefa foi renomeada/removida
+        if (!$novo) { $sem++; continue; }
+        $atual = substr((string)($r['data_necessaria_override'] ?? ''), 0, 10);
+        if ($atual === (string)$novo) { $iguais++; continue; }
+
+        $af = !empty($r['auto_flags']) ? (json_decode($r['auto_flags'], true) ?: []) : [];
+        $sid = (int)$r['servico_id'];
+        $linha = [
+            'servico_id'=>$sid, 'item'=>$r['nome'], 'grupo'=>$r['grupo'],
+            'data_atual'=>$atual ?: null, 'data_cronograma'=>$novo,
+            'marco_atual'=>$marcoFix ?: null, 'marco_cronograma'=>$marcoNovo,
+            'confianca'=>$conf, 'por_robo'=>!empty($af['crono']),
+            'tem_ancora'=>$temAncora, 'via_ancora'=>$viaAncora, 'ancora_sumiu'=>$ancoraSumiu,
+            'dias'=>$atual ? (int)round((strtotime($novo) - strtotime($atual)) / 86400) : null,
+        ];
+        $aplicar = $alvo !== null ? isset($alvo[$sid]) : ($segAut && $viaAncora);
+        if ($aplicar) {
+            $af['crono'] = 1;                        // voltou a ser data do cronograma, não de gente
+            $upd->execute([$novo, $marcoNovo ?: $marcoFix, json_encode($af), date('c'), (int)$rid, $sid]);
+            $linha['aplicado'] = true; $aplicados++;
+            // fica no HISTÓRICO do item, com o antes e o depois — dá pra entender e desfazer depois
+            try { log_historico($pdo, (int)$rid, $sid, $r['nome'], $me, $quem, 'Data em obra (cronograma)', $atual, $novo); } catch (Throwable $e) {}
+        }
+        $difs[] = $linha;
+    }
+    return ['ok'=>true, 'obra'=>$obraF['nome'] ?? '', 'cronograma'=>$obraF['cronograma_nome'] ?? '',
+        'cronograma_id'=>$cid, 'repontou'=>$repontou,
+        'divergencias'=>$difs, 'iguais'=>$iguais, 'sem_match'=>$sem,
+        'com_ancora'=>count(array_filter($difs, fn($d) => $d['via_ancora'])),
+        'ancora_sumida'=>count(array_filter($difs, fn($d) => $d['ancora_sumiu'])),
+        'sem_ancora'=>count(array_filter($difs, fn($d) => !$d['tem_ancora'])),
+        'por_robo'=>count(array_filter($difs, fn($d) => $d['por_robo'])),
+        'por_pessoa'=>count(array_filter($difs, fn($d) => !$d['por_robo'])),
+        'aplicados'=>$aplicados];
+}
+
+function crono_meta_get($pdo, $k, $def = null) {
+    try { $q = $pdo->prepare("SELECT v FROM meta WHERE k=?"); $q->execute([$k]); $v = $q->fetchColumn();
+          return $v === false ? $def : $v; } catch (Throwable $e) { return $def; }
+}
+function crono_meta_set($pdo, $k, $v) {
+    try { $u = $pdo->prepare("UPDATE meta SET v=? WHERE k=?"); $u->execute([(string)$v, $k]);
+          if ($u->rowCount() === 0) $pdo->prepare("INSERT INTO meta (k,v) VALUES (?,?)")->execute([$k, (string)$v]);
+    } catch (Throwable $e) {}
+}
+
+/** Grava o que a rodada fez nesta obra — é o que alimenta a coluna "última atualização". */
+function crono_auto_registrar($pdo, $rid, $r, $modo, $por, $mesRef = null) {
+    try {
+        $pdo->prepare("INSERT INTO crono_auto_log
+            (obra_id,obra_nome,quando,mes_ref,modo,por,cronograma_id,cronograma_nome,repontou,aplicadas,orfaos,sem_vinculo,iguais,aviso)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")->execute([
+            (int)$rid, (string)($r['obra'] ?? ''), date('c'), $mesRef ?: date('Y-m'), $modo, (string)$por,
+            (string)($r['cronograma_id'] ?? ''), (string)($r['cronograma'] ?? ''), $r['repontou'] ?? null,
+            (int)($r['aplicados'] ?? 0), (int)($r['ancora_sumida'] ?? 0), (int)($r['sem_ancora'] ?? 0),
+            (int)($r['iguais'] ?? 0), $r['aviso'] ?? null]);
+    } catch (Throwable $e) {}
+}
+
+/** Obras do radar que ainda não foram processadas no mês de referência (a mais antiga primeiro). */
+function crono_auto_pendentes($pdo, $mesRef) {
+    $q = $pdo->prepare("SELECT o.id, o.nome FROM obra o
+                        WHERE o.id>=2 AND o.cronograma_id IS NOT NULL AND o.cronograma_id<>''
+                          AND NOT EXISTS (SELECT 1 FROM crono_auto_log l WHERE l.obra_id=o.id AND l.mes_ref=?)
+                        ORDER BY o.nome");
+    $q->execute([$mesRef]);
+    return $q->fetchAll();
+}
+
+/** Painel: por obra, o cronograma ATIVO no Planejamento (e quando ele mudou) × o que a obra
+    aponta × quando nós atualizamos pela última vez. É a resposta a "está tudo em dia?". */
+function crono_auto_status($pdo, $recarregar = false) {
+    if ($recarregar) @unlink(CRONO_OBRAS_CACHE);
+    $all = crono_headers_all();
+    $ativo = []; $hdrById = [];
+    foreach ($all as $h) {
+        $hid = (string)($h['id'] ?? ''); $oid = (string)($h['obra_id'] ?? ''); if ($hid === '') continue;
+        $hdrById[$hid] = $h;
+        if (!empty($h['is_active']) && $oid !== '' && !isset($ativo[$oid])) $ativo[$oid] = $h;
+    }
+    $obras = $pdo->query("SELECT o.id, o.nome, o.cronograma_id, f.crono_obra_id
+                          FROM obra o LEFT JOIN obra_ficha f ON f.radar_obra_id = o.id
+                          WHERE o.id>=2 ORDER BY o.nome")->fetchAll();
+    $ult = $pdo->query("SELECT l.* FROM crono_auto_log l
+                        JOIN (SELECT obra_id, MAX(id) mx FROM crono_auto_log GROUP BY obra_id) m
+                          ON m.mx = l.id")->fetchAll();
+    $ultPorObra = []; foreach ($ult as $u) $ultPorObra[(int)$u['obra_id']] = $u;
+
+    $out = [];
+    foreach ($obras as $o) {
+        $cur = (string)($o['cronograma_id'] ?? '');
+        $oid = (string)($o['crono_obra_id'] ?? '');
+        $h = ($oid !== '' && isset($ativo[$oid])) ? $ativo[$oid]
+             : (isset($hdrById[$cur]) && !empty($hdrById[$cur]['obra_id']) && isset($ativo[(string)$hdrById[$cur]['obra_id']])
+                ? $ativo[(string)$hdrById[$cur]['obra_id']]
+                : (($m = obras_crono_match((string)$o['nome'], $ativo)) !== null ? $ativo[$m] : null));
+        $u = $ultPorObra[(int)$o['id']] ?? null;
+        $ativoId = $h ? (string)$h['id'] : '';
+        $out[] = [
+            'obra_id'=>(int)$o['id'], 'obra'=>$o['nome'],
+            'aponta_id'=>$cur,
+            'aponta_nome'=>(string)($hdrById[$cur]['nome'] ?? $hdrById[$cur]['project_name'] ?? ($cur === '' ? '' : '(cabeçalho fora da lista)')),
+            'ativo_id'=>$ativoId,
+            'ativo_nome'=>$h ? (string)($h['nome'] ?? $h['project_name'] ?? '') : '',
+            'ativo_atualizado'=>$h ? (string)($h['updated_at'] ?? '') : '',
+            'ativo_medicao'=>$h ? (string)($h['status_date'] ?? '') : '',
+            'ativo_pct'=>$h ? $h['percent_complete'] : null,
+            'defasado'=>($ativoId !== '' && $cur !== '' && $ativoId !== $cur),   // aponta revisão velha
+            'sem_cronograma'=>$cur === '',
+            'ultima'=>$u ? [
+                'quando'=>$u['quando'], 'modo'=>$u['modo'], 'por'=>$u['por'],
+                'aplicadas'=>(int)$u['aplicadas'], 'orfaos'=>(int)$u['orfaos'],
+                'sem_vinculo'=>(int)$u['sem_vinculo'], 'repontou'=>$u['repontou'], 'aviso'=>$u['aviso'],
+            ] : null,
+        ];
+    }
+    return ['ok'=>true, 'obras'=>$out,
+        'ativo'=>crono_meta_get($pdo, 'crono_auto_ativo', '0') === '1',
+        'dia'=>(int)crono_meta_get($pdo, 'crono_auto_dia', 10),
+        'mes_fechado'=>crono_meta_get($pdo, 'crono_auto_mes', ''),
+        'ultimo_ts'=>crono_meta_get($pdo, 'crono_auto_ts', ''),
+        'hoje'=>date('Y-m-d'), 'mes_atual'=>date('Y-m')];
+}
+
 /** Preenche % físico + datas AO VIVO em cada ficha (com fallback no snapshot do banco). */
 function obras_aplicar_crono($pdo, &$obras) {
     [$crBy, $fresh] = obras_crono_live();
@@ -447,7 +640,6 @@ try {
        `crono_aplicar` grava só os itens que vierem na lista — a decisão de sobrescrever curadoria
        humana é explícita, nunca embutida. */
     if ($acao === 'crono_conferir' || $acao === 'crono_aplicar') {
-        require_once __DIR__ . '/../includes/cronograma.php';
         if (empty($perms['perm_admin']) && empty($perms['perm_crono'])) {
             http_response_code(403);
             echo json_encode(['error' => 'Só administrador ou quem tem permissão de cronograma.'], JSON_UNESCAPED_UNICODE); exit;
@@ -456,110 +648,66 @@ try {
         $rid = (int)($in['obra_id'] ?? 0);
         if (!$rid && $fid) $rid = (int)obra_radar_id($pdo, $fid);
         if (!$rid) throw new Exception('informe obra_ficha_id ou obra_id');
+        $alvo = null;
+        if ($acao === 'crono_aplicar') { $alvo = []; foreach ((array)($in['servicos'] ?? []) as $x) $alvo[(int)$x] = 1; }
+        $r = crono_pass($pdo, $rid, ['alvo'=>$alvo, 'recarregar'=>!empty($in['recarregar']),
+                                     'me'=>$me, 'quem'=>$perms['nome'] ?? '']);
+        /* mes_ref próprio: uma conferência manual NÃO pode consumir a vaga da rodada mensal desta
+           obra (o pendentes[] filtra por mes_ref). Ela entra no histórico, aparece como "última
+           atualização", mas o automático do mês continua devendo. */
+        if (!empty($r['aplicados'])) crono_auto_registrar($pdo, $rid, $r, 'manual', $perms['nome'] ?? '', 'manual-' . date('Y-m-d-His'));
+        echo json_encode($r, JSON_UNESCAPED_UNICODE); exit;
+    }
 
-        /* cronograma_id mora na tabela do RADAR (`obra`), nao na ficha — a ficha guarda so o NOME
-           do cronograma casado. Foi onde eu errei na 1a versao. */
-        $of = $pdo->prepare("SELECT o.nome, o.cronograma_id, f.cronograma_nome
-                             FROM obra o LEFT JOIN obra_ficha f ON f.radar_obra_id = o.id
-                             WHERE o.id=? LIMIT 1");
-        $of->execute([$rid]); $obraF = $of->fetch() ?: [];
-        $cid = (string)($obraF['cronograma_id'] ?? '');
-        if ($cid === '') { echo json_encode(['ok'=>true, 'sem_cronograma'=>true,
-            'aviso'=>'Esta obra não tem cronograma vinculado — vincule em "Cronograma & avanço físico".'], JSON_UNESCAPED_UNICODE); exit; }
+    /* ─────────── RODADA MENSAL DE ATUALIZAÇÃO DO CRONOGRAMA ───────────
+       O servidor não tem cron, então o disparo é oportunista: quem abrir o cockpit depois do dia
+       escolhido dispara a rodada, e a trava por mês (crono_auto_mes) impede que rode duas vezes.
+       Uma obra POR CHAMADA: ler o cronograma de 9 obras numa requisição só estoura o tempo do PHP
+       e morre no meio — assim cada request é curta e o front vai chamando até `restantes` zerar. */
+    if ($acao === 'crono_auto_status' || ($method === 'GET' && isset($_GET['crono_auto_status']))) {
+        echo json_encode(crono_auto_status($pdo, !empty($_GET['recarregar']) || !empty($in['recarregar'])), JSON_UNESCAPED_UNICODE); exit;
+    }
 
-        // fura o cache de 30 min: conferir tem que olhar o cronograma de agora, não o de meia hora atrás
-        if (!empty($in['recarregar'])) { @unlink(SEED_DIR . '/../.crono_' . substr($cid, 0, 8) . '.json'); }
-        $tasks = crono_tasks($cid); $repontou = null; $origem = null;
-        if (!$tasks) {
-            /* O cabeçalho que o radar aponta não devolve mais tarefa — foi o caso da ADARA: o
-               Planejamento republicou o cronograma, o cabeçalho antigo saiu da lista e a obra ficou
-               presa num id morto. O estrago é silencioso: sem tarefa, TODA leitura de data ao vivo
-               desta obra devolve vazio e ninguém é avisado. Um cabeçalho que não devolve nada não
-               tem o que preservar, então re-aponta pra revisão ativa — desde que dê pra dizer com
-               certeza de que obra do Planejamento estamos falando (nunca no casamento por nome). */
-            $novo = crono_header_ativo($pdo, $rid, $origem);
-            if ($novo && in_array($origem, ['ficha', 'cabecalho'], true) && (string)$novo['id'] !== $cid) {
-                $t2 = crono_tasks((string)$novo['id']);
-                if ($t2) {
-                    $pdo->prepare("UPDATE obra SET cronograma_id=? WHERE id=?")->execute([(string)$novo['id'], $rid]);
-                    $tasks = $t2; $cid = (string)$novo['id'];
-                    $repontou = (string)($novo['nome'] ?? $novo['project_name'] ?? '');
-                    $obraF['cronograma_nome'] = $repontou;
-                }
-            }
+    if ($acao === 'crono_auto_salvar') {
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
+        $dia = max(1, min(28, (int)($in['dia'] ?? 10)));       // 28 é o último dia que existe em todo mês
+        crono_meta_set($pdo, 'crono_auto_dia', $dia);
+        crono_meta_set($pdo, 'crono_auto_ativo', !empty($in['ativo']) ? '1' : '0');
+        echo json_encode(['ok'=>true, 'dia'=>$dia, 'ativo'=>!empty($in['ativo'])], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    // roda UMA obra pendente (a mais atrasada) e diz quantas faltam. `forcar` = "Rodar agora" do admin.
+    if ($acao === 'crono_auto_rodar' || ($method === 'GET' && isset($_GET['crono_auto_tick']))) {
+        $forcar = !empty($in['forcar']) || !empty($_GET['forcar']);
+        /* O tick escreve datas, então não pode sair de um papel só-leitura. O veto do db.php cobre
+           POST; aqui a chamada é GET (fire-and-forget do boot), então a trava tem de ser explícita —
+           senão o engenheiro de obra abrindo a tela dispararia escrita no radar. */
+        if (in_array((string)($perms['papel'] ?? ''), sup_papeis_leitores(), true)) { echo json_encode(['ok'=>true,'sem_permissao'=>true]); exit; }
+        if ($forcar && empty($perms['perm_admin']) && empty($perms['perm_crono'])) {
+            http_response_code(403); echo json_encode(['error'=>'Só administrador ou quem tem permissão de cronograma.'], JSON_UNESCAPED_UNICODE); exit;
         }
-        if (!$tasks) { echo json_encode(['ok'=>true, 'sem_tarefas'=>true,
-            'aviso'=>'O cronograma que esta obra aponta não devolve tarefas — quase sempre porque o Planejamento publicou uma revisão nova e o cabeçalho antigo saiu do ar. Use "Verificar cronogramas", no topo da tela de Obras, para re-apontar esta obra.'], JSON_UNESCAPED_UNICODE); exit; }
-
-        $st = $pdo->prepare("
-            SELECT s.id AS servico_id, s.lead_dias, s.termos_cronograma, s.marco_cronograma,
-                   COALESCE(NULLIF(r.nome_override,''), s.nome) AS nome,
-                   COALESCE(NULLIF(r.grupo_override,''), s.grupo) AS grupo,
-                   r.lead_override, r.crono_marco_override, r.data_necessaria_override, r.auto_flags
-            FROM servico s JOIN radar_item r ON r.servico_id = s.id AND r.obra_id = ?
-            ORDER BY COALESCE(r.grupo_ordem_override, s.grupo_ordem), s.ordem");
-        $st->execute([$rid]);
-
-        $alvo = [];                                   // no aplicar: só estes servico_id
-        foreach ((array)($in['servicos'] ?? []) as $x) $alvo[(int)$x] = 1;
-
-        $difs = []; $iguais = 0; $sem = 0; $aplicados = 0;
-        $upd = $pdo->prepare("UPDATE radar_item SET data_necessaria_override=?, crono_marco_override=?, auto_flags=?, updated_at=? WHERE obra_id=? AND servico_id=?");
-        foreach ($st as $r) {
-            /* Se o item tem tarefa vinculada, a data é A DELA — busca a tarefa pelo nome no
-               cronograma de agora. Só quem não tem vínculo cai no casamento por termo.
-               (Antes isto re-casava por termo SEMPRE, ignorando o vínculo: era assim que
-               "Concreto para Fundação Profunda", ancorado em Fundação, ia parar em "PISO DE
-               CONCRETO - CONCRETAGEM" 456 dias adiante. Seguir o vínculo é o pedido; re-casar
-               por palavra é outra coisa, e bem pior.) */
-            $marcoFix  = trim((string)($r['crono_marco_override'] ?? ''));
-            $temAncora = $marcoFix !== '';
-            $novo = null; $marcoNovo = null; $viaAncora = false; $conf = '';
-            if ($temAncora) {
-                $d = crono_data_por_nome($marcoFix, $tasks);
-                if ($d) { $novo = substr((string)$d, 0, 10); $marcoNovo = $marcoFix; $viaAncora = true; $conf = 'tarefa vinculada'; }
-            }
-            if (!$novo) {
-                $auto = crono_resolver($r, $tasks);
-                $novo = $auto['data_necessaria'] ? substr((string)$auto['data_necessaria'], 0, 10) : null;
-                $marcoNovo = $auto['marco_casado'] ?? null;
-                $conf = $auto['confianca'] ?? '';
-            }
-            // âncora que não existe mais no cronograma novo: o vínculo ficou órfão (tarefa renomeada/removida)
-            $ancoraSumiu = $temAncora && !$viaAncora;
-            if (!$novo) { $sem++; continue; }
-            $atual = substr((string)($r['data_necessaria_override'] ?? ''), 0, 10);
-            if ($atual === (string)$novo) { $iguais++; continue; }
-
-            $af = !empty($r['auto_flags']) ? (json_decode($r['auto_flags'], true) ?: []) : [];
-            $porRobo = !empty($af['crono']);           // quem preencheu: robô no onboarding × pessoa
-            $sid = (int)$r['servico_id'];
-            $linha = [
-                'servico_id' => $sid, 'item' => $r['nome'], 'grupo' => $r['grupo'],
-                'data_atual' => $atual ?: null, 'data_cronograma' => $novo,
-                'marco_atual' => $marcoFix ?: null, 'marco_cronograma' => $marcoNovo,
-                'confianca' => $conf, 'por_robo' => $porRobo,
-                'tem_ancora' => $temAncora, 'via_ancora' => $viaAncora, 'ancora_sumiu' => $ancoraSumiu,
-                'dias' => $atual ? (int)round((strtotime($novo) - strtotime($atual)) / 86400) : null,
-            ];
-            if ($acao === 'crono_aplicar' && isset($alvo[$sid])) {
-                $af['crono'] = 1;                      // volta a ser data do robô: veio do cronograma, não de gente
-                $upd->execute([$novo, $marcoNovo ?: $marcoFix, json_encode($af), date('c'), $rid, $sid]);
-                $linha['aplicado'] = true; $aplicados++;
-                // fica no HISTÓRICO do item, com o antes e o depois — quem olhar depois entende por que a data mudou
-                try { log_historico($pdo, $rid, $sid, $r['nome'], $me, $perms['nome'] ?? '', 'Data em obra (cronograma)', $atual, $novo); } catch (Throwable $e) {}
-            }
-            $difs[] = $linha;
+        $mesAtual = date('Y-m');
+        if (!$forcar) {
+            if (crono_meta_get($pdo, 'crono_auto_ativo', '0') !== '1') { echo json_encode(['ok'=>true,'inativo'=>true]); exit; }
+            if ((int)date('j') < (int)crono_meta_get($pdo, 'crono_auto_dia', 10)) { echo json_encode(['ok'=>true,'cedo'=>true]); exit; }
+            if (crono_meta_get($pdo, 'crono_auto_mes', '') === $mesAtual) { echo json_encode(['ok'=>true,'ja_rodou'=>true]); exit; }
         }
-        echo json_encode(['ok'=>true, 'obra'=>$obraF['nome'] ?? '', 'cronograma'=>$obraF['cronograma_nome'] ?? '',
-            'repontou'=>$repontou,
-            'divergencias'=>$difs, 'iguais'=>$iguais, 'sem_match'=>$sem,
-            'com_ancora'=>count(array_filter($difs, fn($d) => $d['via_ancora'])),          // seguiram a tarefa vinculada
-            'ancora_sumida'=>count(array_filter($difs, fn($d) => $d['ancora_sumiu'])),     // vínculo órfão no cronograma novo
-            'sem_ancora'=>count(array_filter($difs, fn($d) => !$d['tem_ancora'])),         // data posta na mão, sem vínculo
-            'por_robo'=>count(array_filter($difs, fn($d) => $d['por_robo'])),
-            'por_pessoa'=>count(array_filter($difs, fn($d) => !$d['por_robo'])),
-            'aplicados'=>$aplicados], JSON_UNESCAPED_UNICODE); exit;
+        $mesRef = $forcar ? ($in['mes_ref'] ?? $mesAtual) : $mesAtual;
+        $pend = crono_auto_pendentes($pdo, $mesRef);
+        if (!$pend) {   // acabou: fecha o mês pra ninguém mais disparar
+            if (!$forcar) crono_meta_set($pdo, 'crono_auto_mes', $mesAtual);
+            crono_meta_set($pdo, 'crono_auto_ts', date('c'));
+            echo json_encode(['ok'=>true, 'fim'=>true, 'restantes'=>0], JSON_UNESCAPED_UNICODE); exit;
+        }
+        $o = array_shift($pend);
+        $r = crono_pass($pdo, (int)$o['id'], ['aplicar_seguras'=>true, 'recarregar'=>true,
+                                              'me'=>$me, 'quem'=>$forcar ? ($perms['nome'] ?? '') : 'automático']);
+        crono_auto_registrar($pdo, (int)$o['id'], $r, $forcar ? 'manual' : 'auto', $forcar ? ($perms['nome'] ?? '') : 'automático', $mesRef);
+        crono_meta_set($pdo, 'crono_auto_ts', date('c'));
+        echo json_encode(['ok'=>true, 'obra'=>$o['nome'], 'restantes'=>count($pend),
+            'aplicados'=>$r['aplicados'] ?? 0, 'orfaos'=>$r['ancora_sumida'] ?? 0,
+            'sem_vinculo'=>$r['sem_ancora'] ?? 0, 'repontou'=>$r['repontou'] ?? null,
+            'aviso'=>$r['aviso'] ?? null], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'salvar') {   // edita a ficha (características + de-para confirmado)

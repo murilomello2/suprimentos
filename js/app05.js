@@ -820,16 +820,41 @@ const PRESETS={
   personalizado:null,
 };
 
+/* IDENTIDADE — quem está usando o cockpit.
+
+   INCIDENTE 05/08/2026: a Paloma criou uma cotação e ela saiu no nome do Murilo, e depois a
+   própria Paloma não conseguia editar. Causa: quando o BX24 não respondia (ou o cockpit era
+   aberto FORA do Bitrix, por link direto), o código fazia `bid='20'` — assumia que a pessoa era
+   o Murilo. Ela não só gravou no nome dele como navegou COM PERMISSÃO DE ADMINISTRADOR.
+   Havia um segundo furo igual: o catch do fetch devolvia perm_admin:1 — uma falha de rede virava
+   acesso total.
+
+   Agora: sem identidade NÃO há acesso. Fora do localhost, o app tenta o BX24 com mais tempo e
+   uma segunda tentativa; se ainda assim não souber quem é, BLOQUEIA e explica. Ficar de fora é
+   chato; agir em nome de outra pessoa é bem pior. */
+async function bxIdentificar(ms){
+  if(!window.BX24) return null;
+  try{ return await new Promise(r=>{
+    let done=false; const fim=v=>{ if(!done){ done=true; r(v||null); } };
+    try{ BX24.init(()=>{ try{ BX24.callMethod('user.current',{},x=>fim((x.data()||{}).ID)); }catch(e){ fim(null); } }); }catch(e){ fim(null); }
+    setTimeout(()=>fim(null), ms);
+  }); }catch(e){ return null; }
+}
+
 async function getCurrentUser(){
   let bid=null, via='fallback';
   const isLocal=(location.hostname==='localhost'||location.hostname==='127.0.0.1');
-  if(!isLocal && window.BX24){
-    try{ bid=await new Promise(r=>{ BX24.init(()=>BX24.callMethod('user.current',{},x=>r((x.data()||{}).ID))); setTimeout(()=>r(null),5000); }); }catch(e){}
+  if(!isLocal){
+    bid = await bxIdentificar(9000);
+    if(!bid) bid = await bxIdentificar(6000);      // 2ª tentativa: BX24 lento no 1º carregamento é comum
     if(bid) via='bx24';
+    if(!bid){ authBloqueia(!window.BX24); return; }
   }
-  if(!bid) bid='20'; // localhost dev OU não identificado → admin Murilo (provisório — ver indicador "Você" na barra)
-  try{ const p=await (await fetch('actions/usuarios.php?me='+encodeURIComponent(bid))).json(); EU=Object.assign({bitrix_id:bid,via},p); IS_ADMIN=!!p.perm_admin; }
-  catch(e){ EU={bitrix_id:bid,via,autorizado:true,perm_admin:1,editar_escopo:'todas',menus:MENUS.map(m=>m[0])}; IS_ADMIN=true; }
+  if(!bid) bid='20';                               // SÓ localhost: sandbox de desenvolvimento
+  let p=null;
+  try{ p=await (await fetch('actions/usuarios.php?me='+encodeURIComponent(bid))).json(); }catch(e){ p=null; }
+  if(!p || p.error){ authBloqueia(false, 'Não consegui confirmar suas permissões no servidor.'); return; }
+  EU=Object.assign({bitrix_id:bid,via},p); IS_ADMIN=!!p.perm_admin;
   CAN_EDIT = IS_ADMIN || (EU && (EU.editar_escopo==='todas'
               || (EU.editar_escopo==='sel' && (EU.obras_editar||[]).map(Number).includes(1))));
   // fornecedor é LISTA-MESTRE compartilhada: liberado por PAPEL (compradores reclamavam do botão sumido
@@ -2149,4 +2174,28 @@ async function cronoAutoRodarAgora(){
 function cronoAutoConferir(radarObraId){
   const ov=document.getElementById('caOv'); if(ov) ov.remove();
   cronoConferir(null, radarObraId);
+}
+
+/* Tela de bloqueio: sem saber quem é a pessoa, o cockpit não abre. Explica em vez de mostrar
+   erro seco, porque a causa quase sempre é abrir por link direto em vez de por dentro do Bitrix. */
+function authBloqueia(foraDoBitrix, motivo){
+  EU={bitrix_id:null, via:'bloqueado', autorizado:false, perm_admin:0, menus:[]};
+  IS_ADMIN=false; CAN_EDIT=false; CAN_FORN=false; CAN_COT=false;
+  try{ applyMenus(); updateWhoami(); }catch(e){}
+  let ov=document.getElementById('authOv');
+  if(!ov){ ov=document.createElement('div'); ov.id='authOv';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.92);z-index:100000;display:flex;align-items:center;justify-content:center;padding:24px';
+    document.body.appendChild(ov); }
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;padding:26px 28px;max-width:520px;text-align:center;box-shadow:0 12px 44px rgba(0,0,0,.3)">'
+   + '<span class="material-icons" style="font-size:42px;color:var(--dourado)">person_off</span>'
+   + '<div style="font-size:17px;font-weight:700;margin:8px 0 6px">Não consegui identificar você</div>'
+   + '<div style="font-size:13.5px;line-height:1.6;color:var(--muted)">'
+   +   (motivo ? esc(motivo)
+              : (foraDoBitrix
+                 ? 'O cockpit precisa ser aberto <b>por dentro do Bitrix24</b>, pelo item de menu do aplicativo. Abrindo por link direto ou favorito, o Bitrix não informa quem é você.'
+                 : 'O Bitrix não respondeu a tempo. Pode ser lentidão de rede.'))
+   + '<br><br>Enquanto eu não souber quem é você, não abro o sistema — <b>agir em nome de outra pessoa seria pior do que ficar de fora</b>.</div>'
+   + '<div style="margin-top:18px;display:flex;gap:8px;justify-content:center">'
+   +   '<button class="btn-prim" onclick="location.reload()">Tentar de novo</button></div>'
+   + '<div style="font-size:11.5px;color:var(--muted);margin-top:12px">Se persistir, avise o administrador do cockpit.</div></div>';
 }

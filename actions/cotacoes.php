@@ -374,6 +374,32 @@ try {
        e é justamente o histórico antigo que mais precisa ser reconciliado com o radar.
        Quem pode: a MESMA regra de gerir a cotação — admin | gerente | criador | colaborador.
        servico_id=0 desvincula. */
+    /* TRANSFERIR A AUTORIA de uma cotação (admin).
+       Nasceu do incidente 05/08/2026 — a Paloma criou uma cotação que ficou gravada no nome do
+       Murilo (o app assumia identidade quando o BX24 não respondia) e ela ficou sem conseguir
+       editar, porque `cot_can_manage` compara criado_por com quem está logado. Serve também para
+       o caso normal de alguém sair da empresa e as cotações dele precisarem de dono. */
+    if ($acao === 'trocar_criador') {
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores.']); exit; }
+        $cid = (int)($in['cotacao_id'] ?? 0);
+        $novo = trim((string)($in['bitrix_id'] ?? ''));
+        if (!$cid || $novo === '') throw new Exception('informe cotacao_id e bitrix_id');
+        $u = $pdo->prepare("SELECT nome FROM usuario WHERE bitrix_id=? LIMIT 1"); $u->execute([$novo]);
+        $nomeNovo = (string)($u->fetchColumn() ?: '');
+        if ($nomeNovo === '') throw new Exception('usuário não encontrado no cockpit');
+        $q = $pdo->prepare("SELECT criado_por, criado_nome, titulo FROM cotacao WHERE id=? LIMIT 1");
+        $q->execute([$cid]); $antes = $q->fetch();
+        if (!$antes) throw new Exception('cotação não encontrada');
+        $pdo->prepare("UPDATE cotacao SET criado_por=?, criado_nome=?, updated_at=? WHERE id=?")
+            ->execute([$novo, $nomeNovo, date('c'), $cid]);
+        // fica no histórico da cotação: mudar dono é o tipo de coisa que alguém vai questionar depois
+        try { cot_log($pdo, $cid, $me, 'trocou o criador',
+              ($antes['criado_nome'] ?: $antes['criado_por']) . ' → ' . $nomeNovo
+              . (($in['motivo'] ?? '') !== '' ? ' · ' . trim((string)$in['motivo']) : '')); } catch (Throwable $e) {}
+        echo json_encode(['ok' => true, 'criado_por' => $novo, 'criado_nome' => $nomeNovo,
+            'antes' => $antes['criado_nome'] ?: $antes['criado_por']], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     if ($acao === 'set_servico') {
         $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
         if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só admin, gerente, quem criou ou quem recebeu a cotação compartilhada pode vinculá-la ao radar.'], JSON_UNESCAPED_UNICODE); exit; }

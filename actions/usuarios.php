@@ -31,7 +31,7 @@ function preset($papel) {
 
 function jrow($r) {
     foreach (['obras_ver','obras_editar','menus'] as $k) $r[$k] = $r[$k] ? json_decode($r[$k], true) : [];
-    foreach (['perm_admin','ativo','perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email'] as $k) $r[$k] = (int)($r[$k] ?? 0);
+    foreach (['perm_admin','ativo','perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','perm_whats'] as $k) $r[$k] = (int)($r[$k] ?? 0);
     return $r;
 }
 
@@ -42,7 +42,7 @@ try {
     try {
         $ucols = [];
         foreach ($pdo->query("PRAGMA table_info(usuario)") as $c) $ucols[$c['name']] = true;
-        foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email'] as $pc) {
+        foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','perm_whats'] as $pc) {
             if (!isset($ucols[$pc])) { try { $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INTEGER DEFAULT 0"); } catch (Throwable $e) {} }
         }
         if (!isset($ucols['dashboard'])) { try { $pdo->exec("ALTER TABLE usuario ADD COLUMN dashboard TEXT DEFAULT ''"); } catch (Throwable $e) {} }
@@ -86,7 +86,7 @@ try {
             $campos = is_array($in['campos'] ?? null) ? $in['campos'] : [];
             if (!$campos) throw new Exception('campos vazio — marque ao menos uma seção');
             $JSONF = ['obras_ver','obras_editar','menus'];
-            $INTF  = ['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','ativo'];
+            $INTF  = ['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','perm_whats','ativo'];
             $STRF  = ['ver_escopo','editar_escopo','dashboard'];
             $set = []; $vals = [];
             foreach (array_merge($JSONF, $INTF, $STRF) as $k) {
@@ -146,6 +146,7 @@ try {
             'perm_admin'    => (int)($in['perm_admin'] ?? $p['perm_admin']),
             'perm_crono'      => (int)($in['perm_crono'] ?? 0),
             'perm_email'      => (int)($in['perm_email'] ?? 0),
+            'perm_whats'      => (int)($in['perm_whats'] ?? 0),
             'perm_orcamento'  => (int)($in['perm_orcamento'] ?? 0),
             'perm_quant'      => (int)($in['perm_quant'] ?? 0),
             'perm_dicionario' => (int)($in['perm_dicionario'] ?? 0),

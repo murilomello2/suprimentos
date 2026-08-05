@@ -91,7 +91,7 @@ function db_schema_mysql($pdo) {
         ver_escopo VARCHAR(16), editar_escopo VARCHAR(16), obras_ver TEXT, obras_editar TEXT, menus TEXT,
         perm_admin INT DEFAULT 0, ativo INT DEFAULT 1, updated_at VARCHAR(40),
         perm_crono INT DEFAULT 0, perm_orcamento INT DEFAULT 0, perm_quant INT DEFAULT 0, perm_dicionario INT DEFAULT 0,
-        perm_email INT DEFAULT 0,
+        perm_email INT DEFAULT 0, perm_whats INT DEFAULT 0,
         perm_responsaveis INT DEFAULT 0,
         dashboard VARCHAR(32) DEFAULT '',
         PRIMARY KEY (bitrix_id)
@@ -285,7 +285,7 @@ function db_schema_mysql($pdo) {
     // permissão granular perm_responsaveis (atribuição de responsável EM LOTE) — self-heal p/ tabela usuario já existente
     $uc = [];
     foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='usuario'") as $c) $uc[$c['COLUMN_NAME']] = true;
-    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email'] as $pc)
+    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','perm_whats'] as $pc)
         if (!isset($uc[$pc])) $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INT DEFAULT 0");
     // dashboard atribuído por usuário (''=padrão | comprador | gerente | diretor) — landing + conteúdo do painel
     if (!isset($uc['dashboard'])) $pdo->exec("ALTER TABLE usuario ADD COLUMN dashboard VARCHAR(32) DEFAULT ''");
@@ -706,7 +706,7 @@ function db_schema($pdo) {
     // estas liberam capacidades específicas POR USUÁRIO:
     $ucols = [];
     foreach ($pdo->query("PRAGMA table_info(usuario)") as $c) $ucols[$c['name']] = true;
-    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email'] as $pc) {
+    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','perm_whats'] as $pc) {
         if (!isset($ucols[$pc])) $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INTEGER DEFAULT 0");
     }
     if (!isset($ucols['dashboard'])) $pdo->exec("ALTER TABLE usuario ADD COLUMN dashboard TEXT DEFAULT ''");
@@ -808,7 +808,8 @@ function user_perms($pdo, $bid) {
             'perm_quant'=>(int)($u['perm_quant'] ?? 0),
             'perm_dicionario'=>(int)($u['perm_dicionario'] ?? 0),
             'perm_responsaveis'=>(int)($u['perm_responsaveis'] ?? 0),
-            'perm_email'=>(int)($u['perm_email'] ?? 0)];
+            'perm_email'=>(int)($u['perm_email'] ?? 0),
+            'perm_whats'=>(int)($u['perm_whats'] ?? 0)];
 }
 function can_edit_obra($perms, $obra_id) {
     if (!empty($perms['perm_admin'])) return true;

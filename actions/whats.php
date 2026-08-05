@@ -17,8 +17,11 @@ set_time_limit(180);
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/whats.php';
 
+/* Quem entra é decidido POR PESSOA na tela de usuários (perm_whats), não pelo papel.
+   Na 1ª versão eu liberei para gerente e comprador — o que tirava do Murilo o controle de quem
+   fala com fornecedor em nome da empresa. Papel é conveniência; permissão é decisão dele. */
 function wa_pode_usar($p) {
-    return !empty($p['perm_admin']) || in_array(($p['papel'] ?? ''), ['gerente', 'comprador'], true);
+    return !empty($p['perm_admin']) || !empty($p['perm_whats']);
 }
 
 try {
@@ -106,7 +109,7 @@ try {
     }
 
     if (!wa_pode_usar($perms)) { http_response_code(403);
-        echo json_encode(['error' => 'A caixa da assistente é de quem cota (comprador, gerente ou admin).'], JSON_UNESCAPED_UNICODE); exit; }
+        echo json_encode(['error' => 'Você não tem acesso ao Assistente WhatsApp. Um administrador libera em Configuração › Usuários › Permissões específicas.'], JSON_UNESCAPED_UNICODE); exit; }
 
     // ─────────────── INICIAR: cria a conversa de cada fornecedor convidado ───────────────
     if ($acao === 'iniciar') {

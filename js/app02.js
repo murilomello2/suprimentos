@@ -293,7 +293,7 @@ let IS_ADMIN=false;                       // fail-closed; vira true só quando g
 let CAN_EDIT=false;                       // editor geral da obra (status/fornecedor/observação)
 let CAN_FORN=false;                       // cadastrar/editar FORNECEDOR (lista-mestre): admin/gerente/comprador — não depende de edição de obra
 let CAN_COT=false;                         // criar/gerir cotação: admin/gerente/comprador — dinâmica de suprimentos (não é edição de obra)
-let CAN_CRONO=false, CAN_ORC=false, CAN_QUANT=false, CAN_DIC=false, CAN_RESP=false, CAN_EMAIL=false; // permissões específicas (vínculos + dicionário + responsáveis em lote)
+let CAN_CRONO=false, CAN_ORC=false, CAN_QUANT=false, CAN_DIC=false, CAN_RESP=false, CAN_EMAIL=false, CAN_WHATS=false; // permissões específicas (vínculos + dicionário + responsáveis em lote)
 let EU=null;                             // usuário logado + permissões efetivas
 function openModal(o,ob){CUR=byOrdem(o,ob);if(!CUR)return;TAB='Resumo';EDITC=EDITO=EDITQ=EDITD=EDITR=false;drawModal();document.getElementById('ov').classList.add('open');hydrateCur();}
 async function ensureFull(){ if(CUR && !CUR._full) await hydrateCur(); }   // garante os campos pesados antes de editar orçamento/quant

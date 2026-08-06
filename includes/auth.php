@@ -119,3 +119,16 @@ function auth_auditar($meAlegado) {
         ], JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND);
     } catch (Throwable $e) {}
 }
+
+/** Registra bilhete EMITIDO com sucesso. É a contraprova do log de falhas: sem ela, "nenhuma
+    chamada sem bilhete" não distingue "todo mundo com bilhete" de "ninguém abriu o sistema". */
+function auth_registrar_ok($bitrixId, $nome = '') {
+    try {
+        $f = __DIR__ . '/../data/.auth_ok.log';
+        if (is_file($f) && filesize($f) > 512 * 1024) @unlink($f);
+        @file_put_contents($f, json_encode([
+            'q' => date('c'), 'id' => (string)$bitrixId, 'nome' => (string)$nome,
+            'ip' => (string)($_SERVER['REMOTE_ADDR'] ?? ''),
+        ], JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND);
+    } catch (Throwable $e) {}
+}

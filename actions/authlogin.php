@@ -36,6 +36,10 @@ try {
     try { $q = $pdo->prepare("SELECT nome FROM usuario WHERE TRIM(bitrix_id)=? LIMIT 1");
           $q->execute([$bitrixId]); $nome = (string)($q->fetchColumn() ?: ''); } catch (Throwable $e) {}
 
+    /* Registrar o SUCESSO, e não só a falha: com log só de falha, silêncio pode ser "funcionou"
+       ou "ninguém abriu" — e essa diferença é exatamente o que decide se dá para virar a chave. */
+    auth_registrar_ok($bitrixId, $nome);
+
     echo json_encode(['ok' => true, 'tk' => auth_emitir($bitrixId),
         'bitrix_id' => $bitrixId, 'nome' => $nome,
         'cadastrado' => $nome !== ''], JSON_UNESCAPED_UNICODE);

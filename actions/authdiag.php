@@ -60,8 +60,22 @@ try {
         try { $q = $pdo->prepare("SELECT nome FROM usuario WHERE TRIM(bitrix_id)=? LIMIT 1"); $q->execute([$bid]);
               $nomes[$bid] = (string)($q->fetchColumn() ?: ''); } catch (Throwable $e) {}
     }
+    // ── quem CONSEGUIU bilhete ──
+    $ok = ['total' => 0, 'ultimo' => '', 'pessoas' => []];
+    $fok = __DIR__ . '/../data/.auth_ok.log';
+    if (is_file($fok)) {
+        foreach (file($fok, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $l) {
+            $j = json_decode($l, true); if (!$j) continue;
+            $ok['total']++; $ok['ultimo'] = $j['q'] ?? '';
+            $k = ($j['nome'] ?: ('id ' . ($j['id'] ?? '?')));
+            $ok['pessoas'][$k] = ($ok['pessoas'][$k] ?? 0) + 1;
+        }
+        arsort($ok['pessoas']);
+    }
+
     echo json_encode(['ok' => true,
         'modo' => auth_modo(),
+        'com_bilhete' => $ok,
         'voce_tem_bilhete' => auth_id_verificada() !== null,
         'sua_id_verificada' => auth_id_verificada(),
         'sem_bilhete' => ['total' => $n, 'primeira' => $primeira, 'ultima' => $ultima,

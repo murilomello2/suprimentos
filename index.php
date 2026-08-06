@@ -383,10 +383,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
       <a id="nav-caixa" data-menu="caixa" title="Caixa de e-mail do suprimentos@ — enviados e recebidos (só leitura)" onclick="showView('caixa')"><span class="material-icons">mail</span> <span class="navtxt">Caixa de E-mail</span></a>
       <a id="nav-obras" data-menu="obras" title="Obras — ficha, características e de-para" onclick="showView('obras')"><span class="material-icons">apartment</span> <span class="navtxt">Obras</span></a>
       <a id="nav-oraculo" data-menu="oraculo" title="Radar IA — oráculo de suprimentos" onclick="showView('oraculo')"><span class="material-icons">auto_awesome</span> <span class="navtxt">Radar IA</span></a>
-      <!-- CONSULTA DA OBRA: telas de leitura para engenheiros/coordenadores (papel 'obra'). -->
-      <a id="nav-ovradar" data-menu="ov_radar" title="Status dos itens de compra da obra — Curva A e B" onclick="showView('ovradar')"><span class="material-icons">event_available</span> <span class="navtxt">Status - Curva A e B</span></a>
-      <a id="nav-ovcot" data-menu="ov_cotacoes" title="Cotações — em que pé está a compra" onclick="showView('ovcot')"><span class="material-icons">price_check</span> <span class="navtxt">Cotações</span></a>
-      <a id="nav-ovsc" data-menu="ov_solicitacoes" title="Solicitações de compra — o que a obra pediu e em que pé está" onclick="showView('ovsc')"><span class="material-icons">assignment</span> <span class="navtxt">Solicitações Totvs</span></a>
+    </nav>
+    <div class="navlabel">Consulta da obra</div>
+    <nav class="nav">
+      <!-- CONSULTA DA OBRA: telas de leitura para engenheiros/coordenadores (papel 'obra').
+           Ficam numa seção PRÓPRIA porque "Cotações" e "Solicitações Totvs" existem também como
+           tela interna, e no menu ficavam indistinguíveis — o Murilo se confundiu com as duas. -->
+      <a id="nav-ovradar" data-menu="ov_radar" title="Status dos itens de compra da obra — Curva A e B (consulta)" onclick="showView('ovradar')"><span class="material-icons">event_available</span> <span class="navtxt">Status - Curva A e B</span></a>
+      <a id="nav-ovcot" data-menu="ov_cotacoes" title="Status das cotações da obra — quem foi chamado, quem respondeu e por quanto (consulta)" onclick="showView('ovcot')"><span class="material-icons">price_check</span> <span class="navtxt">Cotações</span></a>
+      <a id="nav-ovsc" data-menu="ov_solicitacoes" title="Fila de solicitações em aberto — o que a obra pediu e ainda não virou pedido de compra (consulta)" onclick="showView('ovsc')"><span class="material-icons">assignment</span> <span class="navtxt">Solicitações Totvs</span></a>
     </nav>
     <div class="navlabel">Administração</div>
     <nav class="nav">
@@ -602,7 +607,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
    <section id="view-ovcot" style="display:none">
     <div class="top">
       <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">price_check</span> Cotações <span style="font-size:12.5px;font-weight:600;color:var(--muted);letter-spacing:0">· consulta</span></h1>
-      <p class="sub">Em que pé está a compra de cada item: quais fornecedores foram chamados, quem respondeu e por quanto. Tela de consulta — quem negocia é o comprador.</p>
+      <p class="sub">Status das cotações: quais fornecedores foram chamados, quem respondeu e por quanto. Tela de consulta — quem negocia é o comprador.</p>
     </div>
     <div id="ovCotWrap"><div class="dempty">Carregando…</div></div>
    </section>
@@ -610,7 +615,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
    <section id="view-ovsc" style="display:none">
     <div class="top">
       <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">assignment</span> Solicitações Totvs <span style="font-size:12.5px;font-weight:600;color:var(--muted);letter-spacing:0">· consulta</span></h1>
-      <p class="sub">O que a obra pediu e o que já virou cotação. O tempo em aberto é o número que mais importa aqui — clique numa linha para ver os itens.</p>
+      <p class="sub">Fila de solicitações em aberto: o que a obra pediu e ainda não virou pedido de compra. O tempo em aberto é o número que mais importa — clique numa linha para ver os itens.</p>
     </div>
     <div id="ovScWrap"><div class="dempty">Carregando…</div></div>
    </section>

@@ -878,6 +878,27 @@ async function bxIdentificar(ms){
   }); }catch(e){ return null; }
 }
 
+/* Troca a credencial do BX24 por um BILHETE assinado do servidor.
+   Medido em 06/08/2026: o Bitrix NÃO faz POST com AUTH_ID neste app (registrado no modo
+   "somente API JS"), então o token do index.php nunca era emitido e todo mundo continuava
+   chegando ao servidor sem identidade provada. Aqui o navegador pega a credencial e o SERVIDOR
+   pergunta ao Bitrix de quem ela é — inventar token não adianta, quem confere é o Bitrix. */
+async function authTrocarBilhete(){
+  try{
+    const a = (window.BX24 && BX24.getAuth) ? BX24.getAuth() : null;
+    if(!a || !a.access_token) return null;
+    const r = await fetch('actions/authlogin.php', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({auth:a.access_token, domain:a.domain||''})});
+    const j = await r.json();
+    if(j && j.ok && j.tk){
+      window.APP_TK = j.tk;
+      try{ sessionStorage.setItem('sup_tk', j.tk); }catch(e){}
+      return j;
+    }
+  }catch(e){}
+  return null;
+}
+
 async function getCurrentUser(){
   let bid=null, via='fallback';
   const isLocal=(location.hostname==='localhost'||location.hostname==='127.0.0.1');
@@ -886,6 +907,9 @@ async function getCurrentUser(){
     if(!bid) bid = await bxIdentificar(6000);      // 2ª tentativa: BX24 lento no 1º carregamento é comum
     if(bid) via='bx24';
     if(!bid){ authBloqueia(!window.BX24); return; }
+    /* o id que VALE é o que o servidor confirmou com o Bitrix; o do BX24 é só para começar */
+    const bilhete = await authTrocarBilhete();
+    if(bilhete && bilhete.bitrix_id){ bid = bilhete.bitrix_id; via='verificado'; }
   }
   if(!bid) bid='20';                               // SÓ localhost: sandbox de desenvolvimento
   let p=null;

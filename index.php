@@ -649,7 +649,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
     </div>
     <div id="cfg-pedmail" style="display:none"><div class="wrap" id="cfgPedMailWrap"></div></div>
     <div id="cfg-email" style="display:none"><div class="wrap" id="cfgEmailWrap"></div></div>
-    <div id="cfg-acessos" style="display:none"><div class="wrap" id="cfgAcessosWrap"></div></div>
+    <div id="cfg-acessos" style="display:none"><div id="segWrap" style="margin-bottom:14px"></div><div class="wrap" id="cfgAcessosWrap"></div></div>
     <div id="cfg-api" style="display:none"><div class="wrap" id="cfgApiWrap"></div></div>
     <div id="cfg-ia" style="display:none"></div>
     <div id="cfg-users">

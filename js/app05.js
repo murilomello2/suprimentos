@@ -1137,7 +1137,53 @@ function accPing(tela){
 
 const ACC_DIAS_LBL={7:'últimos 7 dias',30:'últimos 30 dias',90:'últimos 90 dias'};
 let ACC={dias:30, data:null, aberto:null};
+/* ═══ SEGURANÇA DA IDENTIDADE — o interruptor do modo estrito ═══
+   Fica aqui, na aba de Acessos, porque é exatamente sobre isso: quem entra e como se prova.
+   A chave só pode ser virada DE DENTRO do app — o servidor recusa ligar o estrito se quem pede
+   não tiver bilhete, senão ninguém entra depois, nem para desligar. */
+async function segLoad(){
+  const w=document.getElementById('segWrap'); if(!w) return;
+  let d; try{ d=await (await fetch('actions/authdiag.php?me='+encodeURIComponent((EU&&EU.bitrix_id)||'')+'&_='+Date.now())).json(); }
+  catch(e){ w.innerHTML=''; return; }
+  if(!d || d.error){ w.innerHTML=''; return; }
+  const estrito = d.modo==='estrito', ok=d.com_bilhete||{total:0,pessoas:{}}, sem=d.sem_bilhete||{total:0};
+  w.innerHTML =
+    '<div class="dcard wide">'+cotSecHead(estrito?'lock':'lock_open','Identidade verificada',
+      estrito?'ninguém entra sem provar quem é':'ainda aceitando chamadas sem prova de identidade','')
+    + '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
+    +   '<span class="dchip" style="background:'+(estrito?'var(--verde)':'var(--dourado)')+'">'+(estrito?'MODO ESTRITO':'MODO AUDITORIA')+'</span>'
+    +   '<span style="font-size:12.5px"><b>'+ok.total+'</b> bilhete(s) emitido(s)</span>'
+    +   '<span style="font-size:12.5px" class="muted"><b>'+sem.total+'</b> chamada(s) sem bilhete registrada(s)</span>'
+    +   '<span class="dmini" style="margin-left:auto;color:'+(d.voce_tem_bilhete?'var(--verde-d)':'var(--pend)')+'">'
+    +     (d.voce_tem_bilhete?('✓ você está identificado (#'+esc(d.sua_id_verificada)+')'):'✗ você está SEM bilhete agora')+'</span>'
+    + '</div>'
+    + (Object.keys(ok.pessoas||{}).length
+       ? '<div class="dmini" style="color:var(--muted);margin-bottom:10px">Já se identificaram: '
+         + Object.keys(ok.pessoas).map(esc).join(' · ')+'</div>' : '')
+    + '<div style="border-left:4px solid '+(estrito?'var(--verde)':'var(--dourado)')+';background:'+(estrito?'#e9f5ee':'#fdf9ec')+';padding:9px 12px;border-radius:0 8px 8px 0;font-size:12.5px;margin-bottom:11px">'
+    +   (estrito
+        ? 'O servidor só aceita chamadas com <b>bilhete assinado</b>. O <code>?me=</code> não vale mais nada: ninguém age no nome de outra pessoa, nem de fora do Bitrix.'
+        : 'O servidor ainda aceita <code>?me=</code> sem prova — é assim que a Paloma criou uma cotação no seu nome. Ligue o modo estrito quando os bilhetes estiverem sendo emitidos normalmente.')
+    + '</div>'
+    + '<div class="bar" style="justify-content:flex-end">'
+    +   (estrito
+        ? '<button class="btn-ghost" onclick="segModo(0)">Voltar para auditoria</button>'
+        : '<button class="btn-prim" onclick="segModo(1)"'+(d.voce_tem_bilhete?'':' disabled title="você precisa estar identificado para poder ligar"')+'>Ligar modo estrito</button>')
+    + '</div></div>';
+}
+async function segModo(ligar){
+  if(ligar && !confirm('Ligar o modo estrito?\n\nA partir daí o servidor recusa qualquer chamada sem bilhete de identidade. Quem estiver com aba antiga aberta se recupera sozinho na próxima ação.')) return;
+  try{
+    const r=await (await fetch('actions/authdiag.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'modo',modo:ligar?'estrito':'auditoria',me:EU&&EU.bitrix_id})})).json();
+    if(r.error){ toast(r.error); return; }
+    toast(r.modo==='estrito'?'Modo estrito ligado — o ?me= não vale mais':'Voltou para auditoria');
+    segLoad();
+  }catch(e){ toast('Falha: '+e.message); }
+}
+
 async function cfgAcessosLoad(){
+  segLoad();
   const w=document.getElementById('cfgAcessosWrap'); if(!w) return;
   w.innerHTML='<div class="dempty">Carregando o uso do sistema…</div>';
   try{ ACC.data=await (await fetch('actions/acessos.php?relatorio=1&dias='+ACC.dias+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||'')+'&_='+Date.now())).json(); }

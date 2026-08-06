@@ -791,6 +791,27 @@ function user_perms($pdo, $bid) {
        $perms não há como o servidor recortar leitura por obra. Negado = o mais restritivo. */
     $deny = ['autorizado'=>false,'perm_admin'=>0,'nome'=>'','editar_escopo'=>'nenhuma','obras_editar'=>[],
              'ver_escopo'=>'sel','obras_ver'=>[]];
+    /* ─── IDENTIDADE VERIFICADA (06/08/2026) ───────────────────────────────────────
+       Até aqui o `$bid` vinha do NAVEGADOR e era acreditado. Medido de fora, com curl e sem
+       sessão nenhuma: `usuarios.php?me=20` devolvia "Murilo Mello, admin=SIM" e `cotacoes.php`
+       devolvia as 809 cotações. Quem soubesse a URL era administrador.
+
+       Como TODO endpoint passa por esta função, a trava fica aqui — um ponto só, em vez de 30
+       lugares para alguém esquecer de um. Havendo bilhete assinado (ver includes/auth.php), o id
+       que vale é o de DENTRO dele; o `me` da requisição é descartado.
+
+       Modo 'auditoria' (padrão) ainda aceita requisição sem bilhete, mas ANOTA — é assim que se
+       descobre quem ficaria de fora antes de virar a chave. Em 'estrito', sem bilhete não há
+       identidade e o resultado é o negado. */
+    require_once __DIR__ . '/auth.php';
+    $verificado = auth_id_verificada();
+    if ($verificado !== null) {
+        $bid = $verificado;                          // o bilhete manda; o que o cliente alegou, não
+    } elseif (PHP_SAPI !== 'cli') {
+        auth_auditar($bid);
+        if (auth_modo() === 'estrito') return $deny;
+    }
+
     $bid = trim((string)($bid ?? ''));               // BX24 às vezes manda id com espaço/quebra invisível
     if ($bid === '') return $deny;
     // compara já com TRIM dos dois lados (resiliente a id salvo/recebido com espaço)

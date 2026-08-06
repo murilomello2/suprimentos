@@ -1,3 +1,43 @@
+
+/* ═════════ BILHETE DE IDENTIDADE — anexado a TODA chamada ao servidor ═════════
+   O bilhete é emitido pelo index.php depois de o servidor perguntar ao Bitrix de quem é o
+   AUTH_ID. Daqui para frente ele viaja em toda requisição, e é o id de DENTRO dele que o
+   servidor usa — o `me` da requisição vira enfeite.
+
+   Interceptar o fetch UMA vez, em vez de editar as dezenas de chamadas espalhadas pelos nove
+   arquivos: mexer em cada uma garante esquecer alguma, e a que ficar de fora é exatamente o
+   furo que a gente está fechando.
+
+   O bilhete fica em sessionStorage porque um F5 é GET — o Bitrix só manda AUTH_ID no POST de
+   abertura do app. Sem guardar, recarregar a página perderia a identidade. sessionStorage e não
+   localStorage: morre com a aba, que é o tempo de vida certo para uma credencial. */
+(function(){
+  const K='sup_tk';
+  if (window.APP_TK) { try{ sessionStorage.setItem(K, window.APP_TK); }catch(e){} }
+  window.supTk = function(){
+    if (window.APP_TK) return window.APP_TK;
+    try{ return sessionStorage.getItem(K) || ''; }catch(e){ return ''; }
+  };
+
+  const orig = window.fetch;
+  window.fetch = function(entrada, opcoes){
+    try{
+      const tk = window.supTk();
+      const url = (typeof entrada === 'string') ? entrada : (entrada && entrada.url) || '';
+      if (tk && typeof entrada === 'string' && /(^|\/)actions\//.test(url)) {
+        // 1) sempre na querystring: cobre GET e também POST cujo corpo não seja JSON nosso
+        entrada += (entrada.indexOf('?') >= 0 ? '&' : '?') + 'tk=' + encodeURIComponent(tk);
+        // 2) e no corpo, quando for o POST JSON que o cockpit usa em tudo
+        if (opcoes && opcoes.method && String(opcoes.method).toUpperCase() === 'POST'
+            && typeof opcoes.body === 'string' && opcoes.body.charAt(0) === '{') {
+          try{ const b = JSON.parse(opcoes.body); if (b && b.tk === undefined) { b.tk = tk; opcoes = Object.assign({}, opcoes, {body: JSON.stringify(b)}); } }catch(e){}
+        }
+      }
+    }catch(e){}
+    return orig.call(this, entrada, opcoes);
+  };
+})();
+
 /* Cockpit de Suprimentos — parte 1 de 6 do aplicativo.
    Gerado a partir do bloco unico que vivia dentro do index.php: 857 KB num arquivo so faziam
    cada deploy levar de 5 a 10 minutos e falhar calado. O corte respeita fronteiras de nivel

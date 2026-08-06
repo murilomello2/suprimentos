@@ -11,11 +11,26 @@
    304 (uns bytes) e o navegador reusa — não custa os 70 KB deste arquivo a cada navegação.
    Quando mudou, vem inteiro, com os ?v= novos. */
 require_once __DIR__ . '/includes/versao.php';
+require_once __DIR__ . '/includes/auth.php';
+
+/* IDENTIDADE — o Bitrix faz POST aqui com AUTH_ID (token OAuth do usuário LOGADO) toda vez que
+   abre um aplicativo local. O código ignorava isso e confiava no `me` que o navegador mandava
+   depois — por isso, de fora, `usuarios.php?me=20` devolvia identidade de administrador.
+   Agora: perguntamos ao PRÓPRIO BITRIX de quem é o token e, com a resposta, emitimos um bilhete
+   assinado que as chamadas seguintes carregam. Sem POST do Bitrix (F5, aba solta) não há bilhete
+   novo — por isso o front reaproveita o último enquanto vale. */
+$SUP_TK = ''; $SUP_TK_ERRO = ''; $SUP_TK_ID = '';
+if (!empty($_POST['AUTH_ID'])) {
+    [$idReal, $err] = auth_bitrix_quem($_POST['AUTH_ID'], $_POST['DOMAIN'] ?? null);
+    if ($idReal) { $SUP_TK = auth_emitir($idReal); $SUP_TK_ID = $idReal; }
+    else $SUP_TK_ERRO = $err;
+}
 $SUP_VER  = sup_versao();
 $SUP_ETAG = '"sup-' . $SUP_VER . '"';
 header('Cache-Control: no-cache, must-revalidate');
 header('ETag: ' . $SUP_ETAG);
-if (sup_etag_bate($SUP_ETAG)) { http_response_code(304); exit; }
+// POST do Bitrix nunca pode virar 304: é a única chance de emitir o bilhete de identidade
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)) { http_response_code(304); exit; }
 ?>
 <!doctype html>
 <html lang="pt-br">
@@ -799,7 +814,11 @@ if (sup_etag_bate($SUP_ETAG)) { http_response_code(304); exit; }
 <?php /* versao do arquivo na URL: o navegador so rebaixa o cache quando o .js muda */
 $jsv = function ($p) { $f = __DIR__ . '/' . $p; return $p . '?v=' . (is_file($f) ? filemtime($f) : time()); };
 ?>
-  <script>window.APP_VER = <?= (int)$SUP_VER ?>;</script>
+  <script>window.APP_VER = <?= (int)$SUP_VER ?>;
+    window.APP_TK = <?= json_encode($SUP_TK) ?>;            // bilhete assinado desta sessão
+    window.APP_TK_ID = <?= json_encode($SUP_TK_ID) ?>;      // quem o Bitrix disse que é
+    window.APP_TK_ERRO = <?= json_encode($SUP_TK_ERRO) ?>;  // por que não deu, quando não dá
+  </script>
   <script src="<?= $jsv('js/app01.js') ?>"></script>
   <script src="<?= $jsv('js/app02.js') ?>"></script>
   <script src="<?= $jsv('js/app03.js') ?>"></script>

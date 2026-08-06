@@ -19,8 +19,23 @@
     try{ return sessionStorage.getItem(K) || ''; }catch(e){ return ''; }
   };
 
+  /* AUTO-RECUPERAÇÃO: aba aberta desde ANTES desta versão não tem bilhete guardado e, no modo
+     estrito, travaria na próxima ação sem a pessoa entender por quê. Então: se o servidor recusar
+     e nós não tivermos bilhete, tenta trocar UMA vez e repete a chamada. Uma só — repetir em
+     laço transformaria um 403 legítimo (sem permissão) em tempestade de requisições. */
+  let tentandoBilhete = false;
+  async function recuperarBilhete(){
+    if (tentandoBilhete || !window.BX24 || typeof authTrocarBilhete !== 'function') return false;
+    tentandoBilhete = true;
+    try{ const b = await authTrocarBilhete(); return !!(b && b.tk); }
+    finally { tentandoBilhete = false; }
+  }
+
   const orig = window.fetch;
-  window.fetch = function(entrada, opcoes){
+  window.fetch = async function(entrada, opcoes){
+    const semBilheteAntes = !window.supTk();
+    const ehAction = (typeof entrada === 'string') && /(^|\/)actions\//.test(entrada);
+    const alvoOriginal = entrada;
     try{
       const tk = window.supTk();
       const url = (typeof entrada === 'string') ? entrada : (entrada && entrada.url) || '';
@@ -34,7 +49,11 @@
         }
       }
     }catch(e){}
-    return orig.call(this, entrada, opcoes);
+    const r = await orig.call(this, entrada, opcoes);
+    if (ehAction && semBilheteAntes && (r.status === 401 || r.status === 403)) {
+      if (await recuperarBilhete()) return window.fetch(alvoOriginal, opcoes);   // 1 nova tentativa
+    }
+    return r;
   };
 })();
 

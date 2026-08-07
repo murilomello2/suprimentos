@@ -80,8 +80,9 @@ function render(){
   const fcr=document.getElementById('fcrono')?document.getElementById('fcrono').value:'';
   const fqt=document.getElementById('fquant')?document.getElementById('fquant').value:'';
   const fre=document.getElementById('frespo')?document.getElementById('frespo').value:'';
+  const fti=document.getElementById('ftipo')?document.getElementById('ftipo').value:'';
   const flat=document.getElementById('fview').value==='lista';
-  const _naf=[fo,fg,fc,fs,fr].filter(Boolean).length+(oa?1:0)+(fcd?1:0)+(fcr?1:0)+(fqt?1:0)+(fre?1:0);
+  const _naf=[fo,fg,fc,fs,fr].filter(Boolean).length+(oa?1:0)+(fcd?1:0)+(fcr?1:0)+(fqt?1:0)+(fre?1:0)+(fti?1:0);
   const _fb=document.getElementById('filtBadge'); if(_fb) _fb.textContent=_naf?` ·${_naf}`:'';
   const _respSet=new Set((typeof RESP!=='undefined'?RESP:[]).map(r=>r.nome));   // nomes de comprador cadastrados (Bitrix)
   const _temResp=i=>!!((i.responsavel||'').trim());
@@ -92,7 +93,10 @@ function render(){
     (!fcd||(fcd==='sim'?i.curado_verba:!i.curado_verba))&&
     (!fcr||(fcr==='sim'?i.curado_data:!i.curado_data))&&
     (!fqt||(fqt==='sim'?i.curado_quant:!i.curado_quant))&&
-    (!fre||(fre==='com'?_temResp(i):fre==='sem'?!_temResp(i):fre==='naocad'?(_temResp(i)&&!_respSet.has((i.responsavel||'').trim())):true)));
+    (!fre||(fre==='com'?_temResp(i):fre==='sem'?!_temResp(i):fre==='naocad'?(_temResp(i)&&!_respSet.has((i.responsavel||'').trim())):true))&&
+    /* '__vazio' = item ainda sem classificação. É o alvo do mutirão, então precisa ser um valor
+       explícito: string vazia no <select> já significa "não filtrar". */
+    (!fti||(fti==='__vazio' ? !String(i.tipo||'').trim() : String(i.tipo||'').trim()===fti)));
   // ordem completa dos grupos (segue grupo_ordem do backend) — base p/ reordenar
   GORDER=[...new Set(DATA.itens.map(i=>i.grupo||'—'))];
   const tb=document.getElementById('tb');

@@ -444,6 +444,19 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
         <select id="fcrono" onchange="render()" title="filtrar pelo cronograma curado"><option value="">Cronograma: todos</option><option value="sim">Só curados ✓</option><option value="nao">Só não curados</option></select>
         <select id="fquant" onchange="render()" title="filtrar pelo quantitativo curado"><option value="">Quantitativo: todos</option><option value="sim">Só curados ✓</option><option value="nao">Só não curados</option></select>
         <select id="frespo" onchange="render()" title="filtrar pelo responsável"><option value="">Responsável: todos</option><option value="com">Com responsável</option><option value="sem">Sem responsável</option><option value="naocad">Não cadastrado</option></select>
+        <!-- TIPO DO ITEM: 86% do radar estava sem classificar (2.116 de 2.460) — o filtro existe
+             sobretudo para o mutirão de classificação. Os valores são os MESMOS do cadastro do
+             item (app02: TIPOS); listar "mão de obra empreitada" ou "locação" como se fossem
+             tipos próprios criaria opção que nunca casa com nada. -->
+        <select id="ftipo" onchange="render()" title="filtrar pelo tipo do item (material, mão de obra, locação…)">
+          <option value="">Tipo: todos</option>
+          <option value="__vazio">— a classificar —</option>
+          <option value="Material">Material</option>
+          <option value="Mão de obra">Mão de obra</option>
+          <option value="Empreitada">Empreitada</option>
+          <option value="Material + MO">Material + MO</option>
+          <option value="Locação">Locação</option>
+        </select>
       </div>
     </div>
 

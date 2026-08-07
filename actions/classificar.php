@@ -46,6 +46,11 @@ function cls_decisoes() {
         'fechamento drywall paredes e shaft emp' => ['Empreitada',  'orçamento não corrigido — verba ainda misturada'],
         // irmão "Transporte Vertical (Cremalheiras)" é Locação na Trinity
         'transporte vertical grua'               => ['Locação',     'irmão Cremalheiras é Locação na Trinity'],
+        /* Estes dois a verba resolve na maioria das obras (100% material), mas em algumas ela está
+           zerada e a regra não dispara — o item ficaria sem tipo por falta de orçamento lançado,
+           não por dúvida. Bloco de concreto e graute são material em qualquer leitura. */
+        'alvenaria estrutural blocos de concreto' => ['Material',   'bloco é material (a verba confirma onde existe)'],
+        'graute a conferir alvenaria estrutural'  => ['Material',   'graute é material (a verba confirma onde existe)'],
     ];
 }
 

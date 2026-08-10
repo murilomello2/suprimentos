@@ -192,7 +192,7 @@ async function fornExcluir(id){ if(!confirm('Excluir este fornecedor?'))return;
   try{ await fetch('actions/fornecedores.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'fornecedor_excluir',me:EU&&EU.bitrix_id,id})}); FORN.edit=null; fornLoad(); }catch(e){toast('Falha');} }
 
 /* ===== Configuração / Permissões (Bloco 2) ===== */
-let CFG={usuarios:[],obras:[]}, NUSER=null;
+let CFG={usuarios:[],obras:[]}, NUSER=null, NUSERS=null;
 /* ===================== MÓDULO OBRAS — ficha das obras + de-para entre sistemas ===================== */
 let OBRAS_M={tab:'ficha', list:[], is_admin:false, filt:'', fstatus:''};
 function obrasInit(){ if(OBRAS_M.list.length){obrasRender();} else obrasLoad(); }

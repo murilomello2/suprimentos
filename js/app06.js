@@ -904,6 +904,7 @@ async function renderConfig(){
 function userForm(bid){
   const u = bid ? CFG.usuarios.find(x=>String(x.bitrix_id)===String(bid)) : null;
   NUSER = u ? {bitrix_id:u.bitrix_id,nome:u.nome,cargo:u.cargo} : null;
+  NUSERS = u ? null : [];   // edição = 1 usuário fixo; criação = carrinho (adiciona vários, salva com o mesmo pacote)
   const papel=u?u.papel:'coordenador';
   const ver=u?u.ver_escopo:'sel', edit=u?u.editar_escopo:'nenhuma';
   const menus=u?(u.menus||[]):PRESETS.coordenador.menus;
@@ -919,7 +920,8 @@ function userForm(bid){
       ${u?`<div class="box"><div class="bv"><b>${esc(u.nome)}</b> <span class="muted">#${esc(u.bitrix_id)}</span></div></div>`
          :`<div class="fld"><label>Buscar usuário no Bitrix</label>
             <div class="search" style="border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
-              <input id="uQ" placeholder="nome ou ID…" oninput="userBuscar()"></div></div>
+              <input id="uQ" placeholder="nome ou ID…" oninput="userBuscar()"></div>
+            <div class="muted" style="font-size:11.5px;margin-top:4px">Escolha um, some outro — os parâmetros abaixo valem para todos da lista.</div></div>
           <div id="uRes"></div>
           <div id="uSel" class="box" style="display:none"></div>`}
       <div class="grid2">
@@ -952,10 +954,11 @@ function userForm(bid){
           <label class="ckl" title="abre o Assistente WhatsApp: kanban das conversas, assumir na mão, parar e encerrar negociação com fornecedor"><input type="checkbox" id="pWhats" ${pw?'checked':''}> Assistente WhatsApp</label>
         </div></div>
       <label class="ckl" style="margin:4px 0 12px"><input type="checkbox" id="uAdmin" ${adm?'checked':''}> É administrador (acessa Configurações e edita tudo)</label>
-      <div style="display:flex;gap:8px"><button class="btn-prim" onclick="userSave()">Salvar usuário</button>
+      <div style="display:flex;gap:8px"><button class="btn-prim" id="uSaveBtn" onclick="userSave()">Salvar usuário</button>
         <button class="btn-ghost" onclick="closeModal()">Cancelar</button></div>
     </div>`;
   document.getElementById('ov').classList.add('open');
+  if(NUSERS) userSelRender();
 }
 function userPreset(){
   const p=PRESETS[val('uPapel')]; if(!p)return; // 'personalizado' (null) mantém o que está marcado
@@ -1069,19 +1072,35 @@ async function userBuscar(){
     <div><div>${esc(u.nome)} <span class="muted">#${esc(u.id)}</span></div></div></div>`).join('')+'</div>';
 }
 function userPick(id,nome,cargo){
-  NUSER={bitrix_id:id,nome,cargo};
+  if(NUSERS.some(u=>String(u.bitrix_id)===String(id))){ toast('Já está na lista'); return; }
+  NUSERS.push({bitrix_id:id,nome,cargo});
   document.getElementById('uRes').innerHTML=''; document.getElementById('uQ').value='';
-  const s=document.getElementById('uSel'); s.style.display='block';
-  s.innerHTML=`<div class="bv">Selecionado: <b>${esc(nome)}</b> <span class="muted">#${esc(id)}</span></div>`;
+  userSelRender();
+}
+function userUnpick(id){
+  NUSERS=NUSERS.filter(u=>String(u.bitrix_id)!==String(id));
+  userSelRender();
+}
+function userSelRender(){
+  const s=document.getElementById('uSel'); if(!s) return;
+  s.style.display=NUSERS.length?'block':'none';
+  s.innerHTML=`<div style="font-weight:700;font-size:12.5px;margin-bottom:6px">Selecionados (${NUSERS.length})</div>`+
+    NUSERS.map(u=>`<div class="bv" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span><b>${esc(u.nome)}</b> <span class="muted">#${esc(u.bitrix_id)}</span></span>
+      <button class="eye" onclick="userUnpick('${esc(u.bitrix_id)}')" title="remover" style="color:var(--pend)">
+        <span class="material-icons" style="font-size:16px;line-height:20px">close</span></button>
+    </div>`).join('');
+  const btn=document.getElementById('uSaveBtn');
+  if(btn) btn.textContent = NUSERS.length>1 ? `Salvar ${NUSERS.length} usuários` : 'Salvar usuário';
 }
 async function userSave(){
-  if(!NUSER){toast('Escolha um usuário do Bitrix');return;}
+  const alvos = NUSER ? [NUSER] : (NUSERS||[]);   // edição: 1 fixo · criação: carrinho (pode ser 1 ou vários)
+  if(!alvos.length){toast('Escolha ao menos um usuário do Bitrix');return;}
   const menus=MENUS.filter(m=>document.getElementById('mn-'+m[0]).checked).map(m=>m[0]);
   const ver=val('uVer'),edit=val('uEdit');
   const obras_ver=ver==='sel'?CFG.obras.filter(o=>document.getElementById('ov-'+o.id).checked).map(o=>o.id):[];
   const obras_editar=edit==='sel'?CFG.obras.filter(o=>document.getElementById('oe-'+o.id).checked).map(o=>o.id):[];
-  const body={acao:'save',me:EU&&EU.bitrix_id,bitrix_id:NUSER.bitrix_id,nome:NUSER.nome,cargo:NUSER.cargo,papel:val('uPapel'),
-    ver_escopo:ver,editar_escopo:edit,obras_ver,obras_editar,menus,
+  const campos={papel:val('uPapel'),ver_escopo:ver,editar_escopo:edit,obras_ver,obras_editar,menus,
     perm_admin:document.getElementById('uAdmin').checked?1:0,
     perm_crono:document.getElementById('pCrono').checked?1:0,
     perm_orcamento:document.getElementById('pOrc').checked?1:0,
@@ -1092,12 +1111,19 @@ async function userSave(){
     perm_whats:document.getElementById('pWhats').checked?1:0,
     dashboard:val('uDash'),
     ativo:parseInt(val('uAtivo'))};
-  const d=await (await fetch('actions/usuarios.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
-  if(d.error){
-    const dbg=d.debug?` · (servidor recebeu me=${JSON.stringify(d.debug.me_recebido)}; eu enviei=${JSON.stringify(EU&&EU.bitrix_id)})`:'';
-    console.warn('userSave erro:',d,'EU=',EU); toast('Erro: '+d.error+dbg); return;
+
+  let ok=0; const falhas=[];
+  for(const u of alvos){   // sequencial: poucos usuários por vez, e cada erro precisa apontar QUEM falhou
+    const body={acao:'save',me:EU&&EU.bitrix_id,bitrix_id:u.bitrix_id,nome:u.nome,cargo:u.cargo,...campos};
+    try{
+      const d=await (await fetch('actions/usuarios.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+      if(d.error) falhas.push(u.nome+': '+d.error); else ok++;
+    }catch(e){ falhas.push(u.nome+': '+e.message); }
   }
-  closeModal(true); await renderConfig(); toast('Usuário salvo');
+  if(!ok){ console.warn('userSave falhas:',falhas,'EU=',EU); toast('Erro: '+falhas.join(' · ')); return; }
+  closeModal(true); await renderConfig();
+  if(!falhas.length) toast(ok>1?`${ok} usuários salvos`:'Usuário salvo');
+  else toast(`${ok} salvo(s), ${falhas.length} falharam: ${falhas.join(' · ')}`);
 }
 async function userDelete(bid){
   if(!confirm('Remover o acesso deste usuário?'))return;

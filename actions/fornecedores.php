@@ -27,6 +27,19 @@ function forn_editor($pdo, $me) {
     if (($p['editar_escopo'] ?? 'nenhuma') !== 'nenhuma') return $p;
     return null;
 }
+/* FONTES possíveis de um cadastro de fornecedor. Lista fechada e servida ao front (rótulo + se pede
+   "indicado por"), pra tela e servidor nunca discordarem do vocabulário. 'ia' já entra aqui porque a
+   busca de fornecedor por IA é o próximo passo — cadastro nascido dela já tem onde se identificar. */
+function forn_fontes() {
+    return [
+        ['v'=>'email',       'lbl'=>'E-mail automático',      'desc'=>'apresentação recebida/encaminhada para suprimentos@'],
+        ['v'=>'indicacao',   'lbl'=>'Indicação',              'desc'=>'alguém indicou', 'quem'=>1],
+        ['v'=>'totvs',       'lbl'=>'TOTVS',                  'desc'=>'veio do cadastro do ERP'],
+        ['v'=>'mapa_antigo', 'lbl'=>'Sistema anterior',       'desc'=>'importado do Mapa de Cotações antigo (Supabase)'],
+        ['v'=>'ia',          'lbl'=>'Pesquisa por IA',        'desc'=>'encontrado por busca da IA'],
+        ['v'=>'manual',      'lbl'=>'Cadastro manual',        'desc'=>'digitado direto no cockpit'],
+    ];
+}
 function forn_add_categoria($pdo, $nome) {
     $nome = trim((string)$nome); if ($nome === '') return;
     $q = $pdo->prepare("SELECT id FROM cot_categoria WHERE nome=?"); $q->execute([$nome]);
@@ -46,6 +59,26 @@ try {
                 ? "CREATE TABLE IF NOT EXISTS totvs_fornecedor (codcfo VARCHAR(20) NOT NULL, cnpj VARCHAR(24), nome VARCHAR(255), fantasia VARCHAR(255), cidade VARCHAR(120), uf VARCHAR(4), email VARCHAR(255), atualizado VARCHAR(40), PRIMARY KEY (codcfo), KEY idx_tf_cnpj (cnpj), KEY idx_tf_nome (nome)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
                 : "CREATE TABLE IF NOT EXISTS totvs_fornecedor (codcfo TEXT PRIMARY KEY, cnpj TEXT, nome TEXT, fantasia TEXT, cidade TEXT, uf TEXT, email TEXT, atualizado TEXT)");
         } catch (Throwable $e2) {}
+    }
+
+    /* FONTE do contato — de onde ele veio pra nós. Colunas aditivas (o projeto não tem migration
+       runner). O TOTVS continua como selo PRÓPRIO e ao vivo (totvs_match, por CNPJ): fonte guarda a
+       origem real do cadastro, e quem está homologado no ERP aparece marcado do lado — assim nenhuma
+       das duas informações apaga a outra. */
+    /* razao_social/totvs_* nasceram DENTRO do enriquecer_totvs, que quase nunca roda: num banco novo
+       (ou que nunca passou por lá) elas não existem, e o save quebrava com "no such column". */
+    foreach ([['fonte','VARCHAR(30)'], ['fonte_data','VARCHAR(40)'], ['fonte_detalhe','VARCHAR(255)'],
+              ['fonte_indicado_por','VARCHAR(160)'], ['origem','VARCHAR(40)'], ['origem_email_data','VARCHAR(40)'],
+              ['origem_capturado_em','VARCHAR(40)'], ['razao_social','VARCHAR(255)'], ['totvs_cod','VARCHAR(40)'],
+              ['totvs_compras_2026','INT'], ['totvs_valor_2026','DOUBLE']] as $c) {
+        try { $pdo->query("SELECT {$c[0]} FROM cot_fornecedor LIMIT 1"); }
+        catch (Throwable $e) {
+            try {
+                $pdo->exec("ALTER TABLE cot_fornecedor ADD COLUMN {$c[0]} {$c[1]}");
+                if ($c[0] === 'fonte') { try { $pdo->exec("UPDATE cot_fornecedor SET fonte='email' WHERE origem='email_apresentacao'"); } catch (Throwable $e3) {} }
+                if ($c[0] === 'fonte_data') { try { $pdo->exec("UPDATE cot_fornecedor SET fonte_data=origem_email_data WHERE origem_email_data IS NOT NULL AND origem_email_data<>''"); } catch (Throwable $e3) {} }
+            } catch (Throwable $e2) {}
+        }
     }
 
     /* Acento -> ASCII por MAPA, não por iconv: com //TRANSLIT o resultado depende do locale do
@@ -117,6 +150,9 @@ try {
         $totvsExists = "EXISTS (SELECT 1 FROM totvs_fornecedor tf WHERE REPLACE(REPLACE(REPLACE(tf.cnpj,'.',''),'/',''),'-','') = REPLACE(REPLACE(REPLACE(cot_fornecedor.cnpj,'.',''),'/',''),'-','') AND LENGTH(REPLACE(REPLACE(REPLACE(cot_fornecedor.cnpj,'.',''),'/',''),'-','')) >= 11)";
         if (($_GET['totvs'] ?? '') === 'sim') { $w[] = $totvsExists; }
         elseif (($_GET['totvs'] ?? '') === 'nao') { $w[] = 'NOT ' . $totvsExists; }
+        // fonte: '__vazia' filtra quem ainda não tem fonte definida (o alvo do mutirão de curadoria)
+        if (($_GET['fonte'] ?? '') === '__vazia')  { $w[] = "(fonte IS NULL OR fonte='')"; }
+        elseif (($_GET['fonte'] ?? '') !== '')     { $w[] = 'fonte = ?'; $a[] = $_GET['fonte']; }
         $where = $w ? ('WHERE ' . implode(' AND ', $w)) : '';
 
         /* EXPORTAÇÃO CSV — leva TODAS as linhas do recorte atual (os mesmos filtros da tela), não só a
@@ -148,7 +184,8 @@ try {
         $limit = min(500, max(1, (int)($_GET['limit'] ?? 60))); $offset = max(0, (int)($_GET['offset'] ?? 0));
         $q = $pdo->prepare("SELECT *, ($totvsExists) AS totvs_match FROM cot_fornecedor $where ORDER BY nome LIMIT $limit OFFSET $offset"); $q->execute($a);
         echo json_encode(['fornecedores'=>$q->fetchAll(), 'total'=>$total, 'categorias'=>$cats,
-            'tipos'=>['Fabricante','M.O.','Atacadista','Varejista','Locadora','Distribuidor','Prestador']], JSON_UNESCAPED_UNICODE); exit;
+            'tipos'=>['Fabricante','M.O.','Atacadista','Varejista','Locadora','Distribuidor','Prestador'],
+            'fontes'=>forn_fontes()], JSON_UNESCAPED_UNICODE); exit;
     }
 
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
@@ -158,13 +195,18 @@ try {
 
     if ($acao === 'fornecedor_salvar') {
         $nome = trim((string)($in['nome'] ?? '')); if ($nome === '') throw new Exception('nome obrigatório');
-        $cols = ['nome','categoria','cidade','contato','telefone','whatsapp','email','itens','tipo','cnpj'];
+        $cols = ['nome','categoria','cidade','contato','telefone','whatsapp','email','itens','tipo','cnpj',
+                 'razao_social','fonte','fonte_data','fonte_detalhe','fonte_indicado_por'];
         $vals = []; foreach ($cols as $c) $vals[$c] = trim((string)($in[$c] ?? ''));
+        // fonte fora do vocabulário conhecido não entra (a lista é fechada — ver forn_fontes())
+        if ($vals['fonte'] !== '' && !in_array($vals['fonte'], array_column(forn_fontes(), 'v'), true)) $vals['fonte'] = '';
+        if ($vals['fonte'] !== 'indicacao') $vals['fonte_indicado_por'] = '';   // "quem indicou" só faz sentido na indicação
         if ($vals['categoria'] !== '') forn_add_categoria($pdo, $vals['categoria']);
         $id = (int)($in['id'] ?? 0);
         if ($id) {
-            $pdo->prepare("UPDATE cot_fornecedor SET nome=?,categoria=?,cidade=?,contato=?,telefone=?,whatsapp=?,email=?,itens=?,tipo=?,cnpj=? WHERE id=?")
-                ->execute([$vals['nome'],$vals['categoria'],$vals['cidade'],$vals['contato'],$vals['telefone'],$vals['whatsapp'],$vals['email'],$vals['itens'],$vals['tipo'],$vals['cnpj'],$id]);
+            $sets = implode(',', array_map(fn($c) => "$c=?", $cols));
+            $args = array_values($vals); $args[] = $id;
+            $pdo->prepare("UPDATE cot_fornecedor SET $sets WHERE id=?")->execute($args);
         } else {
             // ANTI-DUPLICAÇÃO: sem id, reaproveita um fornecedor existente com o MESMO CNPJ (dígitos) ou o MESMO
             // nome (case-insensitive). Fecha o furo do cadastro-por-IA (proposta de PDF) que criava fornecedor repetido.
@@ -187,8 +229,11 @@ try {
                 if ($sets) { $sv[] = $id; $pdo->prepare("UPDATE cot_fornecedor SET " . implode(',', $sets) . " WHERE id=?")->execute($sv); }
                 echo json_encode(['ok'=>true, 'id'=>$id, 'dedup'=>true], JSON_UNESCAPED_UNICODE); exit;
             }
-            $pdo->prepare("INSERT INTO cot_fornecedor (nome,categoria,cidade,contato,telefone,whatsapp,email,itens,tipo,cnpj,ativo,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,1,?)")
-                ->execute([$vals['nome'],$vals['categoria'],$vals['cidade'],$vals['contato'],$vals['telefone'],$vals['whatsapp'],$vals['email'],$vals['itens'],$vals['tipo'],$vals['cnpj'],date('c')]);
+            // cadastro nascendo aqui sem fonte declarada é, por definição, digitado à mão
+            if ($vals['fonte'] === '') { $vals['fonte'] = 'manual'; if ($vals['fonte_data'] === '') $vals['fonte_data'] = date('Y-m-d'); }
+            $ph = implode(',', array_fill(0, count($cols), '?'));
+            $pdo->prepare("INSERT INTO cot_fornecedor (" . implode(',', $cols) . ",ativo,created_at) VALUES ($ph,1,?)")
+                ->execute(array_merge(array_values($vals), [date('c')]));
             $id = (int)$pdo->lastInsertId();
         }
         echo json_encode(['ok'=>true, 'id'=>$id], JSON_UNESCAPED_UNICODE); exit;
@@ -283,6 +328,41 @@ try {
                                substr((string)($r['nota'] ?? ''), 0, 190),
                                trim((string)$f['whatsapp']) !== '' ? 'whatsapp' : 'telefone', (int)$f['id']]);
         }
+        echo json_encode($res, JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    /* BACKFILL DA FONTE — os ~1.500 cadastros que já existiam nasceram antes deste campo.
+       Só toca em quem está SEM fonte (nunca sobrescreve). Duas regras, ambas verificáveis:
+         1. quem entrou no LOTE da importação (o dia com dezenas/centenas de cadastros criados de uma
+            vez — o import do sistema antigo) -> 'mapa_antigo';
+         2. o resto que casa no TOTVS por CNPJ -> 'totvs'.
+       Quem sobrar fica SEM fonte de propósito: "não sei" é uma resposta honesta, chute vira dado
+       falso que ninguém revisa depois. `simular` (padrão) não escreve nada — mostra o que faria. */
+    if ($acao === 'backfill_fonte') {
+        if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error'=>'Apenas administradores.']); exit; }
+        $aplicar = !empty($in['aplicar']);
+        // acha o(s) dia(s) de importação em massa: >= 50 cadastros criados no mesmo dia
+        $lotes = [];
+        foreach ($pdo->query("SELECT SUBSTR(created_at,1,10) d, COUNT(*) n FROM cot_fornecedor
+                              WHERE created_at IS NOT NULL AND created_at<>'' GROUP BY SUBSTR(created_at,1,10)
+                              HAVING COUNT(*) >= 50 ORDER BY n DESC") as $r) $lotes[$r['d']] = (int)$r['n'];
+
+        $res = ['ok'=>true, 'aplicado'=>$aplicar, 'lotes_detectados'=>$lotes, 'mapa_antigo'=>0, 'totvs'=>0, 'sem_fonte_restante'=>0];
+        $semFonte = "(fonte IS NULL OR fonte='')";
+        if ($lotes) {
+            $ph = implode(',', array_fill(0, count($lotes), '?'));
+            $q = $pdo->prepare("SELECT COUNT(*) FROM cot_fornecedor WHERE $semFonte AND SUBSTR(created_at,1,10) IN ($ph)");
+            $q->execute(array_keys($lotes)); $res['mapa_antigo'] = (int)$q->fetchColumn();
+            if ($aplicar) {
+                $u = $pdo->prepare("UPDATE cot_fornecedor SET fonte='mapa_antigo', fonte_data=COALESCE(fonte_data,SUBSTR(created_at,1,10))
+                                    WHERE $semFonte AND SUBSTR(created_at,1,10) IN ($ph)");
+                $u->execute(array_keys($lotes));
+            }
+        }
+        $totvsEx = "EXISTS (SELECT 1 FROM totvs_fornecedor tf WHERE REPLACE(REPLACE(REPLACE(tf.cnpj,'.',''),'/',''),'-','') = REPLACE(REPLACE(REPLACE(cot_fornecedor.cnpj,'.',''),'/',''),'-','') AND LENGTH(REPLACE(REPLACE(REPLACE(cot_fornecedor.cnpj,'.',''),'/',''),'-','')) >= 11)";
+        $res['totvs'] = (int)$pdo->query("SELECT COUNT(*) FROM cot_fornecedor WHERE $semFonte AND $totvsEx")->fetchColumn();
+        if ($aplicar) $pdo->exec("UPDATE cot_fornecedor SET fonte='totvs', fonte_data=COALESCE(fonte_data,SUBSTR(created_at,1,10)) WHERE $semFonte AND $totvsEx");
+        $res['sem_fonte_restante'] = (int)$pdo->query("SELECT COUNT(*) FROM cot_fornecedor WHERE $semFonte")->fetchColumn();
         echo json_encode($res, JSON_UNESCAPED_UNICODE); exit;
     }
 

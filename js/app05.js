@@ -45,14 +45,24 @@ async function solObraSave(i){ const x=SOL.obras.obras[i];
    Agora pagina de verdade, e qualquer mudança de filtro volta p/ a página 1 — senão você filtra
    uma categoria com 12 itens estando na página 7 e a tela aparece vazia sem explicar por quê. */
 const FORN_POR_PAGINA=60;
-let FORN={list:[],cats:[],tipos:[],total:0,pag:1,f:{nome:'',categoria:'',tipo:'',itens:'',totvs:''},edit:null,
+let FORN={list:[],cats:[],tipos:[],fontes:[],total:0,pag:1,f:{nome:'',categoria:'',tipo:'',itens:'',totvs:'',fonte:''},edit:null,
   email:{aberto:false,carregando:false,itens:null,varrendo:false}, sincTotvs:null};
+/* cor/rótulo do selo de fonte — só pra bater o olho e saber a procedência sem ler.
+   Rótulo duplicado do servidor (forn_fontes()) de propósito: o selo aparece em telas que NUNCA
+   carregaram a lista de fornecedores (convite do Mapa, escolha de fornecedor na proposta). */
+const FONTE_COR={email:'#3d7fbf',indicacao:'#a4761c',totvs:'var(--verde)',mapa_antigo:'#8a9299',ia:'#7a4fb5',manual:'#5f6b65'};
+const FONTE_LBL={email:'E-mail',indicacao:'Indicação',totvs:'TOTVS',mapa_antigo:'Sistema anterior',ia:'Busca IA',manual:'Manual'};
+/* selo compacto de procedência, reusado fora da tela de Fornecedores (convite/proposta do Mapa) */
+function fornSeloMini(f){
+  if(!f||!f.fonte||!FONTE_LBL[f.fonte]) return '';
+  return ` <span class="dchip" style="background:${FONTE_COR[f.fonte]||'#8a9299'};font-size:9px;vertical-align:1px" title="fonte do cadastro${f.fonte_data?(' — '+D(String(f.fonte_data).slice(0,10))):''}">${esc(FONTE_LBL[f.fonte])}</span>`;
+}
 function fornQS(){ const q=new URLSearchParams(); Object.entries(FORN.f).forEach(([k,v])=>{ if(v) q.set(k,v); }); return q; }
 async function fornLoad(){
   const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Carregando fornecedores…</div>';
   const q=fornQS(); q.set('limit',String(FORN_POR_PAGINA)); q.set('offset',String((FORN.pag-1)*FORN_POR_PAGINA));
   try{ const d=await (await fetch('actions/fornecedores.php?'+q.toString())).json();
-    FORN.list=d.fornecedores||[]; FORN.cats=d.categorias||[]; FORN.tipos=d.tipos||[]; FORN.total=d.total||0;
+    FORN.list=d.fornecedores||[]; FORN.cats=d.categorias||[]; FORN.tipos=d.tipos||[]; FORN.total=d.total||0; FORN.fontes=d.fontes||[];
     const paginas=Math.max(1,Math.ceil(FORN.total/FORN_POR_PAGINA));
     if(FORN.pag>paginas){ FORN.pag=paginas; return fornLoad(); }   // filtro encolheu o recorte
     fornRender();
@@ -71,7 +81,7 @@ function fornRender(){
   if(FORN.edit) return fornRenderEdit();
   const w=document.getElementById('cotwrap');
   const paginas=Math.max(1,Math.ceil(FORN.total/FORN_POR_PAGINA));
-  const temFiltro=!!(FORN.f.nome||FORN.f.categoria||FORN.f.tipo||FORN.f.itens);
+  const temFiltro=!!(FORN.f.nome||FORN.f.categoria||FORN.f.tipo||FORN.f.itens||FORN.f.totvs||FORN.f.fonte);
   let html=IS_ADMIN?fornEmailPanel():'';
   html+=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
     <div class="search" style="min-width:150px"><span class="material-icons" style="color:var(--muted)">search</span><input placeholder="Buscar nome…" value="${esc(FORN.f.nome)}" oninput="FORN.f.nome=this.value;fornDeb()"></div>
@@ -83,9 +93,15 @@ function fornRender(){
       <option value="sim" ${FORN.f.totvs==='sim'?'selected':''}>TOTVS: sim</option>
       <option value="nao" ${FORN.f.totvs==='nao'?'selected':''}>TOTVS: não</option>
     </select>
-    ${temFiltro?`<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px;color:var(--pend);font-weight:700" onclick="FORN.f={nome:'',categoria:'',tipo:'',itens:'',totvs:''};fornFiltro()">✕ limpar</button>`:''}
+    <select onchange="FORN.f.fonte=this.value;fornFiltro()" title="de onde este contato veio">
+      <option value="" ${FORN.f.fonte===''?'selected':''}>Todas as fontes</option>
+      ${(FORN.fontes||[]).map(x=>`<option value="${esc(x.v)}" ${x.v===FORN.f.fonte?'selected':''}>Fonte: ${esc(x.lbl)}</option>`).join('')}
+      <option value="__vazia" ${FORN.f.fonte==='__vazia'?'selected':''}>Fonte: não informada</option>
+    </select>
+    ${temFiltro?`<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px;color:var(--pend);font-weight:700" onclick="FORN.f={nome:'',categoria:'',tipo:'',itens:'',totvs:'',fonte:''};fornFiltro()">✕ limpar</button>`:''}
     ${IS_ADMIN?`<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px" onclick="fornDups()" title="fornecedores com o MESMO CNPJ cadastrados mais de uma vez"><span class="material-icons" style="font-size:14px;vertical-align:-3px">join_full</span> Duplicados</button>`:''}
     ${IS_ADMIN?`<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px" onclick="fornSincTotvs()" title="puxa do Supabase o cadastro de fornecedores do TOTVS (por CNPJ) — hoje não roda sozinho"><span class="material-icons" style="font-size:14px;vertical-align:-3px">sync</span> Sincronizar TOTVS</button>`:''}
+    ${IS_ADMIN?`<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px" onclick="fornBackfillFonte()" title="preenche a FONTE dos cadastros antigos (importação do sistema anterior / consta no TOTVS) — mostra antes de aplicar"><span class="material-icons" style="font-size:14px;vertical-align:-3px">auto_fix_high</span> Preencher fontes</button>`:''}
     <span class="muted" style="font-size:12px"><b>${FORN.total}</b> fornecedor(es)${temFiltro?' no filtro':''}${paginas>1?` · página ${FORN.pag} de ${paginas}`:''}</span>
     <button class="btn-ghost" style="margin-left:auto;padding:7px 12px" onclick="fornCSV()" title="baixa em CSV TODAS as ${FORN.total} linha(s) do recorte atual — não só esta página">
       <span class="material-icons" style="font-size:15px;vertical-align:-3px">download</span> Exportar CSV</button>
@@ -98,8 +114,9 @@ function fornRender(){
        totvs_cod sob demanda e nao tem botao nenhum que o chame). */
     const selo = f.totvs_cod ? ` <span class="dchip" style="background:var(--verde);font-size:9.5px;vertical-align:1px" title="cadastrado no TOTVS — código ${esc(f.totvs_cod)}">TOTVS ${esc(f.totvs_cod)}</span>`
                : (Number(f.totvs_match)===1 ? ` <span class="dchip" style="background:var(--verde);font-size:9.5px;vertical-align:1px" title="CNPJ encontrado no cadastro de fornecedores do TOTVS">TOTVS ✓</span>` : '');
-    const viaEmail = f.origem==='email_apresentacao' ? ` <span class="material-icons" style="font-size:13px;vertical-align:-2px;color:var(--muted)" title="cadastrado/complementado por e-mail de apresentação${f.origem_email_data?(' — e-mail de '+D(String(f.origem_email_data).slice(0,10))):''}${f.origem_capturado_em?(' · capturado em '+D(String(f.origem_capturado_em).slice(0,10))):''}">mark_email_read</span>` : '';
-    html+=`<tr><td><b>${esc(f.nome)}</b>${selo}${viaEmail}${f.email?`<div class="muted" style="font-size:11px">${esc(f.email)}</div>`:''}${f.cnpj?`<div class="muted" style="font-size:10.5px">CNPJ ${esc(f.cnpj)}</div>`:''}</td><td class="muted">${esc(f.categoria||'')}</td><td class="muted">${esc(f.cidade||'')}</td><td>${esc(f.contato||'')}</td><td>${esc(f.telefone||'')}</td><td class="muted" style="font-size:11px">${esc((f.itens||'').slice(0,42))}</td><td>${esc(f.tipo||'')}</td>
+    const fo=(FORN.fontes||[]).find(x=>x.v===f.fonte);
+    const seloFonte = fo ? ` <span class="dchip" style="background:${FONTE_COR[f.fonte]||'#8a9299'};font-size:9.5px;vertical-align:1px" title="fonte: ${esc(fo.desc||fo.lbl)}${f.fonte_data?(' — '+D(String(f.fonte_data).slice(0,10))):''}${f.fonte_indicado_por?(' · indicado por '+esc(f.fonte_indicado_por)):''}">${esc(fo.lbl)}</span>` : '';
+    html+=`<tr><td><b>${esc(f.nome)}</b>${selo}${seloFonte}${f.email?`<div class="muted" style="font-size:11px">${esc(f.email)}</div>`:''}${f.cnpj?`<div class="muted" style="font-size:10.5px">CNPJ ${esc(f.cnpj)}</div>`:''}</td><td class="muted">${esc(f.categoria||'')}</td><td class="muted">${esc(f.cidade||'')}</td><td>${esc(f.contato||'')}</td><td>${esc(f.telefone||'')}</td><td class="muted" style="font-size:11px">${esc((f.itens||'').slice(0,42))}</td><td>${esc(f.tipo||'')}</td>
       <td>${CAN_FORN?`<button class="btn-ghost" style="padding:2px 8px" onclick="fornNovo(${f.id})"><span class="material-icons" style="font-size:15px">edit</span></button>`:''}</td></tr>`;
   }
   if(!FORN.list.length) html+=`<tr><td colspan="8" class="empty">${temFiltro?'Nenhum fornecedor com esses filtros. <span class="dmini">Tente limpar a categoria ou o tipo.</span>':'Nenhum fornecedor. Importe do sistema antigo (Excel) ou cadastre um novo.'}</td></tr>`;
@@ -136,6 +153,28 @@ async function fornSincTotvs(){
   FORN.sincTotvs=null; fornLoad();
 }
 
+/* ---------- Preencher a FONTE dos cadastros antigos (admin) ---------- */
+/* Mostra o que faria ANTES de escrever (padrão do normalizar_whatsapp): 1.500 cadastros nasceram
+   antes deste campo existir, e chute silencioso vira dado falso que ninguém revisa depois. */
+async function fornBackfillFonte(){
+  let sim;
+  try{ sim=await (await fetch('actions/fornecedores.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'backfill_fonte',me:EU&&EU.bitrix_id})})).json(); }
+  catch(e){ toast('Falha: '+e.message); return; }
+  if(sim.error){ toast(sim.error); return; }
+  const lotes=Object.entries(sim.lotes_detectados||{}).map(([d,n])=>`${D(d)} (${n})`).join(', ')||'nenhum';
+  if(!confirm(`Preencher a fonte dos cadastros que estão SEM fonte:\n\n`
+    +`• ${sim.mapa_antigo} → "Sistema anterior" (criados nos lotes de importação: ${lotes})\n`
+    +`• ${sim.totvs} → "TOTVS" (CNPJ consta no cadastro do ERP)\n`
+    +`• ${sim.sem_fonte_restante-sim.mapa_antigo-sim.totvs} ficam sem fonte (não dá pra saber — melhor vazio que chute)\n\n`
+    +`Quem já tem fonte definida não é tocado. Aplicar?`)) return;
+  try{
+    const r=await (await fetch('actions/fornecedores.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'backfill_fonte',me:EU&&EU.bitrix_id,aplicar:1})})).json();
+    if(r.error){ toast(r.error); return; }
+    toast(`Fontes preenchidas: ${r.mapa_antigo} sistema anterior · ${r.totvs} TOTVS · ${r.sem_fonte_restante} ainda sem fonte`);
+    fornLoad();
+  }catch(e){ toast('Falha: '+e.message); }
+}
+
 /* ---------- Cadastro automático de fornecedor por e-mail (admin) ---------- */
 /* Painel colapsável (fechado por padrão — tela limpa) com o log de auditoria de
    actions/fornecedor_email.php e o botão de varrer manual (não há cron configurado hoje). */
@@ -145,7 +184,7 @@ function fornEmailPanel(){
     <div class="bar" style="gap:8px;align-items:center;cursor:pointer" onclick="fornEmailToggle()">
       <span class="material-icons" style="font-size:16px">${st.aberto?'expand_more':'chevron_right'}</span>
       <b style="font-size:13px">Cadastro automático de fornecedor por e-mail</b>
-      <span class="muted" style="font-size:11.5px">— encaminhe pra suprimentos@ com assunto começando em "Fornecedor"</span>
+      <span class="muted" style="font-size:11.5px">— encaminhe pra suprimentos@ com "Fornecedor" ou "Apresentação" no assunto</span>
     </div>`;
   if(st.aberto){
     h+='<div style="margin-top:10px">';
@@ -256,22 +295,68 @@ async function fornFundir(gi){
   }catch(e){ toast('Falha ao fundir'); }
 }
 function fornNovo(id){ FORN.edit = id ? Object.assign({}, (FORN.list.find(f=>f.id===id)||{id})) : {}; fornRender(); }
+/* Cabeçalho de seção — mesmo desenho do resto do sistema (fonte maior + ícone), pedido do Murilo. */
+function fornSecHead(icone,titulo,sub){
+  return `<div style="display:flex;align-items:center;gap:7px;margin:16px 0 9px">
+    <span class="material-icons" style="font-size:17px;color:var(--verde)">${icone}</span>
+    <b style="font-size:13.5px">${titulo}</b>${sub?`<span class="muted" style="font-size:11.5px">— ${sub}</span>`:''}</div>`;
+}
 function fornRenderEdit(){
   const f=FORN.edit, w=document.getElementById('cotwrap');
-  const F=(label,key,ph)=>cotFld(label,`<input id="fe_${key}" value="${esc(f[key]||'')}" placeholder="${ph||''}">`);
+  const FONTES=FORN.fontes||[];
+  const F=(label,key,ph,extra)=>cotFld(label,`<input id="fe_${key}" value="${esc(f[key]||'')}" placeholder="${ph||''}">`,extra);
+  const G3='display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px';
+  // faixa de procedência: só aparece quando o cadastro TEM história (veio de e-mail, do TOTVS, etc.)
+  const fonteAtual=(FONTES.find(x=>x.v===f.fonte)||{}).lbl||'';
+  let proc='';
+  if(f.id&&(fonteAtual||Number(f.totvs_match)===1||f.created_at)){
+    const bits=[];
+    if(fonteAtual) bits.push(`<b>${esc(fonteAtual)}</b>${f.fonte_data?` · e-mail/registro de <b>${D(String(f.fonte_data).slice(0,10))}</b>`:''}`);
+    if(f.origem_capturado_em) bits.push(`capturado pelo cockpit em ${D(String(f.origem_capturado_em).slice(0,10))}`);
+    if(f.created_at) bits.push(`cadastro criado em ${D(String(f.created_at).slice(0,10))}`);
+    if(Number(f.totvs_match)===1) bits.push('<b style="color:var(--verde)">consta no TOTVS</b>');
+    else if(f.totvs_cod) bits.push(`TOTVS ${esc(f.totvs_cod)}`);
+    proc=`<div style="background:#f3f7f5;border:1px solid #dfe9e3;border-radius:9px;padding:9px 12px;font-size:12px;color:#4a5751;margin-bottom:4px">
+      <span class="material-icons" style="font-size:14px;vertical-align:-2px;color:var(--verde)">history</span> ${bits.join(' · ')}</div>`;
+  }
   w.innerHTML=`<div class="panel"><div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="FORN.edit=null;fornRender()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar</button><b style="font-size:15px">${f.id?'Editar':'Novo'} fornecedor</b></div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
-      ${F('Nome *','nome','Razão social / nome')}
+    ${proc}
+    ${fornSecHead('badge','Identificação')}
+    <div style="${G3}">
+      ${F('Nome *','nome','Nome fantasia / como chamamos')}
+      ${F('Razão social','razao_social','Razão social completa')}
+      ${F('CNPJ','cnpj','00.000.000/0000-00')}
       ${cotFld('Categoria',`<input id="fe_categoria" list="feCats" value="${esc(f.categoria||'')}" placeholder="Categoria"><datalist id="feCats">${FORN.cats.map(c=>`<option value="${esc(c.nome)}">`).join('')}</datalist>`)}
       ${cotFld('Tipo',`<select id="fe_tipo">${['','Fabricante','M.O.','Atacadista','Varejista','Locadora','Distribuidor','Prestador'].map(t=>`<option ${t===(f.tipo||'')?'selected':''}>${t}</option>`).join('')}</select>`)}
-      ${F('Cidade','cidade')} ${F('Contato','contato')} ${F('Telefone','telefone')} ${F('WhatsApp','whatsapp')} ${F('E-mail','email')} ${F('CNPJ','cnpj')}
+      ${F('Cidade','cidade','Cidade/UF')}
     </div>
-    ${cotFld('Itens que fornece','<input id="fe_itens" value="'+esc(f.itens||'')+'" placeholder="Ex.: forro, gesso, revestimentos">','margin-top:8px')}
-    <div style="margin-top:14px;display:flex;gap:8px"><button class="btn-prim" onclick="fornSalvar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar</button>${f.id&&(IS_ADMIN||((EU&&EU.papel)||'')==='gerente')?`<button class="btn-ghost" style="color:var(--pend)" onclick="fornExcluir(${f.id})">Excluir</button>`:''}</div></div>`;
+    ${fornSecHead('contact_phone','Contato')}
+    <div style="${G3}">
+      ${F('Contato','contato','Nome do representante')}
+      ${F('Telefone','telefone','(00) 0000-0000')}
+      ${F('WhatsApp','whatsapp','(00) 00000-0000')}
+      ${F('E-mail','email','contato@fornecedor.com.br')}
+    </div>
+    ${fornSecHead('inventory_2','Itens que fornece','o que ele vende ou executa — é isto que a busca casa quando você procura um fornecedor')}
+    <textarea id="fe_itens" rows="3" placeholder="Ex.: kits de porta pronta certificados, batentes, guarnições, ferragens" style="width:100%;resize:vertical;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:8px">${esc(f.itens||'')}</textarea>
+    ${fornSecHead('travel_explore','Fonte','de onde este contato veio — dá pra filtrar por isso na lista')}
+    <div style="${G3}">
+      ${cotFld('Fonte',`<select id="fe_fonte" onchange="fornFonteToggle()">
+        <option value="">— não informada —</option>
+        ${FONTES.map(x=>`<option value="${esc(x.v)}" ${x.v===(f.fonte||'')?'selected':''}>${esc(x.lbl)}</option>`).join('')}</select>`)}
+      ${cotFld('Data da fonte',`<input id="fe_fonte_data" type="date" value="${esc(String(f.fonte_data||'').slice(0,10))}">`)}
+      ${F('Detalhe da fonte','fonte_detalhe','Ex.: feira Feicon 2026, site do fabricante')}
+    </div>
+    <div id="feIndBox" style="${G3};margin-top:12px;display:${(f.fonte||'')==='indicacao'?'grid':'none'}">
+      ${F('Quem indicou','fonte_indicado_por','Nome de quem indicou (pessoa, obra ou outro fornecedor)')}
+    </div>
+    <div style="margin-top:18px;display:flex;gap:8px"><button class="btn-prim" onclick="fornSalvar()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar</button>${f.id&&(IS_ADMIN||((EU&&EU.papel)||'')==='gerente')?`<button class="btn-ghost" style="color:var(--pend)" onclick="fornExcluir(${f.id})">Excluir</button>`:''}</div></div>`;
 }
+function fornFonteToggle(){ const b=document.getElementById('feIndBox'); if(b) b.style.display=val('fe_fonte')==='indicacao'?'grid':'none'; }
 async function fornSalvar(){
   const g=id=>val('fe_'+id); const nome=g('nome').trim(); if(!nome){toast('Nome obrigatório');return;}
-  const body={acao:'fornecedor_salvar',me:EU&&EU.bitrix_id,id:FORN.edit.id||undefined,nome,categoria:g('categoria'),cidade:g('cidade'),contato:g('contato'),telefone:g('telefone'),whatsapp:g('whatsapp'),email:g('email'),cnpj:g('cnpj'),itens:g('itens'),tipo:g('tipo')};
+  const body={acao:'fornecedor_salvar',me:EU&&EU.bitrix_id,id:FORN.edit.id||undefined,nome,categoria:g('categoria'),cidade:g('cidade'),contato:g('contato'),telefone:g('telefone'),whatsapp:g('whatsapp'),email:g('email'),cnpj:g('cnpj'),itens:g('itens'),tipo:g('tipo'),
+    razao_social:g('razao_social'),fonte:g('fonte'),fonte_data:g('fonte_data'),fonte_detalhe:g('fonte_detalhe'),fonte_indicado_por:g('fonte_indicado_por')};
   try{ const r=await (await fetch('actions/fornecedores.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error);return;} toast(r.dedup?'Já existia um fornecedor com esse nome/CNPJ — reaproveitado':'Fornecedor salvo'); FORN.edit=null; fornLoad();
   }catch(e){toast('Falha: '+e.message);}

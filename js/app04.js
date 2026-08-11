@@ -275,7 +275,7 @@ function cotFornSearch(el){
       const L=d.fornecedores||[]; COT.prop._fornList=L;
       if(!L.length){ drop.innerHTML='<div class="muted" style="padding:10px 12px;font-size:12px">Nenhum fornecedor cadastrado com esse termo. Digite o nome livre e salve — ele entra na Concorrência.</div>'; drop.style.display='block'; return; }
       drop.innerHTML=L.map((f,i)=>`<div onmousedown="cotFornPick(${i})" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f2f4f3" onmouseover="this.style.background='#f3f7f5'" onmouseout="this.style.background='#fff'">
-        <b style="font-size:12.5px">${esc(f.nome)}</b>
+        <b style="font-size:12.5px">${esc(f.nome)}</b>${fornSeloMini(f)}
         <div class="muted" style="font-size:10.5px">${esc(f.categoria||'sem categoria')}${f.cidade?' · '+esc(f.cidade):''}${f.tipo?' · '+esc(f.tipo):''}${f.itens?' · '+esc((''+f.itens).slice(0,60)):''}</div></div>`).join('');
       drop.style.display='block';
     }catch(e){ drop.style.display='none'; }
@@ -817,7 +817,7 @@ function cotDesconvidarOk(id){
 let _cotCB;
 function cotConvBuscaInput(){ clearTimeout(_cotCB); const q=(document.getElementById('cotConvBusca').value||'').trim(), box=document.getElementById('cotConvSug'); if(!box)return; if(q.length<2){box.style.display='none';box.innerHTML='';return;}
   _cotCB=setTimeout(async()=>{ try{ const d=await (await fetch('actions/fornecedores.php?q='+encodeURIComponent(q)+'&limit=14')).json(); COT.convBusca=d.fornecedores||[];
-    box.innerHTML=COT.convBusca.length?COT.convBusca.map((f,i)=>`<div onclick="cotConvidar(${i})" style="padding:7px 10px;cursor:pointer;font-size:12.5px;border-bottom:1px solid #f1f3f2" onmouseover="this.style.background='#eff7f1'" onmouseout="this.style.background=''"><b>${esc(f.nome)}</b> <span class="muted" style="font-size:10.5px">· ${esc(f.categoria||'')}${f.cidade?' · '+esc(f.cidade):''}</span></div>`).join(''):'<div class="dmini" style="padding:8px">nenhum fornecedor casa "'+esc(q)+'"</div>'; box.style.display='block';
+    box.innerHTML=COT.convBusca.length?COT.convBusca.map((f,i)=>`<div onclick="cotConvidar(${i})" style="padding:7px 10px;cursor:pointer;font-size:12.5px;border-bottom:1px solid #f1f3f2" onmouseover="this.style.background='#eff7f1'" onmouseout="this.style.background=''"><b>${esc(f.nome)}</b>${fornSeloMini(f)} <span class="muted" style="font-size:10.5px">· ${esc(f.categoria||'')}${f.cidade?' · '+esc(f.cidade):''}</span></div>`).join(''):'<div class="dmini" style="padding:8px">nenhum fornecedor casa "'+esc(q)+'"</div>'; box.style.display='block';
   }catch(e){} },300); }
 async function cotConvidar(idx){ const f=(COT.convBusca||[])[idx]; if(!f)return;
   try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'convidar',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,convidados:[{id:f.id,nome:f.nome,categoria:f.categoria,contato:f.contato,email:f.email,telefone:f.telefone}]})})).json();

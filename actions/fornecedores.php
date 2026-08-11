@@ -36,6 +36,18 @@ function forn_add_categoria($pdo, $nome) {
 try {
     $pdo = db();
 
+    // BLINDAGEM: garante que totvs_fornecedor existe antes de qualquer JOIN/EXISTS contra ela — sem
+    // isso, se ninguém tiver rodado sync_totvs ainda, a listagem inteira de fornecedores quebraria.
+    try { $pdo->query("SELECT codcfo FROM totvs_fornecedor LIMIT 1"); }
+    catch (Throwable $e) {
+        try {
+            $mysql0 = defined('DB_DRIVER') && DB_DRIVER === 'mysql';
+            $pdo->exec($mysql0
+                ? "CREATE TABLE IF NOT EXISTS totvs_fornecedor (codcfo VARCHAR(20) NOT NULL, cnpj VARCHAR(24), nome VARCHAR(255), fantasia VARCHAR(255), cidade VARCHAR(120), uf VARCHAR(4), email VARCHAR(255), atualizado VARCHAR(40), PRIMARY KEY (codcfo), KEY idx_tf_cnpj (cnpj), KEY idx_tf_nome (nome)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+                : "CREATE TABLE IF NOT EXISTS totvs_fornecedor (codcfo TEXT PRIMARY KEY, cnpj TEXT, nome TEXT, fantasia TEXT, cidade TEXT, uf TEXT, email TEXT, atualizado TEXT)");
+        } catch (Throwable $e2) {}
+    }
+
     /* Acento -> ASCII por MAPA, não por iconv: com //TRANSLIT o resultado depende do locale do
        servidor, e aqui o ç era simplesmente descartado (a categoria "Aço" virava "Ao" no nome do
        arquivo exportado). Mapa fixo é feio mas é previsível. */
@@ -99,6 +111,12 @@ try {
         if (($_GET['tipo'] ?? '') !== '')      { $w[] = 'tipo = ?';         $a[] = $_GET['tipo']; }
         if (($_GET['itens'] ?? '') !== '')     { $w[] = 'itens LIKE ?';     $a[] = '%'.$_GET['itens'].'%'; }
         if (($_GET['cidade'] ?? '') !== '')    { $w[] = 'cidade LIKE ?';    $a[] = '%'.$_GET['cidade'].'%'; }
+        // TOTVS: casamento AO VIVO por CNPJ contra o espelho totvs_fornecedor — não depende de alguém
+        // ter rodado enriquecer_totvs antes (aquilo só preenche totvs_cod sob demanda, e nada mais chama
+        // essa ação). Assim a marcação nunca fica desatualizada por falta de um clique em outro lugar.
+        $totvsExists = "EXISTS (SELECT 1 FROM totvs_fornecedor tf WHERE REPLACE(REPLACE(REPLACE(tf.cnpj,'.',''),'/',''),'-','') = REPLACE(REPLACE(REPLACE(cot_fornecedor.cnpj,'.',''),'/',''),'-','') AND LENGTH(REPLACE(REPLACE(REPLACE(cot_fornecedor.cnpj,'.',''),'/',''),'-','')) >= 11)";
+        if (($_GET['totvs'] ?? '') === 'sim') { $w[] = $totvsExists; }
+        elseif (($_GET['totvs'] ?? '') === 'nao') { $w[] = 'NOT ' . $totvsExists; }
         $where = $w ? ('WHERE ' . implode(' AND ', $w)) : '';
 
         /* EXPORTAÇÃO CSV — leva TODAS as linhas do recorte atual (os mesmos filtros da tela), não só a
@@ -128,7 +146,7 @@ try {
 
         $tot = $pdo->prepare("SELECT COUNT(*) FROM cot_fornecedor $where"); $tot->execute($a); $total = (int)$tot->fetchColumn();
         $limit = min(500, max(1, (int)($_GET['limit'] ?? 60))); $offset = max(0, (int)($_GET['offset'] ?? 0));
-        $q = $pdo->prepare("SELECT * FROM cot_fornecedor $where ORDER BY nome LIMIT $limit OFFSET $offset"); $q->execute($a);
+        $q = $pdo->prepare("SELECT *, ($totvsExists) AS totvs_match FROM cot_fornecedor $where ORDER BY nome LIMIT $limit OFFSET $offset"); $q->execute($a);
         echo json_encode(['fornecedores'=>$q->fetchAll(), 'total'=>$total, 'categorias'=>$cats,
             'tipos'=>['Fabricante','M.O.','Atacadista','Varejista','Locadora','Distribuidor','Prestador']], JSON_UNESCAPED_UNICODE); exit;
     }

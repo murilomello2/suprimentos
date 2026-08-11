@@ -45,7 +45,8 @@ async function solObraSave(i){ const x=SOL.obras.obras[i];
    Agora pagina de verdade, e qualquer mudança de filtro volta p/ a página 1 — senão você filtra
    uma categoria com 12 itens estando na página 7 e a tela aparece vazia sem explicar por quê. */
 const FORN_POR_PAGINA=60;
-let FORN={list:[],cats:[],tipos:[],total:0,pag:1,f:{nome:'',categoria:'',tipo:'',itens:''},edit:null};
+let FORN={list:[],cats:[],tipos:[],total:0,pag:1,f:{nome:'',categoria:'',tipo:'',itens:'',totvs:''},edit:null,
+  email:{aberto:false,carregando:false,itens:null,varrendo:false}, sincTotvs:null};
 function fornQS(){ const q=new URLSearchParams(); Object.entries(FORN.f).forEach(([k,v])=>{ if(v) q.set(k,v); }); return q; }
 async function fornLoad(){
   const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Carregando fornecedores…</div>';
@@ -71,13 +72,20 @@ function fornRender(){
   const w=document.getElementById('cotwrap');
   const paginas=Math.max(1,Math.ceil(FORN.total/FORN_POR_PAGINA));
   const temFiltro=!!(FORN.f.nome||FORN.f.categoria||FORN.f.tipo||FORN.f.itens);
-  let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
+  let html=IS_ADMIN?fornEmailPanel():'';
+  html+=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
     <div class="search" style="min-width:150px"><span class="material-icons" style="color:var(--muted)">search</span><input placeholder="Buscar nome…" value="${esc(FORN.f.nome)}" oninput="FORN.f.nome=this.value;fornDeb()"></div>
     <select onchange="FORN.f.categoria=this.value;fornFiltro()">${fornCatOpts(FORN.f.categoria)}</select>
     <select onchange="FORN.f.tipo=this.value;fornFiltro()"><option value="">Todos os tipos</option>${FORN.tipos.map(t=>`<option value="${esc(t)}" ${t===FORN.f.tipo?'selected':''}>${esc(t)}</option>`).join('')}</select>
     <input placeholder="Filtrar por itens…" value="${esc(FORN.f.itens)}" oninput="FORN.f.itens=this.value;fornDeb()" style="min-width:130px">
-    ${temFiltro?`<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px;color:var(--pend);font-weight:700" onclick="FORN.f={nome:'',categoria:'',tipo:'',itens:''};fornFiltro()">✕ limpar</button>`:''}
+    <select onchange="FORN.f.totvs=this.value;fornFiltro()" title="cadastrado no TOTVS (CODCFO/CNPJ com pedido de compra)">
+      <option value="" ${FORN.f.totvs===''?'selected':''}>TOTVS: todos</option>
+      <option value="sim" ${FORN.f.totvs==='sim'?'selected':''}>TOTVS: sim</option>
+      <option value="nao" ${FORN.f.totvs==='nao'?'selected':''}>TOTVS: não</option>
+    </select>
+    ${temFiltro?`<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px;color:var(--pend);font-weight:700" onclick="FORN.f={nome:'',categoria:'',tipo:'',itens:'',totvs:''};fornFiltro()">✕ limpar</button>`:''}
     ${IS_ADMIN?`<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px" onclick="fornDups()" title="fornecedores com o MESMO CNPJ cadastrados mais de uma vez"><span class="material-icons" style="font-size:14px;vertical-align:-3px">join_full</span> Duplicados</button>`:''}
+    ${IS_ADMIN?`<button class="btn-ghost" style="padding:5px 10px;font-size:11.5px" onclick="fornSincTotvs()" title="puxa do Supabase o cadastro de fornecedores do TOTVS (por CNPJ) — hoje não roda sozinho"><span class="material-icons" style="font-size:14px;vertical-align:-3px">sync</span> Sincronizar TOTVS</button>`:''}
     <span class="muted" style="font-size:12px"><b>${FORN.total}</b> fornecedor(es)${temFiltro?' no filtro':''}${paginas>1?` · página ${FORN.pag} de ${paginas}`:''}</span>
     <button class="btn-ghost" style="margin-left:auto;padding:7px 12px" onclick="fornCSV()" title="baixa em CSV TODAS as ${FORN.total} linha(s) do recorte atual — não só esta página">
       <span class="material-icons" style="font-size:15px;vertical-align:-3px">download</span> Exportar CSV</button>
@@ -85,9 +93,13 @@ function fornRender(){
   </div></div><div class="wrap"><table><thead><tr><th>Nome</th><th>Categoria</th><th>Cidade</th><th>Contato</th><th>Telefone</th><th>Itens</th><th>Tipo</th><th></th></tr></thead><tbody>`;
   for(const f of FORN.list){
     /* Selo do TOTVS: o Murilo abriu dois cadastros da Comercial Ararense e nao tinha como saber qual
-       deles o TOTVS conhece — e e o codigo do TOTVS (CODCFO) que casa o pedido com o cadastro. */
-    const selo = f.totvs_cod ? ` <span class="dchip" style="background:var(--verde);font-size:9.5px;vertical-align:1px" title="cadastrado no TOTVS — código ${esc(f.totvs_cod)}">TOTVS ${esc(f.totvs_cod)}</span>` : '';
-    html+=`<tr><td><b>${esc(f.nome)}</b>${selo}${f.email?`<div class="muted" style="font-size:11px">${esc(f.email)}</div>`:''}${f.cnpj?`<div class="muted" style="font-size:10.5px">CNPJ ${esc(f.cnpj)}</div>`:''}</td><td class="muted">${esc(f.categoria||'')}</td><td class="muted">${esc(f.cidade||'')}</td><td>${esc(f.contato||'')}</td><td>${esc(f.telefone||'')}</td><td class="muted" style="font-size:11px">${esc((f.itens||'').slice(0,42))}</td><td>${esc(f.tipo||'')}</td>
+       deles o TOTVS conhece — e e o codigo do TOTVS (CODCFO) que casa o pedido com o cadastro.
+       totvs_match (ao vivo, por CNPJ) cobre quem nunca passou pelo enriquecer_totvs (que so preenche
+       totvs_cod sob demanda e nao tem botao nenhum que o chame). */
+    const selo = f.totvs_cod ? ` <span class="dchip" style="background:var(--verde);font-size:9.5px;vertical-align:1px" title="cadastrado no TOTVS — código ${esc(f.totvs_cod)}">TOTVS ${esc(f.totvs_cod)}</span>`
+               : (Number(f.totvs_match)===1 ? ` <span class="dchip" style="background:var(--verde);font-size:9.5px;vertical-align:1px" title="CNPJ encontrado no cadastro de fornecedores do TOTVS">TOTVS ✓</span>` : '');
+    const viaEmail = f.origem==='email_apresentacao' ? ` <span class="material-icons" style="font-size:13px;vertical-align:-2px;color:var(--muted)" title="cadastrado/complementado por e-mail de apresentação${f.origem_email_data?(' — e-mail de '+D(String(f.origem_email_data).slice(0,10))):''}${f.origem_capturado_em?(' · capturado em '+D(String(f.origem_capturado_em).slice(0,10))):''}">mark_email_read</span>` : '';
+    html+=`<tr><td><b>${esc(f.nome)}</b>${selo}${viaEmail}${f.email?`<div class="muted" style="font-size:11px">${esc(f.email)}</div>`:''}${f.cnpj?`<div class="muted" style="font-size:10.5px">CNPJ ${esc(f.cnpj)}</div>`:''}</td><td class="muted">${esc(f.categoria||'')}</td><td class="muted">${esc(f.cidade||'')}</td><td>${esc(f.contato||'')}</td><td>${esc(f.telefone||'')}</td><td class="muted" style="font-size:11px">${esc((f.itens||'').slice(0,42))}</td><td>${esc(f.tipo||'')}</td>
       <td>${CAN_FORN?`<button class="btn-ghost" style="padding:2px 8px" onclick="fornNovo(${f.id})"><span class="material-icons" style="font-size:15px">edit</span></button>`:''}</td></tr>`;
   }
   if(!FORN.list.length) html+=`<tr><td colspan="8" class="empty">${temFiltro?'Nenhum fornecedor com esses filtros. <span class="dmini">Tente limpar a categoria ou o tipo.</span>':'Nenhum fornecedor. Importe do sistema antigo (Excel) ou cadastre um novo.'}</td></tr>`;
@@ -104,6 +116,82 @@ function fornRender(){
   }
   w.innerHTML=html;
 }
+/* ---------- Sincronizar TOTVS (admin) ---------- */
+/* sync_totvs existe no backend desde antes, mas nada no front nunca chamava — sem clicar aqui, o
+   espelho totvs_fornecedor (e por tabela o selo/filtro TOTVS na lista) nunca se atualiza sozinho. */
+async function fornSincTotvs(){
+  if(!confirm('Puxar do Supabase o cadastro de fornecedores do TOTVS (pode levar alguns segundos, ~13 mil linhas em lotes de 1000)?'))return;
+  FORN.sincTotvs={offset:0,lidos:0,total:0}; fornRender();
+  try{
+    let off=0, guard=0;
+    while(off!==null && guard<30){
+      guard++;
+      const r=await (await fetch('actions/fornecedores.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'sync_totvs',me:EU&&EU.bitrix_id,offset:off})})).json();
+      if(r.error){ toast('Falha: '+r.error); break; }
+      FORN.sincTotvs={offset:off,lidos:(FORN.sincTotvs.lidos||0)+(r.gravados||0),total:r.total||0}; fornRender();
+      off=r.proximo;
+    }
+    toast('TOTVS sincronizado: '+(FORN.sincTotvs.total||0)+' fornecedores no espelho');
+  }catch(e){ toast('Falha: '+e.message); }
+  FORN.sincTotvs=null; fornLoad();
+}
+
+/* ---------- Cadastro automático de fornecedor por e-mail (admin) ---------- */
+/* Painel colapsável (fechado por padrão — tela limpa) com o log de auditoria de
+   actions/fornecedor_email.php e o botão de varrer manual (não há cron configurado hoje). */
+function fornEmailPanel(){
+  const st=FORN.email;
+  let h=`<div class="panel" style="margin-bottom:10px">
+    <div class="bar" style="gap:8px;align-items:center;cursor:pointer" onclick="fornEmailToggle()">
+      <span class="material-icons" style="font-size:16px">${st.aberto?'expand_more':'chevron_right'}</span>
+      <b style="font-size:13px">Cadastro automático de fornecedor por e-mail</b>
+      <span class="muted" style="font-size:11.5px">— encaminhe pra suprimentos@ com assunto começando em "Fornecedor"</span>
+    </div>`;
+  if(st.aberto){
+    h+='<div style="margin-top:10px">';
+    h+=`<button class="btn-prim" style="padding:6px 12px;font-size:12.5px" onclick="fornEmailVarrer()" ${st.varrendo?'disabled':''}>
+      <span class="material-icons" style="font-size:15px;vertical-align:-3px">refresh</span> ${st.varrendo?'Varrendo…':'Varrer agora'}</button> `;
+    h+=`<span class="muted" style="font-size:11.5px">janela de 45 dias · processa até 25 e-mails por varredura</span>`;
+    if(st.carregando) h+='<div class="dempty" style="padding:10px">Carregando…</div>';
+    else if(!st.itens) h+='';
+    else if(!st.itens.length) h+='<div class="dempty" style="padding:10px">Nenhum e-mail de fornecedor processado ainda.</div>';
+    else {
+      h+='<div class="wrap" style="margin-top:8px"><table><thead><tr><th>E-mail (data original)</th><th>De</th><th>Assunto</th><th>Fornecedor</th><th>Status</th></tr></thead><tbody>';
+      for(const it of st.itens){
+        const stCor={cadastrado:'var(--ok)',atualizado:'var(--verde)',erro:'var(--pend)',novo:'#8a9299'}[it.status]||'#8a9299';
+        h+=`<tr><td class="muted" style="font-size:11.5px">${it.data_email?D(String(it.data_email).slice(0,10)):'—'}</td>
+          <td style="font-size:11.5px">${esc(it.from_nome||it.from_email||'')}</td>
+          <td class="muted" style="font-size:11.5px">${esc(it.assunto||'')}</td>
+          <td style="font-size:11.5px">${it.fornecedor_nome?esc(it.fornecedor_nome):'<span class=\"muted\">—</span>'}</td>
+          <td><span class="dchip" style="background:${stCor};font-size:10px">${esc(it.resumo||it.status||'')}</span></td></tr>`;
+      }
+      h+='</tbody></table></div>';
+    }
+    h+='</div>';
+  }
+  h+='</div>';
+  return h;
+}
+function fornEmailToggle(){ FORN.email.aberto=!FORN.email.aberto; if(FORN.email.aberto && !FORN.email.itens) fornEmailListar(); else fornRender(); }
+async function fornEmailListar(){
+  FORN.email.carregando=true; fornRender();
+  try{ const r=await (await fetch('actions/fornecedor_email.php?listar&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    FORN.email.itens=r.itens||[];
+  }catch(e){ FORN.email.itens=[]; }
+  FORN.email.carregando=false; fornRender();
+}
+async function fornEmailVarrer(){
+  FORN.email.varrendo=true; fornRender();
+  try{
+    const r=await (await fetch('actions/fornecedor_email.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'varrer',me:EU&&EU.bitrix_id})})).json();
+    if(r.error){ toast('Falha: '+r.error); }
+    else if(r.throttled){ toast(r.msg||'Aguarde um pouco.'); }
+    else { toast(`Varredura: ${r.candidatos||0} candidato(s) · ${r.cadastrados||0} cadastrado(s) · ${r.atualizados||0} complementado(s)${r.ignorados?` · ${r.ignorados} sem dados extraíveis`:''}`); fornLoad(); }
+  }catch(e){ toast('Falha: '+e.message); }
+  FORN.email.varrendo=false;
+  await fornEmailListar();
+}
+
 /* DUPLICADOS — mesmo CNPJ em mais de um cadastro. A tela ordena pelos FÁCEIS primeiro: grupo em que
    o cadastro a ser removido não tem NENHUM histórico (nem convite, nem proposta, nem anexo, nem tabela
    de preço) é fusão sem perda. Os que têm histórico dos dois lados ficam por último, com o peso à vista. */

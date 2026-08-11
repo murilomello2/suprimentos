@@ -80,8 +80,9 @@ function fe_norm_subject($s) {
     do { $ant = $s; $s = preg_replace('/^\s*(re|res|enc|encaminhada|fwd|fw)\s*:\s*/i', '', $s); } while ($s !== $ant);
     return trim(preg_replace('/\s+/', ' ', strtolower($s)));
 }
-// gatilho: assunto (normalizado) COMEÇA em "fornecedor" — nunca colide com "Cotação — ..." (template fixo do outro fluxo)
-function fe_eh_fornecedor($assunto) { return strpos(fe_norm_subject($assunto), 'fornecedor') === 0; }
+// gatilho: a palavra "fornecedor(es)" em QUALQUER posição do assunto (não precisa ser a 1ª palavra) —
+// nunca colide com "Cotação — ..." (template fixo do outro fluxo, que nunca usa essa palavra no assunto)
+function fe_eh_fornecedor($assunto) { return (bool)preg_match('/\bfornecedor(es)?\b/i', fe_norm_subject($assunto)); }
 
 // salva o 1º anexo PDF/imagem (magic bytes) -> ['arquivo','mime','bytes'] | null
 function fe_salvar_anexo($bytes, $nomeOrig) {

@@ -27,6 +27,103 @@ define('COT_LISTA_MAX', 3000);
 // O catálogo de motivos de desqualificação (cot_desq_motivos/label/texto) mora em includes/db.php:
 // a API de leitura também precisa traduzir o código do motivo.
 
+/* ───────── FECHAMENTO DA NEGOCIAÇÃO ─────────
+   A fotografia assinada da decisão de compra. A rodada 1 é a RÉGUA — o Preço Inicial de Referência,
+   o que a Caprem compraria sozinha antes de negociar. A última é o que virou pedido. O ganho é a
+   diferença, e é sobre ele que a consultoria é remunerada — por isso o fechamento aprovado é
+   imutável e cada ato fica no histórico.
+
+   Quem aprova: rodada 1 é homologação do gerente (ele confere se a rodada foi bem feita e pode
+   DEVOLVER pedindo mais fornecedores); da rodada 2 em diante é assinatura de quem tem alçada. */
+function cot_fech_origens() {
+    return [
+        'mapa_1a_rodada'  => 'Menor proposta qualificada da 1ª rodada',
+        'preco_vigente'   => 'Preço vigente (tabela/contrato do fornecedor)',
+        'ultimo_pc'       => 'Último preço pago (pedido de compra)',
+        'forn_exclusivo'  => 'Fornecedor exclusivo — primeira cotação dele',
+        'outra'           => 'Outra origem (descrita na justificativa)',
+    ];
+}
+function cot_fech_origem_label($c) { $m = cot_fech_origens(); return $m[(string)$c] ?? ''; }
+// pode APROVAR/DEVOLVER um fechamento: admin, gerente ou quem recebeu a permissão específica (diretor)
+function cot_pode_aprovar_fechamento($pdo, $me) {
+    $p = user_perms($pdo, $me);
+    if (empty($p['autorizado'])) return false;
+    return !empty($p['perm_admin']) || (($p['papel'] ?? '') === 'gerente') || !empty($p['perm_fechamento']);
+}
+// linhas + cabeçalho de um fechamento
+function cot_fech_linhas($pdo, $fid) {
+    $q = $pdo->prepare("SELECT * FROM cotacao_fechamento_linha WHERE fechamento_id=? ORDER BY id"); $q->execute([(int)$fid]);
+    $out = [];
+    foreach ($q->fetchAll() as $l) {
+        $out[] = ['id'=>(int)$l['id'], 'cotacao_item_id'=>(int)$l['cotacao_item_id'],
+                  'proposta_id'=>$l['proposta_id'] ? (int)$l['proposta_id'] : null,
+                  'origem'=>(string)$l['origem'], 'origem_ref'=>(string)$l['origem_ref'],
+                  'fornecedor_id'=>$l['fornecedor_id'] ? (int)$l['fornecedor_id'] : null,
+                  'fornecedor_nome'=>(string)$l['fornecedor_nome'],
+                  'preco_unit'=>$l['preco_unit'] !== null ? (float)$l['preco_unit'] : null,
+                  'quantidade'=>$l['quantidade'] !== null ? (float)$l['quantidade'] : null,
+                  'preco_total'=>$l['preco_total'] !== null ? (float)$l['preco_total'] : null,
+                  'lote'=>(string)$l['lote'], 'justificativa'=>(string)$l['justificativa']];
+    }
+    return $out;
+}
+/* GANHO = Σ [ (unit da régua − unit do fechado) × quantidade FECHADA ].
+   Por preço UNITÁRIO, nunca total contra total: a quantidade muda entre as rodadas e entre o
+   fechamento e o PC, e é essa mesma fórmula que permite recalcular quando o pedido é cancelado ou
+   reduzido. Item sem par nos dois lados contribui zero e é sinalizado — item que a consultoria
+   trouxe depois não tem contra o que ser medido, e seria porta para inflar ganho. */
+function cot_fech_ganho($base, $final) {
+    if (!$base || !$final) return null;
+    $unitBase = [];   // item => menor unitário da régua (se o item foi dividido, a régua é a mais barata dele)
+    foreach ($base['linhas'] as $l) {
+        $i = $l['cotacao_item_id']; $u = $l['preco_unit'];
+        if ($u === null) continue;
+        if (!isset($unitBase[$i]) || $u < $unitBase[$i]) $unitBase[$i] = $u;
+    }
+    $ganho = 0.0; $totalFinal = 0.0; $itens = []; $semBase = 0;
+    foreach ($final['linhas'] as $l) {
+        $i = $l['cotacao_item_id']; $q = (float)($l['quantidade'] ?? 0); $u = $l['preco_unit'];
+        $totalFinal += (float)($l['preco_total'] ?? 0);
+        if ($u === null || $q <= 0) continue;
+        if (!isset($unitBase[$i])) { $semBase++; continue; }
+        $d = ($unitBase[$i] - $u) * $q;
+        $ganho += $d;
+        $itens[] = ['cotacao_item_id'=>$i, 'unit_base'=>$unitBase[$i], 'unit_final'=>$u,
+                    'quantidade'=>$q, 'ganho'=>round($d, 2),
+                    'pct'=>$unitBase[$i] > 0 ? round(($unitBase[$i] - $u) / $unitBase[$i] * 100, 2) : null];
+    }
+    $totalBase = 0.0;
+    foreach ($final['linhas'] as $l) {
+        $i = $l['cotacao_item_id']; $q = (float)($l['quantidade'] ?? 0);
+        if (isset($unitBase[$i]) && $q > 0) $totalBase += $unitBase[$i] * $q;
+    }
+    return ['rodada_base'=>(int)$base['rodada'], 'rodada_final'=>(int)$final['rodada'],
+            'total_base'=>round($totalBase, 2), 'total_final'=>round($totalFinal, 2),
+            'ganho'=>round($ganho, 2), 'pct'=>$totalBase > 0 ? round($ganho / $totalBase * 100, 2) : null,
+            'itens'=>$itens, 'itens_sem_base'=>$semBase,
+            'etr'=>!empty($final['etr_participou'])];
+}
+// todos os fechamentos da cotação + o cálculo do ganho entre a régua e o contratado
+function cot_fechamentos($pdo, $cid) {
+    try { $q = $pdo->prepare("SELECT * FROM cotacao_fechamento WHERE cotacao_id=? ORDER BY rodada, id"); $q->execute([(int)$cid]); }
+    catch (Throwable $e) { return ['fechamentos'=>[], 'ganho'=>null]; }   // tabela ainda não criada (deploy parcial)
+    $fs = [];
+    foreach ($q->fetchAll() as $f) {
+        $f['id'] = (int)$f['id']; $f['rodada'] = (int)$f['rodada'];
+        $f['etr_participou'] = (int)($f['etr_participou'] ?? 0);
+        $f['total'] = $f['total'] !== null ? (float)$f['total'] : null;
+        $f['origem_label'] = cot_fech_origem_label($f['origem_preco'] ?? '');
+        $f['linhas'] = cot_fech_linhas($pdo, $f['id']);
+        $fs[] = $f;
+    }
+    // régua = 1º APROVADO; contratado = último APROVADO. Rascunho não mede nada.
+    $aprov = array_values(array_filter($fs, fn($x) => ($x['status'] ?? '') === 'homologado'));
+    $ganho = count($aprov) >= 2 ? cot_fech_ganho($aprov[0], $aprov[count($aprov) - 1]) : null;
+    return ['fechamentos'=>$fs, 'ganho'=>$ganho, 'origens'=>array_map(fn($k, $v) => ['cod'=>$k, 'label'=>$v],
+            array_keys(cot_fech_origens()), array_values(cot_fech_origens()))];
+}
+
 function cot_can_edit($pdo, $me, $obra) {
     $perms = user_perms($pdo, $me);
     if (empty($perms['autorizado'])) return null;
@@ -283,9 +380,11 @@ function cot_get_full($pdo, $id) {
     $ger = $pdo->prepare("SELECT id, titulo, criado_nome, created_at FROM carta_gerada WHERE cotacao_id=? ORDER BY id DESC"); $ger->execute([$id]);
     // catálogo de motivos de desqualificação: o front monta o select a partir daqui (uma fonte só)
     $motivos = []; foreach (cot_desq_motivos() as $cod => $lbl) $motivos[] = ['cod'=>$cod, 'label'=>$lbl];
+    $fech = cot_fechamentos($pdo, $id);   // fechamentos + ganho vão junto: a tela desenha tudo numa requisição só
     return ['cotacao'=>$cot, 'itens'=>$itens, 'propostas'=>$propostas, 'anexos'=>$anx->fetchAll(),
             'convidados'=>$convidados, 'mapa'=>cot_mapa($itens, $propostas), 'cartas_geradas'=>$ger->fetchAll(),
-            'desq_motivos'=>$motivos];
+            'desq_motivos'=>$motivos, 'fechamentos'=>$fech['fechamentos'], 'ganho'=>$fech['ganho'],
+            'fech_origens'=>$fech['origens'] ?? []];
 }
 
 try {
@@ -775,6 +874,158 @@ try {
         cot_log($pdo, $cid, $me, 'Desqualificação', 'Desqualificou a proposta' . $rot . ' · motivo: ' . cot_desq_texto($motivo, $obs)
             . ' — sai do julgamento (o fornecedor continua na concorrência)');
         echo json_encode(['ok'=>true, 'desq'=>1, 'motivo'=>$motivo, 'texto'=>cot_desq_texto($motivo, $obs)], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    /* ───────── FECHAMENTO: salvar (cria ou edita o rascunho da rodada) ─────────
+       Quem fecha é quem gere a cotação (o comprador). Fechamento APROVADO não se edita — para mexer
+       é preciso reabrir, e reabrir é ato registrado, porque o número já pode ter virado pagamento. */
+    if ($acao === 'fechamento_salvar') {
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador, o gerente, quem criou ou quem recebeu a cotação compartilhada pode fechar a negociação.'], JSON_UNESCAPED_UNICODE); exit; }
+        $fid = (int)($in['fechamento_id'] ?? 0);
+        $linhas = array_values(array_filter((array)($in['linhas'] ?? []), fn($l) => (int)($l['cotacao_item_id'] ?? 0) > 0));
+        if (!$linhas) throw new Exception('escolha ao menos um item com fornecedor e preço');
+        $perms = user_perms($pdo, $me); $now = date('c');
+
+        if ($fid) {
+            $cur = $pdo->prepare("SELECT * FROM cotacao_fechamento WHERE id=? AND cotacao_id=?"); $cur->execute([$fid, $cid]);
+            $cur = $cur->fetch(); if (!$cur) throw new Exception('fechamento não encontrado');
+            if (($cur['status'] ?? '') === 'homologado') throw new Exception('este fechamento já foi aprovado — reabra antes de editar');
+            $rodada = (int)$cur['rodada'];
+        } else {
+            // rodada = próxima da cotação. Só existe rodada nova depois da anterior APROVADA: sem isso
+            // dava para empilhar rascunhos e ninguém saberia qual é a régua.
+            $mx = $pdo->prepare("SELECT COALESCE(MAX(rodada),0), SUM(CASE WHEN status<>'homologado' THEN 1 ELSE 0 END) FROM cotacao_fechamento WHERE cotacao_id=?");
+            $mx->execute([$cid]); $r = $mx->fetch(PDO::FETCH_NUM);
+            if ((int)($r[1] ?? 0) > 0) throw new Exception('já existe um fechamento em aberto nesta cotação — conclua ou exclua ele antes de abrir outro');
+            $rodada = (int)($r[0] ?? 0) + 1;
+        }
+        $total = 0.0;
+        foreach ($linhas as $l) $total += (float)($l['preco_total'] ?? 0);
+
+        $campos = [
+            'origem_preco'   => trim((string)($in['origem_preco'] ?? '')) ?: null,
+            'etr_participou' => !empty($in['etr_participou']) ? 1 : 0,
+            'responsavel_id' => trim((string)($in['responsavel_id'] ?? '')) ?: null,
+            'responsavel_nome' => trim((string)($in['responsavel_nome'] ?? '')) ?: null,
+            'data_fechamento'=> trim((string)($in['data_fechamento'] ?? '')) ?: substr($now, 0, 10),
+            'cond_pagamento' => trim((string)($in['cond_pagamento'] ?? '')) ?: null,
+            'cond_prazo'     => trim((string)($in['cond_prazo'] ?? '')) ?: null,
+            'cond_frete'     => trim((string)($in['cond_frete'] ?? '')) ?: null,
+            'cond_validade'  => trim((string)($in['cond_validade'] ?? '')) ?: null,
+            'cond_obs'       => trim((string)($in['cond_obs'] ?? '')) ?: null,
+            'justificativa'  => trim((string)($in['justificativa'] ?? '')) ?: null,
+            'total'          => $total ?: null,
+        ];
+        $pdo->beginTransaction();
+        if ($fid) {
+            $sets = []; $args = [];
+            foreach ($campos as $k => $v) { $sets[] = "$k=?"; $args[] = $v; }
+            $sets[] = 'status=?'; $args[] = 'rascunho';   // editou, volta a rascunho (inclusive se estava devolvido)
+            $sets[] = 'updated_at=?'; $args[] = $now; $args[] = $fid;
+            $pdo->prepare("UPDATE cotacao_fechamento SET " . implode(',', $sets) . " WHERE id=?")->execute($args);
+            $pdo->prepare("DELETE FROM cotacao_fechamento_linha WHERE fechamento_id=?")->execute([$fid]);
+        } else {
+            $cols = array_keys($campos);
+            $pdo->prepare("INSERT INTO cotacao_fechamento (cotacao_id, rodada, status, " . implode(',', $cols)
+                        . ", criado_por, criado_nome, created_at, updated_at) VALUES (?,?, 'rascunho', "
+                        . implode(',', array_fill(0, count($cols), '?')) . ", ?,?,?,?)")
+                ->execute(array_merge([$cid, $rodada], array_values($campos), [$me, $perms['nome'] ?? null, $now, $now]));
+            $fid = (int)$pdo->lastInsertId();
+        }
+        $ins = $pdo->prepare("INSERT INTO cotacao_fechamento_linha (fechamento_id, cotacao_item_id, proposta_id, origem, origem_ref, fornecedor_id, fornecedor_nome, preco_unit, quantidade, preco_total, lote, justificativa, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        foreach ($linhas as $l) {
+            $pu = ($l['preco_unit'] ?? '') !== '' ? (float)$l['preco_unit'] : null;
+            $q  = ($l['quantidade'] ?? '') !== '' ? (float)$l['quantidade'] : null;
+            $pt = ($l['preco_total'] ?? '') !== '' ? (float)$l['preco_total'] : (($pu !== null && $q !== null) ? $pu * $q : null);
+            $ins->execute([$fid, (int)$l['cotacao_item_id'], ($l['proposta_id'] ?? null) ?: null,
+                trim((string)($l['origem'] ?? 'proposta')) ?: 'proposta', trim((string)($l['origem_ref'] ?? '')) ?: null,
+                ($l['fornecedor_id'] ?? null) ?: null, trim((string)($l['fornecedor_nome'] ?? '')),
+                $pu, $q, $pt, trim((string)($l['lote'] ?? '')) ?: null, trim((string)($l['justificativa'] ?? '')) ?: null, $now]);
+        }
+        $pdo->commit();
+        cot_log($pdo, $cid, $me, 'Fechamento', 'Rascunho do fechamento da rodada ' . $rodada . ' salvo — '
+            . count($linhas) . ' linha(s), total R$ ' . number_format($total, 2, ',', '.'));
+        echo json_encode(['ok'=>true, 'fechamento_id'=>$fid, 'rodada'=>$rodada, 'total'=>round($total, 2)], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'fechamento_enviar') {   // rascunho → aguardando aprovação
+        $fid = (int)($in['fechamento_id'] ?? 0); if (!$fid) throw new Exception('fechamento_id obrigatório');
+        $q = $pdo->prepare("SELECT * FROM cotacao_fechamento WHERE id=?"); $q->execute([$fid]); $f = $q->fetch();
+        if (!$f) throw new Exception('fechamento não encontrado');
+        $cid = (int)$f['cotacao_id'];
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão para enviar este fechamento.']); exit; }
+        if (($f['status'] ?? '') === 'homologado') throw new Exception('este fechamento já foi aprovado');
+        $n = (int)$pdo->query("SELECT COUNT(*) FROM cotacao_fechamento_linha WHERE fechamento_id=" . $fid)->fetchColumn();
+        if (!$n) throw new Exception('fechamento sem linhas — escolha os fornecedores antes de enviar');
+        $pdo->prepare("UPDATE cotacao_fechamento SET status='aguardando', updated_at=? WHERE id=?")->execute([date('c'), $fid]);
+        cot_log($pdo, $cid, $me, 'Fechamento', 'Rodada ' . (int)$f['rodada'] . ' enviada para aprovação'
+            . ((int)$f['rodada'] === 1 ? ' (homologação do gerente)' : ' (assinatura)'));
+        echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'fechamento_aprovar') {   // homologa (rodada 1) / assina (rodada 2+) — congela
+        $fid = (int)($in['fechamento_id'] ?? 0); if (!$fid) throw new Exception('fechamento_id obrigatório');
+        $q = $pdo->prepare("SELECT * FROM cotacao_fechamento WHERE id=?"); $q->execute([$fid]); $f = $q->fetch();
+        if (!$f) throw new Exception('fechamento não encontrado');
+        if (!cot_pode_aprovar_fechamento($pdo, $me)) { http_response_code(403); echo json_encode(['error'=>'Só o gerente, o administrador ou quem tem alçada de fechamento pode aprovar.'], JSON_UNESCAPED_UNICODE); exit; }
+        if (($f['status'] ?? '') === 'homologado') { echo json_encode(['ok'=>true, 'ja'=>true], JSON_UNESCAPED_UNICODE); exit; }
+        if (($f['status'] ?? '') !== 'aguardando') throw new Exception('este fechamento ainda não foi enviado para aprovação');
+        $cid = (int)$f['cotacao_id']; $rod = (int)$f['rodada'];
+        $p = user_perms($pdo, $me); $now = date('c');
+        $pdo->prepare("UPDATE cotacao_fechamento SET status='homologado', aprovado_por=?, aprovado_nome=?, aprovado_at=?, updated_at=? WHERE id=?")
+            ->execute([(string)$me, $p['nome'] ?? null, $now, $now, $fid]);
+        $pdo->prepare("UPDATE cotacao SET updated_at=? WHERE id=?")->execute([$now, $cid]);
+        cot_log($pdo, $cid, $me, 'Fechamento', ($rod === 1 ? 'HOMOLOGOU a rodada 1 — este é o Preço Inicial de Referência'
+            : 'ASSINOU o fechamento da rodada ' . $rod) . ' · total R$ ' . number_format((float)($f['total'] ?? 0), 2, ',', '.'));
+        echo json_encode(['ok'=>true, 'rodada'=>$rod], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    /* DEVOLVER — o mecanismo que o Murilo pediu: "você esqueceu de cotar com esses 3 fornecedores,
+       inclua no mapa antes de fechar". Volta para rascunho com o motivo escrito, e o motivo fica
+       tanto no fechamento (a tela mostra) quanto no histórico da cotação. */
+    if ($acao === 'fechamento_devolver') {
+        $fid = (int)($in['fechamento_id'] ?? 0); if (!$fid) throw new Exception('fechamento_id obrigatório');
+        $motivo = trim((string)($in['motivo'] ?? ''));
+        if (strlen($motivo) < 5) throw new Exception('escreva o que falta — é o que o comprador vai ler para corrigir');
+        $q = $pdo->prepare("SELECT * FROM cotacao_fechamento WHERE id=?"); $q->execute([$fid]); $f = $q->fetch();
+        if (!$f) throw new Exception('fechamento não encontrado');
+        if (!cot_pode_aprovar_fechamento($pdo, $me)) { http_response_code(403); echo json_encode(['error'=>'Só quem aprova pode devolver.']); exit; }
+        if (($f['status'] ?? '') === 'homologado') throw new Exception('fechamento já aprovado — use reabrir');
+        $p = user_perms($pdo, $me); $now = date('c');
+        $pdo->prepare("UPDATE cotacao_fechamento SET status='devolvido', devolvido_motivo=?, devolvido_por=?, devolvido_nome=?, devolvido_at=?, updated_at=? WHERE id=?")
+            ->execute([$motivo, (string)$me, $p['nome'] ?? null, $now, $now, $fid]);
+        cot_log($pdo, (int)$f['cotacao_id'], $me, 'Fechamento', 'DEVOLVEU a rodada ' . (int)$f['rodada'] . ' ao comprador · ' . $motivo);
+        echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'fechamento_reabrir') {   // desfaz a aprovação (admin/gerente/alçada) — invalida o cálculo
+        $fid = (int)($in['fechamento_id'] ?? 0); if (!$fid) throw new Exception('fechamento_id obrigatório');
+        $motivo = trim((string)($in['motivo'] ?? ''));
+        if (strlen($motivo) < 5) throw new Exception('escreva o motivo — reabrir um fechamento aprovado muda o cálculo do ganho');
+        $q = $pdo->prepare("SELECT * FROM cotacao_fechamento WHERE id=?"); $q->execute([$fid]); $f = $q->fetch();
+        if (!$f) throw new Exception('fechamento não encontrado');
+        if (!cot_pode_aprovar_fechamento($pdo, $me)) { http_response_code(403); echo json_encode(['error'=>'Só quem aprova pode reabrir um fechamento.']); exit; }
+        $pdo->prepare("UPDATE cotacao_fechamento SET status='rascunho', aprovado_por=NULL, aprovado_nome=NULL, aprovado_at=NULL, updated_at=? WHERE id=?")
+            ->execute([date('c'), $fid]);
+        cot_log($pdo, (int)$f['cotacao_id'], $me, 'Fechamento', 'REABRIU o fechamento da rodada ' . (int)$f['rodada']
+            . ' (aprovação desfeita, o ganho volta a ser recalculado) · ' . $motivo);
+        echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    if ($acao === 'fechamento_excluir') {   // só rascunho/devolvido, e por quem gere a cotação
+        $fid = (int)($in['fechamento_id'] ?? 0); if (!$fid) throw new Exception('fechamento_id obrigatório');
+        $q = $pdo->prepare("SELECT * FROM cotacao_fechamento WHERE id=?"); $q->execute([$fid]); $f = $q->fetch();
+        if (!$f) { echo json_encode(['ok'=>true, 'ja'=>true]); exit; }
+        $cid = (int)$f['cotacao_id'];
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão.']); exit; }
+        if (($f['status'] ?? '') === 'homologado') throw new Exception('fechamento aprovado não se exclui — reabra se precisar corrigir');
+        $pdo->beginTransaction();
+        $pdo->prepare("DELETE FROM cotacao_fechamento_linha WHERE fechamento_id=?")->execute([$fid]);
+        $pdo->prepare("DELETE FROM cotacao_fechamento WHERE id=?")->execute([$fid]);
+        $pdo->commit();
+        cot_log($pdo, $cid, $me, 'Fechamento', 'Excluiu o rascunho de fechamento da rodada ' . (int)$f['rodada']);
+        echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'status') {

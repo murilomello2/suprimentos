@@ -761,6 +761,7 @@ function cotRender(){
   if(COT.mode==='novo') return cotRenderNovo();
   if(COT.mode==='detalhe') return cotRenderDetalhe();
   if(COT.mode==='proposta') return cotRenderProposta();
+  if(COT.mode==='fechamento') return cotFechRender();
   const w=document.getElementById('cotwrap');
   COT.filt=COT.filt||{q:'',categoria:'',status:'',criador:''}; if(COT.filt.criador==null)COT.filt.criador=''; COT.sort=COT.sort||{col:'created_at',dir:-1};
   const all=COT.list||[];
@@ -1500,6 +1501,7 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
   if(CAN_EDIT) html+=`<div style="margin-top:10px"><button class="btn-ghost" style="padding:5px 12px" onclick="cotFornPickerOpen('convite')"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">group_add</span> Convidar fornecedores</button></div>`;
   html+='</div>'; }
   html+='<div id="cotInboxPanel"></div>';   // Fase 4: respostas recebidas por e-mail (preenchido async por cotInboxLoad)
+  html+=cotFechPanel(d);       // fechamento da negociacao: regua (rodada 1) x contratado + ganho
   html+=cotEqualizaPanel(d);
   if(!props.length){ html+='<div class="panel" style="padding:15px 18px"><div class="empty">Nenhuma proposta ainda. Clique em "Cadastrar proposta" ou "Lançar proposta" de um convidado para montar o mapa.</div></div>'; }
   else{

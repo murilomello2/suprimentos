@@ -92,7 +92,7 @@ function db_schema_mysql($pdo) {
         perm_admin INT DEFAULT 0, ativo INT DEFAULT 1, updated_at VARCHAR(40),
         perm_crono INT DEFAULT 0, perm_orcamento INT DEFAULT 0, perm_quant INT DEFAULT 0, perm_dicionario INT DEFAULT 0,
         perm_email INT DEFAULT 0, perm_whats INT DEFAULT 0,
-        perm_responsaveis INT DEFAULT 0,
+        perm_responsaveis INT DEFAULT 0, perm_fechamento INT DEFAULT 0,
         dashboard VARCHAR(32) DEFAULT '',
         PRIMARY KEY (bitrix_id)
     ) $E");
@@ -147,6 +147,38 @@ function db_schema_mysql($pdo) {
         id INT NOT NULL AUTO_INCREMENT, proposta_id INT NOT NULL, cotacao_item_id INT NOT NULL,
         preco_unit DOUBLE, preco_total DOUBLE, observacao TEXT,
         PRIMARY KEY (id), KEY idx_propi_prop (proposta_id)
+    ) $E");
+    /* FECHAMENTO DA NEGOCIAÇÃO — a fotografia assinada da decisão de compra.
+       Uma cotação tem N: a rodada 1 é a RÉGUA (o Preço Inicial de Referência — o que a Caprem
+       compraria sozinha, antes da negociação), a última é o que virou pedido. O ganho é a diferença
+       entre elas, medida por preço unitário sobre a quantidade final (quantidade muda no meio do
+       caminho, então comparar total com total mente).
+       Depois de aprovado o fechamento é imutável: é ele que define pagamento a terceiro. */
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_fechamento (
+        id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, rodada INT DEFAULT 1,
+        status VARCHAR(20) DEFAULT 'rascunho',
+        origem_preco VARCHAR(40), etr_participou TINYINT DEFAULT 0,
+        responsavel_id VARCHAR(64), responsavel_nome VARCHAR(191), data_fechamento VARCHAR(20),
+        cond_pagamento VARCHAR(255), cond_prazo VARCHAR(255), cond_frete VARCHAR(255),
+        cond_validade VARCHAR(255), cond_obs TEXT,
+        justificativa TEXT, total DOUBLE,
+        criado_por VARCHAR(64), criado_nome VARCHAR(191), created_at VARCHAR(40), updated_at VARCHAR(40),
+        aprovado_por VARCHAR(64), aprovado_nome VARCHAR(191), aprovado_at VARCHAR(40),
+        devolvido_motivo TEXT, devolvido_por VARCHAR(64), devolvido_nome VARCHAR(191), devolvido_at VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_fech_cot (cotacao_id)
+    ) $E");
+    /* Uma linha por item × fornecedor. A DIVISÃO da compra entre fornecedores é consequência disto:
+       todas as linhas no mesmo fornecedor = compra global; fornecedores diferentes = compra dividida;
+       e o mesmo item pode ter DUAS linhas (60% de uma usina, 40% de outra). Nenhum campo a mais.
+       `origem` diz de onde veio o preço — proposta do mapa, tabela vigente ou último PC —, que é a
+       hierarquia do "preço atual" do contrato. */
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_fechamento_linha (
+        id INT NOT NULL AUTO_INCREMENT, fechamento_id INT NOT NULL, cotacao_item_id INT NOT NULL,
+        proposta_id INT, origem VARCHAR(24) DEFAULT 'proposta', origem_ref VARCHAR(191),
+        fornecedor_id INT, fornecedor_nome VARCHAR(255),
+        preco_unit DOUBLE, quantidade DOUBLE, preco_total DOUBLE,
+        lote VARCHAR(80), justificativa TEXT, created_at VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_fechl_fech (fechamento_id), KEY idx_fechl_item (cotacao_item_id)
     ) $E");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (
         id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, proposta_id INT, fornecedor_id INT, fornecedor_nome VARCHAR(191), nome VARCHAR(255),
@@ -287,7 +319,7 @@ function db_schema_mysql($pdo) {
     // permissão granular perm_responsaveis (atribuição de responsável EM LOTE) — self-heal p/ tabela usuario já existente
     $uc = [];
     foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='usuario'") as $c) $uc[$c['COLUMN_NAME']] = true;
-    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','perm_whats'] as $pc)
+    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','perm_whats','perm_fechamento'] as $pc)
         if (!isset($uc[$pc])) $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INT DEFAULT 0");
     // dashboard atribuído por usuário (''=padrão | comprador | gerente | diretor) — landing + conteúdo do painel
     if (!isset($uc['dashboard'])) $pdo->exec("ALTER TABLE usuario ADD COLUMN dashboard VARCHAR(32) DEFAULT ''");
@@ -634,6 +666,11 @@ function db_schema($pdo) {
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_item (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, quantidade REAL, observacao TEXT, ordem INTEGER)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, prazo TEXT, observacoes TEXT, equaliza TEXT, data_resposta TEXT, total REAL, revisao INTEGER DEFAULT 0, raiz_id INTEGER, ativa INTEGER DEFAULT 1, opcao INTEGER DEFAULT 1, opcao_rotulo TEXT, desq INTEGER DEFAULT 0, desq_motivo TEXT, desq_obs TEXT, desq_por TEXT, desq_nome TEXT, desq_at TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta_item (id INTEGER PRIMARY KEY AUTOINCREMENT, proposta_id INTEGER NOT NULL, cotacao_item_id INTEGER NOT NULL, preco_unit REAL, preco_total REAL, observacao TEXT)");
+    // FECHAMENTO da negociação (ver comentário no schema MySQL): rodada 1 = régua, última = contratada
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_fechamento (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, rodada INTEGER DEFAULT 1, status TEXT DEFAULT 'rascunho', origem_preco TEXT, etr_participou INTEGER DEFAULT 0, responsavel_id TEXT, responsavel_nome TEXT, data_fechamento TEXT, cond_pagamento TEXT, cond_prazo TEXT, cond_frete TEXT, cond_validade TEXT, cond_obs TEXT, justificativa TEXT, total REAL, criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT, aprovado_por TEXT, aprovado_nome TEXT, aprovado_at TEXT, devolvido_motivo TEXT, devolvido_por TEXT, devolvido_nome TEXT, devolvido_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_fechamento_linha (id INTEGER PRIMARY KEY AUTOINCREMENT, fechamento_id INTEGER NOT NULL, cotacao_item_id INTEGER NOT NULL, proposta_id INTEGER, origem TEXT DEFAULT 'proposta', origem_ref TEXT, fornecedor_id INTEGER, fornecedor_nome TEXT, preco_unit REAL, quantidade REAL, preco_total REAL, lote TEXT, justificativa TEXT, created_at TEXT)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_fech_cot ON cotacao_fechamento(cotacao_id)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_fechl_fech ON cotacao_fechamento_linha(fechamento_id)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, proposta_id INTEGER, fornecedor_id INTEGER, fornecedor_nome TEXT, nome TEXT, arquivo TEXT, tamanho INTEGER, mime TEXT, criado_por TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cot_dicionario (id INTEGER PRIMARY KEY AUTOINCREMENT, servico_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, ordem INTEGER, nota TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_fornecedor (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, categoria TEXT, contato TEXT, email TEXT, telefone TEXT, enviado_em TEXT, enviado_canal TEXT, enviado_por TEXT, created_at TEXT)");
@@ -723,7 +760,7 @@ function db_schema($pdo) {
     // estas liberam capacidades específicas POR USUÁRIO:
     $ucols = [];
     foreach ($pdo->query("PRAGMA table_info(usuario)") as $c) $ucols[$c['name']] = true;
-    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','perm_whats'] as $pc) {
+    foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','perm_whats','perm_fechamento'] as $pc) {
         if (!isset($ucols[$pc])) $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INTEGER DEFAULT 0");
     }
     if (!isset($ucols['dashboard'])) $pdo->exec("ALTER TABLE usuario ADD COLUMN dashboard TEXT DEFAULT ''");
@@ -847,7 +884,8 @@ function user_perms($pdo, $bid) {
             'perm_dicionario'=>(int)($u['perm_dicionario'] ?? 0),
             'perm_responsaveis'=>(int)($u['perm_responsaveis'] ?? 0),
             'perm_email'=>(int)($u['perm_email'] ?? 0),
-            'perm_whats'=>(int)($u['perm_whats'] ?? 0)];
+            'perm_whats'=>(int)($u['perm_whats'] ?? 0),
+            'perm_fechamento'=>(int)($u['perm_fechamento'] ?? 0)];
 }
 function can_edit_obra($perms, $obra_id) {
     if (!empty($perms['perm_admin'])) return true;

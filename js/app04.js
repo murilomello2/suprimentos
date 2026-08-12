@@ -622,6 +622,310 @@ async function cotDesqDesfazer(pid){
     toast('Proposta requalificada — voltou a concorrer'); cotOpen(COT.cur.cotacao.id);
   }catch(e){toast('Falha: '+e.message);}
 }
+/* ═════════ FECHAMENTO DA NEGOCIAÇÃO ═════════
+   A rodada 1 é a RÉGUA (o Preço Inicial de Referência: o que a Caprem compraria sozinha, antes de
+   negociar). A última é o que virou pedido. O ganho é a diferença — e é sobre ele que a consultoria
+   é remunerada, por isso fechamento aprovado não se edita: reabre, com motivo, e fica no histórico.
+
+   A DIVISÃO da compra entre fornecedores não é um campo: é o que as linhas dizem. Todas no mesmo
+   fornecedor = compra global; fornecedores diferentes = compra dividida; e o mesmo item pode ter
+   duas linhas (60% de uma usina, 40% de outra). */
+const FECH_ST={rascunho:['#8a9299','rascunho'],devolvido:['#b3261e','devolvido pelo gerente'],
+               aguardando:['var(--dourado)','aguardando aprovação'],homologado:['var(--ok)','aprovado']};
+function cotPodeAprovarFech(){ return IS_ADMIN||((EU&&EU.papel)||'')==='gerente'||!!(EU&&EU.perm_fechamento); }
+function cotFechAberto(d){ return ((d||{}).fechamentos||[]).find(f=>f.status!=='homologado')||null; }
+function cotFechAprovados(d){ return ((d||{}).fechamentos||[]).filter(f=>f.status==='homologado'); }
+// melhor preço unitário QUALIFICADO por item (vem do servidor, já sem as desqualificadas)
+function cotMelhorUnit(d,itemId){ const b=((d.mapa||{}).melhor_por_item||{})[itemId]; return b?Number(b.preco_unit):null; }
+
+function cotFechPanel(d){
+  const CAN_EDIT=cotEditavel(), fs=d.fechamentos||[], aberto=cotFechAberto(d), aprov=cotFechAprovados(d), g=d.ganho;
+  const podeAprov=cotPodeAprovarFech();
+  let corpo='';
+  if(!fs.length){
+    corpo=`<div style="font-size:12.5px;color:var(--muted)">Nenhum fechamento ainda. O <b>primeiro</b> fechamento registra o que a Caprem compraria hoje — ele vira o <b>Preço Inicial de Referência</b>, a régua contra a qual todo ganho de negociação vai ser medido.</div>`
+      +(CAN_EDIT?`<div style="margin-top:10px"><button class="btn-prim" style="padding:7px 13px" onclick="cotFechAbrir(0)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">gavel</span> Fechar negociação (rodada 1)</button></div>`:'');
+  } else {
+    corpo=fs.map(f=>{
+      const st=FECH_ST[f.status]||['#8a9299',f.status], ehRegua=(aprov.length&&aprov[0].id===f.id);
+      const fornec=[...new Set((f.linhas||[]).map(l=>l.fornecedor_nome).filter(Boolean))];
+      return `<div style="border:1px solid var(--line);border-left:3px solid ${st[0]};border-radius:10px;padding:10px 13px;margin-bottom:8px;background:#fff">
+        <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+          <b style="font-size:13px">Rodada ${f.rodada}</b>
+          <span class="dchip" style="background:${st[0]};color:#fff">${st[1]}</span>
+          ${ehRegua?`<span class="dchip" style="background:#eef4fb;color:#2a5d8f;font-weight:700" title="é contra este valor que o ganho da negociação é medido">RÉGUA · Preço Inicial de Referência</span>`:''}
+          ${Number(f.etr_participou)===1?`<span class="dchip" style="background:#f3eefb;color:#5b3a8f;font-weight:700" title="rodada com participação da consultoria — o contrato exige que isso esteja documentado">com consultoria</span>`:''}
+          <b style="margin-left:auto;font-size:14px;color:var(--verde-d)">${f.total!=null?BRL(f.total):'—'}</b>
+        </div>
+        <div class="muted" style="font-size:11px;margin-top:4px">
+          ${fornec.length?('<b>'+esc(fornec.join(' · '))+'</b>'+(fornec.length>1?' — compra dividida':'')):'sem linhas'}
+          ${f.origem_label?' · origem: '+esc(f.origem_label):''}
+          ${f.responsavel_nome?' · negociado por '+esc(f.responsavel_nome):''}
+          ${f.data_fechamento?' · '+D(f.data_fechamento):''}
+          ${f.aprovado_nome?` · <span style="color:var(--ok)">aprovado por ${esc(f.aprovado_nome)}${f.aprovado_at?' em '+cotFmtDT(f.aprovado_at):''}</span>`:''}
+        </div>
+        ${f.status==='devolvido'&&f.devolvido_motivo?`<div style="margin-top:6px;background:#fdeaea;border:1px solid #f2d7d4;border-radius:8px;padding:7px 10px;font-size:12px"><b style="color:#b3261e">Devolvido${f.devolvido_nome?' por '+esc(f.devolvido_nome):''}:</b> ${esc(f.devolvido_motivo)}</div>`:''}
+        ${f.justificativa?`<div class="dmini" style="margin-top:5px">${esc(f.justificativa)}</div>`:''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+          ${(CAN_EDIT&&f.status!=='homologado')?`<button class="btn-ghost" style="padding:3px 10px" onclick="cotFechAbrir(${f.id})"><span class="material-icons" style="font-size:13px;vertical-align:-2px">edit</span> editar</button>`:''}
+          ${(CAN_EDIT&&(f.status==='rascunho'||f.status==='devolvido'))?`<button class="btn-prim" style="padding:3px 10px" onclick="cotFechEnviar(${f.id})"><span class="material-icons" style="font-size:13px;vertical-align:-2px">send</span> enviar para ${f.rodada===1?'homologação':'assinatura'}</button>`:''}
+          ${(podeAprov&&f.status==='aguardando')?`<button class="btn-prim" style="padding:3px 10px" onclick="cotFechAprovar(${f.id},${f.rodada})"><span class="material-icons" style="font-size:13px;vertical-align:-2px">check</span> ${f.rodada===1?'homologar':'assinar'}</button>
+             <button class="btn-ghost" style="padding:3px 10px;color:#b3261e" onclick="cotFechDevolver(${f.id})"><span class="material-icons" style="font-size:13px;vertical-align:-2px">undo</span> devolver ao comprador</button>`:''}
+          ${(podeAprov&&f.status==='homologado')?`<button class="btn-ghost" style="padding:3px 10px;color:var(--pend)" onclick="cotFechReabrir(${f.id})" title="desfaz a aprovação — o cálculo do ganho volta a ser recalculado">reabrir</button>`:''}
+          ${(CAN_EDIT&&f.status!=='homologado')?`<button class="btn-ghost" style="padding:3px 8px;color:var(--pend)" onclick="cotFechExcluir(${f.id})">excluir</button>`:''}
+          <button class="btn-ghost" style="padding:3px 10px" onclick="cotFechVer(${f.id})">ver linhas</button>
+        </div></div>`;
+    }).join('');
+    if(CAN_EDIT&&!aberto)
+      corpo+=`<button class="btn-prim" style="padding:7px 13px" onclick="cotFechAbrir(0)"><span class="material-icons" style="font-size:15px;vertical-align:-3px">gavel</span> Abrir rodada ${(fs[fs.length-1].rodada||1)+1} (negociação)</button>
+        <div class="dmini" style="margin-top:5px">A rodada nova nasce copiada da anterior — você mexe só no que mudou.</div>`;
+  }
+  // RESULTADO: só existe com duas rodadas aprovadas (régua × contratado)
+  let res='';
+  if(g){
+    const pos=g.ganho>=0;
+    res=`<div style="margin-top:12px;border:1px solid ${pos?'#cfe8d8':'#f2d7d4'};background:${pos?'#f3fbf6':'#fdf6f6'};border-radius:11px;padding:12px 15px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="material-icons" style="color:${pos?'var(--ok)':'#b3261e'};font-size:22px">${pos?'trending_down':'trending_up'}</span>
+        <div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#889;font-weight:700">Resultado da negociação · rodada ${g.rodada_base} → ${g.rodada_final}</div>
+          <div style="font-size:19px;font-weight:800;color:${pos?'var(--ok)':'#b3261e'}">${pos?'':'−'}${BRL(Math.abs(g.ganho))}${g.pct!=null?` <span style="font-size:12px;font-weight:600">(${g.pct>0?'−':'+'}${Math.abs(g.pct).toFixed(2)}%)</span>`:''}</div></div>
+        <div style="margin-left:auto;text-align:right;font-size:11.5px;color:#667">
+          <div>preço inicial <b>${BRL(g.total_base)}</b></div><div>preço fechado <b>${BRL(g.total_final)}</b></div></div>
+      </div>
+      ${g.etr?`<div class="dmini" style="margin-top:6px;color:#5b3a8f"><b>Rodada com participação da consultoria</b> — este ganho entra na apuração do contrato.</div>`:`<div class="dmini" style="margin-top:6px">Ganho obtido pela Caprem sem participação da consultoria nesta rodada.</div>`}
+      ${g.itens_sem_base?`<div class="dmini" style="margin-top:4px;color:#a15c00">⚠ ${g.itens_sem_base} item(ns) do fechamento não existiam na régua — ficam fora do cálculo, porque não há contra o que medir.</div>`:''}
+      <div style="overflow-x:auto;margin-top:8px"><table class="mtable" style="border:none;width:100%"><thead><tr>
+        <th style="text-align:left">Item</th><th style="text-align:right">Inicial</th><th style="text-align:right">Fechado</th><th style="text-align:right">Qtd</th><th style="text-align:right">Ganho</th></tr></thead><tbody>
+        ${g.itens.map(i=>{ const it=(d.itens||[]).find(x=>String(x.id)===String(i.cotacao_item_id))||{};
+          return `<tr><td style="text-align:left">${esc(it.descricao||('#'+i.cotacao_item_id))}</td>
+            <td style="text-align:right">${BRLp(i.unit_base)}</td><td style="text-align:right">${BRLp(i.unit_final)}</td>
+            <td style="text-align:right">${cotNum(i.quantidade)}</td>
+            <td style="text-align:right;font-weight:700;color:${i.ganho>=0?'var(--ok)':'#b3261e'}">${i.ganho>=0?'':'−'}${BRL(Math.abs(i.ganho))}${i.pct!=null?` <span class="muted" style="font-weight:400;font-size:10px">${i.pct>0?'−':'+'}${Math.abs(i.pct).toFixed(1)}%</span>`:''}</td></tr>`;}).join('')}
+      </tbody></table></div>
+      <div class="dmini" style="margin-top:6px">Calculado por <b>preço unitário</b> sobre a <b>quantidade fechada</b> — nunca total contra total, porque a quantidade muda entre as rodadas.</div>
+    </div>`;
+  }
+  const sub=aprov.length?('régua: '+BRL(aprov[0].total||0)+(aprov.length>1?(' · fechado: '+BRL(aprov[aprov.length-1].total||0)):'')):'preço inicial × preço fechado';
+  return `<div class="panel" style="margin-bottom:12px;padding:15px 18px">${cotSecHead('gavel','Fechamento da negociação',sub,cotChevron('fech'))}${cotColapsado('fech')?'':corpo+res}</div>`;
+}
+/* ---- o formulário ---- */
+function cotFechAbrir(fid){
+  const d=COT.cur; if(!d) return;
+  const fs=d.fechamentos||[], ex=fid?fs.find(f=>String(f.id)===String(fid)):null;
+  const aprov=cotFechAprovados(d), ant=aprov.length?aprov[aprov.length-1]:null;
+  const rodada=ex?ex.rodada:((fs.length?Math.max(...fs.map(f=>f.rodada||1)):0)+1);
+  let linhas=[];
+  if(ex&&(ex.linhas||[]).length) linhas=(ex.linhas||[]).map(l=>Object.assign({},l));
+  else if(ant&&(ant.linhas||[]).length) linhas=(ant.linhas||[]).map(l=>({cotacao_item_id:l.cotacao_item_id,proposta_id:l.proposta_id,
+        origem:l.origem,origem_ref:l.origem_ref,fornecedor_id:l.fornecedor_id,fornecedor_nome:l.fornecedor_nome,
+        preco_unit:l.preco_unit,quantidade:l.quantidade,lote:l.lote,justificativa:''}));   // rodada nova nasce da anterior
+  else linhas=(d.itens||[]).map(it=>{ const b=((d.mapa||{}).melhor_por_item||{})[it.id];
+        const p=b?(d.propostas||[]).find(x=>String(x.id)===String(b.proposta_id)):null;
+        return {cotacao_item_id:it.id, proposta_id:p?p.id:null, origem:'proposta', origem_ref:'',
+                fornecedor_id:p?p.fornecedor_id:null, fornecedor_nome:p?p.fornecedor_nome:'',
+                preco_unit:b?b.preco_unit:'', quantidade:it.quantidade!=null?it.quantidade:'', justificativa:''}; });
+  COT.fech={id:ex?ex.id:0, rodada:rodada, linhas:linhas,
+            origem_preco:ex?(ex.origem_preco||'mapa_1a_rodada'):(rodada===1?'mapa_1a_rodada':''),
+            etr_participou:ex?Number(ex.etr_participou)===1:(rodada>1),
+            responsavel_nome:ex?(ex.responsavel_nome||''):((EU&&EU.nome)||''),
+            data_fechamento:ex?(ex.data_fechamento||''):new Date().toISOString().slice(0,10),
+            cond_pagamento:ex?(ex.cond_pagamento||''):cotFechEqDe(d,'pagamento'),
+            cond_prazo:ex?(ex.cond_prazo||''):'', cond_frete:ex?(ex.cond_frete||''):cotFechEqDe(d,'frete'),
+            cond_validade:ex?(ex.cond_validade||''):'', cond_obs:ex?(ex.cond_obs||''):'',
+            justificativa:ex?(ex.justificativa||''):''};
+  COT.mode='fechamento'; cotFechRender();
+}
+// puxa a condição comercial da equalização da proposta mais barata (o dado já foi coletado uma vez)
+function cotFechEqDe(d,chave){
+  const p=(d.propostas||[]).filter(x=>!cotDesq(x)).sort((a,b)=>(a.total||1e15)-(b.total||1e15))[0];
+  if(!p||!p.equaliza) return '';
+  const k=Object.keys(p.equaliza).find(x=>new RegExp(chave,'i').test(x));
+  return k?String(p.equaliza[k]||''):'';
+}
+function cotFechRender(){
+  const d=COT.cur, c=d.cotacao, f=COT.fech, itens=d.itens||[];
+  const ehR1=f.rodada===1;
+  const props=(d.propostas||[]).filter(p=>!cotDesq(p));
+  const fld=(l,i,st)=>cotFld(l,i,st);
+  let h=`<div class="panel">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <button class="btn-ghost" onclick="cotRenderDetalhe()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar ao mapa</button>
+      <b style="font-size:15px">Fechamento · rodada ${f.rodada} · ${esc(c.titulo)}</b></div>
+    <div class="dmini" style="margin-bottom:12px;background:${ehR1?'#eef4fb':'#f3eefb'};border:1px solid ${ehR1?'#cfe0f2':'#e0d4f2'};padding:9px 12px;border-radius:9px">
+      ${ehR1?'🎯 Esta é a <b>rodada 1</b>: registre o que a Caprem compraria <b>hoje</b>, antes de negociar. O valor daqui vira o <b>Preço Inicial de Referência</b> — a régua de todo ganho medido depois. Ele passa pela <b>homologação do gerente</b>, que pode devolver pedindo mais fornecedores.'
+             :'🤝 Esta é a <b>rodada '+f.rodada+'</b>: o resultado depois de negociar. Nasceu copiada da rodada anterior — mexa só no que mudou. Ao ser assinada, o sistema calcula o ganho contra a régua.'}</div>
+    <div style="max-width:980px">
+    <div style="display:grid;grid-template-columns:1fr 200px 150px;gap:10px">
+      ${fld('Responsável pela negociação','<input id="fcResp" style="width:100%" value="'+esc(f.responsavel_nome||'')+'" placeholder="quem conduziu">')}
+      ${fld('Data do fechamento','<input id="fcData" type="date" style="width:100%" value="'+esc(f.data_fechamento||'')+'">')}
+      ${fld('Participação da consultoria','<label class="ckl" style="margin-top:5px"><input type="checkbox" id="fcEtr" '+(f.etr_participou?'checked':'')+'> ETR participou</label>')}
+    </div>
+    ${ehR1?fld('Origem do preço inicial *','<select id="fcOrigem" style="width:100%">'+(d.fech_origens||[]).map(o=>'<option value="'+esc(o.cod)+'" '+(f.origem_preco===o.cod?'selected':'')+'>'+esc(o.label)+'</option>').join('')+'</select>','margin-top:8px'):''}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:8px">
+      ${fld('Condição de pagamento','<input id="fcPag" style="width:100%" value="'+esc(f.cond_pagamento||'')+'" placeholder="ex.: 28 ddl">')}
+      ${fld('Prazo de entrega','<input id="fcPrazo" style="width:100%" value="'+esc(f.cond_prazo||'')+'" placeholder="ex.: 15 dias">')}
+      ${fld('Frete','<input id="fcFrete" style="width:100%" value="'+esc(f.cond_frete||'')+'" placeholder="CIF / FOB">')}
+      ${fld('Validade da condição','<input id="fcVal" style="width:100%" value="'+esc(f.cond_validade||'')+'" placeholder="ex.: 60 dias">')}
+    </div>
+    ${fld('Outras condições comerciais','<textarea id="fcObs" rows="2" style="width:100%" placeholder="reajuste, garantia, mobilização, pedido mínimo…">'+esc(f.cond_obs||'')+'</textarea>','margin-top:8px')}
+    <div style="margin-top:14px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><b style="font-size:13px">O que foi fechado</b>
+      <span class="muted" style="font-size:11px">um fornecedor por linha — dividir um item entre dois fornecedores é só adicionar outra linha nele</span></div>
+    <div id="fcLinhas" style="margin-top:8px"></div>
+    <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <b style="font-size:14px">Total do fechamento: <span id="fcTotal" style="color:var(--verde-d)">—</span></b></div>
+    ${fld('Justificativa geral do fechamento','<textarea id="fcJust" rows="2" style="width:100%" placeholder="ex.: compra global com um fornecedor porque o fechamento parcial inviabiliza a entrega">'+esc(f.justificativa||'')+'</textarea>','margin-top:10px')}
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-prim" onclick="cotFechSalvar(0)"><span class="material-icons" style="font-size:16px;vertical-align:-3px">save</span> Salvar rascunho</button>
+      <button class="btn-prim" style="background:var(--verde-d)" onclick="cotFechSalvar(1)"><span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Salvar e enviar para ${ehR1?'homologação':'assinatura'}</button>
+      <button class="btn-ghost" onclick="cotRenderDetalhe()">Cancelar</button></div>
+    </div></div>`;
+  document.getElementById('cotwrap').innerHTML=h; cotFechLinhas(); window.scrollTo(0,0);
+}
+function cotFechLinhas(){
+  const d=COT.cur, f=COT.fech, itens=d.itens||[], props=(d.propostas||[]).filter(p=>!cotDesq(p));
+  const box=document.getElementById('fcLinhas'); if(!box)return;
+  let total=0;
+  const h=itens.map(it=>{
+    const ls=f.linhas.map((l,ix)=>({l,ix})).filter(x=>String(x.l.cotacao_item_id)===String(it.id));
+    const melhor=cotMelhorUnit(d,it.id);
+    const corpo=ls.length?ls.map(({l,ix})=>{
+      const u=l.preco_unit===''||l.preco_unit==null?null:Number(l.preco_unit);
+      const q=l.quantidade===''||l.quantidade==null?null:Number(l.quantidade);
+      if(u!=null&&q!=null) total+=u*q;
+      /* JUSTIFICATIVA OBRIGATÓRIA quando não é o menor preço qualificado — é o item da ata
+         ("justificativas de escolha quando o menor preço não for contratado"). O campo só aparece
+         quando precisa: pedir justificativa para quem escolheu o mais barato é atrito à toa. */
+      const pior=(u!=null&&melhor!=null&&u>melhor+0.0001);
+      return `<div style="display:grid;grid-template-columns:minmax(0,1.6fr) 120px 110px 120px 28px;gap:8px;align-items:center;padding:7px 0;border-top:1px solid #f1f3f2">
+        <select onchange="cotFechForn(${ix},this.value)" style="font-size:12px">
+          ${props.map(p=>`<option value="p:${p.id}" ${String(l.proposta_id)===String(p.id)?'selected':''}>${esc(p.fornecedor_nome)}${(p.opcao||1)>1?' · opção '+p.opcao:''}</option>`).join('')}
+          <option value="m:" ${!l.proposta_id?'selected':''}>— outro / preço vigente —</option>
+        </select>
+        ${!l.proposta_id?`<input value="${esc(l.fornecedor_nome||'')}" oninput="COT.fech.linhas[${ix}].fornecedor_nome=this.value" placeholder="fornecedor" style="font-size:12px;grid-column:span 1">`:`<input type="text" inputmode="decimal" value="${u!=null?fmtMoneyN(u,4):''}" oninput="cotFechNum(${ix},'preco_unit',this)" onblur="moneyBlurN(this,4)" placeholder="preço unit." style="font-size:12px;text-align:right">`}
+        ${!l.proposta_id?`<input type="text" inputmode="decimal" value="${u!=null?fmtMoneyN(u,4):''}" oninput="cotFechNum(${ix},'preco_unit',this)" onblur="moneyBlurN(this,4)" placeholder="preço unit." style="font-size:12px;text-align:right">`:`<input type="text" inputmode="decimal" value="${q!=null?q:''}" oninput="cotFechNum(${ix},'quantidade',this)" placeholder="qtd" style="font-size:12px;text-align:right">`}
+        ${!l.proposta_id?`<input type="text" inputmode="decimal" value="${q!=null?q:''}" oninput="cotFechNum(${ix},'quantidade',this)" placeholder="qtd" style="font-size:12px;text-align:right">`:`<b style="font-size:12px;text-align:right;color:var(--verde-d)">${(u!=null&&q!=null)?BRL(u*q):'—'}</b>`}
+        <button class="btn-ghost" style="padding:2px 6px;color:var(--pend)" onclick="cotFechDel(${ix})" title="remover esta linha">×</button>
+        ${pior?`<div style="grid-column:1/-1"><input value="${esc(l.justificativa||'')}" oninput="COT.fech.linhas[${ix}].justificativa=this.value" placeholder="Justifique: este não é o menor preço qualificado (o menor é ${BRLp(melhor)})" style="width:100%;font-size:11.5px;border-color:var(--pend);background:#fffaf3"></div>`:''}
+        ${(!l.proposta_id&&(u!=null&&q!=null))?`<div style="grid-column:1/-1;text-align:right;font-size:11px;color:var(--verde-d);font-weight:700">${BRL(u*q)}</div>`:''}
+      </div>`;
+    }).join(''):'<div class="dmini" style="padding:6px 0;border-top:1px solid #f1f3f2">Item sem fornecedor — não entra no fechamento.</div>';
+    return `<div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:7px">
+      <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+        <b style="font-size:12.5px;flex:1;min-width:0">${esc(it.descricao)}</b>
+        <span class="muted" style="font-size:11px">cotado: ${cotNum(it.quantidade)} ${esc(it.unidade||'')}</span>
+        ${melhor!=null?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:9.5px" title="menor preço unitário entre as propostas qualificadas">menor: ${BRLp(melhor)}</span>`:''}
+        <button class="btn-ghost" style="padding:2px 8px;font-size:11px" onclick="cotFechAdd(${it.id})" title="dividir este item entre mais de um fornecedor">+ dividir</button>
+      </div>${corpo}</div>`;
+  }).join('');
+  box.innerHTML=h;
+  const t=document.getElementById('fcTotal'); if(t)t.textContent=BRL(total);
+}
+function cotFechForn(ix,v){
+  const l=COT.fech.linhas[ix], d=COT.cur; if(!l)return;
+  if(String(v).slice(0,2)==='p:'){
+    const p=(d.propostas||[]).find(x=>String(x.id)===String(v.slice(2)));
+    if(p){ l.proposta_id=p.id; l.fornecedor_id=p.fornecedor_id||null; l.fornecedor_nome=p.fornecedor_nome; l.origem='proposta';
+      const pi=(p.itens||{})[l.cotacao_item_id]; if(pi&&pi.preco_unit!=null) l.preco_unit=pi.preco_unit; }
+  } else { l.proposta_id=null; l.origem='manual'; }
+  cotFechLinhas();
+}
+function cotFechNum(ix,campo,el){
+  const l=COT.fech.linhas[ix]; if(!l)return;
+  if(campo==='preco_unit'){ maskMoneyInputN(el,4); const n=parseBRLInput(el.value); l.preco_unit=(n==null?'':n); }
+  else { const n=parseFloat(String(el.value).replace(/\./g,'').replace(',','.')); l.quantidade=isNaN(n)?'':n; }
+  const t=document.getElementById('fcTotal');
+  if(t){ let tot=0; COT.fech.linhas.forEach(x=>{ const u=Number(x.preco_unit), q=Number(x.quantidade); if(!isNaN(u)&&!isNaN(q)&&x.preco_unit!==''&&x.quantidade!=='') tot+=u*q; }); t.textContent=BRL(tot); }
+}
+function cotFechAdd(itemId){
+  const d=COT.cur, it=(d.itens||[]).find(x=>String(x.id)===String(itemId));
+  COT.fech.linhas.push({cotacao_item_id:itemId, proposta_id:null, origem:'manual', fornecedor_nome:'', preco_unit:'', quantidade:'', justificativa:''});
+  cotFechLinhas();
+}
+function cotFechDel(ix){ COT.fech.linhas.splice(ix,1); cotFechLinhas(); }
+async function cotFechSalvar(enviar){
+  const f=COT.fech, d=COT.cur;
+  const linhas=f.linhas.filter(l=>l.fornecedor_nome&&l.preco_unit!==''&&l.preco_unit!=null&&l.quantidade!==''&&l.quantidade!=null)
+    .map(l=>({cotacao_item_id:l.cotacao_item_id, proposta_id:l.proposta_id||null, origem:l.origem||'proposta',
+              origem_ref:l.origem_ref||'', fornecedor_id:l.fornecedor_id||null, fornecedor_nome:l.fornecedor_nome,
+              preco_unit:Number(l.preco_unit), quantidade:Number(l.quantidade),
+              preco_total:Number(l.preco_unit)*Number(l.quantidade), lote:l.lote||'', justificativa:l.justificativa||''}));
+  if(!linhas.length){ toast('Preencha fornecedor, preço e quantidade de ao menos um item'); return; }
+  // justificativa obrigatória em linha que não é o menor preço qualificado
+  for(const l of linhas){ const m=cotMelhorUnit(d,l.cotacao_item_id);
+    if(m!=null&&l.preco_unit>m+0.0001&&!String(l.justificativa||'').trim()){
+      const it=(d.itens||[]).find(x=>String(x.id)===String(l.cotacao_item_id))||{};
+      toast('Justifique "'+String(it.descricao||'').slice(0,30)+'": não é o menor preço qualificado'); return; } }
+  const body={acao:'fechamento_salvar', me:EU&&EU.bitrix_id, cotacao_id:d.cotacao.id, fechamento_id:f.id||undefined,
+    origem_preco:(document.getElementById('fcOrigem')||{}).value||f.origem_preco||'',
+    etr_participou:(document.getElementById('fcEtr')||{}).checked?1:0,
+    responsavel_nome:val('fcResp'), data_fechamento:val('fcData'),
+    cond_pagamento:val('fcPag'), cond_prazo:val('fcPrazo'), cond_frete:val('fcFrete'),
+    cond_validade:val('fcVal'), cond_obs:val('fcObs'), justificativa:val('fcJust'), linhas:linhas};
+  try{
+    const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.error){toast(r.error);return;}
+    if(enviar){
+      const r2=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({acao:'fechamento_enviar',me:EU&&EU.bitrix_id,fechamento_id:r.fechamento_id})})).json();
+      if(r2.error){toast(r2.error);}else toast('Fechamento enviado para aprovação');
+    } else toast('Rascunho salvo');
+    COT.mode='detalhe'; cotOpen(d.cotacao.id);
+  }catch(e){ toast('Falha: '+e.message); }
+}
+async function cotFechAcao(body,msg){
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.error){toast(r.error);return false;} toast(msg); cotOpen(COT.cur.cotacao.id); return true;
+  }catch(e){ toast('Falha: '+e.message); return false; }
+}
+function cotFechEnviar(fid){ cotFechAcao({acao:'fechamento_enviar',me:EU&&EU.bitrix_id,fechamento_id:fid},'Enviado para aprovação'); }
+function cotFechAprovar(fid,rodada){
+  if(!confirm((rodada===1?'Homologar a rodada 1?\n\nEste valor vira o Preço Inicial de Referência — a régua contra a qual todo ganho será medido. Depois de homologado ele fica travado.'
+                        :'Assinar o fechamento da rodada '+rodada+'?\n\nO sistema vai calcular o ganho da negociação contra a régua, e é sobre ele que a consultoria é remunerada.'))) return;
+  cotFechAcao({acao:'fechamento_aprovar',me:EU&&EU.bitrix_id,fechamento_id:fid},rodada===1?'Rodada 1 homologada — preço inicial travado':'Fechamento assinado');
+}
+function cotFechDevolver(fid){
+  dlgAbrir('Cotações','Devolver o fechamento ao comprador',
+    '<div style="max-width:520px"><div class="dmini" style="margin-bottom:10px">Escreva o que falta. O comprador vê este texto no fechamento e no histórico — é o caminho para pedir mais concorrência antes de travar a régua.</div>'
+   + cotFld('O que precisa ser corrigido *','<textarea id="fcDevM" rows="3" style="width:100%" placeholder="ex.: faltou cotar com a Tatu e a BLB, que já venderam este bloco. Inclua no mapa antes de fechar."></textarea>')
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" style="background:#b3261e" onclick="cotFechDevolverOk('+fid+')">Devolver</button></div></div>');
+}
+function cotFechDevolverOk(fid){
+  const m=((document.getElementById('fcDevM')||{}).value||'').trim();
+  if(m.length<5){toast('Escreva o que precisa ser corrigido');return;}
+  closeModal(true); cotFechAcao({acao:'fechamento_devolver',me:EU&&EU.bitrix_id,fechamento_id:fid,motivo:m},'Devolvido ao comprador');
+}
+function cotFechReabrir(fid){
+  const m=prompt('Reabrir este fechamento aprovado?\nO cálculo do ganho volta a ser recalculado e isso fica no histórico.\n\nMotivo:');
+  if(m===null)return; if(String(m).trim().length<5){toast('Escreva o motivo');return;}
+  cotFechAcao({acao:'fechamento_reabrir',me:EU&&EU.bitrix_id,fechamento_id:fid,motivo:m.trim()},'Fechamento reaberto');
+}
+function cotFechExcluir(fid){
+  if(!confirm('Excluir este rascunho de fechamento?')) return;
+  cotFechAcao({acao:'fechamento_excluir',me:EU&&EU.bitrix_id,fechamento_id:fid},'Rascunho excluído');
+}
+function cotFechVer(fid){
+  const d=COT.cur, f=(d.fechamentos||[]).find(x=>String(x.id)===String(fid)); if(!f)return;
+  const linhas=(f.linhas||[]).map(l=>{ const it=(d.itens||[]).find(x=>String(x.id)===String(l.cotacao_item_id))||{};
+    return `<tr><td style="text-align:left">${esc(it.descricao||('#'+l.cotacao_item_id))}</td>
+      <td style="text-align:left">${esc(l.fornecedor_nome||'—')}</td>
+      <td style="text-align:right">${BRLp(l.preco_unit)}</td><td style="text-align:right">${cotNum(l.quantidade)}</td>
+      <td style="text-align:right"><b>${BRL(l.preco_total)}</b></td>
+      <td style="text-align:left;font-size:10.5px;color:#4a5560">${l.justificativa?esc(l.justificativa):'<span class="muted">—</span>'}</td></tr>`;}).join('');
+  const cond=[['Pagamento',f.cond_pagamento],['Prazo',f.cond_prazo],['Frete',f.cond_frete],['Validade',f.cond_validade]]
+    .filter(x=>x[1]).map(x=>'<b>'+x[0]+':</b> '+esc(x[1])).join(' · ');
+  dlgAbrir('Cotações','Fechamento · rodada '+f.rodada,
+    '<div style="max-width:820px">'
+   + '<div class="dmini" style="margin-bottom:8px">'+(f.origem_label?'Origem: <b>'+esc(f.origem_label)+'</b> · ':'')
+   + (f.responsavel_nome?'Negociado por <b>'+esc(f.responsavel_nome)+'</b> · ':'')
+   + (f.data_fechamento?D(f.data_fechamento):'')+(f.aprovado_nome?' · aprovado por <b>'+esc(f.aprovado_nome)+'</b>':'')+'</div>'
+   + (cond?'<div class="dmini" style="margin-bottom:8px">'+cond+'</div>':'')
+   + (f.cond_obs?'<div class="dmini" style="margin-bottom:8px">'+esc(f.cond_obs)+'</div>':'')
+   + '<div style="overflow-x:auto"><table class="mtable" style="border:none;width:100%"><thead><tr><th style="text-align:left">Item</th><th style="text-align:left">Fornecedor</th><th style="text-align:right">Unit.</th><th style="text-align:right">Qtd</th><th style="text-align:right">Total</th><th style="text-align:left">Justificativa</th></tr></thead><tbody>'
+   + linhas+'</tbody></table></div>'
+   + (f.justificativa?'<div class="dmini" style="margin-top:8px"><b>Justificativa:</b> '+esc(f.justificativa)+'</div>':'')
+   + '</div>');
+}
 /* ═════════ ÚLTIMOS PREÇOS FECHADOS ═════════
    O histórico de compra do item, lido dos pedidos do TOTVS, dentro da tela onde a decisão acontece —
    na cotação e na solicitação. Responde o que hoje obriga a sair do sistema: "quanto a gente já pagou

@@ -196,7 +196,7 @@ As cotações. Inclui as três origens: nascidas do radar, nascidas de uma SC, e
 | `itens` | quantos itens estão sendo cotados |
 | `fornecedores_convidados` / `_disparados` | convidados × e-mail efetivamente enviado |
 | `propostas_recebidas` | quantos fornecedores já responderam com preço |
-| `melhor_oferta` | menor total entre as propostas |
+| `melhor_oferta` | menor total entre as propostas **não desqualificadas** |
 | `verba` | verba prevista, para comparar com a oferta |
 | `num_solicitacao`, `num_pedido` | SC de origem e pedido de compra gerado |
 | `detalhe_url` | o link do recurso 5 |
@@ -217,13 +217,20 @@ Uma cotação **em detalhe**. Traz tudo do recurso 4 mais:
 
 - `itens_detalhe[]` — cada item cotado, com o campo `melhor` (fornecedor e preço vencedor daquele item)
 - `fornecedores[]` — por fornecedor: `convidado_em`, `disparado`, `disparado_em`, `respondeu`,
-  `proposta_total`, `proposta_prazo`, `email_recebido_em`
-- `propostas[]` — cada proposta com `total`, `prazo`, `recebida_em` e os `precos[]` por item
+  `proposta_total`, `proposta_prazo`, `email_recebido_em`, `propostas_desqualificadas`
+- `propostas[]` — cada proposta com `total`, `prazo`, `recebida_em`, os `precos[]` por item e
+  `desqualificada` (+ `desqualificacao` com `motivo`, `motivo_label`, `justificativa` e `em`)
 - `soma_dos_melhores` — quanto custaria comprando cada item de quem ofereceu o melhor preço
 - `pedidos_de_compra[]` — nº do PC por empresa emissora
 
 > O melhor preço por item é escolhido pelo **preço total** da linha. Item sem preço total
 > preenchido não concorre.
+
+> **Proposta desqualificada** continua listada (é registro do que foi recebido), mas **não
+> concorre**: fica fora do `melhor` por item, da `soma_dos_melhores` e da `melhor_oferta`.
+> A desqualificação é da PROPOSTA, não do fornecedor — ele segue convidado e pode revisar.
+> Motivos: `prazo`, `quantidade`, `estoque`, `pagamento`, `especificacao`, `nao_homologado`,
+> `logistica`, `outro` (neste, a `justificativa` é o motivo).
 
 ---
 

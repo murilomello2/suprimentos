@@ -139,6 +139,8 @@ function db_schema_mysql($pdo) {
         prazo VARCHAR(120), observacoes TEXT, equaliza TEXT, data_resposta VARCHAR(40), total DOUBLE, created_at VARCHAR(40),
         revisao INT DEFAULT 0, raiz_id INT, ativa TINYINT DEFAULT 1,
         opcao INT DEFAULT 1, opcao_rotulo VARCHAR(160),
+        desq TINYINT DEFAULT 0, desq_motivo VARCHAR(40), desq_obs TEXT,
+        desq_por VARCHAR(64), desq_nome VARCHAR(191), desq_at VARCHAR(40),
         PRIMARY KEY (id), KEY idx_prop_cot (cotacao_id)
     ) $E");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta_item (
@@ -434,6 +436,15 @@ function db_schema_mysql($pdo) {
         // mesmo tempo e concorrendo no mapa. opcao = 1,2,3… por fornecedor dentro da cotação.
         if ($pc && !isset($pc['opcao']))         $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN opcao INT DEFAULT 1");
         if ($pc && !isset($pc['opcao_rotulo']))  $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN opcao_rotulo VARCHAR(160)");
+        // DESQUALIFICAÇÃO da PROPOSTA (não do fornecedor): a proposta continua no mapa, visível e com o motivo,
+        // mas sai do julgamento — não concorre a melhor preço por item nem a melhor oferta. desq=1 + motivo
+        // (catálogo em cotacoes.php), justificativa livre e quem/quando, para a trilha da cotação.
+        if ($pc && !isset($pc['desq']))        $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN desq TINYINT DEFAULT 0");
+        if ($pc && !isset($pc['desq_motivo'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN desq_motivo VARCHAR(40)");
+        if ($pc && !isset($pc['desq_obs']))    $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN desq_obs TEXT");
+        if ($pc && !isset($pc['desq_por']))    $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN desq_por VARCHAR(64)");
+        if ($pc && !isset($pc['desq_nome']))   $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN desq_nome VARCHAR(191)");
+        if ($pc && !isset($pc['desq_at']))     $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN desq_at VARCHAR(40)");
         // solic_obra.cnpj (CNPJ da obra p/ a carta de cotação) — self-heal p/ tabela já existente
         $sc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='solic_obra'") as $c) $sc[$c['COLUMN_NAME']] = true;
         if ($sc && !isset($sc['cnpj'])) $pdo->exec("ALTER TABLE solic_obra ADD COLUMN cnpj VARCHAR(24)");
@@ -621,7 +632,7 @@ function db_schema($pdo) {
     foreach (['wa_e164','wa_tipo','wa_nota','wa_origem'] as $col) if (!isset($fcols[$col])) $pdo->exec("ALTER TABLE cot_fornecedor ADD COLUMN $col TEXT");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao (id INTEGER PRIMARY KEY AUTOINCREMENT, obra_id INTEGER, servico_id INTEGER, titulo TEXT NOT NULL, apelido TEXT, colaboradores TEXT, categoria TEXT, tipo_servico TEXT, verba REAL, verba_origem TEXT, descricao TEXT, equalizacao TEXT, num_solicitacao TEXT, num_pedido TEXT, solic_coligada TEXT, solic_obra_cod TEXT, status TEXT DEFAULT 'rascunho', aprovacao TEXT DEFAULT 'aguardando', criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_item (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, quantidade REAL, observacao TEXT, ordem INTEGER)");
-    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, prazo TEXT, observacoes TEXT, equaliza TEXT, data_resposta TEXT, total REAL, revisao INTEGER DEFAULT 0, raiz_id INTEGER, ativa INTEGER DEFAULT 1, opcao INTEGER DEFAULT 1, opcao_rotulo TEXT, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, fornecedor_id INTEGER, fornecedor_nome TEXT, prazo TEXT, observacoes TEXT, equaliza TEXT, data_resposta TEXT, total REAL, revisao INTEGER DEFAULT 0, raiz_id INTEGER, ativa INTEGER DEFAULT 1, opcao INTEGER DEFAULT 1, opcao_rotulo TEXT, desq INTEGER DEFAULT 0, desq_motivo TEXT, desq_obs TEXT, desq_por TEXT, desq_nome TEXT, desq_at TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_proposta_item (id INTEGER PRIMARY KEY AUTOINCREMENT, proposta_id INTEGER NOT NULL, cotacao_item_id INTEGER NOT NULL, preco_unit REAL, preco_total REAL, observacao TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, proposta_id INTEGER, fornecedor_id INTEGER, fornecedor_nome TEXT, nome TEXT, arquivo TEXT, tamanho INTEGER, mime TEXT, criado_por TEXT, created_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cot_dicionario (id INTEGER PRIMARY KEY AUTOINCREMENT, servico_id INTEGER NOT NULL, descricao TEXT, unidade TEXT, ordem INTEGER, nota TEXT, created_at TEXT)");
@@ -700,6 +711,12 @@ function db_schema($pdo) {
     if (!isset($pcols['ativa'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN ativa INTEGER DEFAULT 1");
     if (!isset($pcols['opcao'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN opcao INTEGER DEFAULT 1");
     if (!isset($pcols['opcao_rotulo'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN opcao_rotulo TEXT");
+    if (!isset($pcols['desq'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN desq INTEGER DEFAULT 0");
+    if (!isset($pcols['desq_motivo'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN desq_motivo TEXT");
+    if (!isset($pcols['desq_obs'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN desq_obs TEXT");
+    if (!isset($pcols['desq_por'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN desq_por TEXT");
+    if (!isset($pcols['desq_nome'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN desq_nome TEXT");
+    if (!isset($pcols['desq_at'])) $pdo->exec("ALTER TABLE cotacao_proposta ADD COLUMN desq_at TEXT");
 
     // permissões GRANULARES de edição (além do editar_escopo geral) — aditivas, fora do drop de migração.
     // perm_admin = tudo. editar_escopo (todas/sel) = editor geral (status/fornecedor/observação).
@@ -853,6 +870,31 @@ function cot_pode_gerir($pdo, $me, $cotacao_id) {
     if ((string)($r['criado_por'] ?? '') === (string)$me) return true;
     foreach ((array)(json_decode((string)($r['colaboradores'] ?? ''), true) ?: []) as $b) if (trim((string)$b) === trim((string)$me)) return true;
     return false;
+}
+/* ───────── DESQUALIFICAÇÃO DE PROPOSTA (catálogo de motivos) ─────────
+   Desqualifica A PROPOSTA, nunca o fornecedor: ele continua na concorrência, continua convidado e
+   pode mandar revisão nova (que nasce qualificada). A proposta desqualificada NÃO some do mapa —
+   fica lá, marcada com o motivo, mas fora do julgamento: não concorre a melhor preço por item nem
+   a melhor oferta. Catálogo FECHADO de propósito: padroniza o relatório e deixa comparar cotações.
+   Vive aqui (e não em cotacoes.php) porque a API de leitura também precisa traduzir o código. */
+function cot_desq_motivos() {
+    return [
+        'prazo'          => 'Prazo de entrega incompatível',
+        'quantidade'     => 'Quantidade disponível insuficiente',
+        'estoque'        => 'Indisponibilidade de estoque',
+        'pagamento'      => 'Condição de pagamento inadequada',
+        'especificacao'  => 'Especificação técnica não atendida',
+        'nao_homologado' => 'Fornecedor não homologado',
+        'logistica'      => 'Condição logística incompatível',
+        'outro'          => 'Outro motivo que inviabiliza a contratação',
+    ];
+}
+function cot_desq_label($cod) { $m = cot_desq_motivos(); return $m[(string)$cod] ?? ''; }
+// texto curto do motivo p/ o histórico e p/ a tela: no 'outro', a justificativa É o motivo
+function cot_desq_texto($cod, $obs) {
+    $l = cot_desq_label($cod); $obs = trim((string)$obs);
+    if ((string)$cod === 'outro') return $obs !== '' ? $obs : $l;
+    return $l . ($obs !== '' ? ' — ' . $obs : '');
 }
 // NB: o enforcement por campo (mapa campo->grupo + checagem) é INLINE no actions/item_update.php,
 // pra ser resiliente a deploy parcial (não depende deste arquivo chegar atualizado no FTP).

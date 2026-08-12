@@ -277,7 +277,7 @@ function api_cot_por_servico($pdo, $radarObraId) {
                 (SELECT COUNT(*) FROM cotacao_fornecedor cf WHERE cf.cotacao_id=c.id) AS convidados,
                 (SELECT COUNT(*) FROM cotacao_fornecedor cf WHERE cf.cotacao_id=c.id AND cf.enviado_em IS NOT NULL AND cf.enviado_em<>'') AS disparados,
                 (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND (cp.ativa=1 OR cp.ativa IS NULL)) AS propostas,
-                (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND (cp.ativa=1 OR cp.ativa IS NULL) AND cp.total>0) AS melhor
+                (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND (cp.ativa=1 OR cp.ativa IS NULL) AND cp.total>0 AND (cp.desq=0 OR cp.desq IS NULL)) AS melhor
              FROM cotacao c WHERE c.obra_id=? AND c.servico_id IS NOT NULL ORDER BY c.id DESC");
         $q->execute([$radarObraId]);
         foreach ($q as $r) {
@@ -417,7 +417,7 @@ function api_cotacoes_lista($pdo) {
                    (SELECT COUNT(*) FROM cotacao_fornecedor cf WHERE cf.cotacao_id=c.id) AS convidados,
                    (SELECT COUNT(*) FROM cotacao_fornecedor cf WHERE cf.cotacao_id=c.id AND cf.enviado_em IS NOT NULL AND cf.enviado_em<>'') AS disparados,
                    (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND (cp.ativa=1 OR cp.ativa IS NULL)) AS propostas,
-                   (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND (cp.ativa=1 OR cp.ativa IS NULL) AND cp.total>0) AS melhor
+                   (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND (cp.ativa=1 OR cp.ativa IS NULL) AND cp.total>0 AND (cp.desq=0 OR cp.desq IS NULL)) AS melhor
             FROM cotacao c
             LEFT JOIN obra o    ON o.id = c.obra_id
             LEFT JOIN servico s ON s.id = c.servico_id
@@ -475,14 +475,21 @@ function api_cotacao_detalhe($pdo, $id) {
 
     // propostas VIGENTES (revisões arquivadas ficam de fora — senão o comparativo mostra preço velho)
     $props = [];
-    $q = $pdo->prepare("SELECT id, fornecedor_id, fornecedor_nome, prazo, observacoes, data_resposta, total, revisao, opcao, opcao_rotulo
+    $q = $pdo->prepare("SELECT id, fornecedor_id, fornecedor_nome, prazo, observacoes, data_resposta, total, revisao, opcao, opcao_rotulo, desq, desq_motivo, desq_obs, desq_at
                         FROM cotacao_proposta WHERE cotacao_id=? AND (ativa=1 OR ativa IS NULL) ORDER BY (total IS NULL), total, id");
     $q->execute([$id]);
     // opcao: o MESMO fornecedor pode ter mais de uma proposta vigente (formas diferentes de apresentar o preço)
+    // desqualificada: continua listada (com o motivo), mas não entra no melhor-por-item logo abaixo
     foreach ($q as $p) $props[(int)$p['id']] = ['proposta_id' => (int)$p['id'], 'fornecedor_id' => $p['fornecedor_id'] ? (int)$p['fornecedor_id'] : null,
         'fornecedor' => $p['fornecedor_nome'], 'prazo' => $p['prazo'] ?: null, 'observacoes' => trim((string)$p['observacoes']) ?: null,
         'recebida_em' => $p['data_resposta'] ?: null, 'total' => api_num($p['total']), 'revisao' => (int)$p['revisao'],
-        'opcao' => (int)($p['opcao'] ?? 1) ?: 1, 'opcao_rotulo' => trim((string)$p['opcao_rotulo']) ?: null, 'precos' => []];
+        'opcao' => (int)($p['opcao'] ?? 1) ?: 1, 'opcao_rotulo' => trim((string)$p['opcao_rotulo']) ?: null,
+        'desqualificada' => (int)($p['desq'] ?? 0) === 1,
+        'desqualificacao' => (int)($p['desq'] ?? 0) === 1
+            ? ['motivo' => (string)$p['desq_motivo'], 'motivo_label' => cot_desq_label((string)$p['desq_motivo']),
+               'justificativa' => trim((string)$p['desq_obs']) ?: null, 'em' => $p['desq_at'] ?: null]
+            : null,
+        'precos' => []];
 
     if ($props) {
         $in = implode(',', array_map('intval', array_keys($props)));
@@ -497,6 +504,7 @@ function api_cotacao_detalhe($pdo, $id) {
     foreach ($itens as $it) {
         $best = null;
         foreach ($props as $p) {
+            if (!empty($p['desqualificada'])) continue;   // desqualificada não julga (mesma regra do mapa da tela)
             $c = $p['precos'][$it['item_id']] ?? null;
             $pt = $c['preco_total'] ?? null;
             if ($pt === null || $pt <= 0) continue;
@@ -513,11 +521,15 @@ function api_cotacao_detalhe($pdo, $id) {
                         FROM cotacao_fornecedor cf WHERE cf.cotacao_id=? ORDER BY cf.fornecedor_nome");
     $q->execute([$id]);
     foreach ($q as $cf) {
-        $resp = null;
+        // a proposta "do card" é a primeira QUALIFICADA (as desqualificadas só entram se não sobrou nenhuma):
+        // senão o resumo do fornecedor mostraria como oferta um preço que já saiu do julgamento
+        $resp = null; $desqN = 0;
         foreach ($props as $p) {
             $mesmo = ($cf['fornecedor_id'] && $p['fornecedor_id'] && (int)$cf['fornecedor_id'] === $p['fornecedor_id'])
                   || (strtolower(trim((string)$cf['fornecedor_nome'])) === strtolower(trim((string)$p['fornecedor'])));
-            if ($mesmo) { $resp = $p; break; }
+            if (!$mesmo) continue;
+            if (!empty($p['desqualificada'])) $desqN++;
+            if ($resp === null || (!empty($resp['desqualificada']) && empty($p['desqualificada']))) $resp = $p;
         }
         $forn[] = [
             'fornecedor'   => $cf['fornecedor_nome'],
@@ -528,6 +540,8 @@ function api_cotacao_detalhe($pdo, $id) {
             'respondeu'    => $resp !== null,
             'proposta_total' => $resp['total'] ?? null,
             'proposta_prazo' => $resp['prazo'] ?? null,
+            'propostas_desqualificadas' => $desqN,
+            'proposta_desqualificada'   => !empty($resp['desqualificada']),
             'email_recebido_em'  => $cf['inbound_em'] ?: null,
             'email_classificado' => $cf['inbound_tipo'] ?: null,
         ];

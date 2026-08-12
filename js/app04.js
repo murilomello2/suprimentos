@@ -91,7 +91,12 @@ function upCard(label,val,sub,color){ return `<div style="border:1px solid var(-
 // as duas saem junto do nome no comparativo impresso, como no mapa antigo.
 function upOpc(p){ return (p.opcao||1)>1?`<div style="font-weight:700;font-size:9px;color:#2a5d8f">opção ${p.opcao}${p.opcao_rotulo?' · '+esc(p.opcao_rotulo):''}</div>`:''; }
 // nome da coluna quando o fornecedor tem mais de uma opção (senão duas colunas ficariam com o mesmo nome)
-function cotPropNome(p){ return esc(p.fornecedor_nome)+((p.opcao||1)>1?` <span style="font-weight:400;font-size:9.5px;color:#2a5d8f">· opção ${p.opcao}${p.opcao_rotulo?' ('+esc(p.opcao_rotulo)+')':''}</span>`:''); }
+function cotPropNome(p){ return esc(p.fornecedor_nome)+((p.opcao||1)>1?` <span style="font-weight:400;font-size:9.5px;color:#2a5d8f">· opção ${p.opcao}${p.opcao_rotulo?' ('+esc(p.opcao_rotulo)+')':''}</span>`:'')+upDesq(p); }
+/* Selo impresso da proposta DESQUALIFICADA. No papel não há tooltip nem cor de fundo confiável:
+   o motivo vai escrito por extenso embaixo do nome, senão o mapa impresso "escolhe o caro" sem explicar. */
+function upDesq(p){ if(!cotDesq(p)) return '';
+  return `<div style="font-weight:800;font-size:8.5px;color:#b3261e;margin-top:2px">DESQUALIFICADA</div>`
+    + (p.desq_texto?`<div style="font-weight:400;font-size:8px;color:#8a5b57;line-height:1.3;white-space:normal">${esc(p.desq_texto)}</div>`:''); }
 function upObsG(p){ const o=(p.observacoes||'').trim(); return o?`<div style="margin-top:3px;background:#eef1f3;border:1px solid #dde2e6;border-radius:5px;padding:4px 6px;font-size:8.5px;font-weight:400;color:#4a5560;text-align:left;line-height:1.35;white-space:pre-wrap">${esc(o)}</div>`:''; }
 // Comparativo de PREÇOS adaptativo: se há mais FORNECEDORES que itens, vira a tabela (fornecedores nas LINHAS,
 // ranqueados pelo total) — fica uma lista vertical que cabe na página; senão itens nas linhas (estilo clássico).
@@ -100,15 +105,16 @@ function upPrecos(itens,props,m,best,verba){
   let h=`<div style="font-weight:800;font-size:14px;margin:14px 0 8px;color:var(--verde-d)">Comparativo de Preços</div><div style="overflow-x:auto"><table class="up-tbl">`;
   if(props.length>itens.length && props.length>=5){
     // ---- FORNECEDORES nas linhas (ranking por total) ----
-    const ranked=props.slice().sort((a,b)=>((a.total==null?Infinity:a.total)-(b.total==null?Infinity:b.total)));
-    let cheapest=null; ranked.forEach(p=>{ if(p.total!=null&&(cheapest==null||p.total<cheapest))cheapest=p.total; });
+    // desqualificadas vão para o fim do ranking e não disputam o troféu (não são a "mais barata")
+    const ranked=props.slice().sort((a,b)=>((cotDesq(a)?1:0)-(cotDesq(b)?1:0))||((a.total==null?Infinity:a.total)-(b.total==null?Infinity:b.total)));
+    let cheapest=null; ranked.forEach(p=>{ if(!cotDesq(p)&&p.total!=null&&(cheapest==null||p.total<cheapest))cheapest=p.total; });
     h+=`<thead><tr><th style="width:26px">#</th><th style="text-align:left;min-width:150px">Fornecedor</th>`;
     itens.forEach(it=>{ const dsc=String(it.descricao||''); h+=`<th style="min-width:88px" title="${esc(dsc)}">${esc(dsc.slice(0,36))}${dsc.length>36?'…':''}<div style="font-weight:400;font-size:9px;color:#889">${cotNum(it.quantidade)} ${esc(it.unidade||'')}</div></th>`; });
     h+=`<th>Total</th>${verba>0?'<th>vs verba</th>':''}</tr></thead><tbody>`;
-    ranked.forEach((p,idx)=>{ const win=p.total!=null&&p.total===cheapest;
-      h+=`<tr style="${win?'background:#eafaf0':''}"><td style="font-weight:700;text-align:center">${win?'🏆':(idx+1)}</td><td style="text-align:left;font-weight:${win?'800':'600'}">${esc(p.fornecedor_nome)}${upOpc(p)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}${upObsG(p)}</td>`;
-      itens.forEach(it=>{ const pi=(p.itens||{})[it.id], bb=best[it.id], isBI=bb&&bb.proposta_id===p.id;
-        h+=`<td style="${isBI?'background:#d9f2e3;font-weight:700':''};vertical-align:top">${pi&&pi.preco_unit!=null?`${BRLp(pi.preco_unit)}${pi.observacao?`<div style="margin-top:3px;background:#eef1f3;border:1px solid #dde2e6;border-radius:5px;padding:4px 6px;font-size:8.5px;font-weight:400;color:#4a5560;text-align:left;line-height:1.35;white-space:normal">${esc(pi.observacao)}</div>`:''}`:'<span style="color:#bbb">—</span>'}</td>`; });
+    ranked.forEach((p,idx)=>{ const dq=cotDesq(p), win=!dq&&p.total!=null&&p.total===cheapest;
+      h+=`<tr style="${win?'background:#eafaf0':(dq?'background:#fdf6f6;color:#8a9299':'')}"><td style="font-weight:700;text-align:center">${win?'🏆':(dq?'—':(idx+1))}</td><td style="text-align:left;font-weight:${win?'800':'600'}"><span style="${dq?'text-decoration:line-through':''}">${esc(p.fornecedor_nome)}</span>${upOpc(p)}${upDesq(p)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}${upObsG(p)}</td>`;
+      itens.forEach(it=>{ const pi=(p.itens||{})[it.id], bb=best[it.id], isBI=!dq&&bb&&bb.proposta_id===p.id;
+        h+=`<td style="${isBI?'background:#d9f2e3;font-weight:700':(dq?'text-decoration:line-through':'')};vertical-align:top">${pi&&pi.preco_unit!=null?`${BRLp(pi.preco_unit)}${pi.observacao?`<div style="margin-top:3px;background:#eef1f3;border:1px solid #dde2e6;border-radius:5px;padding:4px 6px;font-size:8.5px;font-weight:400;color:#4a5560;text-align:left;line-height:1.35;white-space:normal">${esc(pi.observacao)}</div>`:''}`:'<span style="color:#bbb">—</span>'}</td>`; });
       const vv=(verba>0&&p.total!=null)?verba-p.total:null;
       h+=`<td style="font-weight:800">${p.total!=null?BRL(p.total):'—'}</td>${verba>0?`<td style="font-size:10.5px;color:${vv==null?'#889':(vv>=0?'var(--ok)':'var(--pend)')}">${vv==null?'—':(vv>=0?'+':'')+BRL(vv)}</td>`:''}</tr>`; });
     if(itens.length>1){ h+=`<tr style="background:#f4f7f5;font-weight:800"><td style="text-align:center">★</td><td style="text-align:left">Melhor por item</td>`;
@@ -117,18 +123,21 @@ function upPrecos(itens,props,m,best,verba){
   } else {
     // ---- ITENS nas linhas (poucos fornecedores) ----
     h+=`<thead><tr><th style="text-align:left;min-width:150px;max-width:260px">Item</th><th style="width:40px">Qtd</th><th style="width:34px">Un</th>`;
-    props.forEach(p=>{ h+=`<th style="min-width:92px">${esc(p.fornecedor_nome)}${upOpc(p)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}${upObsG(p)}</th>`; });
+    props.forEach(p=>{ const dq=cotDesq(p); h+=`<th style="min-width:92px;${dq?'color:#8a9299':''}"><span style="${dq?'text-decoration:line-through':''}">${esc(p.fornecedor_nome)}</span>${upOpc(p)}${upDesq(p)}${p.prazo?`<div style="font-weight:400;font-size:9px;color:#889">${esc(p.prazo)}</div>`:''}${upObsG(p)}</th>`; });
     h+=`<th style="background:#eafaf0;color:var(--verde-d)">Melhor preço</th></tr></thead><tbody>`;
     itens.forEach(it=>{ const b=best[it.id];
       h+=`<tr><td style="text-align:left">${esc(it.descricao)}</td><td>${cotNum(it.quantidade)}</td><td>${esc(it.unidade||'')}</td>`;
-      props.forEach(p=>{ const pi=(p.itens||{})[it.id], isB=b&&b.proposta_id===p.id;
-        h+=`<td style="${isB?'background:#d9f2e3;font-weight:700':''};vertical-align:top">${pi&&pi.preco_total!=null?`${BRLp(pi.preco_unit)}${isB?' 🏆':''}<div style="font-size:9.5px;color:#889;font-weight:400">${BRL(pi.preco_total)}</div>${pi.observacao?`<div style="margin-top:3px;background:#eef1f3;border:1px solid #dde2e6;border-radius:5px;padding:4px 6px;font-size:8.5px;font-weight:400;color:#4a5560;text-align:left;line-height:1.35;white-space:normal">${esc(pi.observacao)}</div>`:''}`:'<span style="color:#bbb">—</span>'}</td>`; });
+      props.forEach(p=>{ const pi=(p.itens||{})[it.id], dq=cotDesq(p), isB=!dq&&b&&b.proposta_id===p.id;
+        h+=`<td style="${isB?'background:#d9f2e3;font-weight:700':(dq?'color:#8a9299;text-decoration:line-through':'')};vertical-align:top">${pi&&pi.preco_total!=null?`${BRLp(pi.preco_unit)}${isB?' 🏆':''}<div style="font-size:9.5px;color:#889;font-weight:400">${BRL(pi.preco_total)}</div>${pi.observacao?`<div style="margin-top:3px;background:#eef1f3;border:1px solid #dde2e6;border-radius:5px;padding:4px 6px;font-size:8.5px;font-weight:400;color:#4a5560;text-align:left;line-height:1.35;white-space:normal">${esc(pi.observacao)}</div>`:''}`:'<span style="color:#bbb">—</span>'}</td>`; });
       h+=`<td style="background:#eafaf0">${b?`<b>${BRLp(b.preco_unit)}</b><div style="font-size:9.5px;color:#889">${BRL(b.preco_total)} · ${esc(b.fornecedor)}</div>`:'—'}</td></tr>`; });
     h+=`<tr style="background:#f4f7f5;font-weight:800"><td style="text-align:left">TOTAL GERAL</td><td></td><td></td>`;
-    props.forEach(p=>{ const isBS=m.fornecedor_destaque===p.fornecedor_nome; h+=`<td style="${isBS?'color:var(--verde-d)':''}">${p.total!=null?BRL(p.total):'—'}</td>`; });
+    props.forEach(p=>{ const dq=cotDesq(p), isBS=!dq&&m.fornecedor_destaque===p.fornecedor_nome; h+=`<td style="${isBS?'color:var(--verde-d)':(dq?'color:#8a9299;text-decoration:line-through':'')}">${p.total!=null?BRL(p.total):'—'}</td>`; });
     h+=`<td style="background:#eafaf0;color:var(--verde-d)">${melhor?BRL(melhor):'—'}</td></tr>`;
   }
-  return h+`</tbody></table></div>`;
+  h+=`</tbody></table></div>`;
+  // no papel, a legenda é o que evita a leitura errada de "escolheram o mais caro"
+  if(props.some(cotDesq)) h+=`<div style="font-size:9px;color:#8a5b57;margin-top:5px">Proposta riscada = <b>desqualificada</b>: registrada no mapa, fora do julgamento (não disputa o melhor preço). O motivo está sob o nome do fornecedor.</div>`;
+  return h;
 }
 // Equalização adaptativa: pontos nas linhas (padrão) OU, se há mais fornecedores que pontos, fornecedores nas linhas.
 function upEqualiza(props,pontos){
@@ -415,11 +424,11 @@ function cotPropostaNovaOpcao(pid){
 function cotHistorico(pid){
   const d=COT.cur, cur=(d.propostas||[]).find(p=>String(p.id)===String(pid)); if(!cur){toast('Proposta não encontrada');return;}   // id STRING no MySQL
   const itens=d.itens||[];
-  const chain=[...(cur.historico||[]).map(h=>Object.assign({},h)), {id:cur.id,revisao:cur.revisao||0,total:cur.total,created_at:cur.created_at,itens:cur.itens||{},vigente:true}];
+  const chain=[...(cur.historico||[]).map(h=>Object.assign({},h)), {id:cur.id,revisao:cur.revisao||0,total:cur.total,created_at:cur.created_at,itens:cur.itens||{},desq:cur.desq,desq_texto:cur.desq_texto,vigente:true}];
   chain.sort((a,b)=>(a.revisao||0)-(b.revisao||0));
   const pct=(nv,ov)=>{ if(ov==null||ov===0||nv==null) return null; return (nv-ov)/ov*100; };
   const delta=p=>{ if(p==null) return ''; const dn=p<-0.05, up=p>0.05; const col=dn?'#1a8a4a':(up?'#c0392b':'#8a9299'), ar=dn?'▼':(up?'▲':'='); return ` <span style="color:${col};font-size:9.5px">${ar}${Math.abs(p).toFixed(1)}%</span>`; };
-  let h='<table class="mtable" style="border:none;width:100%"><thead><tr><th style="text-align:left">Item</th>'+chain.map(r=>`<th>rev ${r.revisao}${r.vigente?' <span style="color:var(--verde-d)">•vigente</span>':''}${r.created_at?`<div class="muted" style="font-size:9px;font-weight:400">${cotFmtDT(r.created_at)}</div>`:''}</th>`).join('')+'</tr></thead><tbody>';
+  let h='<table class="mtable" style="border:none;width:100%"><thead><tr><th style="text-align:left">Item</th>'+chain.map(r=>`<th>rev ${r.revisao}${r.vigente?' <span style="color:var(--verde-d)">•vigente</span>':''}${cotDesq(r)?`<div title="${esc(r.desq_texto||'')}" style="font-size:8.5px;font-weight:800;color:#b3261e">DESQUALIFICADA</div>`:''}${r.created_at?`<div class="muted" style="font-size:9px;font-weight:400">${cotFmtDT(r.created_at)}</div>`:''}</th>`).join('')+'</tr></thead><tbody>';
   itens.forEach(it=>{ h+=`<tr><td style="text-align:left">${esc(it.descricao)}</td>`; let prev=null;
     chain.forEach(r=>{ const pi=(r.itens||{})[it.id]; const u=pi&&pi.preco_unit!=null?pi.preco_unit:null; const dl=prev!=null?delta(pct(u,prev)):''; h+=`<td style="text-align:center;white-space:nowrap">${u!=null?BRLp(u):'—'}${dl}</td>`; prev=u; });
     h+='</tr>'; });
@@ -559,6 +568,60 @@ async function cotExcluirPropostaEnviar(pid,motivo){
     if(r&&r.error){ toast(r.error); return; }
     toast('Proposta excluída'); cotOpen(COT.cur.cotacao.id);
   }catch(e){toast('Falha: '+e.message);} }
+/* ───────── DESQUALIFICAR PROPOSTA ─────────
+   Excluir apaga; desqualificar REGISTRA. São coisas diferentes e a diferença importa: quando a
+   proposta mais barata não pode ser contratada (prazo, especificação, condição de pagamento…),
+   quem abrir o mapa daqui a um ano precisa ver que ela existiu e por que não venceu — senão o
+   mapa parece que "escolheu o caro". A proposta fica no mapa, marcada, fora do julgamento.
+   E é a PROPOSTA que é desqualificada, nunca o fornecedor: ele segue convidado e pode revisar. */
+function cotDesqAbrir(pid){
+  const d=COT.cur||{}, p=(d.propostas||[]).find(x=>String(x.id)===String(pid));
+  if(!p){toast('Proposta não encontrada');return;}
+  const ms=d.desq_motivos||[];
+  if(!ms.length){toast('Recarregue a página — a lista de motivos não veio do servidor');return;}
+  const quem=esc(p.fornecedor_nome||'')+((p.opcao||1)>1?(' · opção '+p.opcao+(p.opcao_rotulo?' ('+esc(p.opcao_rotulo)+')':'')):'');
+  dlgAbrir('Cotações','Desqualificar proposta',
+    '<div style="max-width:560px">'
+  + '<div class="dmini" style="margin-bottom:10px;background:#fdf6f6;border:1px solid #f2d7d4;padding:9px 12px;border-radius:9px">'
+  + 'Desqualificando a proposta de <b>'+quem+'</b>'+(p.total!=null?(' — <b>'+BRL(p.total)+'</b>'):'')+'.<br>'
+  + 'Ela <b>continua no mapa</b>, marcada com o motivo, mas sai do julgamento: não disputa o melhor preço por item nem a melhor oferta. '
+  + '<b>O fornecedor não é desqualificado</b> — ele segue na concorrência e pode mandar uma nova revisão a qualquer momento.</div>'
+  + cotFld('Motivo da desqualificação *','<select id="cotDesqM" onchange="cotDesqMotivoIn()" style="width:100%">'
+      + '<option value="">— escolha o motivo —</option>'
+      + ms.map(m=>'<option value="'+esc(m.cod)+'">'+esc(m.label)+'</option>').join('')+'</select>')
+  + cotFld('Justificativa <span id="cotDesqJL" class="muted">(opcional — detalhe o que aconteceu)</span>',
+      '<textarea id="cotDesqJ" rows="3" style="width:100%" placeholder="Ex.: prazo de 45 dias contra os 20 exigidos pela obra."></textarea>','margin-top:8px')
+  + '<div class="dmini" style="margin-top:8px">Fica registrado no <b>Histórico</b> da cotação com seu nome, data e hora.</div>'
+  + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px">'
+  + '<button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+  + '<button class="btn-prim" style="background:#b3261e" onclick="cotDesqSalvar('+pid+')">Desqualificar proposta</button></div></div>');
+}
+// "outro" não tem rótulo próprio: ali a justificativa É o motivo, então vira obrigatória
+function cotDesqMotivoIn(){
+  const v=((document.getElementById('cotDesqM')||{}).value||''), lb=document.getElementById('cotDesqJL'), ta=document.getElementById('cotDesqJ');
+  if(lb) lb.innerHTML=(v==='outro')?'<b style="color:#b3261e">(obrigatória — descreva o motivo)</b>':'(opcional — detalhe o que aconteceu)';
+  if(ta&&v==='outro') ta.focus();
+}
+async function cotDesqSalvar(pid){
+  const motivo=((document.getElementById('cotDesqM')||{}).value||'').trim();
+  const just=((document.getElementById('cotDesqJ')||{}).value||'').trim();
+  if(!motivo){toast('Escolha o motivo');return;}
+  if(motivo==='outro'&&just.length<5){toast('Em "outro motivo", escreva a justificativa');const e=document.getElementById('cotDesqJ');if(e)e.focus();return;}
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({acao:'proposta_desqualificar',me:EU&&EU.bitrix_id,proposta_id:pid,motivo:motivo,justificativa:just})})).json();
+    if(r&&r.error){toast(r.error);return;}
+    closeModal(true); toast('Proposta desqualificada — o fornecedor continua na concorrência'); cotOpen(COT.cur.cotacao.id);
+  }catch(e){toast('Falha: '+e.message);}
+}
+async function cotDesqDesfazer(pid){
+  const p=((COT.cur&&COT.cur.propostas)||[]).find(x=>String(x.id)===String(pid));
+  if(!confirm('Requalificar a proposta'+(p?(' de "'+(p.fornecedor_nome||'')+'"'):'')+'?\nEla volta a concorrer no mapa. A desqualificação e a requalificação ficam no histórico.')) return;
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({acao:'proposta_desqualificar',me:EU&&EU.bitrix_id,proposta_id:pid,desfazer:1})})).json();
+    if(r&&r.error){toast(r.error);return;}
+    toast('Proposta requalificada — voltou a concorrer'); cotOpen(COT.cur.cotacao.id);
+  }catch(e){toast('Falha: '+e.message);}
+}
 // ícone por tipo de anexo
 function cotAnexoIcon(mime,nome){ const m=(mime||'')+' '+(nome||'');
   if(/pdf/i.test(m))return'picture_as_pdf'; if(/png|jpe?g|image/i.test(m))return'image'; if(/sheet|excel|xls/i.test(m))return'table_view'; return'insert_drive_file'; }

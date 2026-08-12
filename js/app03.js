@@ -817,7 +817,7 @@ function cotRender(){
       +`<td class="muted" style="overflow:hidden;line-height:1.25" title="${esc((c.categoria||'')+(c.tipo_servico?' · '+c.tipo_servico:''))}"><div style="${_ell}">${esc(c.categoria||'—')}</div>${c.tipo_servico?`<div style="font-size:10px;${_ell}">${esc(c.tipo_servico)}</div>`:''}</td>`
       +`<td class="muted" style="font-size:11px;white-space:nowrap;line-height:1.3">${c.num_solicitacao?('SC '+esc(c.num_solicitacao)):''}${c.num_solicitacao&&c.num_pedido?'<br>':''}${c.num_pedido?('<b style="color:var(--verde-d)">PC '+esc(c.num_pedido)+'</b>'):''}${!c.num_solicitacao&&!c.num_pedido?'—':''}</td>`
       +`<td style="text-align:center">${c.n_itens}</td>`
-      +`<td style="text-align:center" title="${c.n_propostas} recebida(s) de ${c.n_convidados||0} convidado(s)"><b>${c.n_propostas}</b><span class="muted">/${c.n_convidados||0}</span></td>`
+      +`<td style="text-align:center" title="${c.n_propostas} recebida(s) de ${c.n_convidados||0} convidado(s)${Number(c.n_desq)>0?' · '+c.n_desq+' desqualificada(s), fora do julgamento':''}"><b>${c.n_propostas}</b><span class="muted">/${c.n_convidados||0}</span>${Number(c.n_desq)>0?`<span class="material-icons" style="font-size:12px;color:#b3261e;vertical-align:-2px">block</span>`:''}</td>`
       +`<td style="text-align:right;white-space:nowrap">${c.melhor_oferta?BRL(c.melhor_oferta):'—'}</td>`
       +`<td class="muted" style="font-size:11px;white-space:nowrap">${cotFmtDT(c.created_at)}</td>`
       +`<td class="muted" style="font-size:11px;${_ell}" title="${esc(c.criado_nome||'')}">${esc(c.criado_nome||'—')}</td>`
@@ -1339,8 +1339,18 @@ function cotObsShow(el){ const obs=el.getAttribute('data-obs')||'', forn=el.getA
    mandou a mesma proposta de outro jeito (com/sem bomba, global x diária) e as duas concorrem no mapa.
    Cada opção tem a sua própria cadeia de revisões: revisar a opção 2 não encosta na opção 1. Por isso
    o botão "nova revisão" fica em CADA linha de opção — não existe "de qual opção?" para perguntar. */
+/* DESQUALIFICADA: o PDO do MySQL devolve os números como STRING — "0" é truthy em JS, então tudo que
+   olha esta flag tem que passar por Number(). Foi assim que o `ativa` já mordeu antes. */
+function cotDesq(p){ return Number((p||{}).desq)===1; }
+// selo vermelho da proposta desqualificada (mapa, cards e opções) — o motivo inteiro fica no title
+function cotDesqSelo(p,tam){ if(!cotDesq(p)) return '';
+  const t=(p.desq_texto||'motivo não informado');
+  return `<span title="Proposta desqualificada — ${esc(t)}. O fornecedor continua na concorrência: quem foi desqualificada é esta proposta." style="background:#fdeaea;color:#b3261e;font-size:${tam||8.5}px;font-weight:800;padding:1px 6px;border-radius:5px;white-space:nowrap">DESQUALIFICADA</span>`; }
 function cotConvPropBtns(pp){ if(!pp) return '';
-  return `<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotPropostaRevisar(${pp.id})" title="o fornecedor mandou preço novo — registra a próxima revisão sem perder a atual"><span class="material-icons" style="font-size:13px;vertical-align:-2px">published_with_changes</span> nova revisão</button>`
+  return (cotDesq(pp)
+    ? `<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotDesqDesfazer(${pp.id})" title="devolve esta proposta ao julgamento — ela volta a concorrer no mapa"><span class="material-icons" style="font-size:13px;vertical-align:-2px">restore</span> requalificar</button>`
+    : `<button class="btn-ghost" style="padding:2px 9px;color:#b3261e" onclick="cotDesqAbrir(${pp.id})" title="tira esta proposta do julgamento por um motivo registrado (prazo, especificação, pagamento…). O fornecedor continua na concorrência."><span class="material-icons" style="font-size:13px;vertical-align:-2px">block</span> desqualificar</button>`)
+   + `<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotPropostaRevisar(${pp.id})" title="o fornecedor mandou preço novo — registra a próxima revisão sem perder a atual"><span class="material-icons" style="font-size:13px;vertical-align:-2px">published_with_changes</span> nova revisão</button>`
    + `<button class="btn-ghost" style="padding:2px 9px" onclick="cotPropostaNovaOpcao(${pp.id})" title="o fornecedor apresentou a MESMA proposta de outra forma — cadastra como opção nova, sem substituir esta"><span class="material-icons" style="font-size:13px;vertical-align:-2px">splitscreen</span> nova opção</button>`
    + `<button class="btn-ghost" style="padding:2px 9px" onclick="cotProposta(${pp.id})" title="corrigir a revisão atual (não cria revisão nova)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">edit</span> editar</button>`
    + `<button class="btn-ghost" style="padding:2px 8px;color:var(--pend)" onclick="cotExcluirProposta(${pp.id})" title="apaga SÓ esta proposta (preço e revisões dela). O fornecedor continua na concorrência.">excluir proposta</button>`;
@@ -1349,10 +1359,11 @@ function cotConvPropBtns(pp){ if(!pp) return '';
 function cotConvOpcoes(cf,CAN_EDIT){
   const ps=cf.propostas||[]; if(ps.length<2) return '';
   return `<div style="margin-top:8px;padding-left:16px;display:flex;flex-direction:column;gap:6px">`
-   + ps.map(pp=>`<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;border-left:2px solid #e3e9e6;padding-left:9px">
+   + ps.map(pp=>`<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;border-left:2px solid ${cotDesq(pp)?'#f0c9c6':'#e3e9e6'};padding-left:9px${cotDesq(pp)?';opacity:.75':''}">
       <span class="dchip" style="background:#eef4fb;color:#2a5d8f;font-weight:700">opção ${pp.opcao}</span>
       <span style="font-size:12px;font-weight:600;min-width:90px">${pp.opcao_rotulo?esc(pp.opcao_rotulo):'<span class="muted" style="font-weight:400">sem nome</span>'}</span>
-      <span style="font-size:12px;font-weight:700;color:var(--verde-d)">${pp.total!=null?BRL(pp.total):'—'}</span>
+      <span style="font-size:12px;font-weight:700;color:${cotDesq(pp)?'#8a9299':'var(--verde-d)'};${cotDesq(pp)?'text-decoration:line-through':''}">${pp.total!=null?BRL(pp.total):'—'}</span>
+      ${cotDesqSelo(pp,9)}
       ${pp.prazo?`<span class="muted" style="font-size:10.5px">${esc(pp.prazo)}</span>`:''}
       ${(pp.revisao||pp.n_historico)?`<span style="background:#eef4f0;color:var(--verde-d);font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:5px">rev ${pp.revisao||0}</span>`:''}
       ${pp.n_historico?`<span onclick="cotHistorico(${pp.id})" style="font-size:9.5px;color:#5c7b8a;cursor:pointer;text-decoration:underline">histórico</span>`:''}
@@ -1443,7 +1454,7 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
    +'<div style="display:flex;gap:12px;flex-wrap:wrap;padding:14px 0 2px">'
    /* Conta FORNECEDORES que responderam, não linhas de proposta: com opções o mesmo fornecedor ocupa
       duas colunas do mapa e o KPI mostrava "2/1" (mais propostas que convidados), que não quer dizer nada. */
-   +cotKpi('inbox', cotNResp(props)+'/'+(d.convidados||[]).length, 'propostas recebidas'+(props.length>cotNResp(props)?' · '+props.length+' com as opções':''))
+   +cotKpi('inbox', cotNResp(props)+'/'+(d.convidados||[]).length, 'propostas recebidas'+(props.length>cotNResp(props)?' · '+props.length+' com as opções':'')+(props.filter(cotDesq).length?' · <b style="color:#b3261e">'+props.filter(cotDesq).length+'</b> desqualificada(s)':''))
    +cotKpi('emoji_events', (m.melhor_oferta?BRL(m.melhor_oferta):'—'), 'melhor fornecedor'+(m.fornecedor_destaque?' &middot; <b style="color:var(--tx)">'+esc(m.fornecedor_destaque)+'</b>':''))
    +cotKpi('savings', (c.verba?BRL(c.verba):'—')+(cotVerbaInfoBtn(c)?' '+cotVerbaInfoBtn(c):'')+(CAN_EDIT?' <span class="material-icons" onclick="cotVerbaEditar()" title="editar a verba prevista" style="font-size:13px;cursor:pointer;color:var(--verde);vertical-align:-2px">edit</span>':''), 'verba prevista')
    +'</div>'
@@ -1471,7 +1482,8 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
         <span class="dgm" style="background:${cf.respondeu?'var(--ok)':'#cfd6da'}"></span>
         <span style="flex:1;min-width:130px;font-weight:600">${esc(cf.fornecedor_nome)}${cf.categoria?` <span class="muted" style="font-size:11px;font-weight:400">· ${esc(cf.categoria)}</span>`:''}</span>
         ${cf.enviado_em?`<span class="dchip" style="background:var(--verde-d);color:#fff" title="e-mail enviado em ${D(String(cf.enviado_em).slice(0,10))}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">outbox</span> enviado</span>`:''}
-        <span class="dchip" style="background:${cf.respondeu?'var(--ok)':'#8a9299'}">${cf.respondeu?('respondeu · '+((cf.propostas||[]).length>1?((cf.propostas||[]).length+' opções · a partir de '):'')+BRL(cf.proposta_total)):'aguardando'}</span>
+        <span class="dchip" style="background:${cf.respondeu?(Number(cf.desq_todas)===1?'#b3261e':'var(--ok)'):'#8a9299'}">${cf.respondeu?('respondeu · '+((cf.propostas||[]).length>1?((cf.propostas||[]).length+' opções · a partir de '):'')+BRL(cf.proposta_total)):'aguardando'}</span>
+        ${Number(cf.desq_n)>0?`<span class="dchip" style="background:#fdeaea;color:#b3261e;font-weight:700" title="${esc(cf.desq_texto||'veja o motivo em cada opção')}${Number(cf.desq_todas)===1?' — este fornecedor não tem mais nenhuma proposta no páreo, mas segue convidado e pode enviar uma revisão.':''}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">block</span> ${Number(cf.desq_todas)===1?((cf.propostas||[]).length>1?'propostas desqualificadas':'proposta desqualificada'):(cf.desq_n+' de '+(cf.propostas||[]).length+' desqualificada(s)')}</span>`:''}
         ${cf.inbound_em?`<span class="dchip" style="background:${cf.inbound_tipo==='cotacao'?'#1f7a44':(cf.inbound_tipo==='duvida'?'var(--pend)':'#5b6b7a')};color:#fff" title="${esc(cf.inbound_resumo||'')}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">mail</span> e-mail · ${cf.inbound_tipo==='cotacao'?'cotação':(cf.inbound_tipo==='duvida'?'dúvida':'resposta')}</span>`:''}
         ${CAN_EDIT?`<button class="btn-ghost" style="padding:2px 9px" onclick="cotAnexarAbrir(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="anexar PDF, Excel ou print — arraste, cole (Ctrl+V) ou clique"><span class="material-icons" style="font-size:14px;vertical-align:-2px">attach_file</span> anexar${ax.length?` (${ax.length})`:''}</button>`:''}
         ${CAN_EDIT&&ax.length?`<button class="btn-ghost" style="padding:2px 9px;color:var(--verde-d)" onclick="cotIAPreencher(${cf.fornecedor_id||'null'},'${esc(String(cf.fornecedor_nome||'')).replace(/'/g,'')}')" title="a IA lê os anexos e preenche a proposta (rascunho para você conferir)"><span class="material-icons" style="font-size:14px;vertical-align:-2px">auto_awesome</span> preencher com IA</button>`:''}
@@ -1498,17 +1510,26 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
       // OBSERVAÇÃO GERAL do fornecedor (vale p/ a proposta inteira) — logo abaixo dos dados dele, como no mapa antigo
       const obsG=(p.observacoes||'').trim();
       const obsChip=obsG?`<div style="margin-top:3px;font-weight:400"><span class="material-icons" data-obs="${esc(obsG)}" data-forn="${esc(p.fornecedor_nome)}" data-item="observação geral do fornecedor" onclick="cotObsShow(this)" title="${esc(obsG)}" style="font-size:12px;color:#5c7b8a;cursor:help;vertical-align:-2px">sticky_note_2</span> <span class="muted" style="font-size:9px">${esc(obsG.length>46?obsG.slice(0,46)+'…':obsG)}</span></div>`:'';
-      html+=`<th style="min-width:120px">${esc(p.fornecedor_nome)}${CAN_EDIT?` <span onclick="cotExcluirProposta(${p.id})" title="excluir esta proposta do mapa" style="cursor:pointer;color:var(--pend);font-weight:700">×</span>`:''}${p.prazo?`<div class="muted" style="font-size:9.5px;font-weight:400">${esc(p.prazo)}</div>`:''}${opcChip}${revChip}${obsChip}</th>`; });
+      /* DESQUALIFICADA: a coluna CONTINUA no mapa — some do julgamento, não da vista. Quem lê o mapa
+         depois precisa enxergar que aquele preço existiu e por que ele não valeu. */
+      const dq=cotDesq(p);
+      const dqBtn=CAN_EDIT?(dq
+        ? ` <span class="material-icons" onclick="cotDesqDesfazer(${p.id})" title="requalificar: devolve esta proposta ao julgamento" style="font-size:13px;cursor:pointer;color:var(--verde-d);vertical-align:-2px">restore</span>`
+        : ` <span class="material-icons" onclick="cotDesqAbrir(${p.id})" title="desqualificar esta proposta (o fornecedor continua na concorrência)" style="font-size:13px;cursor:pointer;color:#b3261e;vertical-align:-2px">block</span>`):'';
+      const dqChip=dq?`<div style="margin-top:3px">${cotDesqSelo(p)}</div><div class="muted" style="font-size:9px;font-weight:400;white-space:normal;max-width:150px">${esc(String(p.desq_texto||'').slice(0,60))}${String(p.desq_texto||'').length>60?'…':''}</div>`:'';
+      html+=`<th style="min-width:120px;${dq?'background:#fdf6f6;color:#8a9299':''}"><span style="${dq?'text-decoration:line-through':''}">${esc(p.fornecedor_nome)}</span>${dqBtn}${CAN_EDIT?` <span onclick="cotExcluirProposta(${p.id})" title="excluir esta proposta do mapa" style="cursor:pointer;color:var(--pend);font-weight:700">×</span>`:''}${p.prazo?`<div class="muted" style="font-size:9.5px;font-weight:400">${esc(p.prazo)}</div>`:''}${opcChip}${revChip}${dqChip}${obsChip}</th>`; });
     html+='<th style="min-width:140px;color:var(--verde-d)">🏆 Melhor Compra</th></tr></thead><tbody>';
     itens.forEach(it=>{ const b=best[it.id];
       html+=`<tr><td class="svc-c" style="text-align:left">${(c.multi_obra&&it.obra_nome)?`<span class="dchip" style="background:${obraCor(it.obra_id)};color:#fff;font-size:9px;margin-right:4px">${esc(String(it.obra_nome).slice(0,12))}</span>`:''}${(c.multi_coligada&&it.solic_coligada)?`<span class="dchip" style="background:${coligadaCor(it.solic_colidmov||it.solic_coligada)};color:#fff;font-size:9px;margin-right:4px" title="${esc(it.solic_coligada)}">${esc(colCurta(it.solic_coligada))}</span>`:''}${esc(it.descricao)}<small>${cotNum(it.quantidade)} ${esc(it.unidade||'')}${it.observacao?' · '+esc(it.observacao):''}</small></td>`;
-      props.forEach(p=>{ const pi=(p.itens||{})[it.id]; const isB=b&&b.proposta_id===p.id;
-        html+=`<td style="text-align:center;padding:6px 8px;${isB?'background:#e7f6ee':''}">${pi&&pi.preco_total!=null?`<b>${BRLp(pi.preco_unit)}</b>${isB?' 🏆':''}${pi.observacao?` <span class="material-icons" title="${esc(pi.observacao)}" data-obs="${esc(pi.observacao)}" data-forn="${esc(p.fornecedor_nome)}" data-item="${esc(it.descricao)}" style="font-size:13px;color:#5c7b8a;cursor:help;vertical-align:-2px" onclick="event.stopPropagation();cotObsShow(this)">info</span>`:''}<div class="muted" style="font-size:10px">${BRL(pi.preco_total)}</div>`:'<span class="muted">—</span>'}</td>`; });
+      props.forEach(p=>{ const pi=(p.itens||{})[it.id]; const dq=cotDesq(p), isB=!dq&&b&&b.proposta_id===p.id;
+        html+=`<td style="text-align:center;padding:6px 8px;${isB?'background:#e7f6ee':(dq?'background:#fdf6f6;color:#9aa2a8;text-decoration:line-through':'')}">${pi&&pi.preco_total!=null?`<b>${BRLp(pi.preco_unit)}</b>${isB?' 🏆':''}${pi.observacao?` <span class="material-icons" title="${esc(pi.observacao)}" data-obs="${esc(pi.observacao)}" data-forn="${esc(p.fornecedor_nome)}" data-item="${esc(it.descricao)}" style="font-size:13px;color:#5c7b8a;cursor:help;vertical-align:-2px" onclick="event.stopPropagation();cotObsShow(this)">info</span>`:''}<div class="muted" style="font-size:10px">${BRL(pi.preco_total)}</div>`:'<span class="muted">—</span>'}</td>`; });
       html+=`<td style="text-align:center;padding:6px 8px;background:#eafaf0">${b?`<b>${BRL(b.preco_total)}</b><div class="muted" style="font-size:10px">${esc(b.fornecedor)}</div>`:'—'}</td></tr>`;
     });
     html+='<tr style="background:#f7faf8"><td class="svc-c" style="text-align:left;font-weight:800">TOTAL</td>';
-    props.forEach(p=>{ const isBS=m.fornecedor_destaque===p.fornecedor_nome; html+=`<td style="text-align:center;font-weight:800;${isBS?'color:var(--verde-d)':''}">${p.total!=null?BRL(p.total):'—'}</td>`; });
-    html+=`<td style="text-align:center;font-weight:800;background:#eafaf0;color:var(--verde-d)">${m.melhor_total?BRL(m.melhor_total):'—'}</td></tr></tbody></table></div></div>`;
+    props.forEach(p=>{ const dq=cotDesq(p), isBS=!dq&&m.fornecedor_destaque===p.fornecedor_nome; html+=`<td style="text-align:center;font-weight:800;${isBS?'color:var(--verde-d)':(dq?'color:#9aa2a8;text-decoration:line-through':'')}">${p.total!=null?BRL(p.total):'—'}</td>`; });
+    html+=`<td style="text-align:center;font-weight:800;background:#eafaf0;color:var(--verde-d)">${m.melhor_total?BRL(m.melhor_total):'—'}</td></tr></tbody></table></div>`;
+    if(props.some(cotDesq)) html+='<div class="dmini" style="margin-top:8px"><span class="material-icons" style="font-size:13px;vertical-align:-3px;color:#b3261e">block</span> Coluna riscada = <b>proposta desqualificada</b>: continua no mapa como registro, mas está fora do julgamento (não disputa melhor preço). O motivo aparece no cabeçalho e a decisão fica no <b>Histórico</b>. O fornecedor <b>segue na concorrência</b> e pode enviar uma nova revisão.</div>';
+    html+='</div>';
   }
   w.innerHTML=html;
   if(c.multi_coligada) cotDetectarPedidosColigada(c);            // multi-coligada → um PC por coligada (sem achatar)

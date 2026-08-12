@@ -12,6 +12,7 @@
  * POST {acao:'status', me, cotacao_id, status?, aprovacao?}
  * POST {acao:'excluir', me, cotacao_id}
  * POST {acao:'excluir_proposta', me, proposta_id}
+ * POST {acao:'proposta_desqualificar', me, proposta_id, motivo, justificativa?, desfazer?}
  */
 if (extension_loaded('zlib') && !ini_get('zlib.output_compression')) @ob_start('ob_gzhandler');   // PERF: gzip do JSON (hosting não faz)
 header('Content-Type: application/json; charset=utf-8');
@@ -22,6 +23,9 @@ require_once __DIR__ . '/../includes/coligadas.php';       // FASE 2: coligada_c
 // Teto da lista. Os filtros/busca/ordenação da tela são CLIENT-SIDE (varrem a lista toda), então o servidor
 // manda tudo e o front pagina de 30 em 30. Era 500 — não cabe o histórico importado do sistema antigo (~760).
 define('COT_LISTA_MAX', 3000);
+
+// O catálogo de motivos de desqualificação (cot_desq_motivos/label/texto) mora em includes/db.php:
+// a API de leitura também precisa traduzir o código do motivo.
 
 function cot_can_edit($pdo, $me, $obra) {
     $perms = user_perms($pdo, $me);
@@ -72,11 +76,13 @@ function cot_insert_convidados($pdo, $cid, $lista) {
     return $n;
 }
 // mapa comparativo a partir das propostas: melhor (menor) preço por item + total ótimo + melhor fornecedor único
+// Proposta DESQUALIFICADA continua no mapa (visível, com o motivo) mas não julga: fica fora daqui inteira.
 function cot_mapa($itens, $propostas) {
     $melhor = [];        // item_id => ['proposta_id','fornecedor','preco_unit','preco_total']
     foreach ($itens as $it) {
         $best = null;
         foreach ($propostas as $p) {
+            if (!empty($p['desq'])) continue;
             $pi = $p['itens'][$it['id']] ?? null;
             if (!$pi) continue;
             $pt = $pi['preco_total'];
@@ -90,6 +96,7 @@ function cot_mapa($itens, $propostas) {
     // melhor fornecedor ÚNICO (menor total entre quem respondeu com valor)
     $melhor_oferta = null; $fornecedor_destaque = null;
     foreach ($propostas as $p) {
+        if (!empty($p['desq'])) continue;
         if (($p['total'] ?? 0) <= 0) continue;
         if ($melhor_oferta === null || $p['total'] < $melhor_oferta) { $melhor_oferta = (float)$p['total']; $fornecedor_destaque = $p['fornecedor_nome']; }
     }
@@ -213,6 +220,7 @@ function cot_get_full($pdo, $id) {
         if ($isAtiva($p)) continue;
         $histChain[$chain($p)][] = ['id'=>(int)$p['id'], 'revisao'=>(int)($p['revisao'] ?? 0), 'opcao'=>(int)($p['opcao'] ?? 1),
             'total'=>$p['total']!==null?(float)$p['total']:null, 'prazo'=>$p['prazo'], 'observacoes'=>$p['observacoes'],
+            'desq'=>(int)($p['desq'] ?? 0), 'desq_texto'=>((int)($p['desq'] ?? 0) ? cot_desq_texto($p['desq_motivo'] ?? '', $p['desq_obs'] ?? '') : ''),
             'created_at'=>$p['created_at'], 'itens'=>$byp[(int)$p['id']] ?? []];
     }
     foreach ($histChain as &$h) usort($h, fn($a,$b)=>($a['revisao']<=>$b['revisao'])); unset($h);
@@ -224,9 +232,20 @@ function cot_get_full($pdo, $id) {
         // OPÇÃO: o mesmo fornecedor pode ter mais de uma proposta vigente (formas diferentes de apresentar o preço)
         $p['opcao'] = (int)($p['opcao'] ?? 1) ?: 1;
         $p['opcao_rotulo'] = trim((string)($p['opcao_rotulo'] ?? ''));
+        // DESQUALIFICADA: continua na lista (o mapa mostra a coluna marcada), mas cot_mapa a ignora no julgamento
+        $p['desq'] = (int)($p['desq'] ?? 0);
+        $p['desq_motivo'] = (string)($p['desq_motivo'] ?? '');
+        $p['desq_obs'] = trim((string)($p['desq_obs'] ?? ''));
+        $p['desq_texto'] = $p['desq'] ? cot_desq_texto($p['desq_motivo'], $p['desq_obs']) : '';
         $p['historico'] = $histChain[$chain($p)] ?? [];
     }
     unset($p);
+    /* Desqualificadas vão para o FIM das colunas do mapa: quem julga lê primeiro quem está no páreo.
+       Partição manual (não usort) porque ordenação estável só é garantida a partir do PHP 8 — aqui
+       a ordem de dentro de cada grupo (por total) precisa ser preservada. */
+    $qual = []; $fora = [];
+    foreach ($propostas as $p) { if ($p['desq']) $fora[] = $p; else $qual[] = $p; }
+    $propostas = array_merge($qual, $fora);
     $anx = $pdo->prepare("SELECT id, proposta_id, fornecedor_id, fornecedor_nome, nome, tamanho, mime, url FROM cotacao_anexo WHERE cotacao_id=? AND (fornecedor_nome IS NULL OR fornecedor_nome<>'__CARTA__') ORDER BY id"); $anx->execute([$id]);
     // fornecedores CONVIDADOS (concorrência) + status respondeu (deriva de proposta com mesmo fornecedor)
     $cf = $pdo->prepare("SELECT cf.*, f.email AS f_email, f.telefone AS f_telefone, f.whatsapp AS f_whatsapp, f.contatos_at AS f_contatos_at
@@ -239,15 +258,20 @@ function cot_get_full($pdo, $id) {
         foreach ($propostas as $p) {
             if (($c['fornecedor_id'] && (int)$p['fornecedor_id'] === (int)$c['fornecedor_id'])
                 || ($cn !== '' && strtolower(trim((string)$p['fornecedor_nome'])) === $cn)) {
-                if ($resp === null) $resp = $p;
+                if ($resp === null) $resp = $p;   // $propostas vem com as qualificadas primeiro: o chip do card mostra uma VÁLIDA quando existe
                 $minhas[] = ['id'=>(int)$p['id'], 'opcao'=>(int)$p['opcao'], 'opcao_rotulo'=>$p['opcao_rotulo'],
                              'revisao'=>(int)$p['revisao'], 'total'=>$p['total'], 'prazo'=>$p['prazo'],
+                             'desq'=>(int)$p['desq'], 'desq_texto'=>$p['desq_texto'],
                              'n_historico'=>count($p['historico'] ?? [])];
             }
         }
         usort($minhas, fn($a, $b) => ($a['opcao'] <=> $b['opcao']) ?: ($a['id'] <=> $b['id']));
         $c['propostas'] = $minhas;
         $c['respondeu'] = $resp ? 1 : 0; $c['proposta_id'] = $resp['id'] ?? null; $c['proposta_total'] = $resp['total'] ?? null;
+        // quantas propostas dele estão desqualificadas (e se sobrou alguma no páreo) — o card avisa sem entrar nas opções
+        $c['desq_n'] = count(array_filter($minhas, fn($x) => !empty($x['desq'])));
+        $c['desq_todas'] = ($minhas && $c['desq_n'] === count($minhas)) ? 1 : 0;
+        $c['desq_texto'] = $c['desq_todas'] ? (string)($minhas[0]['desq_texto'] ?? '') : '';
         // contatos p/ a conferência (mestre cot_fornecedor quando há vínculo; senão o snapshot do convite)
         $c['email'] = ($c['f_email'] ?? '') !== '' ? $c['f_email'] : ($c['email'] ?? '');
         $c['telefone'] = ($c['f_telefone'] ?? '') !== '' ? $c['f_telefone'] : ($c['telefone'] ?? '');
@@ -257,8 +281,11 @@ function cot_get_full($pdo, $id) {
     }
     unset($c);
     $ger = $pdo->prepare("SELECT id, titulo, criado_nome, created_at FROM carta_gerada WHERE cotacao_id=? ORDER BY id DESC"); $ger->execute([$id]);
+    // catálogo de motivos de desqualificação: o front monta o select a partir daqui (uma fonte só)
+    $motivos = []; foreach (cot_desq_motivos() as $cod => $lbl) $motivos[] = ['cod'=>$cod, 'label'=>$lbl];
     return ['cotacao'=>$cot, 'itens'=>$itens, 'propostas'=>$propostas, 'anexos'=>$anx->fetchAll(),
-            'convidados'=>$convidados, 'mapa'=>cot_mapa($itens, $propostas), 'cartas_geradas'=>$ger->fetchAll()];
+            'convidados'=>$convidados, 'mapa'=>cot_mapa($itens, $propostas), 'cartas_geradas'=>$ger->fetchAll(),
+            'desq_motivos'=>$motivos];
 }
 
 try {
@@ -291,7 +318,8 @@ try {
                                    (SELECT COUNT(*) FROM cotacao_item ci WHERE ci.cotacao_id=c.id) AS n_itens,
                                    (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND (cp.ativa=1 OR cp.ativa IS NULL)) AS n_propostas,
                                    (SELECT COUNT(*) FROM cotacao_fornecedor cf WHERE cf.cotacao_id=c.id) AS n_convidados,
-                                   (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND cp.total>0 AND (cp.ativa=1 OR cp.ativa IS NULL)) AS melhor_oferta,
+                                   (SELECT MIN(cp.total) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND cp.total>0 AND (cp.ativa=1 OR cp.ativa IS NULL) AND (cp.desq=0 OR cp.desq IS NULL)) AS melhor_oferta,
+                                   (SELECT COUNT(*) FROM cotacao_proposta cp WHERE cp.cotacao_id=c.id AND (cp.ativa=1 OR cp.ativa IS NULL) AND cp.desq=1) AS n_desq,
                                    (SELECT COUNT(*) FROM cotacao_email_in ei WHERE ei.cotacao_id=c.id AND ei.status='novo') AS n_inbound_novo
                             FROM cotacao c LEFT JOIN obra o ON o.id=c.obra_id
                             $where ORDER BY c.created_at DESC, c.id DESC LIMIT " . COT_LISTA_MAX);
@@ -696,8 +724,55 @@ try {
         $pdo->commit();
         cot_log($pdo, $cid, $me, 'Proposta', 'Revisão ' . $rev . ' da proposta de ' . $forn
             . ($opc > 1 ? (' [opção ' . $opc . ($rot !== '' ? ' · ' . $rot : '') . ']') : '')
-            . ' — total R$ ' . number_format($total, 2, ',', '.'));
+            . ' — total R$ ' . number_format($total, 2, ',', '.')
+            /* A revisão nasce QUALIFICADA de propósito: o defeito era da proposta anterior, e o fornecedor
+               mandou outra justamente para corrigi-lo. Fica dito no histórico p/ ninguém achar que "sumiu". */
+            . ((int)($cur['desq'] ?? 0) ? ' · a revisão anterior estava desqualificada ('
+                . cot_desq_texto($cur['desq_motivo'] ?? '', $cur['desq_obs'] ?? '') . ') — esta volta a concorrer' : ''));
         echo json_encode(['ok'=>true, 'proposta_id'=>$novo, 'revisao'=>$rev, 'opcao'=>$opc, 'total'=>round($total, 2)], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    /* DESQUALIFICAR / REQUALIFICAR uma proposta. Marca A PROPOSTA (não o fornecedor): ele segue na
+       concorrência e pode mandar revisão nova — que nasce qualificada, porque o defeito era daquela
+       proposta. A desqualificada não some do mapa: fica visível com o motivo e fora do julgamento.
+       Fica registrada na trilha da cotação (quem, quando, motivo e justificativa) — é decisão que
+       alguém vai questionar depois, principalmente quando desqualifica a mais barata. */
+    if ($acao === 'proposta_desqualificar') {
+        $pid = (int)($in['proposta_id'] ?? 0); if (!$pid) throw new Exception('proposta_id obrigatório');
+        $row = $pdo->prepare("SELECT id, cotacao_id, fornecedor_nome, total, opcao, opcao_rotulo, revisao, ativa, desq, desq_motivo, desq_obs FROM cotacao_proposta WHERE id=?");
+        $row->execute([$pid]); $p = $row->fetch();
+        if (!$p) throw new Exception('proposta não encontrada');
+        $cid = (int)$p['cotacao_id'];
+        if (!cot_can_manage($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error'=>'Só o administrador, o gerente, quem criou ou quem recebeu a cotação compartilhada pode desqualificar uma proposta.'], JSON_UNESCAPED_UNICODE); exit; }
+        if (($p['ativa'] ?? null) !== null && (int)$p['ativa'] === 0) throw new Exception('esta revisão está arquivada — desqualifique a proposta vigente');
+        $rot = ' de ' . ((string)$p['fornecedor_nome'] ?: ('#' . $pid))
+             . (((int)($p['opcao'] ?? 1)) > 1 ? (' [opção ' . (int)$p['opcao'] . (trim((string)$p['opcao_rotulo']) !== '' ? ' · ' . trim((string)$p['opcao_rotulo']) : '') . ']') : '')
+             . ((float)($p['total'] ?? 0) > 0 ? (' — R$ ' . number_format((float)$p['total'], 2, ',', '.')) : '');
+
+        if (!empty($in['desfazer'])) {   // REQUALIFICAR: volta ao julgamento
+            if (!(int)($p['desq'] ?? 0)) { echo json_encode(['ok'=>true, 'desq'=>0, 'ja'=>true], JSON_UNESCAPED_UNICODE); exit; }
+            $antes = cot_desq_texto($p['desq_motivo'] ?? '', $p['desq_obs'] ?? '');
+            $pdo->prepare("UPDATE cotacao_proposta SET desq=0, desq_motivo=NULL, desq_obs=NULL, desq_por=NULL, desq_nome=NULL, desq_at=NULL WHERE id=?")->execute([$pid]);
+            $pdo->prepare("UPDATE cotacao SET updated_at=? WHERE id=?")->execute([date('c'), $cid]);
+            cot_log($pdo, $cid, $me, 'Desqualificação', 'Requalificou a proposta' . $rot . ' — volta a concorrer no mapa'
+                . ($antes !== '' ? ' (estava desqualificada por: ' . $antes . ')' : ''));
+            echo json_encode(['ok'=>true, 'desq'=>0], JSON_UNESCAPED_UNICODE); exit;
+        }
+
+        $motivo = trim((string)($in['motivo'] ?? ''));
+        if (cot_desq_label($motivo) === '') throw new Exception('escolha um motivo da lista para desqualificar a proposta');
+        $obs = trim((string)($in['justificativa'] ?? $in['desq_obs'] ?? ''));
+        // 'outro' existe justamente para o que não está na lista — sem o texto ele não diz nada a quem ler depois
+        if ($motivo === 'outro' && mb_strlen($obs) < 5) throw new Exception('escreva a justificativa — em "outro motivo" ela é o próprio motivo');
+        if (function_exists('mb_substr')) $obs = mb_substr($obs, 0, 1000); else $obs = substr($obs, 0, 1000);
+        $nome = ''; try { $pp = user_perms($pdo, $me); $nome = (string)($pp['nome'] ?? ''); } catch (Throwable $e) {}
+        $now = date('c');
+        $pdo->prepare("UPDATE cotacao_proposta SET desq=1, desq_motivo=?, desq_obs=?, desq_por=?, desq_nome=?, desq_at=? WHERE id=?")
+            ->execute([$motivo, $obs !== '' ? $obs : null, (string)$me, $nome ?: null, $now, $pid]);
+        $pdo->prepare("UPDATE cotacao SET updated_at=? WHERE id=?")->execute([$now, $cid]);
+        cot_log($pdo, $cid, $me, 'Desqualificação', 'Desqualificou a proposta' . $rot . ' · motivo: ' . cot_desq_texto($motivo, $obs)
+            . ' — sai do julgamento (o fornecedor continua na concorrência)');
+        echo json_encode(['ok'=>true, 'desq'=>1, 'motivo'=>$motivo, 'texto'=>cot_desq_texto($motivo, $obs)], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'status') {

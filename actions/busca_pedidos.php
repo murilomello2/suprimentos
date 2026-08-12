@@ -334,7 +334,8 @@ try {
                romaneio inteiro ("Pilares do 12º ao 14º Pavimento — Torre 1…") e a concatenação virava
                um parágrafo que dominava a tabela. O texto completo continua no pedido (botão do PC). */
             $ob = trim((string)($r['item_observacao'] ?? ''));
-            if ($ob !== '' && strpos($ag[$k]['observacao'], $ob) === false && mb_strlen($ag[$k]['observacao']) < 400)
+            // strlen (bytes), não mb_strlen: a hospedagem não tem mbstring — aqui é só um teto, byte serve
+            if ($ob !== '' && strpos($ag[$k]['observacao'], $ob) === false && strlen($ag[$k]['observacao']) < 400)
                 $ag[$k]['observacao'] = $ag[$k]['observacao'] === '' ? $ob : ($ag[$k]['observacao'] . ' · ' . $ob);
         }
         $itens = array_values($ag);

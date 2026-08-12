@@ -763,7 +763,9 @@ try {
         if (cot_desq_label($motivo) === '') throw new Exception('escolha um motivo da lista para desqualificar a proposta');
         $obs = trim((string)($in['justificativa'] ?? $in['desq_obs'] ?? ''));
         // 'outro' existe justamente para o que não está na lista — sem o texto ele não diz nada a quem ler depois
-        if ($motivo === 'outro' && mb_strlen($obs) < 5) throw new Exception('escreva a justificativa — em "outro motivo" ela é o próprio motivo');
+        // strlen (bytes), não mb_strlen: a hospedagem NÃO tem mbstring e mb_strlen aqui derrubava o
+        // endpoint com 500 em vez de devolver a mensagem — só aparecia em produção, nunca no sandbox
+        if ($motivo === 'outro' && strlen($obs) < 5) throw new Exception('escreva a justificativa — em "outro motivo" ela é o próprio motivo');
         if (function_exists('mb_substr')) $obs = mb_substr($obs, 0, 1000); else $obs = substr($obs, 0, 1000);
         $nome = ''; try { $pp = user_perms($pdo, $me); $nome = (string)($pp['nome'] ?? ''); } catch (Throwable $e) {}
         $now = date('c');

@@ -31,7 +31,7 @@ function preset($papel) {
 
 function jrow($r) {
     foreach (['obras_ver','obras_editar','menus'] as $k) $r[$k] = $r[$k] ? json_decode($r[$k], true) : [];
-    foreach (['perm_admin','ativo','perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','perm_whats','perm_fechamento'] as $k) $r[$k] = (int)($r[$k] ?? 0);
+    foreach (['perm_admin','ativo','perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','perm_whats','perm_fechamento','perm_ganhos'] as $k) $r[$k] = (int)($r[$k] ?? 0);
     return $r;
 }
 
@@ -42,7 +42,7 @@ try {
     try {
         $ucols = [];
         foreach ($pdo->query("PRAGMA table_info(usuario)") as $c) $ucols[$c['name']] = true;
-        foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','perm_whats','perm_fechamento'] as $pc) {
+        foreach (['perm_crono','perm_orcamento','perm_quant','perm_dicionario','perm_responsaveis','perm_email','perm_whats','perm_fechamento','perm_ganhos'] as $pc) {
             if (!isset($ucols[$pc])) { try { $pdo->exec("ALTER TABLE usuario ADD COLUMN $pc INTEGER DEFAULT 0"); } catch (Throwable $e) {} }
         }
         if (!isset($ucols['dashboard'])) { try { $pdo->exec("ALTER TABLE usuario ADD COLUMN dashboard TEXT DEFAULT ''"); } catch (Throwable $e) {} }
@@ -152,6 +152,7 @@ try {
             'perm_dicionario' => (int)($in['perm_dicionario'] ?? 0),
             'perm_responsaveis' => (int)($in['perm_responsaveis'] ?? 0),
             'perm_fechamento' => (int)($in['perm_fechamento'] ?? 0),
+            'perm_ganhos' => (int)($in['perm_ganhos'] ?? 0),
             'dashboard'     => (string)($in['dashboard'] ?? ''),
             'ativo'         => (int)($in['ativo'] ?? 1),
             'updated_at'    => date('c'),

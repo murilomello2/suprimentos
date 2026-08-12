@@ -1169,7 +1169,7 @@ async function cotReprocessarObras(){ if(!confirm('Tentar preencher a obra das c
   if(r.error){toast(r.error);return;} toast(`Obras resolvidas: ${r.resolvidas} de ${r.total} (${r.nao_resolvidas} sem par)`); cotLoad(); }catch(e){toast('Falha: '+e.message);} }
 async function cotOpen(id){
   const w=document.getElementById('cotwrap'); w.innerHTML='<div class="dempty">Abrindo mapa…</div>';
-  try{ const d=await (await fetch('actions/cotacoes.php?id='+id+'&_='+Date.now())).json();
+  try{ const d=await (await fetch('actions/cotacoes.php?id='+id+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||'')+'&_='+Date.now())).json();
     if(d.error){w.innerHTML='<div class="dempty">'+esc(d.error)+'</div>';return;}
     COT.cur=d; COT.mode='detalhe'; COT.editItens=false; COT.eqEdit=false; cotRenderDetalhe();
   }catch(e){w.innerHTML='<div class="dempty">Falha: '+esc(e.message)+'</div>';}
@@ -1325,9 +1325,9 @@ function cotSecHead(icon,title,sub,actions){ return `<div style="display:flex;ju
   <div style="display:flex;align-items:center;gap:8px;min-width:0"><span class="material-icons" style="font-size:20px;color:var(--verde)">${icon}</span><b style="font-size:15.5px;letter-spacing:.2px">${title}</b>${sub?`<span class="muted" style="font-size:11.5px;font-weight:400">${sub}</span>`:''}</div>
   ${actions?`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${actions}</div>`:''}</div>`; }
 /* Seções recolhíveis (o Murilo tem ~40 fornecedores) — estado por-cotação em localStorage; recolhido mostra só um resuminho */
-function cotColapsado(key){ try{ return localStorage.getItem('cotcol_'+key)==='1'; }catch(e){ return false; } }
-function cotToggleSec(key){ try{ localStorage.setItem('cotcol_'+key, cotColapsado(key)?'0':'1'); }catch(e){} cotRenderDetalhe(); }
-function cotChevron(key){ const col=cotColapsado(key); return `<span class="material-icons" style="font-size:20px;cursor:pointer;color:var(--muted)" onclick="cotToggleSec('${key}')" title="${col?'expandir':'recolher'}">${col?'unfold_more':'unfold_less'}</span>`; }
+function cotColapsado(key,padraoRecolhido){ try{ const v=localStorage.getItem('cotcol_'+key); return v===null?!!padraoRecolhido:(v==='1'); }catch(e){ return !!padraoRecolhido; } }
+function cotToggleSec(key,padraoRecolhido){ try{ localStorage.setItem('cotcol_'+key, cotColapsado(key,padraoRecolhido)?'0':'1'); }catch(e){} cotRenderDetalhe(); }
+function cotChevron(key,padraoRecolhido){ const col=cotColapsado(key,padraoRecolhido); return `<span class="material-icons" style="font-size:20px;cursor:pointer;color:var(--muted)" onclick="cotToggleSec('${key}',${padraoRecolhido?'true':'false'})" title="${col?'expandir':'recolher'}">${col?'unfold_more':'unfold_less'}</span>`; }
 // popup da OBSERVAÇÃO de um item×fornecedor (o "quadro cinza" do mapa antigo)
 function cotObsShow(el){ const obs=el.getAttribute('data-obs')||'', forn=el.getAttribute('data-forn')||'', item=el.getAttribute('data-item')||'';
   let ov=document.getElementById('obsOverlay'); if(!ov){ov=document.createElement('div');ov.id='obsOverlay';ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';document.body.appendChild(ov);} ov.onclick=()=>ov.remove();

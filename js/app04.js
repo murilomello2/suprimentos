@@ -633,6 +633,10 @@ async function cotDesqDesfazer(pid){
 const FECH_ST={rascunho:['#8a9299','rascunho'],devolvido:['#b3261e','devolvido pelo gerente'],
                aguardando:['var(--dourado)','aguardando aprovação'],homologado:['var(--ok)','aprovado']};
 function cotPodeAprovarFech(){ return IS_ADMIN||((EU&&EU.papel)||'')==='gerente'||!!(EU&&EU.perm_fechamento); }
+/* VER APURAÇÃO DE GANHOS ≠ aprovar. O comprador NÃO vê quanto se ganhou (decisão do Murilo: vira
+   comentário entre áreas). O servidor já não manda o número — isto aqui é só para a tela não
+   reservar espaço nem prometer o que não vem. */
+function cotPodeVerGanhos(){ return IS_ADMIN||((EU&&EU.papel)||'')==='gerente'||!!(EU&&EU.perm_ganhos); }
 function cotFechAberto(d){ return ((d||{}).fechamentos||[]).find(f=>f.status!=='homologado')||null; }
 function cotFechAprovados(d){ return ((d||{}).fechamentos||[]).filter(f=>f.status==='homologado'); }
 // melhor preço unitário QUALIFICADO por item (vem do servidor, já sem as desqualificadas)
@@ -705,8 +709,26 @@ function cotFechPanel(d){
       <div class="dmini" style="margin-top:6px">Calculado por <b>preço unitário</b> sobre a <b>quantidade fechada</b> — nunca total contra total, porque a quantidade muda entre as rodadas.</div>
     </div>`;
   }
-  const sub=aprov.length?('régua: '+BRL(aprov[0].total||0)+(aprov.length>1?(' · fechado: '+BRL(aprov[aprov.length-1].total||0)):'')):'preço inicial × preço fechado';
-  return `<div class="panel" style="margin-bottom:12px;padding:15px 18px">${cotSecHead('gavel','Fechamento da negociação',sub,cotChevron('fech'))}${cotColapsado('fech')?'':corpo+res}</div>`;
+  /* RESUMO RECOLHIDO — a cotação já é uma tela cheia, então o fechamento nasce fechado e diz só o
+     que importa de relance: em que rodada está, esperando quem, e há quanto tempo. Nenhum valor de
+     ganho aqui: a apuração vive no menu Fechamentos, para quem tem permissão. */
+  const ult=fs.length?fs[fs.length-1]:null;
+  let resumo;
+  if(!ult) resumo='<span class="muted">Sem fechamento — o primeiro define o <b>Preço Inicial de Referência</b>.</span>';
+  else{
+    const st=FECH_ST[ult.status]||['#8a9299',ult.status];
+    const dias=ult.updated_at?Math.floor((Date.now()-new Date(ult.updated_at).getTime())/864e5):null;
+    const quem=ult.status==='aguardando'?(' · aguardando '+(ult.rodada===1?'homologação do gerente':'assinatura')+(dias!=null&&dias>0?' há '+dias+' dia(s)':''))
+              :(ult.status==='homologado'?(' · aprovado'+(ult.aprovado_nome?' por '+esc(ult.aprovado_nome):'')):
+                (ult.status==='devolvido'?' · devolvido ao comprador':' · em rascunho'));
+    resumo=`<span class="dchip" style="background:${st[0]};color:#fff">rodada ${ult.rodada} · ${st[1]}</span> <span class="muted">${quem}</span>`
+      +(aprov.length?` <span class="muted">· ${aprov.length} rodada(s) aprovada(s)</span>`:'');
+  }
+  const chev=cotChevron('fech',true);
+  const head=cotSecHead('gavel','Fechamento da negociação','preço inicial × preço fechado',chev);
+  if(cotColapsado('fech',true))
+    return `<div class="panel" style="margin-bottom:12px;padding:15px 18px">${head}<div style="font-size:12.5px">${resumo}</div></div>`;
+  return `<div class="panel" style="margin-bottom:12px;padding:15px 18px">${head}${corpo}${res}</div>`;
 }
 /* ---- o formulário ---- */
 function cotFechAbrir(fid){

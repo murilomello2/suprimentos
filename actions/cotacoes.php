@@ -45,6 +45,16 @@ function cot_fech_origens() {
     ];
 }
 function cot_fech_origem_label($c) { $m = cot_fech_origens(); return $m[(string)$c] ?? ''; }
+/* Pode VER A APURAÇÃO DE GANHOS. Separada da alçada de aprovar de propósito: o gerente aprova E vê;
+   o diretor precisa das duas; a consultoria vê e nunca aprova; e o COMPRADOR não vê — decisão do
+   Murilo (12/08/2026): quanto se ganhou por negociação vira comentário entre áreas, e o comprador
+   não deve carregar isso. Um comprador específico só passa a ver se ele marcar a permissão.
+   O corte é AQUI, no servidor: esconder só na tela deixaria o valor viajando para o navegador. */
+function cot_pode_ver_ganhos($pdo, $me) {
+    $p = user_perms($pdo, $me);
+    if (empty($p['autorizado'])) return false;
+    return !empty($p['perm_admin']) || (($p['papel'] ?? '') === 'gerente') || !empty($p['perm_ganhos']);
+}
 // pode APROVAR/DEVOLVER um fechamento: admin, gerente ou quem recebeu a permissão específica (diretor)
 function cot_pode_aprovar_fechamento($pdo, $me) {
     $p = user_perms($pdo, $me);
@@ -406,6 +416,9 @@ try {
         if (isset($_GET['id'])) {
             $full = cot_get_full($pdo, (int)$_GET['id']);
             if (!$full) { http_response_code(404); echo json_encode(['error'=>'cotação não encontrada']); exit; }
+            // APURAÇÃO DE GANHOS não vai no payload de quem não pode vê-la (ver cot_pode_ver_ganhos)
+            $full['pode_ver_ganhos'] = cot_pode_ver_ganhos($pdo, $_GET['me'] ?? null) ? 1 : 0;
+            if (!$full['pode_ver_ganhos']) $full['ganho'] = null;
             echo json_encode($full, JSON_UNESCAPED_UNICODE); exit;
         }
         // lista

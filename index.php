@@ -573,6 +573,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
         <div class="dmini" id="dmeta">—</div>
       </div>
     </div>
+    <div id="dfechAlerta"></div>
     <div id="dwrap"><div class="dempty">Carregando…</div></div>
    </section>
 

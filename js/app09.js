@@ -494,7 +494,7 @@ async function fecLoad(){
   const w=document.getElementById('fecWrap'); if(w)w.innerHTML='<div class="dempty">Carregando os fechamentos…</div>';
   try{ const d=await (await fetch('actions/cotacoes.php?fila=1&me='+fecMe()+'&_='+Date.now())).json();
     if(d.error){ w.innerHTML='<div class="empty">'+esc(d.error)+'</div>'; return; }
-    FEC.fila=d.fila||[]; FEC.podeAprovar=!!d.pode_aprovar; fecRender();
+    FEC.fila=d.fila||[]; FEC.podeAprovar=!!d.pode_aprovar; FEC.veAndamento=!!d.ve_andamento; fecRender();
   }catch(e){ if(w)w.innerHTML='<div class="empty">Falha ao carregar.</div>'; }
 }
 async function fecLoadApur(mes){
@@ -517,16 +517,18 @@ function fecRenderFila(){
   const kpi=(ic,v,l,cor)=>`<div style="flex:1 1 190px;min-width:170px;border:1px solid var(--line);border-radius:12px;padding:12px 15px;background:#fff;display:flex;align-items:center;gap:12px">
     <span style="width:40px;height:40px;border-radius:50%;background:#eef6f0;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span class="material-icons" style="color:${cor||'var(--verde)'};font-size:20px">${ic}</span></span>
     <div style="line-height:1.2"><div style="font-size:19px;font-weight:800;color:${cor||'var(--verde-d)'}">${v}</div><div class="muted" style="font-size:11.5px">${l}</div></div></div>`;
+  /* Quem está FORA da cadeia de aprovação (consultoria/visualizador) não vê pendência nenhuma —
+     rodada em andamento não existe na lista dele, então KPI de fila seria sempre zero e enganoso. */
   let h=`<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-    ${kpi('pending_actions',esperando.length,'aguardando aprovação',esperando.length?'var(--dourado)':'var(--verde-d)')}
-    ${kpi('schedule',maisVelho?maisVelho+' dias':'—','o mais parado da fila',maisVelho>=5?'var(--pend)':'var(--verde-d)')}
+    ${FEC.veAndamento?kpi('pending_actions',esperando.length,'aguardando aprovação',esperando.length?'var(--dourado)':'var(--verde-d)'):''}
+    ${FEC.veAndamento?kpi('schedule',maisVelho?maisVelho+' dias':'—','o mais parado da fila',maisVelho>=5?'var(--pend)':'var(--verde-d)'):''}
     ${kpi('gavel',L.filter(c=>c.aprovadas>=2).length,'negociações concluídas')}
     ${kpi('done_all',L.filter(c=>c.aprovadas>=1).length+'/'+L.length,'com régua definida')}
   </div>`;
   h+=`<div class="panel" style="margin-bottom:10px;padding:10px 14px"><div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">
     <div class="search" style="flex:1;min-width:240px;border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
       <input placeholder="Filtrar por cotação, obra, comprador ou nº de PC…" value="${esc(FEC.filtro||'')}" oninput="FEC.filtro=this.value;fecRenderFila()"></div>
-    <label class="ckl" style="white-space:nowrap"><input type="checkbox" ${FEC.so_espera?'checked':''} onchange="FEC.so_espera=this.checked;fecRenderFila()"> só o que espera aprovação</label>
+    ${FEC.veAndamento?`<label class="ckl" style="white-space:nowrap"><input type="checkbox" ${FEC.so_espera?'checked':''} onchange="FEC.so_espera=this.checked;fecRenderFila()"> só o que espera aprovação</label>`:''}
     <button class="btn-ghost" style="padding:5px 11px" onclick="FEC.fila=null;fecLoad()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">refresh</span> atualizar</button>
   </div></div>`;
   if(!rows.length){ w.innerHTML=h+'<div class="panel"><div class="empty">Nenhuma cotação com fechamento'+(FEC.filtro?' nesse filtro':'')+'.<br><span class="dmini">O fechamento nasce dentro da cotação: abra o mapa e clique em “Fechar negociação”.</span></div></div>'; return; }
@@ -541,6 +543,7 @@ function fecRenderFila(){
         ${c.status==='aguardando'?`<span class="dchip" style="background:${atras?'var(--pend)':'#eef4f0'};color:${atras?'#fff':'var(--verde-d)'};font-weight:700">há ${c.dias_parado||0} dia(s)</span>`:''}
         ${c.etr?'<span class="dchip" style="background:#f3eefb;color:#5b3a8f;font-weight:700">consultoria</span>':''}
         ${c.tem_pc?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d)">PC ${esc(c.num_pedido)}</span>`:'<span class="dchip" style="background:#fff3e0;color:#a15c00" title="sem pedido de compra emitido: não entra na apuração (cláusula 5.2)">sem PC</span>'}
+        ${c.em_andamento?'<span class="dchip" style="background:#eef1f4;color:#5b6b7a" title="há uma rodada em curso; ela aparece aqui quando for aprovada">nova rodada em andamento</span>':''}
         ${c.ganho?`<b style="color:${c.ganho.ganho>=0?'var(--ok)':'#b3261e'};font-size:13px">${c.ganho.ganho>=0?'':'−'}${BRL(Math.abs(c.ganho.ganho))}</b>`:''}
         <button class="btn-ghost" style="padding:3px 10px" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${c.cotacao_id}),200)" title="abrir o mapa desta cotação"><span class="material-icons" style="font-size:14px;vertical-align:-3px">open_in_new</span> abrir</button>
       </div>

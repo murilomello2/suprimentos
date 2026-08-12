@@ -214,7 +214,28 @@ function dashInit(){
   if(tb) tb.innerHTML=DASH_TABS.filter(t=>allowed.includes(t[0])).map(t=>`<button class="dtab" id="dtab-${t[0]}" onclick="dashTab('${t[0]}')"><span class="material-icons">${t[2]}</span> ${t[1]}</button>`).join('');
   if(!DASH.tab){ const d=(EU&&EU.dashboard)||''; if(d&&allowed.includes(d)) DASH.tab=d; }   // aba inicial = painel atribuído
   if(!DASH.tab||!allowed.includes(DASH.tab)) DASH.tab=allowed[0]||'comprador';
-  dashActive(); dashLoad();
+  dashActive(); dashLoad(); dashFechPendentes();
+}
+/* AGUARDANDO SUA APROVAÇÃO — o gerente e o diretor precisam saber, ao abrir o cockpit, o que está
+   travado por causa deles. Fica acima de qualquer aba do painel de propósito: é pendência da
+   pessoa, não de um recorte. Some para quem não aprova. */
+async function dashFechPendentes(){
+  const host=document.getElementById('dfechAlerta'); if(!host) return;
+  const pode=IS_ADMIN||((EU&&EU.papel)||'')==='gerente'||!!(EU&&EU.perm_fechamento);
+  if(!pode){ host.innerHTML=''; return; }
+  try{
+    const d=await (await fetch('actions/cotacoes.php?fila=1&me='+encodeURIComponent((EU&&EU.bitrix_id)||'')+'&_='+Date.now())).json();
+    const L=((d&&d.fila)||[]).filter(c=>c.status==='aguardando');
+    if(!L.length){ host.innerHTML=''; return; }
+    const velho=L.reduce((a,c)=>Math.max(a,c.dias_parado||0),0), urgente=velho>=5;
+    host.innerHTML=`<div class="panel" style="margin-bottom:10px;padding:12px 16px;border-left:3px solid ${urgente?'var(--pend)':'var(--dourado)'};${urgente?'background:#fffaf3':''}">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span class="material-icons" style="color:${urgente?'var(--pend)':'var(--dourado)'};font-size:24px">pending_actions</span>
+        <div style="min-width:0"><b style="font-size:14px">${L.length} fechamento(s) aguardando sua aprovação</b>
+          <div class="muted" style="font-size:11.5px">${L.slice(0,3).map(c=>esc(c.apelido||c.titulo)+' (rodada '+c.rodada_atual+(c.dias_parado?', há '+c.dias_parado+'d':'')+')').join(' · ')}${L.length>3?' · e mais '+(L.length-3):''}</div></div>
+        <button class="btn-prim" style="margin-left:auto;padding:6px 13px" onclick="showView('fechamentos')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">gavel</span> Abrir a fila</button>
+      </div></div>`;
+  }catch(e){ host.innerHTML=''; }
 }
 function dashActive(){ DASH_TABS.forEach(t=>{ const b=document.getElementById('dtab-'+t[0]); if(b) b.classList.toggle('on',t[0]===DASH.tab); }); }
 function dashTab(t){ DASH.tab=t; DASH.gfiltro=null; DASH.cfiltro=null;

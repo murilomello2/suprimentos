@@ -448,9 +448,26 @@ try {
                 $r['linhas'] = cot_fech_linhas($pdo, $r['id']);
                 $porCot[$cid]['rodadas'][] = $r;
             }
-            // estado consolidado por cotação + o ganho (régua × contratado)
+            /* QUEM VÊ RODADA EM ANDAMENTO. Rascunho, "aguardando aprovação" e principalmente o
+               MOTIVO DA DEVOLUÇÃO são deliberação interna da Caprem: se o gerente devolve dizendo
+               "faltou cotar com a Tatu", esse texto conta para a consultoria exatamente onde a
+               régua está fraca — e ela é remunerada sobre a diferença contra essa régua.
+               Então quem está FORA da cadeia de aprovação (a consultoria, e qualquer visualizador)
+               só enxerga rodada APROVADA; cotação sem nenhuma aprovada nem aparece. O dono da
+               cotação continua vendo a dele, e quem aprova vê tudo — é a fila de trabalho dele. */
+            $meFila = $_GET['me'] ?? null;
+            $permFila = user_perms($pdo, $meFila);
+            $veAndamento = !empty($permFila['perm_admin']) || (($permFila['papel'] ?? '') === 'gerente')
+                        || !empty($permFila['perm_fechamento']);
             $lista = [];
             foreach ($porCot as $cid => $c) {
+                $ehDono = ($meFila !== null && $meFila !== '' && (string)$c['criado_por'] === (string)$meFila);
+                if (!$veAndamento && !$ehDono) {
+                    $emAndamento = count(array_filter($c['rodadas'], fn($x) => ($x['status'] ?? '') !== 'homologado')) > 0;
+                    $c['rodadas'] = array_values(array_filter($c['rodadas'], fn($x) => ($x['status'] ?? '') === 'homologado'));
+                    if (!$c['rodadas']) continue;                 // nada aprovado ainda: não existe para quem está de fora
+                    $c['em_andamento'] = $emAndamento ? 1 : 0;    // sinal neutro: "há rodada em curso", sem valor nem status
+                }
                 $rs = $c['rodadas']; $ult = $rs[count($rs) - 1];
                 $ap = array_values(array_filter($rs, fn($x) => ($x['status'] ?? '') === 'homologado'));
                 $c['rodada_atual'] = (int)$ult['rodada'];
@@ -482,8 +499,8 @@ try {
                     $pa = ($a['status'] === 'aguardando') ? 0 : 1; $pb = ($b['status'] === 'aguardando') ? 0 : 1;
                     return ($pa <=> $pb) ?: (($b['dias_parado'] ?? 0) <=> ($a['dias_parado'] ?? 0));
                 });
-                echo json_encode(['fila'=>$lista, 'pode_aprovar'=>cot_pode_aprovar_fechamento($pdo, $_GET['me'] ?? null) ? 1 : 0],
-                                 JSON_UNESCAPED_UNICODE); exit;
+                echo json_encode(['fila'=>$lista, 'pode_aprovar'=>cot_pode_aprovar_fechamento($pdo, $meFila) ? 1 : 0,
+                                  've_andamento'=>$veAndamento ? 1 : 0], JSON_UNESCAPED_UNICODE); exit;
             }
 
             /* APURAÇÃO DO MÊS. Regras do contrato aplicadas aqui, não no Excel de ninguém:

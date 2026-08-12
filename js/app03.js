@@ -1467,6 +1467,7 @@ function cotRenderDetalhe(){ const CAN_EDIT=cotEditavel();
    +(c.multi_coligada?'<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:10px" title="a cotação atravessa mais de uma coligada — cada uma tem seu pedido">multi-coligada: 1 PC por coligada</span>':'')
    +'</div>'+(c.multi_coligada?cotPCColigadas(c):'')+'<div id="cotPedDetect" style="margin-top:8px"></div></div>';
   html+=cotItensPanel(d);
+  html+=cotUltimosPanel(d);   // histórico de compra de cada item (PCs do TOTVS) — antes de convidar e de cotar
   // ---- Concorrência (fornecedores convidados) + anexos POR fornecedor (anexar antes de cadastrar proposta) ----
   const conv=d.convidados||[], anx=d.anexos||[], meB=(EU&&EU.bitrix_id)||'';
   const anxNorm=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');

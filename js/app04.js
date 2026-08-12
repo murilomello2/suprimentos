@@ -622,6 +622,155 @@ async function cotDesqDesfazer(pid){
     toast('Proposta requalificada — voltou a concorrer'); cotOpen(COT.cur.cotacao.id);
   }catch(e){toast('Falha: '+e.message);}
 }
+/* ═════════ ÚLTIMOS PREÇOS FECHADOS ═════════
+   O histórico de compra do item, lido dos pedidos do TOTVS, dentro da tela onde a decisão acontece —
+   na cotação e na solicitação. Responde o que hoje obriga a sair do sistema: "quanto a gente já pagou
+   por isto, para quem, em que obra e quando?".
+
+   A chave é o código do produto (codprd), o mesmo que a solicitação carrega para o item da cotação —
+   casamento exato. Item criado do zero não tem código: aí a busca é por descrição e vem marcada como
+   aproximada, para ninguém tomar decisão achando que é exata.
+
+   Carrega SOB DEMANDA (uma consulta por item, ao expandir) e guarda em cache: numa cotação de vinte
+   itens, buscar tudo de uma vez seriam vinte consultas ao Supabase que quase ninguém ia olhar. */
+const ULTP = {cache:{}, seq:0};
+function ultpChave(cod,termo){ return cod?('c:'+cod):('t:'+String(termo||'').slice(0,60)); }
+async function ultpBuscar(cod,termo,lim){
+  const k=ultpChave(cod,termo)+'|'+(lim||5);
+  if(ULTP.cache[k]) return ULTP.cache[k];
+  const u='actions/busca_pedidos.php?ultimos='+encodeURIComponent(cod||'')+'&termo='+encodeURIComponent(termo||'')
+        +'&limit='+(lim||5)+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||'');
+  const r=await (await fetch(u)).json();
+  if(r&&r.error) throw new Error(r.error);
+  ULTP.cache[k]=r; return r;
+}
+/* A tabela. `ctx.itemId` só existe na cotação — é o que habilita o "usar"; na solicitação o quadro
+   é só consulta. `ctx.unidade` é a unidade do item na cotação, para acusar divergência de escala. */
+function ultpTabela(r,ctx){
+  ctx=ctx||{};
+  const its=(r&&r.itens)||[];
+  if(!its.length) return '<div class="dmini" style="padding:6px 0">Nenhuma compra deste item nos pedidos do TOTVS.</div>';
+  const un=s=>String(s||'').trim().toUpperCase();
+  const podeUsar=!!ctx.itemId&&cotEditavel();
+  /* FORA DA CURVA: linha de adiantamento/ADF e erro de digitação entram na base como "preço" e
+     ancoram a decisão em número que nunca foi preço de compra (vi R$ 2.645/m³ de concreto ao lado
+     de R$ 588/m³, e o texto do item dizia "criação de ADF"). Não escondo a linha — marco, porque
+     esconder dado do TOTVS seria pior. Mediana, não média: com 5 linhas um outlier arrasta a média. */
+  const precos=its.map(x=>x.preco_unit).filter(v=>v>0).sort((a,b)=>a-b);
+  const mediana=precos.length?precos[Math.floor(precos.length/2)]:0;
+  const foraDaCurva=v=>mediana>0&&precos.length>2&&(v>mediana*3||v<mediana/3);
+  let h='';
+  if(r.fonte==='descricao') h+='<div class="dmini" style="margin:2px 0 6px;color:#a15c00">⚠ Este item não tem código do TOTVS — a busca foi por <b>descrição</b>, então pode trazer produto parecido mas diferente. Confira antes de usar.</div>';
+  h+='<div style="overflow-x:auto"><table class="mtable" style="border:none;width:100%">'
+   + '<thead><tr><th style="text-align:left">Data</th><th style="text-align:left">Obra</th><th style="text-align:left">Fornecedor</th>'
+   + '<th style="text-align:right">Preço unit.</th><th>Un</th><th style="text-align:right">Qtd</th><th>PC</th>'
+   + '<th style="text-align:left">Observação do item</th>'+(podeUsar?'<th></th>':'')+'</tr></thead><tbody>';
+  its.forEach((i,ix)=>{
+    const dif=un(i.und)&&un(ctx.unidade)&&un(i.und)!==un(ctx.unidade);
+    const fora=foraDaCurva(i.preco_unit);
+    // observação longa (romaneio de concreto) vira resumo + o quadro cinza que já existe no mapa
+    const ob=String(i.observacao||''), obCurta=ob.length>64?(ob.slice(0,64)+'…'):ob;
+    h+=`<tr${fora?' style="background:#fffaf3"':''}>
+      <td style="white-space:nowrap;text-align:left">${i.data?D(i.data):'—'}${i.dias!=null?`<div class="muted" style="font-size:9.5px">${i.recente?'<b style="color:var(--verde-d)">há '+i.dias+' dias</b>':'há '+i.dias+' dias'}</div>`:''}</td>
+      <td style="text-align:left;font-size:11.5px">${esc(i.obra||'—')}</td>
+      <td style="text-align:left;font-size:11.5px"><b>${esc(i.fornecedor||'—')}</b></td>
+      <td style="text-align:right;white-space:nowrap"><b>${BRLp(i.preco_unit)}</b>${fora?` <span class="material-icons" title="Muito fora da mediana desta lista (${BRLp(mediana)}) — costuma ser adiantamento, ADF ou lançamento atípico, não preço de compra. Confira o pedido antes de usar." style="font-size:12px;color:#a15c00;cursor:help;vertical-align:-2px">warning</span>`:''}</td>
+      <td style="${dif?'background:#fff3e0;color:#a15c00;font-weight:700':''}" ${dif?`title="O pedido está em ${esc(i.und)} e o item da cotação está em ${esc(ctx.unidade||'—')} — escalas diferentes"`:''}>${esc(i.und||'')}${dif?' ⚠':''}</td>
+      <td style="text-align:right">${cotNum(i.qtd)}</td>
+      <td style="white-space:nowrap"><span style="cursor:pointer;color:var(--verde-d);font-weight:700" onclick="cotPedidoVer('${esc(i.pedido_bruto)}','${esc(i.coligada_cod)}')" title="ver o pedido no TOTVS">${esc(i.pedido)}</span></td>
+      <td style="text-align:left;font-size:10.5px;color:#4a5560;line-height:1.35;white-space:normal;width:220px;max-width:220px">${ob?(ob.length>64?`<span data-obs="${esc(ob)}" data-forn="${esc(i.fornecedor||'')}" data-item="PC ${esc(i.pedido)} · ${esc(i.produto||'')}" onclick="cotObsShow(this)" style="cursor:help" title="clique para ler inteiro">${esc(obCurta)} <span class="material-icons" style="font-size:11px;color:#5c7b8a;vertical-align:-2px">unfold_more</span></span>`:esc(ob)):'<span class="muted">—</span>'}</td>
+      ${podeUsar?`<td style="white-space:nowrap"><button class="btn-ghost" style="padding:2px 8px;font-size:11px;color:var(--verde-d)" onclick="ultpUsar('${esc(ctx.chave)}',${ix},${ctx.itemId})" title="traz este preço para o mapa como proposta deste fornecedor (você confere e salva)">usar</button></td>`:''}
+    </tr>`;
+  });
+  h+='</tbody></table></div>';
+  if(r.total>its.length) h+=`<div class="dmini" style="margin-top:4px">mostrando ${its.length} de ${r.total} compras — as mais recentes</div>`;
+  return h;
+}
+/* "Usar este preço": NÃO grava direto. Abre o formulário de proposta preenchido, para a pessoa
+   conferir, trocar o fornecedor se quiser e salvar pelo caminho normal — que é o que já registra
+   tudo no histórico. Gravar calado aqui também apagaria os outros preços da proposta existente,
+   porque o servidor regrava a lista de itens inteira. */
+function ultpUsar(chave,ix,itemId){
+  const r=ULTP.cache[chave]; if(!r){toast('Recarregue o quadro');return;}
+  const i=(r.itens||[])[ix]; if(!i)return;
+  const d=COT.cur; if(!d||!d.cotacao){toast('Abra uma cotação para usar o preço');return;}
+  const it=(d.itens||[]).find(x=>String(x.id)===String(itemId)); if(!it){toast('Item não encontrado');return;}
+  const un=s=>String(s||'').trim().toUpperCase();
+  if(un(i.und)&&un(it.unidade)&&un(i.und)!==un(it.unidade)){
+    if(!confirm('Atenção às unidades.\n\nO pedido está em "'+i.und+'" e este item da cotação está em "'+(it.unidade||'—')+'".\n\nO preço NÃO será convertido — se as escalas forem diferentes (quilo × tonelada, peça × barra), o mapa vai errar de propósito.\n\nTrazer assim mesmo para você ajustar?')) return;
+  }
+  const nz=s=>String(s||'').trim().toLowerCase();
+  const forn=i.fornecedor_nome||i.fornecedor||'';
+  const ex=(d.propostas||[]).find(p=>nz(p.fornecedor_nome)===nz(forn));
+  cotProposta(ex?ex.id:undefined);            // monta COT.prop: edita a proposta vigente dele, ou cria nova
+  if(!ex) COT.prop.fornecedor_nome=forn;
+  const p=COT.prop.precos[itemId];
+  if(p){
+    p.preco_unit=i.preco_unit;
+    const q=(it.quantidade!=null&&it.quantidade!=='')?Number(it.quantidade):null;
+    if(q) p.preco_total=+(i.preco_unit*q).toFixed(4);
+  }
+  const nota='Preço de referência: PC '+i.pedido+' de '+(i.data?D(i.data):'—')+(i.obra?' · '+i.obra:'')+' · '+BRLp(i.preco_unit)+'/'+(i.und||'');
+  COT.prop.observacoes=((COT.prop.observacoes||'').indexOf('Preço de referência: PC '+i.pedido)>=0)
+    ? COT.prop.observacoes
+    : ((COT.prop.observacoes?COT.prop.observacoes+'\n':'')+nota);
+  cotRenderProposta();
+  toast('Preço do PC '+i.pedido+' trazido — confira e salve');
+}
+/* ---- na COTAÇÃO: uma seção, um bloco por item, cada um abrindo sob demanda ---- */
+function cotUltimosPanel(d){
+  const itens=d.itens||[]; if(!itens.length) return '';
+  const head=cotSecHead('history','Últimos preços fechados','o que já pagamos por estes itens, nos pedidos do TOTVS',cotChevron('ultprec'));
+  if(cotColapsado('ultprec'))
+    return `<div class="panel" style="margin-bottom:12px;padding:15px 18px">${head}<div style="font-size:12.5px;color:var(--muted)"><b>${itens.length}</b> item(ns) — expanda para ver o histórico de compra de cada um.</div></div>`;
+  const linhas=itens.map(it=>{
+    const cod=String(it.solic_codprd||'').trim();
+    return `<div style="border:1px solid var(--line);border-radius:10px;margin-bottom:7px;overflow:hidden">
+      <div onclick="ultpToggle(${it.id})" style="display:flex;align-items:center;gap:9px;padding:9px 12px;cursor:pointer;background:#fcfdfc">
+        <span class="material-icons" id="ultpChev${it.id}" style="font-size:17px;color:var(--muted)">chevron_right</span>
+        <b style="font-size:12.5px;flex:1;min-width:0">${esc(it.descricao)}</b>
+        <span class="muted" style="font-size:11px;white-space:nowrap">${cotNum(it.quantidade)} ${esc(it.unidade||'')}</span>
+        ${cod?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d);font-size:9.5px" title="código do produto no TOTVS — casamento exato">${esc(cod)}</span>`
+             :`<span class="dchip" style="background:#fff3e0;color:#a15c00;font-size:9.5px" title="item sem código do TOTVS — a busca será por descrição, aproximada">sem código</span>`}
+      </div>
+      <div id="ultpBox${it.id}" style="display:none;padding:0 12px 10px"></div>
+    </div>`;
+  }).join('');
+  return `<div class="panel" style="margin-bottom:12px;padding:15px 18px">${head}${linhas}
+    <div class="dmini" style="margin-top:4px">Leia junto com a <b>quantidade</b> e a <b>obra</b>: compra pequena de depósito não é referência de preço. A observação do item costuma explicar o porquê do valor.</div></div>`;
+}
+async function ultpToggle(itemId){
+  const box=document.getElementById('ultpBox'+itemId), chev=document.getElementById('ultpChev'+itemId);
+  if(!box) return;
+  const abrir=box.style.display==='none';
+  box.style.display=abrir?'block':'none';
+  if(chev) chev.textContent=abrir?'expand_more':'chevron_right';
+  if(!abrir||box.getAttribute('data-ok')==='1') return;
+  const it=((COT.cur||{}).itens||[]).find(x=>String(x.id)===String(itemId)); if(!it) return;
+  box.innerHTML='<div class="dmini" style="padding:6px 0">Consultando os pedidos do TOTVS…</div>';
+  const cod=String(it.solic_codprd||'').trim(), termo=cod?'':(it.descricao||'');
+  try{
+    const r=await ultpBuscar(cod,termo,5);
+    box.innerHTML=ultpTabela(r,{itemId:itemId, unidade:it.unidade, chave:ultpChave(cod,termo)+'|5'});
+    box.setAttribute('data-ok','1');
+  }catch(e){ box.innerHTML='<div class="dmini" style="color:var(--pend)">Não consegui consultar os pedidos: '+esc(e.message)+'</div>'; }
+}
+/* ---- na SOLICITAÇÃO: o mesmo quadro, aberto na linha do item (só consulta) ---- */
+async function ultpSolToggle(el,cod,produto,und){
+  /* o quadro é IRMÃO do bloco onde o botão vive, não filho dele — subir até o wrapper é o que
+     encontra os dois (procurar a partir do parentNode direto achava nada, calado) */
+  const wrap=el.closest('.ultpwrap'); const box=wrap?wrap.querySelector('.ultpsol'):null; if(!box) return;
+  const abrir=box.style.display==='none';
+  box.style.display=abrir?'block':'none';
+  if(!abrir||box.getAttribute('data-ok')==='1') return;
+  box.innerHTML='<div class="dmini" style="padding:4px 0">Consultando…</div>';
+  const termo=cod?'':String(produto||'');
+  try{
+    const r=await ultpBuscar(cod,termo,5);
+    box.innerHTML=ultpTabela(r,{unidade:und});
+    box.setAttribute('data-ok','1');
+  }catch(e){ box.innerHTML='<div class="dmini" style="color:var(--pend)">Falha ao consultar.</div>'; }
+}
 // ícone por tipo de anexo
 function cotAnexoIcon(mime,nome){ const m=(mime||'')+' '+(nome||'');
   if(/pdf/i.test(m))return'picture_as_pdf'; if(/png|jpe?g|image/i.test(m))return'image'; if(/sheet|excel|xls/i.test(m))return'table_view'; return'insert_drive_file'; }
@@ -1316,7 +1465,14 @@ function solRenderLista(){
              estava pendente de verdade. */
           const pc=it.pc_atendido||'';
           const est=pc?'text-decoration:line-through;opacity:.55':'';
-          return `<div style="font-size:12px;padding:2px 0;${est}">${pc?'<span class="material-icons" style="font-size:13px;vertical-align:-2px;color:var(--ok)">shopping_cart_checkout</span> ':solCotDot(it.cot)}${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${pc?` <b style="color:var(--verde-d);text-decoration:none;font-size:10.5px">ja no PC ${esc(pc)}</b>`:''}${(!pc&&it.cot_cid)?` <button class="btn-ghost" style="padding:0 5px;color:var(--verde-d);font-size:10px;font-weight:700;vertical-align:1px" title="Ver cotação #${it.cot_cid}${it.cot_ctit?': '+esc(it.cot_ctit):''}" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${it.cot_cid}),200)">#${it.cot_cid}</button>`:''}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}</div>`;
+          /* ÚLTIMOS PREÇOS na própria linha do item: quem monta a solicitação decide melhor vendo
+             por quanto a empresa já comprou aquilo. Abre embaixo, sob demanda — sem pop-up. */
+          const uCod=String(it.codprd||'').trim();
+          return `<div class="ultpwrap" style="font-size:12px;padding:2px 0">
+            <div style="${est}">${pc?'<span class="material-icons" style="font-size:13px;vertical-align:-2px;color:var(--ok)">shopping_cart_checkout</span> ':solCotDot(it.cot)}${cotNum(it.qtd)} ${esc(it.und)} — ${esc(it.produto)}${pc?` <b style="color:var(--verde-d);text-decoration:none;font-size:10.5px">ja no PC ${esc(pc)}</b>`:''}${(!pc&&it.cot_cid)?` <button class="btn-ghost" style="padding:0 5px;color:var(--verde-d);font-size:10px;font-weight:700;vertical-align:1px" title="Ver cotação #${it.cot_cid}${it.cot_ctit?': '+esc(it.cot_ctit):''}" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${it.cot_cid}),200)">#${it.cot_cid}</button>`:''}${it.observacao?` <span class="muted">(${esc(it.observacao)})</span>`:''}
+              <button class="btn-ghost" style="padding:0 6px;font-size:10px;font-weight:700;vertical-align:1px;color:#5c7b8a;text-decoration:none" title="últimos preços que a empresa fechou para este item" onclick="ultpSolToggle(this,'${esc(uCod)}','${esc(String(it.produto||'').replace(/'/g,''))}','${esc(it.und||'')}')"><span class="material-icons" style="font-size:12px;vertical-align:-2px">history</span> últimos preços</button>
+            </div>
+            <div class="ultpsol" style="display:none;margin:4px 0 8px 14px"></div></div>`;
         }).join('')}</td></tr>`;
   }
   if(!rows.length) html+='<tr><td colspan="11" class="empty">Nenhuma solicitação nesse filtro.</td></tr>';

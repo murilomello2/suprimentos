@@ -272,6 +272,77 @@ try {
     $perms = user_perms($pdo, $_GET['me'] ?? null);
     if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }
 
+    /* ---- ?ultimos=<codprd> : ÚLTIMOS PREÇOS FECHADOS DE UM ITEM ----
+       O quadro que abre dentro da cotação e da solicitação. Responde, na hora de cotar, a pergunta
+       que hoje ninguém consegue responder sem sair da tela: "quanto a gente já pagou por ISTO, para
+       quem, em que obra e quando?".
+
+       A chave é o `codprd` — o mesmo código do TOTVS que a solicitação carrega para o item da
+       cotação (cotacao_item.solic_codprd). Casamento exato, sem depender de bater descrição, que é
+       onde esse tipo de consulta costuma morrer. Cotação criada do zero não tem código: aí vale o
+       fallback por descrição (`termo`), que é aproximado e vem marcado como tal.
+
+       DEDUP: o mesmo PC pode ter várias linhas do mesmo produto (cores/circuitos diferentes — é o
+       caso do cabo flexível). Linhas do mesmo pedido com o MESMO preço e a MESMA unidade viram uma
+       só, somando a quantidade; preço diferente no mesmo PC continua sendo linha própria, porque aí
+       é informação de verdade.
+
+       `recente` marca os preços de até 30 dias: é o status que o contrato dá ao "último preço de
+       aquisição" na hierarquia do preço de referência. */
+    if (isset($_GET['ultimos'])) {
+        $cod   = trim((string)$_GET['ultimos']);
+        $termo = trim((string)($_GET['termo'] ?? ''));
+        $lim   = max(1, min(20, (int)($_GET['limit'] ?? 5)));
+        if ($cod === '' && strlen($termo) < 3) { echo json_encode(['itens' => [], 'total' => 0, 'fonte' => '']); exit; }
+
+        $sel = 'select=pedido_numero,pedido_data,pedido_status,coligada,coligada_cod,ccusto_cod,ccusto_nome,'
+             . 'fornecedor_nome,fornecedor_fantasia,codprd,produto,qtd,und,preco_unit,valor_total,'
+             . 'solic_numeros,item_observacao,obra_efetiva_nome,obra_efetiva_fonte,obra_cod';
+        $fonte  = $cod !== '' ? 'codprd' : 'descricao';
+        $filtro = $cod !== '' ? ('codprd=eq.' . rawurlencode($cod))
+                              : ('produto=ilike.' . rawurlencode('*' . $termo . '*'));
+        // pede folgado (120) porque o dedup abaixo encolhe o resultado antes de cortar no limite
+        $rows = bp_get($sel . '&' . $filtro . '&order=pedido_data.desc,pedido_numero.desc&limit=120');
+
+        $mapaRazao = bp_mapa_razao($pdo); $mapaObraCod = bp_mapa_obracod($pdo);
+        $hoje = time(); $ag = [];
+        foreach ($rows as $r) {
+            $pu = ($r['preco_unit'] ?? null) !== null ? (float)$r['preco_unit'] : null;
+            if ($pu === null || $pu <= 0) continue;   // linha sem preço não é referência de nada
+            $k = trim((string)$r['coligada_cod']) . '|' . trim((string)$r['pedido_numero']) . '|' . $pu . '|' . trim((string)$r['und']);
+            if (!isset($ag[$k])) {
+                $data = substr((string)($r['pedido_data'] ?? ''), 0, 10);
+                $dias = $data !== '' ? (int)floor(($hoje - strtotime($data)) / 86400) : null;
+                $ag[$k] = [
+                    'pedido'       => ltrim(trim((string)$r['pedido_numero']), '0') ?: trim((string)$r['pedido_numero']),
+                    'pedido_bruto' => trim((string)$r['pedido_numero']),
+                    'coligada'     => trim((string)$r['coligada']), 'coligada_cod' => trim((string)$r['coligada_cod']),
+                    'data' => $data, 'dias' => $dias, 'recente' => ($dias !== null && $dias <= 30) ? 1 : 0,
+                    'obra' => bp_obra_label($r['obra_efetiva_nome'] ?? '', $r['obra_efetiva_fonte'] ?? '', $mapaRazao,
+                                            $r['coligada_cod'] ?? '', $r['ccusto_cod'] ?? '', $r['ccusto_nome'] ?? '',
+                                            $r['obra_cod'] ?? '', $mapaObraCod),
+                    'fornecedor'      => trim((string)($r['fornecedor_fantasia'] ?: $r['fornecedor_nome'])),
+                    'fornecedor_nome' => trim((string)$r['fornecedor_nome']),
+                    'codprd'  => trim((string)($r['codprd'] ?? '')), 'produto' => trim((string)$r['produto']),
+                    'preco_unit' => $pu, 'und' => trim((string)$r['und']), 'qtd' => 0.0,
+                    'status' => trim((string)($r['pedido_status'] ?? '')),
+                    'solic'  => trim((string)($r['solic_numeros'] ?? '')), 'observacao' => '',
+                ];
+            }
+            $ag[$k]['qtd'] += (float)($r['qtd'] ?? 0);
+            /* Observação: junta as das linhas fundidas, mas com TETO. Em concreto, cada linha traz o
+               romaneio inteiro ("Pilares do 12º ao 14º Pavimento — Torre 1…") e a concatenação virava
+               um parágrafo que dominava a tabela. O texto completo continua no pedido (botão do PC). */
+            $ob = trim((string)($r['item_observacao'] ?? ''));
+            if ($ob !== '' && strpos($ag[$k]['observacao'], $ob) === false && mb_strlen($ag[$k]['observacao']) < 400)
+                $ag[$k]['observacao'] = $ag[$k]['observacao'] === '' ? $ob : ($ag[$k]['observacao'] . ' · ' . $ob);
+        }
+        $itens = array_values($ag);
+        usort($itens, fn($a, $b) => strcmp((string)$b['data'], (string)$a['data']) ?: ($b['pedido'] <=> $a['pedido']));
+        echo json_encode(['itens' => array_slice($itens, 0, $lim), 'total' => count($itens),
+                          'fonte' => $fonte, 'codprd' => $cod], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     // ---- ?obras=1 : lista pro filtro, montada a partir dos PRÓPRIOS PEDIDOS ----
     // Antes o dropdown vinha da ficha de obras e sumia com tudo que não tinha de-para (faltava obra).
     // Aqui aparece exatamente o que existe em pedido — inclusive as áreas da sede da CAPRETZ.

@@ -1013,7 +1013,7 @@ async function t20CfgExcluir(){ const c=T20.cfgSel; if(!c||!c.id)return; if(!con
 async function t20Reseed(){ if(!confirm('Apagar TODOS os grupos e voltar aos 20 sugeridos?'))return;
   try{ await fetch('actions/top20.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'reseed',me:EU&&EU.bitrix_id})}); const ov=document.getElementById('t20Cf'); if(ov)ov.remove(); T20.data=null; t20Load(); }catch(e){toast('Falha');} }
 
-const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['solicitacoes','Solicitações'],['envio','Envio de Pedidos'],['buscaped','Busca Pedidos'],['obras','Obras'],['oportunidades','Oportunidades'],['top20','Top 20'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações'],
+const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['fechamentos','Fechamentos (apuração de ganhos)'],['solicitacoes','Solicitações'],['envio','Envio de Pedidos'],['buscaped','Busca Pedidos'],['obras','Obras'],['oportunidades','Oportunidades'],['top20','Top 20'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações'],
   /* telas de CONSULTA da obra (papel 'obra') — leitura, sem nenhuma ação */
   ['ov_radar','Obra: Status - Curva A e B'],['ov_cotacoes','Obra: Cotações'],['ov_solicitacoes','Obra: Solicitações Totvs']];
 const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',gerente:'Gerente de Suprimentos',comprador:'Suprimentos',coordenador:'Coordenador',obra:'Obra (consulta)',personalizado:'Personalizado'};
@@ -1139,6 +1139,9 @@ function applyMenus(){
     let show;
     if(m==='caixa') show = IS_ADMIN || !!(EU&&EU.perm_email);   // uma chave só: a permissão específica
     else if(m==='whats') show = IS_ADMIN || !!(EU&&EU.perm_whats);   // permissão por pessoa, não por papel
+    /* FECHAMENTOS mostra APURAÇÃO DE GANHOS — some para quem não tem a permissão, inclusive comprador
+       (decisão do Murilo: ganho por negociação vira comentário entre áreas). Gerente entra por papel. */
+    else if(m==='fechamentos') show = IS_ADMIN || ((EU&&EU.papel)||'')==='gerente' || !!(EU&&EU.perm_ganhos);
     else if(!ehLeitor && (m==='oraculo'||m==='solicitacoes'||m==='obras')) show = auth;  // p/ suprimentos, referência sempre à mão
     else if(m==='config') show = IS_ADMIN||allow.includes('config')||CAN_RESP;  // Config nunca some p/ admin
     else if(adminSel) show = allow.includes(m);                            // admin escolheu → mostra só o marcado

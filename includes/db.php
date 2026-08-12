@@ -172,6 +172,18 @@ function db_schema_mysql($pdo) {
        e o mesmo item pode ter DUAS linhas (60% de uma usina, 40% de outra). Nenhum campo a mais.
        `origem` diz de onde veio o preço — proposta do mapa, tabela vigente ou último PC —, que é a
        hierarquia do "preço atual" do contrato. */
+    /* APURAÇÃO MENSAL (contrato ETR) — o estado de cada Projeto de Negociação dentro da medição do
+       mês: em análise, aceito ou contestado, com a observação de quem contesta. A cláusula 3.3 dá
+       10 dias úteis para a Caprem se manifestar por escrito, então isso é prazo, não conforto.
+       Os valores são CONGELADOS ao aceitar/contestar (ganho_snap etc.): depois de fechada a medição,
+       o número não pode escorregar porque alguém reabriu um fechamento meses depois. */
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_apuracao (
+        id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, competencia VARCHAR(7),
+        status VARCHAR(16) DEFAULT 'analise', observacao TEXT,
+        ganho_snap DOUBLE, base_snap DOUBLE, final_snap DOUBLE, pct_etr DOUBLE DEFAULT 40,
+        por VARCHAR(64), por_nome VARCHAR(191), updated_at VARCHAR(40), created_at VARCHAR(40),
+        PRIMARY KEY (id), UNIQUE KEY uq_apur_cot (cotacao_id), KEY idx_apur_comp (competencia)
+    ) $E");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_fechamento_linha (
         id INT NOT NULL AUTO_INCREMENT, fechamento_id INT NOT NULL, cotacao_item_id INT NOT NULL,
         proposta_id INT, origem VARCHAR(24) DEFAULT 'proposta', origem_ref VARCHAR(191),
@@ -669,6 +681,7 @@ function db_schema($pdo) {
     // FECHAMENTO da negociação (ver comentário no schema MySQL): rodada 1 = régua, última = contratada
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_fechamento (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, rodada INTEGER DEFAULT 1, status TEXT DEFAULT 'rascunho', origem_preco TEXT, etr_participou INTEGER DEFAULT 0, responsavel_id TEXT, responsavel_nome TEXT, data_fechamento TEXT, cond_pagamento TEXT, cond_prazo TEXT, cond_frete TEXT, cond_validade TEXT, cond_obs TEXT, justificativa TEXT, total REAL, criado_por TEXT, criado_nome TEXT, created_at TEXT, updated_at TEXT, aprovado_por TEXT, aprovado_nome TEXT, aprovado_at TEXT, devolvido_motivo TEXT, devolvido_por TEXT, devolvido_nome TEXT, devolvido_at TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_fechamento_linha (id INTEGER PRIMARY KEY AUTOINCREMENT, fechamento_id INTEGER NOT NULL, cotacao_item_id INTEGER NOT NULL, proposta_id INTEGER, origem TEXT DEFAULT 'proposta', origem_ref TEXT, fornecedor_id INTEGER, fornecedor_nome TEXT, preco_unit REAL, quantidade REAL, preco_total REAL, lote TEXT, justificativa TEXT, created_at TEXT)");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_apuracao (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL UNIQUE, competencia TEXT, status TEXT DEFAULT 'analise', observacao TEXT, ganho_snap REAL, base_snap REAL, final_snap REAL, pct_etr REAL DEFAULT 40, por TEXT, por_nome TEXT, updated_at TEXT, created_at TEXT)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_fech_cot ON cotacao_fechamento(cotacao_id)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_fechl_fech ON cotacao_fechamento_linha(fechamento_id)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, proposta_id INTEGER, fornecedor_id INTEGER, fornecedor_nome TEXT, nome TEXT, arquivo TEXT, tamanho INTEGER, mime TEXT, criado_por TEXT, created_at TEXT)");

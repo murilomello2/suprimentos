@@ -377,6 +377,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
       <a id="nav-radar" data-menu="radar" class="active" title="Radar de Aquisições" onclick="showView('radar')"><span class="material-icons">radar</span> <span class="navtxt">Radar de Aquisições</span></a>
       <a id="nav-matriz" data-menu="matriz" title="Matriz" onclick="showView('matriz')"><span class="material-icons">grid_on</span> <span class="navtxt">Matriz</span></a>
       <a id="nav-cotacoes" data-menu="cotacoes" title="Cotações" onclick="showView('cotacoes')"><span class="material-icons">request_quote</span> <span class="navtxt">Cotações</span></a>
+      <a id="nav-fechamentos" data-menu="fechamentos" title="Fechamentos: fila de aprovação e apuração mensal dos ganhos de negociação" onclick="showView('fechamentos')"><span class="material-icons">gavel</span> <span class="navtxt">Fechamentos</span></a>
       <a id="nav-solicitacoes" data-menu="solicitacoes" title="Solicitações de Compra" onclick="showView('solicitacoes')"><span class="material-icons">inbox</span> <span class="navtxt">Solicitações</span></a>
       <a id="nav-envio" data-menu="envio" title="Envio de Pedidos de Compra aprovados" onclick="showView('envio')"><span class="material-icons">outgoing_mail</span> <span class="navtxt">Envio de Pedidos</span></a>
       <a id="nav-whats" data-menu="whats" title="Assistente que cota por WhatsApp — kanban das conversas" onclick="showView('whats')"><span class="material-icons">smart_toy</span> <span class="navtxt">Assistente WhatsApp</span></a>
@@ -755,6 +756,19 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
    </section>
    <section id="view-envio" style="display:none">
     <div class="wrap" id="envWrap"></div>
+   </section>
+   <section id="view-fechamentos" style="display:none">
+    <div class="top">
+      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">gavel</span> Fechamentos</h1>
+      <p class="sub">A negociação depois do mapa: <b>fila de aprovação</b> (o que espera por você e há quantos dias) e <b>apuração mensal</b> dos ganhos, com a divisão do contrato.</p>
+    </div>
+    <div class="panel" style="margin-bottom:10px;padding:10px 14px">
+      <div class="bar" style="gap:6px;flex-wrap:wrap">
+        <button id="fectab-fila" class="btn-ghost on" onclick="fecTab('fila')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">pending_actions</span> Fila de fechamentos</button>
+        <button id="fectab-apuracao" class="btn-ghost" onclick="fecTab('apuracao')"><span class="material-icons" style="font-size:15px;vertical-align:-3px">request_quote</span> Apuração mensal</button>
+      </div>
+    </div>
+    <div class="wrap" id="fecWrap"><div class="dempty">Carregando…</div></div>
    </section>
    <section id="view-buscaped" style="display:none">
     <div class="top">

@@ -476,3 +476,203 @@ async function wcfgSalvarWa(){
   if(r.error){ toast(r.error); return; }
   toast('Configuração salva · modo '+r.modo); wcfgLoad();
 }
+
+/* ═══════════ FECHAMENTOS — fila de aprovação + apuração mensal ═══════════
+   Saiu de dentro da cotação de propósito: a tela do mapa já estava cheia, e a apuração de ganhos
+   não pode circular na tela que todo mundo usa (o comprador não vê ganho). Aqui é onde o gerente e
+   o diretor aprovam, onde a consultoria acompanha, e onde a medição do mês é conferida linha a
+   linha — com as regras do contrato aplicadas pelo sistema, não pelo Excel de alguém. */
+const FEC={tab:'fila', fila:null, apur:null, mes:'', filtro:'', so_espera:false, exp:{}};
+const FEC_ST={rascunho:['#8a9299','rascunho'],devolvido:['#b3261e','devolvido'],
+              aguardando:['var(--dourado)','aguardando aprovação'],homologado:['var(--ok)','aprovado']};
+function fecMe(){ return encodeURIComponent((EU&&EU.bitrix_id)||''); }
+function fecInit(){ if(!FEC.fila) fecLoad(); else fecRender(); }
+function fecTab(t){ FEC.tab=t;
+  ['fila','apuracao'].forEach(x=>{const b=document.getElementById('fectab-'+x); if(b)b.classList.toggle('on',x===t);});
+  if(t==='apuracao'&&!FEC.apur) fecLoadApur(); else fecRender(); }
+async function fecLoad(){
+  const w=document.getElementById('fecWrap'); if(w)w.innerHTML='<div class="dempty">Carregando os fechamentos…</div>';
+  try{ const d=await (await fetch('actions/cotacoes.php?fila=1&me='+fecMe()+'&_='+Date.now())).json();
+    if(d.error){ w.innerHTML='<div class="empty">'+esc(d.error)+'</div>'; return; }
+    FEC.fila=d.fila||[]; FEC.podeAprovar=!!d.pode_aprovar; fecRender();
+  }catch(e){ if(w)w.innerHTML='<div class="empty">Falha ao carregar.</div>'; }
+}
+async function fecLoadApur(mes){
+  const w=document.getElementById('fecWrap'); if(w)w.innerHTML='<div class="dempty">Apurando o mês…</div>';
+  try{ const d=await (await fetch('actions/cotacoes.php?apuracao=1&me='+fecMe()+(mes?('&mes='+encodeURIComponent(mes)):'')+'&_='+Date.now())).json();
+    if(d.error){ w.innerHTML='<div class="empty">'+esc(d.error)+'</div>'; return; }
+    FEC.apur=d; FEC.mes=d.mes; fecRender();
+  }catch(e){ if(w)w.innerHTML='<div class="empty">Falha ao apurar.</div>'; }
+}
+function fecRender(){ return FEC.tab==='apuracao'?fecRenderApur():fecRenderFila(); }
+
+/* ---------- FILA: o que espera aprovação, e há quanto tempo ---------- */
+function fecRenderFila(){
+  const w=document.getElementById('fecWrap'); if(!w)return;
+  const L=FEC.fila||[], q=opNorm(FEC.filtro||'');
+  let rows=L.filter(c=>!q||opNorm((c.titulo||'')+' '+(c.apelido||'')+' '+(c.obra_nome||'')+' '+(c.criado_nome||'')+' '+(c.num_pedido||'')).includes(q));
+  if(FEC.so_espera) rows=rows.filter(c=>c.status==='aguardando');
+  const esperando=L.filter(c=>c.status==='aguardando');
+  const maisVelho=esperando.reduce((a,c)=>Math.max(a,c.dias_parado||0),0);
+  const kpi=(ic,v,l,cor)=>`<div style="flex:1 1 190px;min-width:170px;border:1px solid var(--line);border-radius:12px;padding:12px 15px;background:#fff;display:flex;align-items:center;gap:12px">
+    <span style="width:40px;height:40px;border-radius:50%;background:#eef6f0;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span class="material-icons" style="color:${cor||'var(--verde)'};font-size:20px">${ic}</span></span>
+    <div style="line-height:1.2"><div style="font-size:19px;font-weight:800;color:${cor||'var(--verde-d)'}">${v}</div><div class="muted" style="font-size:11.5px">${l}</div></div></div>`;
+  let h=`<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+    ${kpi('pending_actions',esperando.length,'aguardando aprovação',esperando.length?'var(--dourado)':'var(--verde-d)')}
+    ${kpi('schedule',maisVelho?maisVelho+' dias':'—','o mais parado da fila',maisVelho>=5?'var(--pend)':'var(--verde-d)')}
+    ${kpi('gavel',L.filter(c=>c.aprovadas>=2).length,'negociações concluídas')}
+    ${kpi('done_all',L.filter(c=>c.aprovadas>=1).length+'/'+L.length,'com régua definida')}
+  </div>`;
+  h+=`<div class="panel" style="margin-bottom:10px;padding:10px 14px"><div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">
+    <div class="search" style="flex:1;min-width:240px;border:1px solid var(--line)"><span class="material-icons" style="color:var(--muted)">search</span>
+      <input placeholder="Filtrar por cotação, obra, comprador ou nº de PC…" value="${esc(FEC.filtro||'')}" oninput="FEC.filtro=this.value;fecRenderFila()"></div>
+    <label class="ckl" style="white-space:nowrap"><input type="checkbox" ${FEC.so_espera?'checked':''} onchange="FEC.so_espera=this.checked;fecRenderFila()"> só o que espera aprovação</label>
+    <button class="btn-ghost" style="padding:5px 11px" onclick="FEC.fila=null;fecLoad()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">refresh</span> atualizar</button>
+  </div></div>`;
+  if(!rows.length){ w.innerHTML=h+'<div class="panel"><div class="empty">Nenhuma cotação com fechamento'+(FEC.filtro?' nesse filtro':'')+'.<br><span class="dmini">O fechamento nasce dentro da cotação: abra o mapa e clique em “Fechar negociação”.</span></div></div>'; return; }
+  h+='<div style="display:flex;flex-direction:column;gap:8px">'+rows.map(c=>{
+    const st=FEC_ST[c.status]||['#8a9299',c.status], ab=FEC.exp[c.cotacao_id];
+    const atras=(c.status==='aguardando'&&(c.dias_parado||0)>=5);
+    return `<div class="panel" style="padding:12px 15px;border-left:3px solid ${st[0]}${atras?';background:#fffaf3':''}">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span onclick="FEC.exp[${c.cotacao_id}]=${ab?'false':'true'};fecRenderFila()" class="material-icons" style="cursor:pointer;color:var(--muted);font-size:18px">${ab?'expand_more':'chevron_right'}</span>
+        <b style="font-size:13.5px;min-width:0;flex:1">${esc(c.apelido||c.titulo)}</b>
+        <span class="dchip" style="background:${st[0]};color:#fff">rodada ${c.rodada_atual} · ${st[1]}</span>
+        ${c.status==='aguardando'?`<span class="dchip" style="background:${atras?'var(--pend)':'#eef4f0'};color:${atras?'#fff':'var(--verde-d)'};font-weight:700">há ${c.dias_parado||0} dia(s)</span>`:''}
+        ${c.etr?'<span class="dchip" style="background:#f3eefb;color:#5b3a8f;font-weight:700">consultoria</span>':''}
+        ${c.tem_pc?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d)">PC ${esc(c.num_pedido)}</span>`:'<span class="dchip" style="background:#fff3e0;color:#a15c00" title="sem pedido de compra emitido: não entra na apuração (cláusula 5.2)">sem PC</span>'}
+        ${c.ganho?`<b style="color:${c.ganho.ganho>=0?'var(--ok)':'#b3261e'};font-size:13px">${c.ganho.ganho>=0?'':'−'}${BRL(Math.abs(c.ganho.ganho))}</b>`:''}
+        <button class="btn-ghost" style="padding:3px 10px" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${c.cotacao_id}),200)" title="abrir o mapa desta cotação"><span class="material-icons" style="font-size:14px;vertical-align:-3px">open_in_new</span> abrir</button>
+      </div>
+      <div class="muted" style="font-size:11.5px;margin-top:4px;padding-left:28px">
+        ${esc(c.obra_nome||'sem obra')} · comprador ${esc(c.criado_nome||'—')}
+        ${c.aprovado_nome?' · última aprovação por <b>'+esc(c.aprovado_nome)+'</b>':''}
+        ${c.aprovadas>=2?' · <b>negociação concluída</b>':(c.aprovadas===1?' · régua definida, negociação em curso':' · régua ainda não homologada')}
+      </div>
+      ${(c.status==='devolvido'&&c.devolvido_motivo)?`<div style="margin:6px 0 0 28px;background:#fdeaea;border:1px solid #f2d7d4;border-radius:8px;padding:6px 9px;font-size:11.5px"><b style="color:#b3261e">Devolvido:</b> ${esc(c.devolvido_motivo)}</div>`:''}
+      ${ab?fecRodadas(c):''}
+    </div>`;
+  }).join('')+'</div>';
+  w.innerHTML=h;
+}
+function fecRodadas(c){
+  return '<div style="margin:8px 0 0 28px;display:flex;flex-direction:column;gap:5px">'
+   + (c.rodadas||[]).map(r=>{ const st=FEC_ST[r.status]||['#8a9299',r.status];
+      return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-left:2px solid #e3e9e6;padding-left:9px;font-size:11.5px">
+        <b>rodada ${r.rodada}</b><span class="dchip" style="background:${st[0]};color:#fff;font-size:9.5px">${st[1]}</span>
+        ${r.total!=null?`<b style="color:var(--verde-d)">${BRL(r.total)}</b>`:''}
+        ${r.etr?'<span class="dchip" style="background:#f3eefb;color:#5b3a8f;font-size:9.5px">consultoria</span>':''}
+        ${r.origem_label?`<span class="muted">${esc(r.origem_label)}</span>`:''}
+        ${(r.fornecedores||[]).length?`<span class="muted">· ${esc(r.fornecedores.join(' · '))}</span>`:''}
+        ${r.aprovado_nome?`<span class="muted">· aprovado por ${esc(r.aprovado_nome)}${r.aprovado_at?' em '+cotFmtDT(r.aprovado_at):''}</span>`:''}
+      </div>`; }).join('')+'</div>';
+}
+
+/* ---------- APURAÇÃO MENSAL: a medição do contrato, conferível linha a linha ---------- */
+function fecRenderApur(){
+  const w=document.getElementById('fecWrap'); if(!w)return;
+  const d=FEC.apur; if(!d){ fecLoadApur(); return; }
+  const r=d.resumo, L=d.linhas||[];
+  const mesLbl=m=>{ const p=String(m).split('-'); return ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][(+p[1]||1)-1]+'/'+p[0]; };
+  let h=`<div class="panel" style="margin-bottom:10px;padding:11px 15px"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <b style="font-size:13px">Competência</b>
+    <select onchange="fecLoadApur(this.value)" style="font-size:12.5px;padding:5px 8px">
+      ${(d.meses||[]).length?(d.meses||[]).map(m=>`<option value="${esc(m)}" ${m===d.mes?'selected':''}>${mesLbl(m)}</option>`).join(''):`<option>${mesLbl(d.mes)}</option>`}
+    </select>
+    <span class="muted" style="font-size:11.5px">${L.length} projeto(s) de negociação concluído(s) nesta competência</span>
+    <button class="btn-ghost" style="padding:5px 11px;margin-left:auto" onclick="fecExportar()"><span class="material-icons" style="font-size:14px;vertical-align:-3px">download</span> Exportar p/ Excel</button>
+  </div></div>`;
+  const prevaleceFee=r.prevalece==='success_fee';
+  h+=`<div class="panel" style="margin-bottom:10px;padding:14px 17px">
+    <div style="display:flex;gap:14px;flex-wrap:wrap">
+      ${[['Ganho apurado no mês',BRL(r.ganho_apuravel),'só o que atende às regras do contrato','var(--ok)'],
+         ['Caprem ('+(100-r.pct_etr)+'%)',BRL(r.fee_caprem),'fica com a empresa','var(--verde-d)'],
+         ['Consultoria ('+r.pct_etr+'%)',BRL(r.fee_etr),'success fee da competência','#5b3a8f'],
+         ['Adiantamento mensal',BRL(r.adiantamento),'cláusula 5.3.1','var(--muted)']]
+        .map(x=>`<div style="flex:1 1 180px;min-width:160px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#889;font-weight:700">${x[0]}</div>
+          <div style="font-size:18px;font-weight:800;color:${x[3]};margin-top:2px">${x[1]}</div>
+          <div class="muted" style="font-size:10.5px">${x[2]}</div></div>`).join('')}
+    </div>
+    <div style="margin-top:12px;padding-top:11px;border-top:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span class="material-icons" style="color:var(--dourado);font-size:26px">receipt_long</span>
+      <div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#889;font-weight:700">A faturar nesta competência</div>
+        <div style="font-size:21px;font-weight:800;color:var(--dourado)">${BRL(r.a_faturar)}</div></div>
+      <div class="dmini" style="flex:1;min-width:230px">Prevalece o <b>${prevaleceFee?'success fee':'adiantamento'}</b>: a cláusula 5.3.1 manda faturar o maior dos dois, vedada a cumulação na mesma competência.</div>
+    </div></div>`;
+  if(!L.length){ w.innerHTML=h+'<div class="panel"><div class="empty">Nenhuma negociação concluída nesta competência.<br><span class="dmini">Entram aqui as cotações com <b>duas rodadas de fechamento aprovadas</b> — a régua e a contratada.</span></div></div>'; return; }
+  h+='<div class="panel" style="padding:0;overflow:hidden"><div style="overflow-x:auto"><table class="mtable" style="border:none;width:100%;min-width:920px"><thead><tr>'
+    +'<th style="text-align:left">Projeto de negociação</th><th style="text-align:left">Obra</th>'
+    +'<th style="text-align:right">Preço inicial</th><th style="text-align:right">Preço fechado</th><th style="text-align:right">Ganho</th>'
+    +'<th style="text-align:right">Caprem '+(100-r.pct_etr)+'%</th><th style="text-align:right">Consultoria '+r.pct_etr+'%</th>'
+    +'<th style="text-align:left">Situação</th></tr></thead><tbody>';
+  L.forEach(l=>{
+    const stChip={analise:['#8a9299','em análise'],aceito:['var(--ok)','aceito'],contestado:['#b3261e','contestado']}[l.status]||['#8a9299',l.status];
+    h+=`<tr style="${l.conta?'':'opacity:.62'}">
+      <td style="text-align:left"><b>${esc(l.titulo)}</b><small>${l.num_pedido?('PC '+esc(l.num_pedido)):'<span style="color:#a15c00">sem pedido de compra</span>'} · comprador ${esc(l.comprador||'—')}</small></td>
+      <td style="text-align:left;font-size:11.5px">${esc(l.obra_nome||'—')}</td>
+      <td style="text-align:right">${BRL(l.total_base)}</td>
+      <td style="text-align:right">${BRL(l.total_final)}</td>
+      <td style="text-align:right;font-weight:800;color:${l.ganho>=0?'var(--ok)':'#b3261e'}">${l.ganho>=0?'':'−'}${BRL(Math.abs(l.ganho))}${l.pct!=null?`<div class="muted" style="font-size:9.5px;font-weight:400">${l.pct>0?'−':'+'}${Math.abs(l.pct).toFixed(1)}%</div>`:''}</td>
+      <td style="text-align:right">${l.conta?BRL(l.fee_caprem):'—'}</td>
+      <td style="text-align:right;font-weight:700;color:${l.conta?'#5b3a8f':'#aab'}">${l.conta?BRL(l.fee_etr):'—'}</td>
+      <td style="text-align:left">
+        <span class="dchip" style="background:${stChip[0]};color:#fff">${stChip[1]}</span>
+        ${(!l.conta&&l.motivo_fora)?`<div class="muted" style="font-size:10px;margin-top:3px">fora da apuração: ${esc(l.motivo_fora)}</div>`:''}
+        ${l.observacao?`<div style="font-size:10.5px;color:#4a5560;margin-top:3px">${esc(l.observacao)}</div>`:''}
+        ${l.por_nome?`<div class="muted" style="font-size:9.5px">${esc(l.por_nome)}</div>`:''}
+        <div style="display:flex;gap:5px;margin-top:5px;flex-wrap:wrap">
+          <button class="btn-ghost" style="padding:2px 8px;font-size:10.5px" onclick="showView('cotacoes');setTimeout(()=>cotAbrir(${l.cotacao_id}),200)">ver mapa</button>
+          ${l.status!=='aceito'?`<button class="btn-ghost" style="padding:2px 8px;font-size:10.5px;color:var(--ok)" onclick="fecApurar(${l.cotacao_id},'aceito')">aceitar</button>`:''}
+          ${l.status!=='contestado'?`<button class="btn-ghost" style="padding:2px 8px;font-size:10.5px;color:#b3261e" onclick="fecContestar(${l.cotacao_id},'${esc(String(l.titulo).replace(/'/g,''))}')">contestar</button>`:''}
+          ${l.status!=='analise'?`<button class="btn-ghost" style="padding:2px 8px;font-size:10.5px;color:var(--muted)" onclick="fecApurar(${l.cotacao_id},'analise')">reabrir</button>`:''}
+        </div></td></tr>`;
+  });
+  h+=`<tr style="background:#f7faf8;font-weight:800"><td style="text-align:left" colspan="4">TOTAL APURÁVEL DA COMPETÊNCIA</td>
+      <td style="text-align:right;color:var(--ok)">${BRL(r.ganho_apuravel)}</td>
+      <td style="text-align:right">${BRL(r.fee_caprem)}</td>
+      <td style="text-align:right;color:#5b3a8f">${BRL(r.fee_etr)}</td><td></td></tr>`;
+  h+='</tbody></table></div></div>';
+  h+='<div class="dmini" style="margin-top:8px">Entram na apuração apenas os projetos com <b>pedido de compra emitido</b> (cláusula 5.2 — vedada apuração sobre economia projetada) e com <b>participação registrada da consultoria</b> (cláusula 3.12). Linha contestada sai da conta enquanto a divergência não é resolvida — a cláusula 3.3 dá 10 dias úteis para a manifestação por escrito. Valores de linha aceita ou contestada ficam <b>congelados</b>, para a medição não escorregar se algum fechamento for reaberto depois.</div>';
+  w.innerHTML=h;
+}
+async function fecApurar(cid,status,obs){
+  try{ const r=await (await fetch('actions/cotacoes.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'apuracao_salvar',me:EU&&EU.bitrix_id,cotacao_id:cid,status:status,observacao:obs||''})})).json();
+    if(r.error){toast(r.error);return;}
+    toast({aceito:'Ganho aceito',contestado:'Ganho contestado',analise:'Voltou para análise'}[status]||'Salvo');
+    fecLoadApur(FEC.mes);
+  }catch(e){ toast('Falha: '+e.message); }
+}
+function fecContestar(cid,titulo){
+  dlgAbrir('Fechamentos','Contestar o ganho apurado',
+    '<div style="max-width:540px"><div class="dmini" style="margin-bottom:10px">Contestando <b>'+esc(titulo)+'</b>. A linha sai da apuração da competência enquanto a divergência não for resolvida, e o texto abaixo fica registrado no histórico da cotação — é o que sustenta a conversa com a consultoria (o contrato dá 10 dias úteis para a manifestação por escrito).</div>'
+   + cotFld('Por que não concorda com este ganho? *','<textarea id="fecCtM" rows="3" style="width:100%" placeholder="ex.: o preço inicial usou a proposta da rodada 1, mas já havia tabela vigente mais barata para este item."></textarea>')
+   + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
+   + '<button class="btn-prim" style="background:#b3261e" onclick="fecContestarOk('+cid+')">Registrar contestação</button></div></div>');
+}
+function fecContestarOk(cid){
+  const m=((document.getElementById('fecCtM')||{}).value||'').trim();
+  if(m.length<5){toast('Escreva o motivo da contestação');return;}
+  closeModal(true); fecApurar(cid,'contestado',m);
+}
+/* Export: CSV com BOM e ponto-e-vírgula — é o que o Excel em português abre com as colunas certas
+   num duplo clique, sem passo de importação. */
+function fecExportar(){
+  const d=FEC.apur; if(!d||!(d.linhas||[]).length){toast('Nada para exportar nesta competência');return;}
+  const r=d.resumo;
+  const n=v=>String(v==null?'':Number(v).toFixed(2)).replace('.',',');
+  const q=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
+  const L=[['Competência','Projeto de negociação','Obra','Comprador','Pedido de compra','Preço inicial','Preço fechado','Ganho','Caprem '+(100-r.pct_etr)+'%','Consultoria '+r.pct_etr+'%','Entra na apuração','Situação','Observação'].join(';')];
+  d.linhas.forEach(l=>L.push([q(d.mes),q(l.titulo),q(l.obra_nome),q(l.comprador),q(l.num_pedido),
+    n(l.total_base),n(l.total_final),n(l.ganho),n(l.fee_caprem),n(l.fee_etr),
+    q(l.conta?'sim':('não — '+(l.motivo_fora||''))),q(l.status),q(l.observacao)].join(';')));
+  L.push('');
+  L.push([q('TOTAL APURÁVEL'),'','','','','','',n(r.ganho_apuravel),n(r.fee_caprem),n(r.fee_etr)].join(';'));
+  L.push([q('Adiantamento mensal (cláusula 5.3.1)'),'','','','','','',n(r.adiantamento)].join(';'));
+  L.push([q('A faturar — o maior dos dois'),'','','','','','',n(r.a_faturar)].join(';'));
+  const blob=new Blob(['﻿'+L.join('\r\n')],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='apuracao-ganhos-'+d.mes+'.csv'; document.body.appendChild(a); a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},400);
+  toast('Planilha da competência '+d.mes+' baixada');
+}

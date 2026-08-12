@@ -24,6 +24,14 @@ require_once __DIR__ . '/../includes/coligadas.php';       // FASE 2: coligada_c
 // manda tudo e o front pagina de 30 em 30. Era 500 — não cabe o histórico importado do sistema antigo (~760).
 define('COT_LISTA_MAX', 3000);
 
+/* Números do contrato com a ETR (assinado ago/2026), usados na apuração mensal:
+   5.1  — success fee = 40% da Economia Prevista (os 60% restantes ficam com a CAPREM);
+   5.3.1 — R$ 67.000/mês é ADIANTAMENTO compensável: fatura-se o MAIOR entre ele e o fee do mês,
+           vedada a cumulação na mesma competência.
+   Ficam aqui, nomeados, em vez de espalhados como número mágico no meio da conta. */
+define('COT_ETR_PCT', 40);
+define('COT_ADIANTAMENTO', 67000.00);
+
 // O catálogo de motivos de desqualificação (cot_desq_motivos/label/texto) mora em includes/db.php:
 // a API de leitura também precisa traduzir o código do motivo.
 
@@ -412,6 +420,126 @@ try {
             $hq = $pdo->prepare("SELECT bitrix_id, usuario_nome, acao, detalhe, created_at FROM cotacao_historico WHERE cotacao_id=? ORDER BY id DESC LIMIT 300");
             $hq->execute([(int)$_GET['historico']]);
             echo json_encode(['historico' => $hq->fetchAll()], JSON_UNESCAPED_UNICODE); exit;
+        }
+        /* ───────── MÓDULO FECHAMENTOS ─────────
+           A tela de cotação ficou poluída, então a apuração saiu de lá. Duas consultas: a FILA (o
+           estado do fechamento de cada cotação, com o aging de quem está esperando aprovação) e a
+           APURAÇÃO MENSAL, que espelha a tabela do próprio contrato para poder ser conferida linha
+           a linha numa reunião. Ambas exigem a permissão de ver ganhos — o comprador não entra. */
+        if (isset($_GET['fila']) || isset($_GET['apuracao'])) {
+            if (!cot_pode_ver_ganhos($pdo, $_GET['me'] ?? null)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão para ver a apuração de ganhos.'], JSON_UNESCAPED_UNICODE); exit; }
+            $rows = $pdo->query("SELECT f.*, c.titulo, c.apelido, c.obra_id, c.criado_nome, c.criado_por,
+                                        c.num_pedido, c.status AS cot_status, c.servico_id,
+                                        COALESCE(NULLIF(o.nome,''), c.obra_livre) AS obra_nome
+                                 FROM cotacao_fechamento f
+                                 JOIN cotacao c ON c.id=f.cotacao_id
+                                 LEFT JOIN obra o ON o.id=c.obra_id
+                                 ORDER BY f.cotacao_id, f.rodada, f.id")->fetchAll();
+            $porCot = [];
+            foreach ($rows as $r) {
+                $cid = (int)$r['cotacao_id'];
+                if (!isset($porCot[$cid])) $porCot[$cid] = ['cotacao_id'=>$cid, 'titulo'=>$r['titulo'], 'apelido'=>$r['apelido'],
+                    'obra_nome'=>$r['obra_nome'], 'criado_nome'=>$r['criado_nome'], 'criado_por'=>$r['criado_por'],
+                    'num_pedido'=>trim((string)$r['num_pedido']), 'cot_status'=>$r['cot_status'],
+                    'do_radar'=>!empty($r['servico_id']) ? 1 : 0, 'rodadas'=>[]];
+                $r['id'] = (int)$r['id']; $r['rodada'] = (int)$r['rodada'];
+                $r['etr_participou'] = (int)($r['etr_participou'] ?? 0);
+                $r['total'] = $r['total'] !== null ? (float)$r['total'] : null;
+                $r['linhas'] = cot_fech_linhas($pdo, $r['id']);
+                $porCot[$cid]['rodadas'][] = $r;
+            }
+            // estado consolidado por cotação + o ganho (régua × contratado)
+            $lista = [];
+            foreach ($porCot as $cid => $c) {
+                $rs = $c['rodadas']; $ult = $rs[count($rs) - 1];
+                $ap = array_values(array_filter($rs, fn($x) => ($x['status'] ?? '') === 'homologado'));
+                $c['rodada_atual'] = (int)$ult['rodada'];
+                $c['status'] = (string)$ult['status'];
+                $c['fechamento_id'] = (int)$ult['id'];
+                $c['aprovadas'] = count($ap);
+                $c['etr'] = !empty($ult['etr_participou']) ? 1 : 0;
+                $c['total_atual'] = $ult['total'];
+                $c['aprovado_nome'] = (string)($ult['aprovado_nome'] ?? '');
+                $c['aprovado_at'] = (string)($ult['aprovado_at'] ?? '');
+                $c['devolvido_motivo'] = (string)($ult['devolvido_motivo'] ?? '');
+                $ts = strtotime((string)($ult['updated_at'] ?? $ult['created_at'] ?? ''));
+                $c['dias_parado'] = $ts ? (int)floor((time() - $ts) / 86400) : null;
+                $c['ganho'] = count($ap) >= 2 ? cot_fech_ganho($ap[0], $ap[count($ap) - 1]) : null;
+                // competência = mês em que o fechamento final foi aprovado (quando a negociação concluiu)
+                $c['competencia'] = (count($ap) >= 2 && !empty($ap[count($ap) - 1]['aprovado_at']))
+                    ? substr((string)$ap[count($ap) - 1]['aprovado_at'], 0, 7) : '';
+                $c['tem_pc'] = $c['num_pedido'] !== '' ? 1 : 0;
+                unset($c['rodadas']);
+                $c['rodadas'] = array_map(fn($x) => ['id'=>$x['id'], 'rodada'=>$x['rodada'], 'status'=>$x['status'],
+                    'total'=>$x['total'], 'etr'=>(int)$x['etr_participou'], 'aprovado_nome'=>$x['aprovado_nome'] ?? '',
+                    'aprovado_at'=>$x['aprovado_at'] ?? '', 'data_fechamento'=>$x['data_fechamento'] ?? '',
+                    'origem_label'=>cot_fech_origem_label($x['origem_preco'] ?? ''),
+                    'fornecedores'=>array_values(array_unique(array_filter(array_map(fn($l) => $l['fornecedor_nome'], $x['linhas']))))], $rs);
+                $lista[] = $c;
+            }
+            if (isset($_GET['fila'])) {
+                usort($lista, function ($a, $b) {   // quem está esperando aprovação primeiro, mais parado no topo
+                    $pa = ($a['status'] === 'aguardando') ? 0 : 1; $pb = ($b['status'] === 'aguardando') ? 0 : 1;
+                    return ($pa <=> $pb) ?: (($b['dias_parado'] ?? 0) <=> ($a['dias_parado'] ?? 0));
+                });
+                echo json_encode(['fila'=>$lista, 'pode_aprovar'=>cot_pode_aprovar_fechamento($pdo, $_GET['me'] ?? null) ? 1 : 0],
+                                 JSON_UNESCAPED_UNICODE); exit;
+            }
+
+            /* APURAÇÃO DO MÊS. Regras do contrato aplicadas aqui, não no Excel de ninguém:
+               - só entra o Projeto de Negociação com PEDIDO DE COMPRA emitido (cláusula 5.2 — vedada
+                 apuração sobre economia projetada). Sem PC a linha aparece como PENDENTE, não somada;
+               - só gera honorário a rodada com participação registrada da ETR (cláusula 3.12);
+               - fatura-se o MAIOR entre o success fee do mês e o adiantamento (cláusula 5.3.1),
+                 vedada a cumulação. */
+            $mes = trim((string)($_GET['mes'] ?? ''));
+            $meses = [];
+            foreach ($lista as $c) if ($c['competencia'] !== '') $meses[$c['competencia']] = true;
+            krsort($meses);
+            if ($mes === '') $mes = (string)(array_key_first($meses) ?? date('Y-m'));
+            $apRows = [];
+            try { foreach ($pdo->query("SELECT * FROM cotacao_apuracao") as $r) $apRows[(int)$r['cotacao_id']] = $r; }
+            catch (Throwable $e) {}
+            $linhas = []; $somaGanhoEtr = 0.0; $somaGanhoTotal = 0.0; $pendentes = [];
+            foreach ($lista as $c) {
+                if (!$c['ganho']) continue;
+                if ($c['competencia'] !== $mes) continue;
+                $a = $apRows[$c['cotacao_id']] ?? null;
+                $congelado = $a && ($a['status'] ?? '') !== 'analise' && $a['ganho_snap'] !== null;
+                $ganho = $congelado ? (float)$a['ganho_snap'] : (float)$c['ganho']['ganho'];
+                $base  = $congelado ? (float)$a['base_snap']  : (float)$c['ganho']['total_base'];
+                $fim   = $congelado ? (float)$a['final_snap'] : (float)$c['ganho']['total_final'];
+                $pct   = (float)($a['pct_etr'] ?? COT_ETR_PCT);
+                $l = ['cotacao_id'=>$c['cotacao_id'], 'titulo'=>$c['apelido'] ?: $c['titulo'], 'obra_nome'=>$c['obra_nome'],
+                      'comprador'=>$c['criado_nome'], 'num_pedido'=>$c['num_pedido'], 'tem_pc'=>$c['tem_pc'],
+                      'etr'=>$c['etr'], 'total_base'=>round($base, 2), 'total_final'=>round($fim, 2),
+                      'ganho'=>round($ganho, 2), 'pct'=>$c['ganho']['pct'],
+                      'status'=>$a ? (string)$a['status'] : 'analise', 'observacao'=>$a ? (string)$a['observacao'] : '',
+                      'congelado'=>$congelado ? 1 : 0, 'pct_etr'=>$pct,
+                      'por_nome'=>$a ? (string)$a['por_nome'] : '', 'atualizado'=>$a ? (string)$a['updated_at'] : '',
+                      'itens'=>$c['ganho']['itens'], 'rodadas'=>$c['rodadas']];
+                // conta no honorário só se: tem PC + ETR participou + não foi contestado + ganho positivo
+                $vale = $c['tem_pc'] && $c['etr'] && ($l['status'] !== 'contestado') && $ganho > 0;
+                $l['conta'] = $vale ? 1 : 0;
+                $l['fee_etr'] = $vale ? round($ganho * $pct / 100, 2) : 0.0;
+                $l['fee_caprem'] = $vale ? round($ganho - $ganho * $pct / 100, 2) : 0.0;
+                if (!$c['tem_pc']) $l['motivo_fora'] = 'sem pedido de compra emitido (cláusula 5.2)';
+                elseif (!$c['etr']) $l['motivo_fora'] = 'rodada sem participação registrada da consultoria (cláusula 3.12)';
+                elseif ($l['status'] === 'contestado') $l['motivo_fora'] = 'contestado pela Caprem';
+                elseif ($ganho <= 0) $l['motivo_fora'] = 'sem ganho a apurar';
+                if ($vale) { $somaGanhoEtr += $ganho; }
+                $somaGanhoTotal += $ganho;
+                $linhas[] = $l;
+            }
+            usort($linhas, fn($a, $b) => ($b['conta'] <=> $a['conta']) ?: ($b['ganho'] <=> $a['ganho']));
+            $fee = round($somaGanhoEtr * COT_ETR_PCT / 100, 2);
+            echo json_encode(['mes'=>$mes, 'meses'=>array_keys($meses), 'linhas'=>$linhas,
+                'resumo'=>['ganho_total'=>round($somaGanhoTotal, 2), 'ganho_apuravel'=>round($somaGanhoEtr, 2),
+                           'fee_etr'=>$fee, 'fee_caprem'=>round($somaGanhoEtr - $fee, 2),
+                           'pct_etr'=>COT_ETR_PCT, 'adiantamento'=>COT_ADIANTAMENTO,
+                           'a_faturar'=>max($fee, COT_ADIANTAMENTO),
+                           'prevalece'=>$fee >= COT_ADIANTAMENTO ? 'success_fee' : 'adiantamento'],
+                'pode_aprovar'=>cot_pode_aprovar_fechamento($pdo, $_GET['me'] ?? null) ? 1 : 0], JSON_UNESCAPED_UNICODE); exit;
         }
         if (isset($_GET['id'])) {
             $full = cot_get_full($pdo, (int)$_GET['id']);
@@ -1039,6 +1167,41 @@ try {
         $pdo->commit();
         cot_log($pdo, $cid, $me, 'Fechamento', 'Excluiu o rascunho de fechamento da rodada ' . (int)$f['rodada']);
         echo json_encode(['ok'=>true], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    /* APURAÇÃO: aceitar ou CONTESTAR o ganho de um projeto na medição do mês.
+       Contestar é direito contratual (cláusula 3.3: 10 dias úteis para manifestação por escrito), e
+       é o que o Murilo pediu — "não concordo com esse ganho aqui, por conta disso". Ao sair de
+       'análise' os valores são CONGELADOS: medição fechada não pode escorregar porque alguém
+       reabriu um fechamento depois. */
+    if ($acao === 'apuracao_salvar') {
+        if (!cot_pode_ver_ganhos($pdo, $me)) { http_response_code(403); echo json_encode(['error'=>'Sem permissão para tratar a apuração.'], JSON_UNESCAPED_UNICODE); exit; }
+        $cid = (int)($in['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
+        $st = trim((string)($in['status'] ?? 'analise'));
+        if (!in_array($st, ['analise', 'aceito', 'contestado'], true)) throw new Exception('status inválido');
+        $obs = trim((string)($in['observacao'] ?? ''));
+        if ($st === 'contestado' && strlen($obs) < 5) throw new Exception('escreva por que não concorda — a contestação sem motivo não serve para a discussão com a consultoria');
+        $fech = cot_fechamentos($pdo, $cid);
+        $ap = array_values(array_filter($fech['fechamentos'], fn($x) => ($x['status'] ?? '') === 'homologado'));
+        $g = count($ap) >= 2 ? cot_fech_ganho($ap[0], $ap[count($ap) - 1]) : null;
+        if (!$g) throw new Exception('esta cotação ainda não tem duas rodadas aprovadas — não há ganho a apurar');
+        $comp = !empty($ap[count($ap) - 1]['aprovado_at']) ? substr((string)$ap[count($ap) - 1]['aprovado_at'], 0, 7) : date('Y-m');
+        $p = user_perms($pdo, $me); $now = date('c');
+        // congela os valores ao sair de "em análise"; voltar para análise descongela
+        $snapG = $st === 'analise' ? null : $g['ganho'];
+        $snapB = $st === 'analise' ? null : $g['total_base'];
+        $snapF = $st === 'analise' ? null : $g['total_final'];
+        $ex = $pdo->prepare("SELECT id FROM cotacao_apuracao WHERE cotacao_id=?"); $ex->execute([$cid]);
+        $aid = (int)($ex->fetchColumn() ?: 0);
+        if ($aid) $pdo->prepare("UPDATE cotacao_apuracao SET competencia=?, status=?, observacao=?, ganho_snap=?, base_snap=?, final_snap=?, por=?, por_nome=?, updated_at=? WHERE id=?")
+                        ->execute([$comp, $st, $obs ?: null, $snapG, $snapB, $snapF, (string)$me, $p['nome'] ?? null, $now, $aid]);
+        else $pdo->prepare("INSERT INTO cotacao_apuracao (cotacao_id, competencia, status, observacao, ganho_snap, base_snap, final_snap, pct_etr, por, por_nome, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+                   ->execute([$cid, $comp, $st, $obs ?: null, $snapG, $snapB, $snapF, COT_ETR_PCT, (string)$me, $p['nome'] ?? null, $now, $now]);
+        cot_log($pdo, $cid, $me, 'Apuração', ['analise'=>'Devolveu a apuração para análise',
+                'aceito'=>'ACEITOU o ganho apurado de R$ ' . number_format($g['ganho'], 2, ',', '.') . ' (competência ' . $comp . ')',
+                'contestado'=>'CONTESTOU o ganho apurado de R$ ' . number_format($g['ganho'], 2, ',', '.') . ' (competência ' . $comp . ')'][$st]
+                . ($obs !== '' ? ' · ' . $obs : ''));
+        echo json_encode(['ok'=>true, 'status'=>$st, 'competencia'=>$comp], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'status') {

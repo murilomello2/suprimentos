@@ -6,6 +6,8 @@ vendor/
 data/cockpit.sqlite
 data/.token_cache.json
 data/.crono_*.json
+data/.bp_obras.json
+data/.bn_obras.json
 data/.users_cache.json
 data/.oracle.json
 data/.oracle*.json

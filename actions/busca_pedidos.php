@@ -20,80 +20,17 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/coligadas.php';
 require_once __DIR__ . '/../includes/supabase.php';
+require_once __DIR__ . '/../includes/sb_pag.php';   // paginação/varredura do PostgREST (compartilhada com a Busca de Notas)
 
 define('BP_MAX_LINHAS', 30000);  // teto de itens lidos por consulta (protege o Supabase e a memória)
-define('BP_PAGINA_API', 1000);   // teto por resposta do PostgREST (max-rows) — pedir mais não adianta
-define('BP_PARALELO', 8);        // páginas buscadas ao mesmo tempo (16 páginas em série levavam 20s)
 define('BP_POR_PAGINA', 30);
 
-function bp_url($query) { return SOLIC_SUPABASE_URL . '/rest/v1/pedidos_itens?' . $query; }
-function bp_headers() {
-    return ['apikey: ' . SOLIC_SUPABASE_KEY, 'Authorization: Bearer ' . SOLIC_SUPABASE_KEY, 'Accept: application/json'];
-}
-
-function bp_get($query) {
-    [$code, $res, $err] = sb_http('GET', bp_url($query), bp_headers());
-    if ($code !== 200 && $code !== 206) throw new Exception('TOTVS HTTP ' . $code . ' — ' . substr((string)($res ?: $err), 0, 160));
-    return json_decode((string)$res, true) ?: [];
-}
-
-/** Quantas linhas o recorte tem, sem baixar nada (Prefer: count=exact -> "content-range: 0-0/15363"). */
-function bp_contar($query) {
-    $ch = curl_init(bp_url($query . '&limit=1'));
-    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => 1, CURLOPT_HEADER => 1, CURLOPT_TIMEOUT => 25,
-        CURLOPT_HTTPHEADER => array_merge(bp_headers(), ['Prefer: count=exact'])]);
-    $r = curl_exec($ch); curl_close($ch);
-    if (is_string($r) && preg_match('#content-range:\s*\S+/(\d+)#i', $r, $m)) return (int)$m[1];
-    return -1;   // servidor não informou: cai no modo sequencial
-}
-
-/** Lê o recorte INTEIRO, entregando página por página a um callback. Devolve quantas linhas passaram.
- *  Sem isso "todas as obras" vinha cortado em 1000 itens e a contagem mentia.
- *  ⚠️ O PostgREST tem teto próprio por resposta e ignora limit maior — daí paginar de 1000 em 1000.
- *  Duas razões p/ não juntar tudo num array: 16 idas em série levavam 20s (agora vão em paralelo),
- *  e segurar 15 mil linhas cruas custava ~54MB de RAM — agregando por página o pico cai muito. */
-function bp_varrer($query, callable $cb) {
-    $total = bp_contar($query);
-    if ($total === 0) return 0;
-
-    if ($total < 0) {   // servidor não informou a contagem: sequencial, para quando a página vier incompleta
-        $n = 0;
-        for ($off = 0; $off < BP_MAX_LINHAS; $off += BP_PAGINA_API) {
-            $lote = bp_get($query . '&limit=' . BP_PAGINA_API . '&offset=' . $off);
-            $n += count($lote); $cb($lote);
-            if (count($lote) < BP_PAGINA_API) break;
-        }
-        return $n;
-    }
-
-    $alvo = min($total, BP_MAX_LINHAS);
-    $offs = [];
-    for ($off = 0; $off < $alvo; $off += BP_PAGINA_API) $offs[] = $off;
-
-    $n = 0;
-    foreach (array_chunk($offs, BP_PARALELO) as $bloco) {
-        $mh = curl_multi_init(); $hs = [];
-        foreach ($bloco as $off) {
-            $ch = curl_init(bp_url($query . '&limit=' . BP_PAGINA_API . '&offset=' . $off));
-            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => 1, CURLOPT_TIMEOUT => 40, CURLOPT_HTTPHEADER => bp_headers()]);
-            curl_multi_add_handle($mh, $ch); $hs[$off] = $ch;
-        }
-        do { $st = curl_multi_exec($mh, $rodando); if ($rodando) curl_multi_select($mh, 1.0); }
-        while ($rodando && $st === CURLM_OK);
-
-        foreach ($hs as $off => $ch) {
-            $body = curl_multi_getcontent($ch);
-            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_multi_remove_handle($mh, $ch); curl_close($ch);
-            if ($code !== 200 && $code !== 206) throw new Exception('TOTVS HTTP ' . $code . ' na página ' . $off);
-            $lote = json_decode((string)$body, true);
-            if (is_array($lote)) { $n += count($lote); $cb($lote); }
-            unset($body, $lote);
-        }
-        curl_multi_close($mh);
-    }
-    return $n;
-}
+/* A máquina de paginar (offsets em paralelo, contagem por Prefer: count=exact, leitura por callback)
+   mudou-se para includes/sb_pag.php quando a Busca de NOTAS passou a precisar dela sobre outra
+   tabela. Aqui ficam só os atalhos com a tabela já amarrada — a assinatura bp_varrer($query,$cb)
+   continua a mesma porque o Envio de Pedidos e o PDF do pedido a usam como biblioteca. */
+function bp_get($query)                  { return sbp_get('pedidos_itens', $query); }
+function bp_varrer($query, callable $cb) { return sbp_varrer('pedidos_itens', $query, $cb, BP_MAX_LINHAS); }
 
 /** Status do pedido no TOTVS -> texto legível (tabela oficial passada pelo Murilo, 28/jul). */
 function bp_status_label($s) {

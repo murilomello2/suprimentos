@@ -397,6 +397,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
     <div class="navlabel">Administração</div>
     <nav class="nav">
       <a id="nav-buscaped" data-menu="buscaped" title="Busca de pedidos de compra (consulta ao TOTVS)" onclick="showView('buscaped')"><span class="material-icons">receipt_long</span> <span class="navtxt">Busca Pedidos</span></a>
+      <a id="nav-buscanf" data-menu="buscanf" title="Busca de notas fiscais — a cadeia solicitação → pedido → nota (consulta ao TOTVS)" onclick="showView('buscanf')"><span class="material-icons">description</span> <span class="navtxt">Buscar Notas</span></a>
       <a id="nav-oportunidades" data-menu="oportunidades" title="Oportunidades (Curva ABC)" onclick="showView('oportunidades')"><span class="material-icons">insights</span> <span class="navtxt">Oportunidades</span></a>
       <a id="nav-top20" data-menu="top20" title="Top 20 — volumes consolidados p/ negociação" onclick="showView('top20')"><span class="material-icons">stacked_bar_chart</span> <span class="navtxt">Top 20</span></a>
       <a id="nav-config" data-menu="config" title="Configurações" onclick="showView('config')"><span class="material-icons">settings</span> <span class="navtxt">Configurações</span></a>
@@ -804,6 +805,46 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
     <div id="bpWrap"><div class="empty">Escolha os filtros e clique em <b>Buscar</b>. Dica: digite o nome do item (ex.: <b>martelete</b>) com "Todas as obras" pra ver com quem já compramos.</div></div>
    </section>
 
+   <section id="view-buscanf" style="display:none">
+    <div class="top">
+      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">description</span> Busca de Notas Fiscais</h1>
+      <p class="sub">Consulta ao TOTVS (apropriações): a cadeia <b>solicitação → pedido → nota</b> costurada. Busque por <b>fornecedor, nº da nota, nº do pedido, CNPJ, produto ou tarefa</b> e veja se a nota bateu com o preço e a quantidade do pedido.</p>
+    </div>
+    <div class="panel" style="margin-bottom:10px;padding:14px 18px">
+      <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">
+        <div class="search" style="flex:1;min-width:270px;border:1px solid var(--line)">
+          <span class="material-icons" style="color:var(--muted)">search</span>
+          <input id="bnQ" placeholder="fornecedor, nº da nota, nº do pedido, CNPJ, produto…" onkeydown="if(event.key==='Enter')bnBuscar(1)">
+        </div>
+        <div style="position:relative">
+          <input id="bnObraTxt" list="bnObraList" placeholder="Todas as obras" autocomplete="off" oninput="bnObraPick()" onfocus="this.select()"
+                 style="padding:7px 26px 7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;width:200px">
+          <datalist id="bnObraList"></datalist>
+          <span id="bnObraX" onclick="bnObraLimpar()" title="limpar" style="display:none;position:absolute;right:7px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--muted);font-size:15px;line-height:1">&times;</span>
+        </div>
+        <select id="bnPeriodo" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+          <option value="30d">Últimos 30 dias</option><option value="3m" selected>Últimos 3 meses</option>
+          <option value="ano">Este ano</option><option value="tudo">Tudo</option></select>
+        <select id="bnTipo" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px" title="tipo da nota no TOTVS">
+          <option value="">Todo tipo</option><option value="material">Material</option><option value="servico">Serviço</option>
+          <option value="locacao">Locação</option><option value="frete">Frete</option></select>
+        <select id="bnRastro" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px" title="a nota veio de pedido? o pedido veio de solicitação?">
+          <option value="">Toda origem</option><option value="completa">✓ SC → PC → NF</option>
+          <option value="sem_solic">⚠ Pedido sem SC</option><option value="sem_pedido">✕ Nota sem pedido</option></select>
+        <select id="bnDiverg" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px" title="preço da nota × preço fechado no pedido">
+          <option value="">Todo preço</option><option value="suspeita">⚠ Confira a unidade</option>
+          <option value="acima">↑ Acima do pedido</option><option value="acima5">↑ Acima +5%</option>
+          <option value="abaixo">↓ Abaixo do pedido</option><option value="mantido">= Preço mantido</option>
+          <option value="sem_preco">? Sem preço no pedido</option></select>
+        <select id="bnEntrega" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px" title="quantidade da nota × quantidade do pedido">
+          <option value="">Toda entrega</option><option value="integral">Integral</option><option value="parcial">Parcial</option>
+          <option value="acima">Acima do pedido</option></select>
+        <button class="btn-prim" style="padding:7px 14px" onclick="bnBuscar(1)"><span class="material-icons" style="font-size:16px;vertical-align:-3px">search</span> Buscar</button>
+      </div>
+    </div>
+    <div id="bnWrap"><div class="empty">Escolha os filtros e clique em <b>Buscar</b>. Dica: digite o nome do fornecedor pra ver tudo que ele entregou, ou o nº do pedido pra achar as notas dele.</div></div>
+   </section>
+
    <section id="view-top20" style="display:none">
     <div class="top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
       <div>
@@ -861,6 +902,7 @@ $jsv = function ($p) { $f = __DIR__ . '/' . $p; return $p . '?v=' . (is_file($f)
   <script src="<?= $jsv('js/app07.js') ?>"></script>
   <script src="<?= $jsv('js/app08.js') ?>"></script>
   <script src="<?= $jsv('js/app09.js') ?>"></script>   <!-- assistente de whatsapp -->   <!-- caixa de e-mail -->   <!-- telas de consulta da obra -->
+  <script src="<?= $jsv('js/app10.js') ?>"></script>   <!-- busca de notas fiscais (cadeia SC -> PC -> NF) -->
 
 </body>
 </html>

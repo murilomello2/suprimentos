@@ -23,6 +23,7 @@ define('ACC_RETENCAO_DIAS', 180);   // além disso a linha é descartada — nã
 function acc_telas() {
     return ['dashboards'=>'Dashboards', 'radar'=>'Radar de Aquisições', 'matriz'=>'Matriz',
             'cotacoes'=>'Cotações', 'solicitacoes'=>'Solicitações', 'buscaped'=>'Busca Pedidos',
+            'buscanf'=>'Buscar Notas',
             'obras'=>'Obras', 'top20'=>'Top 20', 'oportunidades'=>'Oportunidades',
             'oraculo'=>'Radar IA', 'config'=>'Configurações', 'audit'=>'Auditoria', 'updates'=>'Atualizações'];
 }

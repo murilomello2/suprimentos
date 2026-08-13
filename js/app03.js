@@ -869,7 +869,7 @@ async function cotIniciar(sid, obra, nome, grupo){
   await ensureFull();   // garante composicao_sel (a cotação puxa itens da composição do radar)
   /* MESMA lista do showView: telas novas (caixa, assistente, telas de obra) precisam entrar aqui,
      senão abrir uma cotação vindo delas deixa as DUAS visíveis ao mesmo tempo. */
-  ['radar','matriz','oportunidades','top20','dashboards','cotacoes','fechamentos','solicitacoes','envio','buscaped','obras','caixa','whats','oraculo','config','audit','updates','ovradar','ovcot','ovsc'].forEach(x=>{ const v=document.getElementById('view-'+x); if(v)v.style.display=x==='cotacoes'?'':'none'; const n=document.getElementById('nav-'+x); if(n)n.classList.toggle('active',x==='cotacoes'); });
+  ['radar','matriz','oportunidades','top20','dashboards','cotacoes','fechamentos','solicitacoes','envio','buscaped','buscanf','obras','caixa','whats','oraculo','config','audit','updates','ovradar','ovcot','ovsc'].forEach(x=>{ const v=document.getElementById('view-'+x); if(v)v.style.display=x==='cotacoes'?'':'none'; const n=document.getElementById('nav-'+x); if(n)n.classList.toggle('active',x==='cotacoes'); });
   if(typeof closeModal==='function'){ try{ closeModal(); }catch(e){} }
   COT.tab='cotacoes'; ['cotacoes','fornecedores'].forEach(x=>{ const b=document.getElementById('ctab-'+x); if(b)b.classList.toggle('on',x==='cotacoes'); });
   // puxa o ITEM COMPLETO da obra (quantitativo/escopo/variáveis) + o dicionário do serviço (fallback + nome/grupo)

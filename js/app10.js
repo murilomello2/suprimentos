@@ -66,10 +66,11 @@ const BN_RASTRO={
 /* DIVERGÊNCIA DE PREÇO (NF × pedido). Verde não é "bom", é "sem novidade": o que pede olho é o que
    veio ACIMA do pedido. Abaixo do pedido aparece em azul porque também é informação (desconto). */
 const BN_DIV={
-  /* SUSPEITA vem antes de tudo: diferença acima de 70% no unitário não é negociação, é quase sempre
-     unidade diferente entre o pedido e a nota (o pedido em SACO, a nota em KG). O R$ dessas notas
-     fica FORA do impacto do recorte — senão um erro de lançamento vira "ganho" no número. */
-  suspeita :{cor:'#7a2fa0', ic:'straighten',    t:'Confira a unidade'},
+  /* SUSPEITA vem antes de tudo: metade do preço unitário depois do pedido colocado não é
+     negociação. São dois casos, e nos dois a nota e o pedido não falam da mesma coisa — unidade
+     diferente (pedido em saco, nota em quilo) ou medição parcial de uma verba (o pedido é o
+     contrato inteiro, a nota é uma parcela). O R$ dessas notas fica FORA do impacto do recorte. */
+  suspeita :{cor:'#7a2fa0', ic:'straighten',    t:'Confira a base'},
   acima5   :{cor:'#c0392b', ic:'trending_up',   t:'Acima +5%'},
   acima    :{cor:'#a4761c', ic:'trending_up',   t:'Acima'},
   sem_preco:{cor:'#8a9299', ic:'help_outline',  t:'Sem preço no PC'},
@@ -103,7 +104,7 @@ function bnChips(d){
     +';border-radius:20px;padding:2px 9px;font-size:10.5px;font-weight:800;'+(on?'box-shadow:0 0 0 2px '+cor:'')+'">'
     +'<span class="material-icons" style="font-size:12px">'+ic+'</span>'+txt+'</span>';
   let h='';
-  if(A.suspeita)  h+=chip(A.suspeita+' confira a unidade','straighten','#7a2fa0','#f3eafa',atualD==='suspeita','bnFiltro(\'bnDiverg\',\'suspeita\')')+' ';
+  if(A.suspeita)  h+=chip(A.suspeita+' confira a base','straighten','#7a2fa0','#f3eafa',atualD==='suspeita','bnFiltro(\'bnDiverg\',\'suspeita\')')+' ';
   [['sem_pedido',R.sem_pedido],['sem_solic',R.sem_solic],['completa',R.completa]].forEach(([k,n])=>{
     if(!n) return; const a=BN_RASTRO[k];
     h+=chip(n+' '+a.t.toLowerCase(), a.ic, a.cor, a.bg, atualR===k, 'bnFiltro(\'bnRastro\',\''+k+'\')')+' ';
@@ -134,7 +135,7 @@ function bnRender(){
    +(Math.abs(imp)>=1?('<span class="dchip" title="'+esc('Soma do impacto de preço das notas do recorte: o quanto a nota veio acima (+) ou abaixo (−) do preço fechado no pedido. Notas com suspeita de unidade ficam fora desta conta.')+'" style="background:'+(imp>0?'#fdeaea':'#e8f5ee')+';color:'+(imp>0?'#c0392b':'#1F6B3B')+';font-size:10px">impacto '+BRL(imp)+'</span>'):'')
    /* O suspeito aparece SEPARADO e nunca somado ao impacto: numa base real ele chegou a ser 80% do
       número, e era erro de unidade — inflava "ganho" que nunca existiu. */
-   +(Math.abs(Number(d.impacto_suspeito||0))>=1?('<span class="dchip" title="'+esc('Diferença das notas com suspeita de unidade (mais de '+(d.corte_suspeita||70)+'% fora do preço do pedido). NÃO entra no impacto acima — precisa de conferência.')+'" style="background:#f3eafa;color:#7a2fa0;font-size:10px">'+BRL(d.impacto_suspeito)+' a conferir</span>'):'')
+   +(Math.abs(Number(d.impacto_suspeito||0))>=1?('<span class="dchip" title="'+esc('Diferença das notas em que a nota e o pedido não falam da mesma coisa: mais de '+(d.corte_suspeita||50)+'% fora do preço, por unidade diferente ou medição parcial de verba. NÃO entra no impacto acima — precisa de conferência.')+'" style="background:#f3eafa;color:#7a2fa0;font-size:10px">'+BRL(d.impacto_suspeito)+' a conferir</span>'):'')
    +(d.truncado?'<span class="dchip" style="background:#fff9e6;color:#6b5d1f;font-size:10px" title="a consulta bateu no teto de leitura — estreite o período ou a busca">resultado parcial</span>':'')
    +bnChips(d)
    +'<span class="muted" style="font-size:11px;margin-left:auto">ordenado por <b>'+esc(d.sort)+'</b> '+(d.dir==='asc'?'↑':'↓')+'</span>'
@@ -188,7 +189,7 @@ function bnRender(){
     if(d.pagina<d.paginas) nav+=btn(d.pagina+1,'próxima ›');
     h+=nav+'</div>';
   }
-  h+='</div><div class="note"><b>Preço NF × PC</b> compara o preço da nota com o preço fechado no pedido: <b style="color:#c0392b">acima</b> é o que pede olho (o valor embaixo é o impacto em R$ na nota), <b style="color:#2b6cb0">abaixo</b> é desconto, <b style="color:#1F6B3B">mantido</b> é o esperado. <b style="color:#7a2fa0">Confira a unidade</b> = o unitário da nota está mais de '+(d.corte_suspeita||70)+'% fora do pedido, o que quase nunca é negociação e quase sempre é <b>unidade diferente</b> entre o PC e a NF (pedido por saco, nota por quilo) — o R$ dessas notas fica <b>fora</b> da conta do impacto até alguém conferir. <b>Pedido / SC</b> mostra a cadeia: sem pedido = compra que entrou por fora do processo; <b>sem SC</b> = o pedido nasceu sem solicitação. Clique no <b>nº do pedido</b> pra abrir o PC completo, ou no 👁 pra ver a nota item a item com a comparação de preço e quantidade. A <b>data</b> traz embaixo quantos dias separaram o pedido da nota. Consulta ao TOTVS (somente leitura) — a base é a apropriação, então uma nota rateada entre tarefas aparece uma vez só, com o valor cheio.</div>';
+  h+='</div><div class="note"><b>Preço NF × PC</b> compara o preço da nota com o preço fechado no pedido: <b style="color:#c0392b">acima</b> é o que pede olho (o valor embaixo é o impacto em R$ na nota), <b style="color:#2b6cb0">abaixo</b> é desconto, <b style="color:#1F6B3B">mantido</b> é o esperado. <b style="color:#7a2fa0">Confira a base</b> = o unitário da nota está mais de '+(d.corte_suspeita||50)+'% fora do pedido. Depois do pedido colocado isso quase nunca é negociação: ou a <b>unidade</b> é diferente entre o PC e a NF (pedido por saco, nota por quilo), ou a nota é uma <b>medição parcial</b> de uma verba (o pedido é o contrato inteiro). Nos dois casos não é ganho, então o R$ fica <b>fora</b> da conta do impacto e aparece à parte, até alguém conferir. <b>Pedido / SC</b> mostra a cadeia: sem pedido = compra que entrou por fora do processo; <b>sem SC</b> = o pedido nasceu sem solicitação. Clique no <b>nº do pedido</b> pra abrir o PC completo, ou no 👁 pra ver a nota item a item com a comparação de preço e quantidade. A <b>data</b> traz embaixo quantos dias separaram o pedido da nota. Consulta ao TOTVS (somente leitura) — a base é a apropriação, então uma nota rateada entre tarefas aparece uma vez só, com o valor cheio.</div>';
   w.innerHTML=h;
 }
 

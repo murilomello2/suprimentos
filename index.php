@@ -832,7 +832,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
           <option value="">Toda origem</option><option value="completa">✓ SC → PC → NF</option>
           <option value="sem_solic">⚠ Pedido sem SC</option><option value="sem_pedido">✕ Nota sem pedido</option></select>
         <select id="bnDiverg" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:12.5px" title="preço da nota × preço fechado no pedido">
-          <option value="">Todo preço</option><option value="suspeita">⚠ Confira a unidade</option>
+          <option value="">Todo preço</option><option value="suspeita">⚠ Confira a base (unidade/medição)</option>
           <option value="acima">↑ Acima do pedido</option><option value="acima5">↑ Acima +5%</option>
           <option value="abaixo">↓ Abaixo do pedido</option><option value="mantido">= Preço mantido</option>
           <option value="sem_preco">? Sem preço no pedido</option></select>

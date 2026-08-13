@@ -47,7 +47,7 @@ require_once __DIR__ . '/../includes/sb_pag.php';
 define('BP_LIB_ONLY', 1); require_once __DIR__ . '/busca_pedidos.php';
 
 define('BN_TABELA', 'apropriacoes_compras');
-define('BN_MAX_LINHAS', 30000);   // teto de linhas lidas por consulta (a base inteira tem ~45 mil)
+define('BN_MAX_LINHAS', 60000);   // teto de linhas lidas: cabe a base inteira (~45 mil hoje) sem voltar parcial
 define('BN_POR_PAGINA', 30);
 
 function bn_get($query)                  { return sbp_get(BN_TABELA, $query); }
@@ -86,22 +86,27 @@ function bn_rastro_filtro($k) {
 }
 
 /**
- * SUSPEITA DE UNIDADE / LANÇAMENTO — diferença de preço grande demais para ser negociação.
+ * PREÇO FORA DE ESCALA — a nota e o pedido não estão falando da mesma coisa.
  *
- * Nasceu de um número que não podia estar certo: o impacto de 3 meses dava −R$ 659 mil e **80% disso
- * era UMA nota** — a NF 6122 (TOPGESSO, obra Polastri), com o pedido cotado por SACO (R$ 27,50) e a
- * nota lançada por outra unidade (R$ 1,4489 × 20.360). O DAX lê como "−94,7% de economia"; não é
- * economia nenhuma, é unidade de medida diferente entre o PC e a NF. Outro flagrante do mesmo tipo:
- * GESSO COLA, pedido 20 × R$ 60,00 e nota 60 × R$ 5,00.
+ * Nasceu de dois números que não podiam estar certos, os dois achados conferindo o total do impacto:
  *
- * O corte de 70% não é chute: na base inteira (45 mil linhas) existem só 26 linhas acima dele, e
- * todas com essa cara. Ninguém negocia 70% no preço unitário de um item já pedido.
+ *  1. UNIDADE DIFERENTE. A NF 6122 (TOPGESSO, obra Polastri): pedido cotado por SACO (R$ 27,50) e
+ *     nota lançada por outra unidade (R$ 1,4489 × 20.360). O DAX lê "−94,7% de economia" e sozinha
+ *     ela era 80% do impacto de 3 meses. Mesmo caso do GESSO COLA (PC 20 × R$ 60, NF 60 × R$ 5).
  *
- * O rótulo PERGUNTA, não acusa ("confira a unidade") — parte dos casos pode ser medição parcial
- * lançada de outro jeito, e quem sabe é a obra. E o R$ dessas notas fica FORA do impacto do
- * recorte, contado à parte: senão um erro de digitação vira "ganho" no número que a diretoria olha.
+ *  2. MEDIÇÃO PARCIAL DE VERBA. As NF 2349 e 2350 ("serviço de engenharia"): o pedido é o CONTRATO
+ *     inteiro (quantidade 1 × R$ 3.753.600) e a nota é UMA PARCELA (quantidade 1 × R$ 1.361.493).
+ *     Como a quantidade é 1 nos dois lados, nada denuncia a parcela e o DAX lê −63,7% de desconto.
+ *     Só essas duas notas respondiam por −R$ 4,1 milhões do impacto do ano.
+ *
+ * Por isso o corte é de 50% e não de 70%: com 70% as duas piores (63,7% e 56,7%) passavam batido.
+ * Nos dois casos a conclusão é a mesma — NÃO é ganho de negociação, e não pode entrar no número
+ * que a diretoria olha. Ninguém negocia metade do preço unitário DEPOIS do pedido colocado.
+ *
+ * O rótulo PERGUNTA, não acusa ("confira a base"), porque quem sabe qual dos dois casos é (ou se é
+ * um desconto real) é quem comprou. O R$ fica contado à parte, visível e filtrável.
  */
-define('BN_DIF_SUSPEITA', 70.0);
+define('BN_DIF_SUSPEITA', 50.0);
 function bn_suspeita($pct) { return $pct !== null && abs((float)$pct) >= BN_DIF_SUSPEITA; }
 
 /** Divergência de preço NF × pedido. */
@@ -187,7 +192,7 @@ try {
             $novo = !isset($seqs[$seq]);
             if ($novo) { $seqs[$seq] = 1; $valor += (float)($r['nf_valor_item'] ?? 0); }
             [$dk, $dl] = bn_diverg($r['status_divergencia_preco'] ?? '');
-            if (bn_suspeita($r['dif_preco_pct'] ?? null)) { $dk = 'suspeita'; $dl = 'Confira a unidade — preço muito fora do pedido'; }
+            if (bn_suspeita($r['dif_preco_pct'] ?? null)) { $dk = 'suspeita'; $dl = 'Confira a base — unidade diferente ou medição parcial?'; }
             [$ek, $el] = bn_entrega($r['situacao_entrega'] ?? '');
             $itens[] = [
                 'seq' => $seq, 'produto_cod' => $r['produto_cod'] ?? '', 'produto' => $r['produto_nome'] ?? '',
@@ -359,7 +364,7 @@ try {
             $pr = trim((string)($r['produto_nome'] ?? ''));  if ($pr !== '' && count($g['produtos']) < 3) $g['produtos'][$pr] = 1;
             // a nota herda a PIOR divergência e a PIOR situação de entrega das suas linhas
             [$dk, $dl] = bn_diverg($r['status_divergencia_preco'] ?? '');
-            if ($susp) { $dk = 'suspeita'; $dl = 'Confira a unidade — preço muito fora do pedido'; }
+            if ($susp) { $dk = 'suspeita'; $dl = 'Confira a base — unidade diferente ou medição parcial?'; }
             if (bn_diverg_peso($dk) > bn_diverg_peso($g['diverg'])) { $g['diverg'] = $dk; $g['diverg_label'] = $dl; }
             [$ek, $el] = bn_entrega($r['situacao_entrega'] ?? '');
             if (bn_entrega_peso($ek) > bn_entrega_peso($g['entrega'])) { $g['entrega'] = $ek; $g['entrega_label'] = $el; }

@@ -530,7 +530,7 @@ async function cotPedidoVer(numero,coligadaCod,obraId){
       <div class="muted" style="font-size:11.5px;margin-bottom:10px"><b>${esc(p.coligada||'')}</b>${p.ccusto_cod?' · c.custo '+esc(p.ccusto_cod):''}${p.data?' · '+D(String(p.data).slice(0,10)):''}${p.status?' · TOTVS '+esc(p.status):''} · ${p.n_itens} item(ns)${p.solic_numeros?' · SC '+esc(String(p.solic_numeros).replace(/^0+/,'')):''}${p.usuario?' · criado por <b>'+esc(p.usuario)+'</b>':''}</div>
       ${bpAprovFaixa(p)}
       <div style="margin-bottom:9px;font-size:12.5px"><span class="muted">Fornecedor(es):</span> <b>${esc(forn)}</b></div>
-      <div style="overflow-x:auto"><table class="mtable" style="border:none;table-layout:fixed;width:100%"><thead><tr><th class="svc-h" style="text-align:left;width:${multiForn?'26%':'34%'}">Item</th><th style="text-align:left;width:${multiForn?'28%':'36%'}">Observação</th>${multiForn?'<th style="text-align:left;width:18%">Fornecedor</th>':''}<th style="text-align:right;width:10%">Qtde</th><th style="text-align:right;width:13%">Preço unit.</th><th style="text-align:right;width:13%">Total</th></tr></thead><tbody>
+      <div style="overflow-x:auto"><table class="mtable leitura" style="border:none;table-layout:fixed;width:100%"><thead><tr><th class="svc-h" style="text-align:left;width:${multiForn?'26%':'34%'}">Item</th><th style="text-align:left;width:${multiForn?'28%':'36%'}">Observação</th>${multiForn?'<th style="text-align:left;width:18%">Fornecedor</th>':''}<th style="text-align:right;width:10%">Qtde</th><th style="text-align:right;width:13%">Preço unit.</th><th style="text-align:right;width:13%">Total</th></tr></thead><tbody>
       ${p.itens.map(it=>`<tr><td class="svc-c" style="text-align:left;font-size:12px">${esc(it.produto)}<small>${it.codprd?esc(it.codprd):''}</small></td><td style="text-align:left;font-size:11px;color:#4a5560;white-space:pre-wrap;word-break:break-word;line-height:1.35">${it.observacao?esc(it.observacao):'<span class="muted">—</span>'}</td>${multiForn?`<td style="text-align:left;font-size:11px">${esc(it.fornecedor_fantasia||it.fornecedor_nome||('cód. '+(it.fornecedor_cod||'—')))}</td>`:''}<td style="text-align:right">${cotNum(it.qtd)} ${esc(it.und||'')}</td><td style="text-align:right">${BRLp(it.preco_unit)}</td><td style="text-align:right"><b>${BRL(it.total)}</b></td></tr>`).join('')}
       <tr style="background:#f7faf8"><td class="svc-c" style="text-align:left;font-weight:800" colspan="${multiForn?4:3}">TOTAL</td><td></td><td style="text-align:right;font-weight:800;color:var(--verde-d)">${BRL(p.total)}</td></tr>
       </tbody></table></div>
@@ -987,9 +987,9 @@ function ultpTabela(r,ctx){
   const foraDaCurva=v=>mediana>0&&precos.length>2&&(v>mediana*3||v<mediana/3);
   let h='';
   if(r.fonte==='descricao') h+='<div class="dmini" style="margin:2px 0 6px;color:#a15c00">⚠ Este item não tem código do TOTVS — a busca foi por <b>descrição</b>, então pode trazer produto parecido mas diferente. Confira antes de usar.</div>';
-  h+='<div style="overflow-x:auto"><table class="mtable" style="border:none;width:100%">'
+  h+='<div style="overflow-x:auto"><table class="mtable leitura" style="border:none;width:100%">'
    + '<thead><tr><th style="text-align:left">Data</th><th style="text-align:left">Obra</th><th style="text-align:left">Fornecedor</th>'
-   + '<th style="text-align:right">Preço unit.</th><th>Un</th><th style="text-align:right">Qtd</th><th>PC</th>'
+   + '<th class="num">Preço unit.</th><th style="text-align:left">Un</th><th class="num">Qtd</th><th style="text-align:left">PC</th>'
    + '<th style="text-align:left">Observação do item</th>'+(podeUsar?'<th></th>':'')+'</tr></thead><tbody>';
   its.forEach((i,ix)=>{
     const dif=un(i.und)&&un(ctx.unidade)&&un(i.und)!==un(ctx.unidade);
@@ -1000,10 +1000,10 @@ function ultpTabela(r,ctx){
       <td style="white-space:nowrap;text-align:left">${i.data?D(i.data):'—'}${i.dias!=null?`<div class="muted" style="font-size:9.5px">${i.recente?'<b style="color:var(--verde-d)">há '+i.dias+' dias</b>':'há '+i.dias+' dias'}</div>`:''}</td>
       <td style="text-align:left;font-size:11.5px">${esc(i.obra||'—')}</td>
       <td style="text-align:left;font-size:11.5px"><b>${esc(i.fornecedor||'—')}</b></td>
-      <td style="text-align:right;white-space:nowrap"><b>${BRLp(i.preco_unit)}</b>${fora?` <span class="material-icons" title="Muito fora da mediana desta lista (${BRLp(mediana)}) — costuma ser adiantamento, ADF ou lançamento atípico, não preço de compra. Confira o pedido antes de usar." style="font-size:12px;color:#a15c00;cursor:help;vertical-align:-2px">warning</span>`:''}</td>
-      <td style="${dif?'background:#fff3e0;color:#a15c00;font-weight:700':''}" ${dif?`title="O pedido está em ${esc(i.und)} e o item da cotação está em ${esc(ctx.unidade||'—')} — escalas diferentes"`:''}>${esc(i.und||'')}${dif?' ⚠':''}</td>
-      <td style="text-align:right">${cotNum(i.qtd)}</td>
-      <td style="white-space:nowrap"><span style="cursor:pointer;color:var(--verde-d);font-weight:700" onclick="cotPedidoVer('${esc(i.pedido_bruto)}','${esc(i.coligada_cod)}')" title="ver o pedido no TOTVS">${esc(i.pedido)}</span></td>
+      <td class="num"><b>${BRLp(i.preco_unit)}</b>${fora?` <span class="material-icons" title="Muito fora da mediana desta lista (${BRLp(mediana)}) — costuma ser adiantamento, ADF ou lançamento atípico, não preço de compra. Confira o pedido antes de usar." style="font-size:12px;color:#a15c00;cursor:help;vertical-align:-2px">warning</span>`:''}</td>
+      <td style="text-align:left;white-space:nowrap;${dif?'background:#fff3e0;color:#a15c00;font-weight:700':'color:var(--muted)'}" ${dif?`title="O pedido está em ${esc(i.und)} e o item da cotação está em ${esc(ctx.unidade||'—')} — escalas diferentes"`:''}>${esc(i.und||'')}${dif?' ⚠':''}</td>
+      <td class="num">${cotNum(i.qtd)}</td>
+      <td style="text-align:left;white-space:nowrap"><span style="cursor:pointer;color:var(--verde-d);font-weight:700" onclick="cotPedidoVer('${esc(i.pedido_bruto)}','${esc(i.coligada_cod)}')" title="ver o pedido no TOTVS">${esc(i.pedido)}</span></td>
       <td style="text-align:left;font-size:10.5px;color:#4a5560;line-height:1.35;white-space:normal;width:220px;max-width:220px">${ob?(ob.length>64?`<span data-obs="${esc(ob)}" data-forn="${esc(i.fornecedor||'')}" data-item="PC ${esc(i.pedido)} · ${esc(i.produto||'')}" onclick="cotObsShow(this)" style="cursor:help" title="clique para ler inteiro">${esc(obCurta)} <span class="material-icons" style="font-size:11px;color:#5c7b8a;vertical-align:-2px">unfold_more</span></span>`:esc(ob)):'<span class="muted">—</span>'}</td>
       ${podeUsar?`<td style="white-space:nowrap"><button class="btn-ghost" style="padding:2px 8px;font-size:11px;color:var(--verde-d)" onclick="ultpUsar('${esc(ctx.chave)}',${ix},${ctx.itemId})" title="traz este preço para o mapa como proposta deste fornecedor (você confere e salva)">usar</button></td>`:''}
     </tr>`;

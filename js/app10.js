@@ -252,7 +252,7 @@ async function bnVer(colidmov){
     +'<div class="muted" style="font-size:11.5px;margin-bottom:2px">'+esc(n.coligada||'')+' · movimento '+esc(n.colidmov)
       +' · competência '+esc(n.competencia)+(n.contrato?' · <b>medição de contrato</b>':'')+'</div>'
     +regua
-    +'<div style="overflow-x:auto"><table class="mtable" style="border:none;table-layout:fixed;width:100%">'
+    +'<div style="overflow-x:auto"><table class="mtable leitura" style="border:none;table-layout:fixed;width:100%">'
     +'<thead><tr><th class="svc-h" style="text-align:left;width:30%">Item</th><th style="text-align:left;width:22%">Apropriado em (tarefa)</th>'
     +'<th style="text-align:right;width:11%">Qtde</th><th style="text-align:right;width:13%">Preço NF</th>'
     +'<th style="text-align:right;width:11%">× pedido</th><th style="text-align:right;width:13%">Total</th></tr></thead><tbody>'

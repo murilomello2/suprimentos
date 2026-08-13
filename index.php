@@ -267,6 +267,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
   .mtable td.svc-c{padding:8px 10px;font-size:13px;position:sticky;left:0;background:#fff;border-right:1px solid var(--line)}
   #mwrap .mtable td.svc-c{z-index:1}
   .mtable tr:hover td.svc-c{background:#f7fbf8}
+  /* TABELAS DE LEITURA (últimos preços, pedido do TOTVS, nota fiscal). O `.mtable td{padding:0}`
+     acima existe para a MATRIZ, onde cada célula traz o próprio bloco já espaçado. Quando o texto
+     vai direto na célula as colunas encostam e o número vira outro número: "R$ 750,00UN" e, pior,
+     qtd 1 + PC 2141 lidos como "12141". Aqui devolvemos o respiro — e um pouco mais entre as
+     colunas numéricas, que são as que colam (valor alinhado à direita seguido de texto à esquerda). */
+  .mtable.leitura td{padding:7px 10px;vertical-align:top}
+  .mtable.leitura th{padding:9px 10px}
+  .mtable.leitura td.num,.mtable.leitura th.num{text-align:right;padding-right:14px;white-space:nowrap}
   .mtable .grp-h td{background:#eef4f0;font-weight:800;color:var(--verde-d);font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;padding:7px 10px;position:sticky;left:0}
   .mo-th{cursor:grab} .mo-th.mo-drag{outline:2px dashed var(--dourado);outline-offset:-2px;background:#fff7e6}
   .mexp-c{padding:6px 8px;vertical-align:top;background:#f7faf8;border-left:1px solid #eef1ef}

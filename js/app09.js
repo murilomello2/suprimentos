@@ -635,7 +635,7 @@ function fecRenderApur(){
       <td style="text-align:right">${BRL(r.fee_caprem)}</td>
       <td style="text-align:right;color:#5b3a8f">${BRL(r.fee_etr)}</td><td></td></tr>`;
   h+='</tbody></table></div></div>';
-  h+='<div class="dmini" style="margin-top:8px">Entram na apuração apenas os projetos com <b>pedido de compra emitido</b> (cláusula 5.2 — vedada apuração sobre economia projetada) e com <b>participação registrada da consultoria</b> (cláusula 3.12). Linha contestada sai da conta enquanto a divergência não é resolvida — a cláusula 3.3 dá 10 dias úteis para a manifestação por escrito. Valores de linha aceita ou contestada ficam <b>congelados</b>, para a medição não escorregar se algum fechamento for reaberto depois.</div>';
+  h+='<div class="dmini" style="margin-top:8px">Entram na apuração apenas os projetos com <b>pedido de compra emitido</b> (cláusula 5.2 — vedada apuração sobre economia projetada) e com <b>participação registrada da consultoria</b> (cláusula 3.12). Linha contestada sai da conta enquanto a divergência não é resolvida — a cláusula 5.7.1 dá <b>7 dias úteis</b> para a conferência e validação da medição, e permite faturar de imediato a parcela incontroversa. Valores de linha aceita ou contestada ficam <b>congelados</b>, para a medição não escorregar se algum fechamento for reaberto depois.</div>';
   w.innerHTML=h;
 }
 async function fecApurar(cid,status,obs){
@@ -648,7 +648,7 @@ async function fecApurar(cid,status,obs){
 }
 function fecContestar(cid,titulo){
   dlgAbrir('Fechamentos','Contestar o ganho apurado',
-    '<div style="max-width:540px"><div class="dmini" style="margin-bottom:10px">Contestando <b>'+esc(titulo)+'</b>. A linha sai da apuração da competência enquanto a divergência não for resolvida, e o texto abaixo fica registrado no histórico da cotação — é o que sustenta a conversa com a consultoria (o contrato dá 10 dias úteis para a manifestação por escrito).</div>'
+    '<div style="max-width:540px"><div class="dmini" style="margin-bottom:10px">Contestando <b>'+esc(titulo)+'</b>. A linha sai da apuração da competência enquanto a divergência não for resolvida, e o texto abaixo fica registrado no histórico da cotação — é o que sustenta a conversa com a consultoria (a cláusula 5.7.1 dá 7 dias úteis para conferir a medição; a parcela incontroversa segue faturável).</div>'
    + cotFld('Por que não concorda com este ganho? *','<textarea id="fecCtM" rows="3" style="width:100%" placeholder="ex.: o preço inicial usou a proposta da rodada 1, mas já havia tabela vigente mais barata para este item."></textarea>')
    + '<div class="bar" style="justify-content:flex-end;gap:8px;margin-top:14px"><button class="btn-ghost" onclick="closeModal(true)">Cancelar</button>'
    + '<button class="btn-prim" style="background:#b3261e" onclick="fecContestarOk('+cid+')">Registrar contestação</button></div></div>');

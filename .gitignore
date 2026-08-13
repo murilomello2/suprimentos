@@ -41,3 +41,9 @@ data/.fornecedores_cnpj.json
 # Estava rastreado por engano: 552 KB reenviados a cada deploy — 20% do peso total, e o
 # deploy ja estourava o timeout do MCP. Mesma regra dos outros data/.*.json aqui de cima.
 data/.solic_atendidos.json
+
+# Cache dos ULTIMOS PRECOS (6h por recorte, um arquivo por item) e o carimbo de ate quando a base
+# do TOTVS vai (1h). Mesma regra: o servidor refaz sozinho, e rastrear seria reenviar lixo a cada
+# deploy -- ate 400 arquivos que so fazem sentido na maquina onde foram gerados.
+data/.ultp/
+data/.bp_base_ate.json

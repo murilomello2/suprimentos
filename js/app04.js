@@ -959,23 +959,67 @@ function cotFechVer(fid){
 
    Carrega SOB DEMANDA (uma consulta por item, ao expandir) e guarda em cache: numa cotação de vinte
    itens, buscar tudo de uma vez seriam vinte consultas ao Supabase que quase ninguém ia olhar. */
-const ULTP = {cache:{}, seq:0};
+const ULTP = {cache:{}, ctx:{}, seq:0};
 function ultpChave(cod,termo){ return cod?('c:'+cod):('t:'+String(termo||'').slice(0,60)); }
-async function ultpBuscar(cod,termo,lim){
+/* Cache que sobrevive ao F5. O da memória morria a cada recarga da tela e cada item voltava a custar
+   ~3s; o do servidor (6h, compartilhado entre as pessoas) já resolve o grosso, e este aqui evita até
+   a ida. TTL curto de propósito: aba aberta o dia todo não pode congelar o quadro. */
+const ULTP_SESS_TTL=30*60*1000;
+function ultpSessLer(k){
+  try{ const s=sessionStorage.getItem('ultp:'+k); if(!s) return null;
+       const o=JSON.parse(s);
+       if(!o||!o.t||(Date.now()-o.t)>ULTP_SESS_TTL){ sessionStorage.removeItem('ultp:'+k); return null; }
+       return o.r; }catch(e){ return null; }
+}
+function ultpSessGravar(k,r){
+  try{ sessionStorage.setItem('ultp:'+k,JSON.stringify({t:Date.now(),r:r})); }
+  catch(e){ /* cota estourada: joga fora só o que é nosso e segue sem cache de disco */
+    try{ Object.keys(sessionStorage).forEach(x=>{ if(x.indexOf('ultp:')===0) sessionStorage.removeItem(x); }); }catch(_){}
+  }
+}
+async function ultpBuscar(cod,termo,lim,forcar){
   const k=ultpChave(cod,termo)+'|'+(lim||5);
-  if(ULTP.cache[k]) return ULTP.cache[k];
+  if(!forcar){ const m=ULTP.cache[k]||ultpSessLer(k); if(m){ ULTP.cache[k]=m; return m; } }
   const u='actions/busca_pedidos.php?ultimos='+encodeURIComponent(cod||'')+'&termo='+encodeURIComponent(termo||'')
-        +'&limit='+(lim||5)+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||'');
+        +'&limit='+(lim||5)+(forcar?'&recarregar=1':'')+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||'');
   const r=await (await fetch(u)).json();
   if(r&&r.error) throw new Error(r.error);
-  ULTP.cache[k]=r; return r;
+  ULTP.cache[k]=r; ultpSessGravar(k,r); return r;
+}
+/* ATÉ QUANDO A BASE VAI. A base de pedidos vem do TOTVS por fora deste sistema — se a carga parar,
+   a tela continua respondendo com dado velho e calada. Acima de 3 dias o carimbo fica âmbar: aqui
+   "nenhuma compra deste item" pode ser mentira da base, não do histórico. */
+function ultpBaseNota(r){
+  if(!r||!r.base_ate) return '';
+  const d=r.base_dias, velha=(d!=null&&d>3);
+  const q=d==null?'':(' · há '+d+(d===1?' dia':' dias'));
+  return `<span title="Data do pedido mais recente que existe na base do TOTVS. A carga é feita fora do cockpit — se esta data ficar para trás, é a carga que parou, não a empresa que parou de comprar."
+    style="${velha?'color:#a15c00;font-weight:700':'color:var(--muted)'}">${velha?'⚠ ':''}base do TOTVS até ${D(r.base_ate)}${q}</span>`;
+}
+/* Relê ignorando os dois caches (o do navegador e o do servidor) — para quem sabe que acabou de
+   sair um PC. Reaproveita o mesmo ctx da montagem, então o botão "usar" continua funcionando. */
+async function ultpRecarregar(el,cid){
+  const c=ULTP.ctx[cid]; if(!c) return;
+  const res=el.closest('.ultpres'), box=res&&res.parentNode; if(!box) return;
+  box.innerHTML='<div class="dmini" style="padding:6px 0">Relendo os pedidos do TOTVS…</div>';
+  try{
+    const r=await ultpBuscar(c.cod,c.termo,c.lim,true);
+    box.innerHTML=ultpTabela(r,c);
+  }catch(e){ box.innerHTML='<div class="dmini" style="color:var(--pend)">Não consegui reler: '+esc(e.message)+'</div>'; }
 }
 /* A tabela. `ctx.itemId` só existe na cotação — é o que habilita o "usar"; na solicitação o quadro
    é só consulta. `ctx.unidade` é a unidade do item na cotação, para acusar divergência de escala. */
 function ultpTabela(r,ctx){
   ctx=ctx||{};
+  /* O ctx fica guardado por id porque o rodapé precisa dele para RE-montar a tabela depois do
+     "atualizar" — inclusive o itemId, sem o qual o botão "usar" sumiria na segunda leitura. */
+  const cid=++ULTP.seq; ULTP.ctx[cid]=ctx;
   const its=(r&&r.itens)||[];
-  if(!its.length) return '<div class="dmini" style="padding:6px 0">Nenhuma compra deste item nos pedidos do TOTVS.</div>';
+  const rod=(extra)=>`<div class="dmini" style="margin-top:4px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">`
+    +ultpBaseNota(r)
+    +`<button class="btn-ghost" style="padding:0 6px;font-size:10px;font-weight:700;color:#5c7b8a" title="ignora o cache e relê agora os pedidos do TOTVS" onclick="ultpRecarregar(this,${cid})"><span class="material-icons" style="font-size:11px;vertical-align:-2px">refresh</span> atualizar</button>`
+    +(extra||'')+`</div>`;
+  if(!its.length) return '<div class="ultpres"><div class="dmini" style="padding:6px 0">Nenhuma compra deste item nos pedidos do TOTVS.</div>'+rod('')+'</div>';
   const un=s=>String(s||'').trim().toUpperCase();
   const podeUsar=!!ctx.itemId&&cotEditavel();
   /* FORA DA CURVA: linha de adiantamento/ADF e erro de digitação entram na base como "preço" e
@@ -1009,8 +1053,9 @@ function ultpTabela(r,ctx){
     </tr>`;
   });
   h+='</tbody></table></div>';
-  if(r.total>its.length) h+=`<div class="dmini" style="margin-top:4px">mostrando ${its.length} de ${r.total} compras — as mais recentes</div>`;
-  return h;
+  return '<div class="ultpres">'+h
+    +rod(r.total>its.length?`<span>mostrando ${its.length} de ${r.total} compras — as mais recentes</span>`:'')
+    +'</div>';
 }
 /* "Usar este preço": NÃO grava direto. Abre o formulário de proposta preenchido, para a pessoa
    conferir, trocar o fornecedor se quiser e salvar pelo caminho normal — que é o que já registra
@@ -1077,7 +1122,8 @@ async function ultpToggle(itemId){
   const cod=String(it.solic_codprd||'').trim(), termo=cod?'':(it.descricao||'');
   try{
     const r=await ultpBuscar(cod,termo,5);
-    box.innerHTML=ultpTabela(r,{itemId:itemId, unidade:it.unidade, chave:ultpChave(cod,termo)+'|5'});
+    box.innerHTML=ultpTabela(r,{itemId:itemId, unidade:it.unidade, chave:ultpChave(cod,termo)+'|5',
+                                cod:cod, termo:termo, lim:5});
     box.setAttribute('data-ok','1');
   }catch(e){ box.innerHTML='<div class="dmini" style="color:var(--pend)">Não consegui consultar os pedidos: '+esc(e.message)+'</div>'; }
 }
@@ -1093,7 +1139,7 @@ async function ultpSolToggle(el,cod,produto,und){
   const termo=cod?'':String(produto||'');
   try{
     const r=await ultpBuscar(cod,termo,5);
-    box.innerHTML=ultpTabela(r,{unidade:und});
+    box.innerHTML=ultpTabela(r,{unidade:und, cod:cod, termo:termo, lim:5});
     box.setAttribute('data-ok','1');
   }catch(e){ box.innerHTML='<div class="dmini" style="color:var(--pend)">Falha ao consultar.</div>'; }
 }

@@ -177,6 +177,83 @@ function bp_aprov_label($k, $etapa) {
     return 'Sem fluxo de aprovação';
 }
 
+/**
+ * ATÉ QUANDO A BASE ESTÁ ATUALIZADA.
+ *
+ * A base de pedidos NÃO é escrita por este sistema: ela chega do TOTVS por fora (Power Automate).
+ * Se esse fluxo parar, a tela continua respondendo — com dado velho e sem dizer nada. Foi por isso
+ * que este carimbo existe: "nenhuma compra deste item" é uma frase MUITO diferente conforme a base
+ * tenha parado ontem ou há duas semanas.
+ *
+ * O que dá para saber sem inventar: a data do pedido mais recente que existe na base. Não é a hora
+ * da carga (o TOTVS não manda isso), é um piso — a carga é no mínimo tão nova quanto ele. Serve
+ * exatamente para o alarme que interessa: parou de entrar pedido.
+ *
+ * `lte.hoje` porque pedido com data futura existe e congelaria o carimbo numa data que nunca chega.
+ */
+define('BP_BASE_CACHE', __DIR__ . '/../data/.bp_base_ate.json');
+define('BP_BASE_TTL', 3600);       // 1 h: é um rodapé, não vale uma consulta por abertura de quadro
+
+function bp_base_ate() {
+    if (is_file(BP_BASE_CACHE) && (time() - filemtime(BP_BASE_CACHE)) < BP_BASE_TTL) {
+        $j = @json_decode(@file_get_contents(BP_BASE_CACHE), true);
+        if (is_array($j)) return $j;
+    }
+    $out = ['data' => '', 'dias' => null];
+    try {
+        $r = bp_get('select=pedido_data&pedido_data=lte.' . date('Y-m-d') . '&order=pedido_data.desc&limit=1');
+        $d = substr((string)($r[0]['pedido_data'] ?? ''), 0, 10);
+        if ($d === '') return $out;
+        $out = ['data' => $d, 'dias' => (int)floor((time() - strtotime($d)) / 86400)];
+    } catch (Throwable $e) {
+        return $out;   // de propósito NÃO grava: cache de falha esconderia a base fora do ar por 1 h
+    }
+    @file_put_contents(BP_BASE_CACHE, json_encode($out), LOCK_EX);
+    return $out;
+}
+
+/**
+ * CACHE DOS ÚLTIMOS PREÇOS (server-side).
+ *
+ * O quadro abre um item por vez e cada abertura custava ~3s de Supabase — medido. Numa cotação de
+ * vinte itens, com três pessoas olhando a mesma cotação, é a MESMA consulta repetida: o recorte
+ * depende só do código do produto (ou do texto), nunca de quem pergunta. Cabia cache, e o cache do
+ * navegador não resolvia porque morria no F5 e não era compartilhado entre as pessoas.
+ *
+ * TTL de 6h contra uma base que ganha carga ~diária: o pior atraso possível é ver um PC de hoje uma
+ * tarde depois, e o botão "atualizar" do rodapé (&recarregar=1) fura o cache para quem não pode
+ * esperar. O carimbo da base NÃO entra no arquivo — ele é colado fresco na resposta, senão o aviso
+ * de "base parada" chegaria com 6h de atraso, justo o que ele existe para denunciar.
+ *
+ * Um arquivo por recorte (e não um JSON grande): sem corrida de leitura-e-regravação entre dois
+ * compradores, e a expiração é o mtime do próprio arquivo.
+ */
+define('ULTP_CACHE_DIR', __DIR__ . '/../data/.ultp');
+define('ULTP_TTL', 21600);         // 6 h
+define('ULTP_MAX_ARQ', 400);       // teto de arquivos na pasta (cada um ~4 KB)
+
+function ultp_cache_ler($chave) {
+    $f = ULTP_CACHE_DIR . '/' . $chave . '.json';
+    if (!is_file($f) || (time() - filemtime($f)) >= ULTP_TTL) return null;
+    $j = @json_decode(@file_get_contents($f), true);
+    return is_array($j) ? $j : null;
+}
+
+function ultp_cache_gravar($chave, array $payload) {
+    if (!is_dir(ULTP_CACHE_DIR)) @mkdir(ULTP_CACHE_DIR, 0775, true);
+    if (!is_dir(ULTP_CACHE_DIR)) return;                       // sem permissão de escrita: segue sem cache
+    @file_put_contents(ULTP_CACHE_DIR . '/' . $chave . '.json',
+                       json_encode($payload, JSON_UNESCAPED_UNICODE), LOCK_EX);
+    /* Poda só na gravação (que já é o caminho lento). Apaga um BLOCO acima do teto — apagar um por
+       vez faria a pasta viver no limite, varrendo a cada gravação. */
+    $fs = @glob(ULTP_CACHE_DIR . '/*.json') ?: [];
+    if (count($fs) <= ULTP_MAX_ARQ) return;
+    $idade = [];
+    foreach ($fs as $f) $idade[$f] = @filemtime($f) ?: 0;
+    asort($idade);
+    foreach (array_slice(array_keys($idade), 0, count($fs) - ULTP_MAX_ARQ + 50) as $f) @unlink($f);
+}
+
 /* Endpoint E biblioteca: o Envio de Pedidos reaproveita bp_varrer/bp_obra_label/bp_aprov em vez de
    copiá-los (duas cópias da regra da CAPRETZ acabariam divergindo, e é ela que decide a obra).
    Quem inclui como biblioteca define BP_LIB_ONLY e o bloco de resposta abaixo não roda. */
@@ -232,6 +309,16 @@ try {
         $lim   = max(1, min(20, (int)($_GET['limit'] ?? 5)));
         if ($cod === '' && strlen($termo) < 3) { echo json_encode(['itens' => [], 'total' => 0, 'fonte' => '']); exit; }
 
+        /* O carimbo da base vem sempre fresco (cache próprio de 1h), inclusive no acerto de cache
+           abaixo — é ele que denuncia base parada, e denunciar com 6h de atraso não serve. */
+        $base   = bp_base_ate();
+        $chave  = md5($cod . '|' . $termo . '|' . $lim);
+        $forcar = !empty($_GET['recarregar']);
+        if (!$forcar && ($c = ultp_cache_ler($chave)) !== null) {
+            $c['base_ate'] = $base['data']; $c['base_dias'] = $base['dias']; $c['cache'] = 1;
+            echo json_encode($c, JSON_UNESCAPED_UNICODE); exit;
+        }
+
         $sel = 'select=pedido_numero,pedido_data,pedido_status,coligada,coligada_cod,ccusto_cod,ccusto_nome,'
              . 'fornecedor_nome,fornecedor_fantasia,codprd,produto,qtd,und,preco_unit,valor_total,'
              . 'solic_numeros,item_observacao,obra_efetiva_nome,obra_efetiva_fonte,obra_cod';
@@ -277,8 +364,11 @@ try {
         }
         $itens = array_values($ag);
         usort($itens, fn($a, $b) => strcmp((string)$b['data'], (string)$a['data']) ?: ($b['pedido'] <=> $a['pedido']));
-        echo json_encode(['itens' => array_slice($itens, 0, $lim), 'total' => count($itens),
-                          'fonte' => $fonte, 'codprd' => $cod], JSON_UNESCAPED_UNICODE); exit;
+        $payload = ['itens' => array_slice($itens, 0, $lim), 'total' => count($itens),
+                    'fonte' => $fonte, 'codprd' => $cod];
+        ultp_cache_gravar($chave, $payload);      // sem o carimbo da base: ele é colado na resposta
+        $payload['base_ate'] = $base['data']; $payload['base_dias'] = $base['dias']; $payload['cache'] = 0;
+        echo json_encode($payload, JSON_UNESCAPED_UNICODE); exit;
     }
 
     // ---- ?obras=1 : lista pro filtro, montada a partir dos PRÓPRIOS PEDIDOS ----

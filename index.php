@@ -911,6 +911,7 @@ $jsv = function ($p) { $f = __DIR__ . '/' . $p; return $p . '?v=' . (is_file($f)
   <script src="<?= $jsv('js/app08.js') ?>"></script>
   <script src="<?= $jsv('js/app09.js') ?>"></script>   <!-- assistente de whatsapp -->   <!-- caixa de e-mail -->   <!-- telas de consulta da obra -->
   <script src="<?= $jsv('js/app10.js') ?>"></script>   <!-- busca de notas fiscais (cadeia SC -> PC -> NF) -->
+  <script src="<?= $jsv('js/app11.js') ?>"></script>   <!-- cadastro de fornecedor em lote (print da IA / mascara) -->
 
 </body>
 </html>

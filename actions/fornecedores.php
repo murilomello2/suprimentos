@@ -94,6 +94,13 @@ try {
         }
     }
 
+    /* Este arquivo também serve de BIBLIOTECA para o cadastro em lote (actions/forn_lote.php): com
+       FORN_LIB_ONLY o include para exatamente aqui — o $pdo já aberto, as colunas de fonte já
+       garantidas — e leva só as funções (forn_editor / forn_fontes / forn_add_categoria /
+       forn_sem_acento). Sem isto o lote teria de repetir a regra de permissão e o vocabulário de
+       fontes, e um dia as duas cópias discordariam. Mesmo padrão do ORACLE_LIB_ONLY. */
+    if (defined('FORN_LIB_ONLY')) return;
+
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         $cats = $pdo->query("SELECT id, nome FROM cot_categoria ORDER BY nome")->fetchAll();
         if (isset($_GET['categorias'])) { echo json_encode(['categorias'=>$cats], JSON_UNESCAPED_UNICODE); exit; }
@@ -638,4 +645,7 @@ try {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
     http_response_code(400);
     echo json_encode(['error'=>$e->getMessage()], JSON_UNESCAPED_UNICODE);
+    // exit e não "fim do arquivo": quem inclui este arquivo como biblioteca (FORN_LIB_ONLY) seguiria
+    // rodando com o $pdo inexistente e escreveria um SEGUNDO json de erro em cima deste.
+    exit;
 }

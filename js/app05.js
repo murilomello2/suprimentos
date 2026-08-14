@@ -45,7 +45,7 @@ async function solObraSave(i){ const x=SOL.obras.obras[i];
    Agora pagina de verdade, e qualquer mudança de filtro volta p/ a página 1 — senão você filtra
    uma categoria com 12 itens estando na página 7 e a tela aparece vazia sem explicar por quê. */
 const FORN_POR_PAGINA=60;
-let FORN={list:[],cats:[],tipos:[],fontes:[],total:0,pag:1,f:{nome:'',categoria:'',tipo:'',itens:'',totvs:'',fonte:''},edit:null,
+let FORN={list:[],cats:[],tipos:[],fontes:[],total:0,pag:1,f:{nome:'',categoria:'',tipo:'',itens:'',totvs:'',fonte:''},edit:null,lote:0,
   email:{aberto:false,carregando:false,itens:null,varrendo:false}, sincTotvs:null};
 /* cor/rótulo do selo de fonte — só pra bater o olho e saber a procedência sem ler.
    Rótulo duplicado do servidor (forn_fontes()) de propósito: o selo aparece em telas que NUNCA
@@ -78,6 +78,7 @@ function fornCSV(){
 }
 function fornCatOpts(sel){ return '<option value="">Todas as categorias</option>'+FORN.cats.map(c=>`<option value="${esc(c.nome)}" ${c.nome===sel?'selected':''}>${esc(c.nome)}</option>`).join(''); }
 function fornRender(){
+  if(FORN.lote) return fornLoteRender();     // cadastro em lote (js/app11.js)
   if(FORN.edit) return fornRenderEdit();
   const w=document.getElementById('cotwrap');
   const paginas=Math.max(1,Math.ceil(FORN.total/FORN_POR_PAGINA));
@@ -105,6 +106,7 @@ function fornRender(){
     <span class="muted" style="font-size:12px"><b>${FORN.total}</b> fornecedor(es)${temFiltro?' no filtro':''}${paginas>1?` · página ${FORN.pag} de ${paginas}`:''}</span>
     <button class="btn-ghost" style="margin-left:auto;padding:7px 12px" onclick="fornCSV()" title="baixa em CSV TODAS as ${FORN.total} linha(s) do recorte atual — não só esta página">
       <span class="material-icons" style="font-size:15px;vertical-align:-3px">download</span> Exportar CSV</button>
+    ${CAN_FORN?`<button class="btn-ghost" style="padding:7px 12px" onclick="fornLoteAbrir()" title="a lista inteira de uma vez: cola o print da pesquisa que a IA devolveu (ou uma planilha na máscara), confere e cadastra"><span class="material-icons" style="font-size:15px;vertical-align:-3px;color:var(--verde)">playlist_add</span> Inserir em lote</button>`:''}
     ${CAN_FORN?'<button class="btn-prim" style="padding:7px 12px" onclick="fornNovo()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">add</span> Novo</button>':''}
   </div></div><div class="wrap"><table><thead><tr><th>Nome</th><th>Categoria</th><th>Cidade</th><th>Contato</th><th>Telefone</th><th>Itens</th><th>Tipo</th><th></th></tr></thead><tbody>`;
   for(const f of FORN.list){

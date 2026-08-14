@@ -74,6 +74,37 @@ function llm_perfil($perfil = 'padrao') {
             'temperatura' => $p['temperatura'] ?? 0.3, 'max_tokens' => (int)($p['max_tokens'] ?? 1200), 'perfil' => $perfil];
 }
 
+/**
+ * CONTEÚDO MULTIMODAL num formato NEUTRO.
+ *
+ * O cadastro de fornecedor em lote lê o PRINT de uma lista (o comprador pesquisa na IA e cola a
+ * tabela como imagem). Cada provedor embala imagem de um jeito diferente, e antes disto o
+ * llm_chat() fazia (string)$content — o que jogava a imagem no lixo calado em Anthropic/Google.
+ *
+ * Então a mensagem pode chegar como array de partes:
+ *   [['t'=>'texto','texto'=>'...'], ['t'=>'imagem','mime'=>'image/png','b64'=>'...']]
+ * e aqui cada uma vira o formato do provedor. `content` string continua passando reto — nada do
+ * que já funcionava muda de caminho.
+ */
+function llm_partes($partes, $prov) {
+    $out = [];
+    foreach ((array)$partes as $p) {
+        $tipo = $p['t'] ?? 'texto';
+        if ($tipo === 'imagem') {
+            $mime = (string)($p['mime'] ?? 'image/png'); $b64 = (string)($p['b64'] ?? '');
+            if ($b64 === '') continue;
+            if ($prov === 'anthropic')   $out[] = ['type' => 'image', 'source' => ['type' => 'base64', 'media_type' => $mime, 'data' => $b64]];
+            elseif ($prov === 'google')  $out[] = ['inline_data' => ['mime_type' => $mime, 'data' => $b64]];
+            else                         $out[] = ['type' => 'image_url', 'image_url' => ['url' => 'data:' . $mime . ';base64,' . $b64]];
+            continue;
+        }
+        $txt = (string)($p['texto'] ?? '');
+        if ($txt === '') continue;
+        $out[] = ($prov === 'google') ? ['text' => $txt] : ['type' => 'text', 'text' => $txt];
+    }
+    return $out;
+}
+
 function llm_http($url, $headers, $payload, $timeout = 120) {
     $ch = curl_init($url);
     curl_setopt_array($ch, [
@@ -110,7 +141,8 @@ function llm_chat($perfil, $msgs, $opts = []) {
         $sys = ''; $ms = [];
         foreach ($msgs as $m) {
             if (($m['role'] ?? '') === 'system') { $sys .= ($sys ? "\n\n" : '') . (string)$m['content']; continue; }
-            $ms[] = ['role' => $m['role'] === 'assistant' ? 'assistant' : 'user', 'content' => (string)$m['content']];
+            $ms[] = ['role' => $m['role'] === 'assistant' ? 'assistant' : 'user',
+                     'content' => is_array($m['content'] ?? null) ? llm_partes($m['content'], 'anthropic') : (string)$m['content']];
         }
         $body = ['model' => $p['modelo'], 'max_tokens' => $maxT, 'temperature' => $temp, 'messages' => $ms];
         if ($sys !== '') $body['system'] = $sys;
@@ -128,7 +160,8 @@ function llm_chat($perfil, $msgs, $opts = []) {
         $sys = ''; $conts = [];
         foreach ($msgs as $m) {
             if (($m['role'] ?? '') === 'system') { $sys .= ($sys ? "\n\n" : '') . (string)$m['content']; continue; }
-            $conts[] = ['role' => ($m['role'] === 'assistant' ? 'model' : 'user'), 'parts' => [['text' => (string)$m['content']]]];
+            $conts[] = ['role' => ($m['role'] === 'assistant' ? 'model' : 'user'),
+                        'parts' => is_array($m['content'] ?? null) ? llm_partes($m['content'], 'google') : [['text' => (string)$m['content']]]];
         }
         $body = ['contents' => $conts, 'generationConfig' => ['temperature' => $temp, 'maxOutputTokens' => $maxT]];
         if ($sys !== '') $body['systemInstruction'] = ['parts' => [['text' => $sys]]];
@@ -143,6 +176,8 @@ function llm_chat($perfil, $msgs, $opts = []) {
     }
 
     // openai + qualquer coisa compatível com ela
+    $msgs = array_map(fn($m) => is_array($m['content'] ?? null)
+        ? ['role' => $m['role'], 'content' => llm_partes($m['content'], 'openai')] : $m, $msgs);
     $body = ['model' => $p['modelo'], 'temperature' => $temp, 'max_tokens' => $maxT, 'messages' => $msgs];
     if (!empty($opts['json'])) $body['response_format'] = ['type' => 'json_object'];
     [$code, $res, $err] = llm_http($p['url'], ['Content-Type: application/json', 'Authorization: Bearer ' . $p['chave']], $body);

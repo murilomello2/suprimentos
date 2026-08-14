@@ -60,8 +60,18 @@ function forn_lote_cols() {
 }
 function forn_lote_tipos() { return ['Fabricante', 'M.O.', 'Atacadista', 'Varejista', 'Locadora', 'Distribuidor', 'Prestador']; }
 
-/** chave de comparação de texto: sem acento, sem caixa, sem espaço sobrando */
-function forn_lote_chave($s) { return preg_replace('/\s+/', ' ', trim(mb_strtolower(forn_sem_acento((string)$s), 'UTF-8'))); }
+/* A HOSPEDAGEM NÃO TEM mbstring (medido em 14/08/2026: mb_strtolower() undefined em produção —
+   o cotacoes.php já convivia com isso). Então nada de mb_* aqui.
+   - chave: forn_sem_acento() já derruba tudo para ASCII, e aí strtolower() basta;
+   - corte: substr() cru partiria um caractere UTF-8 em dois e o JSON sairia inválido — o corte
+     por PCRE com /u respeita o caractere. */
+function forn_lote_chave($s) { return preg_replace('/\s+/', ' ', trim(strtolower(forn_sem_acento((string)$s)))); }
+function forn_lote_corta($s, $n) {
+    $s = (string)$s; $n = (int)$n;
+    if (strlen($s) <= $n) return $s;                       // bytes ≤ n ⇒ caracteres ≤ n
+    if (preg_match('/^.{0,' . $n . '}/us', $s, $m)) return $m[0];
+    return rtrim(substr($s, 0, $n), "\x80..\xBF");         // UTF-8 já quebrado na entrada: tira o rabo partido
+}
 
 /**
  * A MÁSCARA EM TEXTO — é isto que o comprador cola na IA (ChatGPT, Gemini, no que ele usa) para a
@@ -220,7 +230,7 @@ function forn_lote_norm($pdo, $l, $catMapa, $fontesOK) {
     $cnpjOK = strlen($dig) >= 11 && !preg_match('/^(\d)\1+$/', $dig);
 
     // e-mail: minúsculo e validado. É o campo que faz o fornecedor servir para cotação.
-    $r['email'] = mb_strtolower($r['email'], 'UTF-8');
+    $r['email'] = strtolower($r['email']);
     if ($r['email'] !== '' && strpos($r['email'], ',') !== false) $r['email'] = trim(explode(',', $r['email'])[0]);
     if ($r['email'] !== '' && !filter_var($r['email'], FILTER_VALIDATE_EMAIL)) {
         /* "Solicitar pelo site", "formulário no site", "consultar" — a coluna de e-mail do print às
@@ -364,7 +374,7 @@ try {
                 $partes[] = ['t' => 'imagem', 'mime' => $mime, 'b64' => base64_encode($bin)];
                 $imgs++;
             }
-            if ($texto !== '') $partes[] = ['t' => 'texto', 'texto' => "LISTA EM TEXTO:\n" . mb_substr($texto, 0, 20000)];
+            if ($texto !== '') $partes[] = ['t' => 'texto', 'texto' => "LISTA EM TEXTO:\n" . forn_lote_corta($texto, 20000)];
             if (!$partes) throw new Exception('cole o print da lista (Ctrl+V) ou o texto dela');
             array_unshift($partes, ['t' => 'texto', 'texto' => forn_lote_prompt_interno($cats, $contexto)]);
 
@@ -391,7 +401,7 @@ try {
             $vistos[$k] = 1;
             // itens vazio é fornecedor que a busca nunca acha: na falta de algo melhor, vale o
             // contexto que o comprador escreveu (é o que ele foi pesquisar, afinal)
-            if ($contexto !== '' && $n['itens'] === '') $n['itens'] = mb_substr($contexto, 0, 240);
+            if ($contexto !== '' && $n['itens'] === '') $n['itens'] = forn_lote_corta($contexto, 240);
             $linhas[] = $n;
         }
         if (!$linhas) throw new Exception('nenhuma linha aproveitável — confira se o print mostra a tabela inteira');
@@ -427,8 +437,8 @@ try {
                      'cidade' => $n['cidade'], 'contato' => $n['contato'], 'telefone' => $n['telefone'],
                      'whatsapp' => $n['whatsapp'], 'email' => $n['email'], 'itens' => $n['itens'],
                      'tipo' => $n['tipo'], 'categoria' => $n['categoria'], 'fonte' => $n['fonte'],
-                     'fonte_data' => $hoje, 'fonte_detalhe' => mb_substr($det, 0, 250),
-                     'fonte_indicado_por' => ($n['fonte'] === 'indicacao' ? mb_substr($n['indicado_por'], 0, 150) : ''),
+                     'fonte_data' => $hoje, 'fonte_detalhe' => forn_lote_corta($det, 250),
+                     'fonte_indicado_por' => ($n['fonte'] === 'indicacao' ? forn_lote_corta($n['indicado_por'], 150) : ''),
                      'wa_e164' => $n['wa_e164'], 'wa_tipo' => $n['wa_tipo'],
                      'wa_origem' => $n['wa_e164'] !== '' ? ($n['wa_do_telefone'] ? 'telefone' : 'whatsapp') : ''];
             if ($vals['categoria'] !== '' && !isset($catMapa[forn_lote_chave($vals['categoria'])])) $novasCats[$vals['categoria']] = 1;

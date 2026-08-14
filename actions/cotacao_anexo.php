@@ -12,7 +12,20 @@
 require_once __DIR__ . '/../includes/db.php';
 
 define('ANEXO_DIR', __DIR__ . '/../data/anexos');
-define('ANEXO_MAX', 25 * 1024 * 1024);
+/* Teto do anexo: 25 MB é a REGRA do produto, mas o PHP do servidor pode aceitar menos. Vale o
+   MENOR dos dois — assim o "máximo X MB" que aparece na tela é a verdade daquele servidor, e não
+   uma promessa que o upload quebra depois. */
+function anexo_ini_bytes($v) {
+    $v = trim((string)$v); if ($v === '') return 0;
+    $n = (float)$v; $u = strtolower(substr($v, -1));
+    return (int)($n * ($u === 'g' ? 1073741824 : ($u === 'm' ? 1048576 : ($u === 'k' ? 1024 : 1))));
+}
+define('ANEXO_MAX', (function () {
+    $lim = [25 * 1024 * 1024];
+    if (($b = anexo_ini_bytes(ini_get('upload_max_filesize'))) > 0) $lim[] = $b;          // teto POR ARQUIVO
+    if (($b = anexo_ini_bytes(ini_get('post_max_size'))) > 0) $lim[] = $b - 256 * 1024;   // teto do CORPO (menos os outros campos)
+    return max(256 * 1024, min($lim));
+})());
 
 // pode GERIR a cotação (anexar/excluir/vincular) = MESMA regra de lançar proposta: admin | gerente | criador |
 // colaborador. Antes o anexo exigia can_edit_obra (edição de obra) → comprador criador/colaborador via o botão
@@ -33,6 +46,14 @@ function anexo_can($pdo, $me, $cotacao_id) {
 
 try {
     $pdo = db();
+
+    /* LIMITE REAL deste servidor — a tela pergunta antes de deixar escolher o arquivo, para dizer
+       "máximo X MB" em vez de prometer 25 e falhar no envio. */
+    if (isset($_GET['limite'])) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['ok' => true, 'max_bytes' => ANEXO_MAX, 'max_mb' => round(ANEXO_MAX / 1048576, 1),
+            'upload_max_filesize' => ini_get('upload_max_filesize'), 'post_max_size' => ini_get('post_max_size')]); exit;
+    }
 
     // ---------- DOWNLOAD (stream) ----------
     if (isset($_GET['download'])) {
@@ -95,6 +116,20 @@ try {
 
     // ---------- UPLOAD (multipart) ----------
     header('Content-Type: application/json; charset=utf-8');
+
+    /* POST MAIOR QUE O LIMITE DO PHP = requisição VAZIA. Quando o corpo passa de post_max_size, o
+       PHP joga fora $_POST E $_FILES juntos e não marca erro em lugar nenhum: chegava aqui como
+       "cotacao_id obrigatório", que manda a pessoa procurar no lugar errado. Foi o que fez o anexo
+       falhar para uns e funcionar para outros — depende do TAMANHO do arquivo, não de quem é.
+       Diagnóstico medido em 14/08/2026, a pedido do Murilo (relato do comprador Gabriel Borges). */
+    if (empty($_POST) && empty($_FILES) && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+        $lim = ini_get('post_max_size');
+        http_response_code(413);
+        echo json_encode(['error' => 'O arquivo passou do limite do servidor (' . $lim . ' por envio). '
+            . 'Mande um arquivo menor, ou envie um de cada vez — se precisar de mais, peça ao TI para aumentar post_max_size.',
+            'limite' => $lim], JSON_UNESCAPED_UNICODE); exit;
+    }
+
     $cid = (int)($_POST['cotacao_id'] ?? 0); if (!$cid) throw new Exception('cotacao_id obrigatório');
     [$perms, $obra, $pode] = anexo_can($pdo, $_POST['me'] ?? null, $cid);
     if (!$pode) { http_response_code(403); echo json_encode(['error'=>'Sem permissão para anexar nesta cotação (só admin, gerente, quem criou ou um colaborador).']); exit; }
@@ -113,7 +148,7 @@ try {
     $pid = (int)($_POST['proposta_id'] ?? 0);   // valida que a proposta é DESTA cotação (senão vira anexo da cotação)
     if ($pid) { $ck = $pdo->prepare("SELECT COUNT(*) FROM cotacao_proposta WHERE id=? AND cotacao_id=?"); $ck->execute([$pid, $cid]); if (!$ck->fetchColumn()) $pid = 0; }
     $f = $_FILES['arquivo'];
-    if ($f['size'] > ANEXO_MAX) throw new Exception('máximo 25 MB por arquivo');
+    if ($f['size'] > ANEXO_MAX) throw new Exception('máximo ' . round(ANEXO_MAX / 1048576) . ' MB por arquivo neste servidor');
     if ($f['size'] <= 0) throw new Exception('arquivo vazio');
     // detecta o TIPO por MAGIC BYTES (não confia no mime/extensão do cliente): PDF, Excel (xlsx/xls) e imagem (PNG/JPG)
     $fh = fopen($f['tmp_name'], 'rb'); $head = $fh ? fread($fh, 8) : ''; if ($fh) fclose($fh);

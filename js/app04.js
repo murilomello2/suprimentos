@@ -1207,7 +1207,18 @@ async function ultpSolToggle(el,cod,produto,und){
 function cotAnexoIcon(mime,nome){ const m=(mime||'')+' '+(nome||'');
   if(/pdf/i.test(m))return'picture_as_pdf'; if(/png|jpe?g|image/i.test(m))return'image'; if(/sheet|excel|xls/i.test(m))return'table_view'; return'insert_drive_file'; }
 // modal de anexo multi-formato (PDF/Excel/imagem) POR fornecedor — arrastar, colar (Ctrl+V) ou clicar
+/* Limite REAL de upload deste servidor. Ficava 25 MB escrito na tela enquanto o PHP aceitava 2 MB:
+   quem mandava proposta escaneada via "falha" sem motivo aparente. Pergunta uma vez e guarda. */
+let ANEXO_LIM=null;
+async function cotAnexoLimite(){
+  if(ANEXO_LIM) return ANEXO_LIM;
+  try{ const r=await (await fetch('actions/cotacao_anexo.php?limite=1')).json();
+    if(r&&r.max_bytes) ANEXO_LIM={bytes:r.max_bytes,mb:r.max_mb}; }catch(e){}
+  if(!ANEXO_LIM) ANEXO_LIM={bytes:25*1024*1024,mb:25};
+  return ANEXO_LIM;
+}
 function cotAnexarAbrir(fornId,fornNome){ COT.anexo={fornId:(fornId&&fornId!=='null')?fornId:null,fornNome:fornNome||'',files:[]};
+  cotAnexoLimite().then(()=>{ if(COT.anexo) cotAnexarRender(); });
   let ov=document.getElementById('anexOverlay'); if(!ov){ ov=document.createElement('div'); ov.id='anexOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }
   document.addEventListener('paste',cotAnexarPaste); cotAnexarRender(); }
 function cotAnexarFechar(){ const ov=document.getElementById('anexOverlay'); if(ov)ov.remove(); document.removeEventListener('paste',cotAnexarPaste); COT.anexo=null; }
@@ -1223,7 +1234,7 @@ function cotAnexarRender(){ const a=COT.anexo, ov=document.getElementById('anexO
     <label ondragover="event.preventDefault()" ondrop="cotAnexarDrop(event)" style="display:block;border:2px dashed var(--line);border-radius:12px;padding:22px;text-align:center;cursor:pointer;background:#fafbfb">
       <span class="material-icons" style="font-size:30px;color:var(--verde)">upload_file</span>
       <div style="font-size:12.5px;margin-top:4px">Arraste, <b>cole (Ctrl+V)</b> ou clique</div>
-      <div class="muted" style="font-size:11px;margin-top:2px">PDF, Excel (xlsx/xls) ou imagem (PNG/JPG) · até 25 MB</div>
+      <div class="muted" style="font-size:11px;margin-top:2px">PDF, Excel (xlsx/xls) ou imagem (PNG/JPG) · até ${ANEXO_LIM?ANEXO_LIM.mb:25} MB por arquivo${a.files.length>1?` · ${a.files.length} selecionados`:''}</div>
       <input type="file" accept=".pdf,.xlsx,.xls,image/png,image/jpeg,application/pdf" multiple style="display:none" onchange="cotAnexarPick(this)"></label>
     <div style="margin-top:10px">${a.files.length?a.files.map((f,i)=>`<div style="display:flex;align-items:center;gap:7px;padding:4px 0"><span class="material-icons" style="font-size:16px;color:var(--muted)">${cotAnexoIcon(f.type,f.name)}</span><span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span><span class="muted" style="font-size:10.5px">${(f.size/1024).toFixed(0)} KB</span><span onclick="COT.anexo.files.splice(${i},1);cotAnexarRender()" class="material-icons" style="cursor:pointer;color:var(--pend);font-size:16px">close</span></div>`).join(''):'<div class="dmini">Nenhum arquivo ainda.</div>'}</div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
@@ -1237,7 +1248,8 @@ async function cotAnexarEnviar(runIA){ const a=COT.anexo; if(!a||!a.files.length
   cotAnexarFechar(); toast(ok+' anexado(s)'+(fail?' · '+fail+' falharam':''));
   if(ok){ await cotOpen(COT.cur.cotacao.id); if(runIA) cotIAPreencher(fornId,fornNome); } }
 async function cotUploadAnexoFile(file,fornId,fornNome,propostaId){
-  if(file.size>25*1024*1024){ toast('"'+file.name+'": máx 25 MB'); return false; }
+  const lim=(ANEXO_LIM&&ANEXO_LIM.bytes)||25*1024*1024;
+  if(file.size>lim){ toast('"'+file.name+'" tem '+(file.size/1048576).toFixed(1)+' MB — o servidor aceita até '+((ANEXO_LIM&&ANEXO_LIM.mb)||25)+' MB por arquivo'); return false; }
   const fd=new FormData(); fd.append('arquivo',file); fd.append('cotacao_id',COT.cur.cotacao.id);
   if(fornId)fd.append('fornecedor_id',fornId); if(fornNome)fd.append('fornecedor_nome',fornNome); if(propostaId)fd.append('proposta_id',propostaId);
   fd.append('me',(EU&&EU.bitrix_id)||'');

@@ -393,7 +393,10 @@ try {
                 'match_metodo' => $r['match_metodo'], 'match_confianca' => $r['match_confianca'],
                 'tipo' => $r['tipo'], 'resumo' => $r['resumo'], 'tem_proposta' => (int)$r['tem_proposta'], 'precisa_humano' => (int)$r['precisa_humano'],
                 'ia_confianca' => $r['ia_confianca'], 'tem_anexo' => (int)$r['tem_anexo'], 'anexos_ids' => $r['anexos_ids'],
-                'tem_rascunho' => $draft ? 1 : 0, 'draft' => $draft, 'corpo_preview' => $r['corpo_preview'], 'status' => $r['status']];
+                'tem_rascunho' => $draft ? 1 : 0, 'draft' => $draft, 'corpo_preview' => $r['corpo_preview'], 'status' => $r['status'],
+                // colunas da resposta são ADITIVAS: antes da 1ª resposta elas nem existem na tabela
+                'respondido_em' => $r['respondido_em'] ?? null, 'respondido_nome' => $r['respondido_nome'] ?? null,
+                'resposta_texto' => $r['resposta_texto'] ?? null];
         }, $q->fetchAll());
         echo json_encode(['ok' => true, 'itens' => $itens], JSON_UNESCAPED_UNICODE); exit;
     }
@@ -404,6 +407,79 @@ try {
         $duv = (int)$pdo->query("SELECT COUNT(*) FROM cotacao_email_in WHERE status='novo' AND tipo='duvida'")->fetchColumn();
         $nv = (int)$pdo->query("SELECT COUNT(*) FROM cotacao_email_in WHERE status='nao_vinculado'")->fetchColumn();
         echo json_encode(['ok' => true, 'novo' => $novo, 'cotacoes' => $cot, 'duvidas' => $duv, 'nao_vinculado' => $nv], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    /**
+     * RESPONDER a resposta do fornecedor — fecha o ciclo dentro do cockpit.
+     *
+     * A IA classifica "DÚVIDA" e mostra o card; até aqui o comprador via a pergunta e tinha de
+     * sair para o webmail, achar a thread e responder de lá — e o cockpit nunca ficava sabendo.
+     * Agora responde daqui, e a resposta:
+     *   • vai para o REMETENTE GRAVADO NO BANCO, nunca para um endereço vindo do corpo do e-mail
+     *     (conteúdo de e-mail é dado não confiável; quem escreve o "responda para X" é o remetente);
+     *   • entra na mesma thread (In-Reply-To/References com o Message-ID original);
+     *   • sai com Message-ID nosso, é registrada em caixa_saida e arquivada na pasta Enviados —
+     *     então aparece na aba Enviados da Caixa de E-mail com o nome de quem respondeu.
+     */
+    if ($acao === 'responder') {
+        $id = (int)($in['id'] ?? 0); if (!$id) throw new Exception('id obrigatório');
+        $texto = trim((string)($in['texto'] ?? ''));
+        if ($texto === '') throw new Exception('escreva a resposta');
+        if (strlen($texto) > 20000) throw new Exception('resposta muito longa');
+
+        $q = $pdo->prepare("SELECT * FROM cotacao_email_in WHERE id=? LIMIT 1"); $q->execute([$id]);
+        $m = $q->fetch(); if (!$m) throw new Exception('e-mail não encontrado');
+        if ($m['cotacao_id']) { if (!cot_pode_gerir($pdo, $me, (int)$m['cotacao_id'])) { http_response_code(403); echo json_encode(['error' => 'Sem permissão nesta cotação.']); exit; } }
+        elseif (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores.']); exit; }
+
+        $para = trim((string)$m['from_email']);
+        if (!filter_var($para, FILTER_VALIDATE_EMAIL)) throw new Exception('o remetente deste e-mail não tem endereço válido (' . $para . ')');
+
+        define('EMAIL_LIB_ONLY', 1);
+        require_once __DIR__ . '/email.php';                 // email_cfg() + email_fone(): mesma conta e mesma assinatura do convite
+        require_once __DIR__ . '/../includes/caixa.php';     // caixa_msgid/caixa_log_saida/caixa_arquivar_enviado
+        $cfg = email_cfg();
+        if (empty($cfg['senha'])) throw new Exception('A conta de e-mail não está configurada — o admin cadastra em Configurações › E-mail.');
+
+        $assunto = trim((string)$m['assunto']);
+        if ($assunto === '') $assunto = 'Cotação';
+        if (!preg_match('/^\s*(re|res|enc|fwd)\s*:/i', $assunto)) $assunto = 'Re: ' . $assunto;   // não empilha "Re: Re: Re:"
+
+        $quem = trim((string)($perms['nome'] ?? '')) ?: 'Suprimentos';
+        $fone = function_exists('email_fone') ? email_fone($quem) : '';
+        $corpo = $texto . "\n\n--\n" . $quem . "\nSuprimentos · Caprem Construtora"
+               . ($fone !== '' ? "\n" . $fone : '') . "\n" . trim((string)($cfg['from'] ?? $cfg['user'] ?? ''));
+        // citação do original: o fornecedor precisa saber a QUAL pergunta estamos respondendo
+        $orig = trim((string)$m['corpo_preview']);
+        if ($orig !== '') {
+            $cit = substr(str_replace("\r", '', $orig), 0, 2000);
+            $corpo .= "\n\n\n" . 'Em ' . substr((string)$m['data_email'], 0, 10) . ', '
+                    . (trim((string)$m['from_nome']) ?: $para) . " escreveu:\n> "
+                    . str_replace("\n", "\n> ", $cit);
+        }
+
+        $msgid = caixa_msgid($cfg);
+        $hdr = ['Message-ID' => $msgid];
+        $ref = trim((string)$m['message_id']);
+        if ($ref !== '') { $hdr['In-Reply-To'] = $ref; $hdr['References'] = $ref; }   // é isto que mantém a thread no cliente do fornecedor
+
+        [$ok, $msgErr, $raw] = smtp_send($cfg, $para, $assunto, $corpo, [], $hdr);
+        if (!$ok) throw new Exception('não consegui enviar: ' . $msgErr);
+
+        // colunas aditivas (o projeto não tem migration runner; cada módulo cria a sua)
+        foreach ([['respondido_em', 'VARCHAR(40)'], ['respondido_por', 'VARCHAR(64)'],
+                  ['respondido_nome', 'VARCHAR(160)'], ['resposta_texto', 'MEDIUMTEXT']] as $c) {
+            try { $pdo->query("SELECT {$c[0]} FROM cotacao_email_in LIMIT 1"); }
+            catch (Throwable $e) { try { $pdo->exec("ALTER TABLE cotacao_email_in ADD COLUMN {$c[0]} {$c[1]}"); } catch (Throwable $e2) {} }
+        }
+        $pdo->prepare("UPDATE cotacao_email_in SET status='respondido', respondido_em=?, respondido_por=?, respondido_nome=?, resposta_texto=?, lido_por=COALESCE(lido_por,?), lido_em=COALESCE(lido_em,?) WHERE id=?")
+            ->execute([date('c'), (string)$me, $quem, $texto, (string)$me, date('c'), $id]);
+        try {
+            caixa_log_saida($pdo, $msgid, 'resposta', (string)($m['cotacao_id'] ?? ''), (string)$me, $quem,
+                            $assunto, $para, $m['cotacao_id'] ? (int)$m['cotacao_id'] : null);
+            caixa_arquivar_enviado($cfg, $raw);   // sem isto a resposta não existe na pasta Enviados da conta
+        } catch (Throwable $e) {}
+        echo json_encode(['ok' => true, 'para' => $para, 'assunto' => $assunto], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'marcar_lido' || $acao === 'ignorar' || $acao === 'converter') {

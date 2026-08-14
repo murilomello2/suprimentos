@@ -25,6 +25,11 @@ function email_fone($nome) {
 }
 function email_qtd($q) { if ($q === null || $q === '') return ''; return rtrim(rtrim(number_format((float)$q, 2, ',', '.'), '0'), ','); }
 
+/* Serve de BIBLIOTECA para a resposta à dúvida do fornecedor (actions/inbox.php): a conta de
+   envio e o telefone da assinatura têm de ser os MESMOS do disparo da carta — duas cópias um dia
+   discordariam, e o fornecedor receberia resposta assinada diferente do convite. */
+if (defined('EMAIL_LIB_ONLY')) return;
+
 try {
     $pdo = db();
     $meGet = $_GET['me'] ?? null;

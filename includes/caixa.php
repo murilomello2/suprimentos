@@ -146,8 +146,23 @@ function caixa_sync_pasta($pdo, $cfg, $mbox, $pasta, $direcao, $max = CAIXA_MAX_
     // uidvalidity mudou = o servidor renumerou tudo; as UIDs guardadas não valem mais nada
     if ($uv !== $uvAnt) { $last = 0; caixa_meta_set($pdo, $kUv, $uv); }
 
+    $marcaAntes = $last;
     [$uids, $total] = inbox_buscar_novos($mbox, date('c', strtotime(CAIXA_JANELA)), $last, $max);
-    if (!$uids) return [0, 0, '', $naPasta];
+
+    /* VARREDURA DE RECUPERAÇÃO — a marca de UID é só ATALHO; quem garante que nada duplica é a
+       dedup_key. Enquanto a marca era a única fonte da verdade, qualquer mensagem que ficasse
+       para trás (fetch que falhou, timeout no meio do lote, pasta renumerada) sumia PARA SEMPRE:
+       a marca já tinha passado por cima dela e a faixa UID marca+1:* nunca mais a alcançava.
+       Foi exatamente o que aconteceu — medido em 14/08/2026: a caixa parou em 04/08 enquanto o
+       INBOX tinha mensagens de 11 a 14/08 que o inbound da cotação lia normalmente.
+       Então: quando a faixa por UID não traz NADA novo, varre a janela por DATA e deixa a
+       dedup_key filtrar. Custa um SEARCH e um SELECT indexado por mensagem já conhecida. */
+    $recuperando = false;
+    if (!$uids && $naPasta > 0) {
+        [$uids, $total] = inbox_buscar_novos($mbox, date('c', strtotime(CAIXA_JANELA)), 0, $max, true);
+        $recuperando = true;
+    }
+    if (!$uids) return [0, 0, '', $naPasta, ['marca' => $marcaAntes, 'vistas' => 0]];
 
     $ja  = $pdo->prepare("SELECT id FROM caixa_msg WHERE dedup_key=? LIMIT 1");
     $ins = $pdo->prepare("INSERT INTO caixa_msg
@@ -156,13 +171,18 @@ function caixa_sync_pasta($pdo, $cfg, $mbox, $pasta, $direcao, $max = CAIXA_MAX_
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     // quem disparou: só o cockpit sabe. Casa pelo Message-ID que nós mesmos geramos no envio.
     $saida = $pdo->prepare("SELECT tipo, ref_valor, cotacao_id, quem FROM caixa_saida WHERE message_id=? LIMIT 1");
-    $novas = 0;
+    $novas = 0; $conhecidas = 0; $falhas = 0; $travou = false;
+    /* A marca só avança enquanto NADA falhou neste lote. Antes ela avançava para a maior UID
+       processada com sucesso — então uma mensagem que falhava no meio ficava para trás da marca e
+       nunca mais era buscada. Parando de avançar na primeira falha, a próxima varredura recomeça
+       exatamente onde o buraco começou. (A varredura de recuperação acima é a segunda rede.) */
     foreach ($uids as $uid) {
         $uid = (int)$uid;
         $dedup = $direcao . ':' . $uv . ':' . $uid . ':' . md5($pasta);
-        $ja->execute([$dedup]); if ($ja->fetchColumn()) { if ($uid > $last) $last = $uid; continue; }
-        try { $m = inbox_parse_msg($mbox, $uid, CAIXA_PREVIEW); } catch (Throwable $e) { continue; }
-        if (!$m) continue;
+        $ja->execute([$dedup]);
+        if ($ja->fetchColumn()) { $conhecidas++; if (!$travou && $uid > $last) $last = $uid; continue; }
+        try { $m = inbox_parse_msg($mbox, $uid, CAIXA_PREVIEW); } catch (Throwable $e) { $m = null; }
+        if (!$m) { $falhas++; $travou = true; continue; }
 
         // só anexo DE VERDADE conta para o clipe: imagem embutida de assinatura não é anexo
         $anexNomes = [];
@@ -189,8 +209,12 @@ function caixa_sync_pasta($pdo, $cfg, $mbox, $pasta, $direcao, $max = CAIXA_MAX_
             substr((string)($m['corpo'] ?? ''), 0, CAIXA_PREVIEW),
             $origem, $cotId, $refTipo, $refVal, $quem, date('c')]);
         $novas++;
-        if ($uid > $last) $last = $uid;
+        if (!$travou && $uid > $last) $last = $uid;
     }
     caixa_meta_set($pdo, $kUid, $last);
-    return [$novas, $total, '', $naPasta];
+    // o diagnóstico volta junto: "0 novas" tem causas MUITO diferentes (caixa em dia × marca à
+    // frente × mensagem que não abre), e sem isto a tela só sabe dizer "nada novo".
+    return [$novas, $total, '', $naPasta,
+            ['marca_antes' => $marcaAntes, 'marca_depois' => $last, 'vistas' => count($uids),
+             'conhecidas' => $conhecidas, 'falhas' => $falhas, 'recuperacao' => $recuperando ? 1 : 0]];
 }

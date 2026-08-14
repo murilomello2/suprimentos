@@ -47,7 +47,7 @@ async function cotInboxLoad(cid){ const CAN_EDIT=cotEditavel();
     if(col){ host.innerHTML=`<div class="panel" style="margin-bottom:10px">${head}<div style="font-size:12.5px;color:var(--muted)"><b>${its.length}</b> e-mail(s)${novos?` · <b style="color:var(--pend)">${novos}</b> não processada(s) — expanda p/ ver e incluir no mapa`:' · todas tratadas'}</div></div>`; return; }
     const tipoChip=t=>t==='cotacao'?'<span class="dchip" style="background:#1f7a44;color:#fff">COTAÇÃO</span>':(t==='duvida'?'<span class="dchip" style="background:var(--pend);color:#fff">DÚVIDA</span>':(t==='fora_de_escopo'?'<span class="dchip" style="background:#8a9299;color:#fff">FORA DE ESCOPO</span>':'<span class="dchip" style="background:#5b6b7a;color:#fff">'+esc(String(t||'?').toUpperCase())+'</span>'));
     // 1 e-mail = 1 card; AGRUPADOS por fornecedor (sequência), mais recente primeiro
-    const rowOf=(m,i)=>{ const anx=String(m.anexos_ids||'').split(',').filter(Boolean); const done=(m.status==='lido'||m.status==='convertido'||m.status==='ignorado');
+    const rowOf=(m,i)=>{ const anx=String(m.anexos_ids||'').split(',').filter(Boolean); const done=(m.status==='lido'||m.status==='convertido'||m.status==='ignorado'||m.status==='respondido');
       return `<div style="${done?'opacity:.6;':''}">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           ${tipoChip(m.tipo)}
@@ -60,6 +60,7 @@ async function cotInboxLoad(cid){ const CAN_EDIT=cotEditavel();
           ${m.tem_rascunho&&CAN_EDIT?`<button class="${done?'btn-ghost':'btn-prim'}" style="padding:3px 11px" onclick="cotInboxUsarRascunho(${i})" title="abre a proposta pré-preenchida pela IA (rascunho — confira e salve)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">auto_awesome</span> ${done?'usar de novo':'Usar rascunho'}</button>`:''}
           ${anx.map(id=>`<a class="btn-ghost" style="padding:3px 9px;text-decoration:none" href="actions/cotacao_anexo.php?download=${id}&me=${encodeURIComponent(meB)}" target="_blank" rel="noopener"><span class="material-icons" style="font-size:13px;vertical-align:-2px">description</span> anexo</a>`).join('')}
           ${m.corpo_preview?`<button class="btn-ghost" style="padding:3px 9px" onclick="cotInboxVerCorpo(${i})">ver e-mail</button>`:''}
+          ${CAN_EDIT&&m.from_email?`<button class="${(m.tipo==='duvida'&&!m.respondido_em)?'btn-prim':'btn-ghost'}" style="padding:3px 11px" onclick="cotInboxVerCorpo(${i},1)" title="responde ao fornecedor por e-mail, na mesma conversa — a cópia fica na aba Enviados"><span class="material-icons" style="font-size:13px;vertical-align:-2px">reply</span> ${m.respondido_em?'respondido':'Responder'}</button>`:''}
           ${!done?`<button class="btn-ghost" style="padding:3px 9px;color:var(--muted)" onclick="cotInboxMarcar(${m.id},'marcar_lido')">marcar lido</button>`:''}
         </div></div>`; };
     const groups={}, order=[];
@@ -81,7 +82,66 @@ async function cotInboxLoad(cid){ const CAN_EDIT=cotEditavel();
 function cotInboxUsarRascunho(i){ const m=(COT.inbox||[])[i]; if(!m||!m.draft){toast('Sem rascunho neste e-mail');return;}
   if(m.id) fetch('actions/inbox.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'converter',me:EU&&EU.bitrix_id,id:m.id})}).catch(()=>{});   // usei o rascunho → marca tratado
   m.status='convertido'; cotIAAplicar(m.fornecedor_nome||'', m.draft, {}); }
-function cotInboxVerCorpo(i){ const m=(COT.inbox||[])[i]; if(!m)return; alert('De: '+(m.from_nome||'')+' <'+(m.from_email||'')+'>\nAssunto: '+(m.assunto||'')+'\n\n'+(m.corpo_preview||'(sem corpo)')); }
+/* Ver o e-mail e RESPONDER no mesmo lugar. Era um alert() — dava para ler a dúvida e mais nada:
+   o comprador saía para o webmail, procurava a thread e respondia de lá, e o cockpit nunca ficava
+   sabendo. A resposta daqui vai para o remetente gravado no banco (nunca um endereço tirado do
+   corpo), entra na mesma thread e aparece na aba Enviados da Caixa. */
+function cotInboxVerCorpo(i, focoResposta){
+  const m=(COT.inbox||[])[i]; if(!m)return;
+  let ov=document.getElementById('inbxOv');
+  if(!ov){ ov=document.createElement('div'); ov.id='inbxOv';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.onclick=e=>{ if(e.target===ov) cotInboxFechar(); }; document.body.appendChild(ov); }
+  const podeResp=cotEditavel();
+  const resp=m.respondido_em;
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:0;max-width:760px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22);max-height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+    <div style="display:flex;align-items:center;gap:9px;padding:14px 18px;border-bottom:1px solid var(--line)">
+      <span class="material-icons" style="font-size:19px;color:var(--verde)">mail</span>
+      <b style="font-size:15px;flex:1">${esc(m.assunto||'(sem assunto)')}</b>
+      <span class="material-icons" style="cursor:pointer;color:var(--muted)" onclick="cotInboxFechar()">close</span>
+    </div>
+    <div style="padding:14px 18px;overflow:auto">
+      <div class="muted" style="font-size:12px;margin-bottom:9px">
+        De <b>${esc(m.from_nome||m.from_email||'')}</b> &lt;${esc(m.from_email||'')}&gt;${m.data_email?' · '+D(String(m.data_email).slice(0,10)):''}
+      </div>
+      <div style="white-space:pre-wrap;font-size:12.5px;background:#f8faf9;border:1px solid var(--line);border-radius:9px;padding:11px 13px;max-height:32vh;overflow:auto">${esc(m.corpo_preview||'(sem corpo)')}</div>
+      ${resp?`<div style="margin-top:11px;background:#eef4f0;border:1px solid #d6e6dc;border-radius:9px;padding:10px 13px;font-size:12.5px">
+          <b style="color:var(--verde-d)">Respondido</b> por ${esc(m.respondido_nome||'')} em ${D(String(resp).slice(0,10))}
+          ${m.resposta_texto?`<div style="white-space:pre-wrap;margin-top:6px;color:#4a5751">${esc(m.resposta_texto)}</div>`:''}</div>`:''}
+      ${podeResp?`
+      <div style="margin-top:14px">
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">
+          <span class="material-icons" style="font-size:16px;color:var(--verde)">reply</span>
+          <b style="font-size:13px">${resp?'Responder de novo':'Responder por e-mail'}</b>
+          <span class="muted" style="font-size:11.5px">— vai para ${esc(m.from_email||'')}, na mesma conversa</span>
+        </div>
+        <textarea id="inbxResp" rows="6" placeholder="Escreva a resposta ao fornecedor…"
+          style="width:100%;resize:vertical;font-family:inherit;font-size:13px;padding:9px 11px;border:1px solid var(--line);border-radius:9px"></textarea>
+        <div class="dmini" style="margin-top:5px">assinatura e conta de envio são as mesmas da carta de cotação · o original vai citado abaixo</div>
+      </div>`:'<div class="dmini" style="margin-top:12px">Você não tem permissão para responder nesta cotação.</div>'}
+    </div>
+    <div style="display:flex;gap:9px;align-items:center;padding:12px 18px;border-top:1px solid var(--line)">
+      ${podeResp?`<button class="btn-prim" id="inbxBtn" onclick="cotInboxResponder(${i})"><span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Enviar resposta</button>`:''}
+      <button class="btn-ghost" onclick="cotInboxFechar()">Fechar</button>
+    </div></div>`;
+  if(podeResp&&focoResposta){ const t=document.getElementById('inbxResp'); if(t)t.focus(); }
+}
+function cotInboxFechar(){ const o=document.getElementById('inbxOv'); if(o)o.remove(); }
+async function cotInboxResponder(i){
+  const m=(COT.inbox||[])[i]; if(!m)return;
+  const texto=(val('inbxResp')||'').trim();
+  if(!texto){ toast('Escreva a resposta'); return; }
+  if(!confirm('Enviar esta resposta para '+(m.from_email||'')+'?')) return;
+  const b=document.getElementById('inbxBtn'); if(b){ b.disabled=true; b.textContent='Enviando…'; }
+  try{
+    const r=await (await fetch('actions/inbox.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'responder',me:EU&&EU.bitrix_id,id:m.id,texto})})).json();
+    if(r.error){ toast(r.error); if(b){b.disabled=false;b.innerHTML='<span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Enviar resposta';} return; }
+    toast('Resposta enviada para '+r.para);
+    cotInboxFechar();
+    const c=(COT.cur||{}).cotacao; if(c) cotInboxLoad(c.id);
+  }catch(e){ toast('Falha: '+e.message); if(b){b.disabled=false;b.textContent='Enviar resposta';} }
+}
 async function cotInboxMarcar(id,acao){ try{ const r=await (await fetch('actions/inbox.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao,me:EU&&EU.bitrix_id,id})})).json(); if(r&&r.error){toast(r.error);return;} const c=(COT.cur||{}).cotacao; if(c)cotInboxLoad(c.id); }catch(e){toast('Falha: '+e.message);} }
 function upCard(label,val,sub,color){ return `<div style="border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:#fff">
   <div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#889;font-weight:700">${esc(label)}</div>

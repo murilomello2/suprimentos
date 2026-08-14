@@ -44,7 +44,7 @@ function inbox_uidvalidity($mbox, $cfg, $folder = 'INBOX') {
  * Se $lastUid==0 (1ª vez / uidvalidity mudou): busca por data (SINCE $desde).
  * Devolve [uids_fatiados_asc, total_disponivel] — total>contagem sinaliza backlog p/ o chamador avisar.
  */
-function inbox_buscar_novos($mbox, $desde, $lastUid = 0, $max = 40) {
+function inbox_buscar_novos($mbox, $desde, $lastUid = 0, $max = 40, $preferirRecentes = false) {
     if ((int)$lastUid > 0) {
         $uids = @imap_search($mbox, 'UID ' . ((int)$lastUid + 1) . ':*', SE_UID); imap_errors();
         // o '*' do IMAP casa a MAIOR UID mesmo quando lastUid+1 > todas — filtra o falso positivo
@@ -57,7 +57,9 @@ function inbox_buscar_novos($mbox, $desde, $lastUid = 0, $max = 40) {
     if (!$uids) return [[], 0];
     sort($uids, SORT_NUMERIC);                                     // ASC: processa do mais antigo (high-water monotônico)
     $total = count($uids);
-    return [array_slice($uids, 0, max(1, (int)$max)), $total];
+    // $preferirRecentes: na varredura de RECUPERAÇÃO (por data), um backlog velho não pode atrasar
+    // o e-mail de hoje — leva a ponta mais nova da faixa, ainda em ordem ASC.
+    return [$preferirRecentes ? array_slice($uids, -max(1, (int)$max)) : array_slice($uids, 0, max(1, (int)$max)), $total];
 }
 
 /** Header MIME (=?UTF-8?B?..?=) -> UTF-8, SEM mb_*. */

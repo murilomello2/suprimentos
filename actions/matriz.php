@@ -38,7 +38,7 @@ try {
     if (!$obra) { echo json_encode(['error'=>'obra não encontrada: '.$OBRA]); exit; }
 
     $st = $pdo->prepare("
-        SELECT s.ordem, COALESCE(NULLIF(r.nome_override,''), s.nome) AS nome, s.fase,
+        SELECT s.ordem, s.id AS servico_id, COALESCE(NULLIF(r.nome_override,''), s.nome) AS nome, s.fase,
                COALESCE(NULLIF(r.grupo_override,''), s.grupo) AS grupo,
                COALESCE(r.grupo_ordem_override, s.grupo_ordem) AS grupo_ordem,
                s.nome AS nome_base, s.grupo AS grupo_base, r.nome_override, r.grupo_override,

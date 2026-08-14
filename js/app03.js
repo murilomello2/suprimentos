@@ -203,7 +203,8 @@ function bpRender(){
 }
 /* ===================== DASHBOARDS ===================== */
 let DASH={tab:null, D:null, oppByObra:{}, cots:null, sols:null, carregandoF:false,
-         gfiltro:null, csub:'radar', cobra:'', cstatus:''};
+         gfiltro:null, csub:'radar', cobra:'', cstatus:'',
+         sel:{}, selLista:[], carimbo:''};   // sel = itens marcados p/ ação em lote (chave obra:servico)
 const DASH_TABS=[['comprador','Comprador','person'],['gerente','Gerente de Compras','groups'],['diretor','Diretor','insights']];   // aba "Oportunidades" DELETADA (23/jul, pedido do Murilo — não servia; a tela Oportunidades do MENU continua)
 function dashAllowed(){ const papel=(EU&&EU.papel)||''; if(IS_ADMIN||papel==='diretor') return DASH_TABS.map(t=>t[0]);
   let a; if(papel==='gerente') a=['gerente','comprador']; else a=['comprador'];
@@ -262,7 +263,7 @@ async function dashLoad(){
   const need=obras.filter(id=>!DASH.oppByObra[id]);
   if(need.length){ w.innerHTML='<div class="dempty">Analisando cobertura e oportunidades…</div>';
     await Promise.all(need.map(async id=>{ try{ DASH.oppByObra[id]=await (await fetch('actions/oportunidades.php?obra='+id+'&_='+Date.now())).json(); }catch(e){ DASH.oppByObra[id]={gaps:[],resumo:{}}; } })); }
-  DASH.D=dashCompute(); renderDash();
+  DASH.D=dashCompute(); renderDash(); dashCarimbo();
   dashLoadFunil();
 }
 /* Cotações e Solicitações são as duas pontas do funil (radar -> SC -> cotação). São pesadas — a de
@@ -283,7 +284,20 @@ async function dashLoadFunil(){
   DASH.carregandoF=false;
   renderDash();
 }
-function dashRefresh(){ DASH.items=null; DASH.oppByObra={}; DASH.cots=null; DASH.sols=null; DASH.gfiltro=null; dashLoad(); }
+/* Recarrega tudo do servidor. O painel é montado uma vez e fica parado: quem estava mudando status
+   por aqui (ou outra pessoa mexendo ao mesmo tempo) via o número velho até sair da tela e voltar. */
+function dashRefresh(){
+  DASH.items=null; DASH.oppByObra={}; DASH.cots=null; DASH.sols=null; DASH.gfiltro=null; DASH.sel={};
+  const b=document.getElementById('dashBtnAtualizar'); if(b) b.disabled=true;
+  Promise.resolve(dashLoad()).finally(()=>{ const x=document.getElementById('dashBtnAtualizar'); if(x) x.disabled=false; dashCarimbo(); });
+}
+/* Carimbo de "dado desta hora" — sem ele não dá para saber se a tela é de agora ou de 40 minutos atrás. */
+function dashCarimbo(){
+  const e=document.getElementById('dashCarimbo'); if(!e) return;
+  const d=new Date(); const p=n=>String(n).padStart(2,'0');
+  DASH.carimbo=p(d.getHours())+':'+p(d.getMinutes());
+  e.textContent='· '+DASH.carimbo;
+}
 function renderDash(){
   const w=document.getElementById('dwrap'), D=DASH.D; if(!w)return;
   if(!D){ w.innerHTML='<div class="dempty">Sem dados.</div>'; return; }
@@ -507,11 +521,19 @@ function renderDashComprador(D){
     ${card('verba',`${M(verbaTot)}`,`verba sob minha gestão`)}
   </div>
   <div class="dcard wide" style="margin-top:10px">${cotSecHead('flag',titulo,'','')}${nFiltro}
-    <div style="overflow-x:auto"><table class="dtable"><thead><tr><th></th><th>Item</th><th>Obra</th><th>Próxima ação</th><th>Prazo</th><th>Status</th><th class="r">Verba</th></tr></thead><tbody>
-    ${capped.map(i=>`<tr style="cursor:pointer" onclick="openModal(${Number(i.ordem)||0},${Number(i.obra_id)||1})" title="clique p/ abrir o item">
+    ${dashSelBarra(capped)}
+    <div style="overflow-x:auto"><table class="dtable"><thead><tr>
+      <th style="width:26px"><input type="checkbox" onclick="dashSelTodos(this.checked)" title="marcar/desmarcar todos os itens desta lista" style="width:auto;cursor:pointer"></th>
+      <th></th><th>Item</th><th>Obra</th><th>Próxima ação</th>
+      <th style="white-space:normal;line-height:1.15" title="a data em que a cotação precisa estar FECHADA (fim da cotação) — não é o início nem a data em obra">Data limite<br>fechamento</th>
+      <th>Status</th><th>Observação</th><th class="r">Verba</th></tr></thead><tbody>
+    ${capped.map(i=>{const k=dashKey(i); const mk=!!(DASH.sel||{})[k];
+      return `<tr style="cursor:pointer;${mk?'background:#f0f7f3':''}" onclick="openModal(${Number(i.ordem)||0},${Number(i.obra_id)||1})" title="clique p/ abrir o item">
+      <td onclick="event.stopPropagation()"><input type="checkbox" ${mk?'checked':''} onclick="dashSel('${k}',this.checked)" style="width:auto;cursor:pointer"></td>
       <td>${chipNivel(i)}</td><td><b>${esc(i.nome)}</b></td><td style="white-space:nowrap"><span class="dgm" style="background:${obraCor(i.obra_id)}"></span>${esc(i.obra_nome||'')}</td>
-      <td>${acaoDe(i)}</td><td style="white-space:nowrap">${D2(i.fim_cotacao)}</td><td>${esc(i.status||'Não Iniciado')}</td><td class="r"><b>${val(i)?M(val(i)):'—'}</b></td></tr>`).join('')}
-    ${capped.length?'':'<tr><td colspan="7" class="dempty" style="padding:18px">nenhum item neste recorte 🎉</td></tr>'}
+      <td>${acaoDe(i)}</td><td style="white-space:nowrap">${D3(i.fim_cotacao)}</td><td>${esc(i.status||'Não Iniciado')}</td>
+      <td>${dashObsCel(i)}</td><td class="r"><b>${val(i)?M(val(i)):'—'}</b></td></tr>`;}).join('')}
+    ${capped.length?'':'<tr><td colspan="9" class="dempty" style="padding:18px">nenhum item neste recorte 🎉</td></tr>'}
     </tbody></table></div>
     ${cur&&cur.list.length>60?`<div class="dmini" style="margin-top:6px">mostrando 60 de ${cur.list.length} — refine no Radar se precisar da lista completa</div>`:''}
     ${!cur&&abertos.length>15?`<div class="dmini" style="margin-top:6px">mostrando os 15 mais prioritários de ${abertos.length} abertos — clique num card acima pra detalhar um recorte</div>`:''}
@@ -521,6 +543,126 @@ function dashCSub(k){ DASH.csub=k; DASH.cfiltro=null; DASH.cobra=''; DASH.cstatu
 function SOL_ST_LBL(s){ return {pendente:'Pendente',em_cotacao:'Em cotação',cotacoes_recebidas:'Cotações recebidas',pedido_criado:'Pedido criado',cancelado:'Cancelado'}[s]||s||'—'; }
 function dashCFiltro(k){ DASH.cfiltro=(DASH.cfiltro===k?null:k); renderDash(); }
 function D2(s){ if(!s)return'—'; const p=String(s).split('-'); return p.length===3?p[2]+'/'+p[1]:s; }
+/* dd/mm/aaaa — o ano importa: sem ele "07/06" num painel de agosto parece do mês que vem, e é de dois meses atrás. */
+function D3(s){ if(!s)return'—'; const p=String(s).slice(0,10).split('-'); return p.length===3?(p[2]+'/'+p[1]+'/'+p[0]):s; }
+
+/* ═════════ Observação e ações em LOTE na tabela do comprador ═════════
+   Mesma observação do radar (radar_item.observacoes) — não um campo paralelo do dashboard, senão
+   a pessoa escreve aqui e não vê lá. E o lote reusa o actions/status_lote.php do Radar, que já tem
+   a regra de alçada certa: admin/gerente mexem em tudo, comprador só no item de que é responsável. */
+/* chave real do item: servico_id vem do matriz.php (s.id). `ordem` é OUTRA coluna de servico e
+   só por sorte hoje coincide com o id — apostar nisso escreveria no item errado. */
+function dashSid(i){ return Number(i.servico_id)||Number(i.ordem)||0; }
+function dashKey(i){ return (Number(i.obra_id)||1)+':'+dashSid(i); }
+function dashSel(k,on){ DASH.sel=DASH.sel||{}; if(on) DASH.sel[k]=1; else delete DASH.sel[k]; renderDash(); }
+function dashSelTodos(on){ DASH.sel=DASH.sel||{};
+  const l=DASH.selLista||[]; if(on) l.forEach(i=>{DASH.sel[dashKey(i)]=1;}); else l.forEach(i=>{delete DASH.sel[dashKey(i)];});
+  renderDash(); }
+function dashSelLimpar(){ DASH.sel={}; renderDash(); }
+/* Truncada na tabela; o texto inteiro fica no title (mouse em cima) e no clique, que abre tudo
+   junto com a caixa de edição — observação longa é comum ("fornecedor pediu CNPJ e endereço..."). */
+function dashObsCel(i){
+  const t=String(i.observacoes||'').trim();
+  const k=dashKey(i);
+  if(!t) return `<span class="dmini" onclick="event.stopPropagation();dashObsAbrir('${k}')" style="cursor:pointer;color:var(--muted)" title="clique para escrever uma observação">+ obs</span>`;
+  const curto=t.length>38?(t.slice(0,38)+'…'):t;
+  return `<span onclick="event.stopPropagation();dashObsAbrir('${k}')" title="${esc(t)}"
+    style="cursor:pointer;font-size:11.5px;display:inline-block;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-bottom:1px dotted var(--line)">${esc(curto)}</span>`;
+}
+function dashItemPorKey(k){ return (DASH.items||[]).find(i=>dashKey(i)===k)||null; }
+function dashObsAbrir(k){
+  const i=dashItemPorKey(k); if(!i) return;
+  dashModal(`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span class="material-icons" style="font-size:18px;color:var(--verde)">sticky_note_2</span>
+      <b style="font-size:14px">Observação — ${esc(i.nome||'')}</b></div>
+    <div class="dmini" style="margin-bottom:8px">${esc(i.obra_nome||'')} · ${esc(i.status||'')}</div>
+    <textarea id="dashObsTxt" rows="7" style="width:100%;resize:vertical;font-family:inherit;font-size:13px;padding:9px 11px;border:1px solid var(--line);border-radius:9px">${esc(i.observacoes||'')}</textarea>
+    <div class="dmini" style="margin-top:5px">é a mesma observação que aparece no Radar de Aquisições</div>`,
+    `<button class="btn-prim" onclick="dashObsSalvar('${k}')"><span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Salvar</button>`);
+}
+async function dashObsSalvar(k){
+  const i=dashItemPorKey(k); if(!i) return;
+  const txt=(val('dashObsTxt')||'');
+  try{
+    const r=await (await fetch('actions/status_lote.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({me:EU&&EU.bitrix_id, itens:[{obra_id:Number(i.obra_id)||1, servico_id:dashSid(i)}],
+        campos:{observacoes:txt}, obs_modo:'substituir'})})).json();
+    if(r.error){ toast(r.error); return; }
+    if(r.sem_permissao){ toast('Este item é de outro responsável — só quem responde por ele (ou admin/gerente) pode anotar.'); return; }
+    i.observacoes=txt; dashFechaModal(); renderDash(); toast('Observação salva');
+  }catch(e){ toast('Falha: '+e.message); }
+}
+/* Barra que só existe quando há seleção — tela limpa por padrão. */
+function dashSelBarra(lista){
+  DASH.selLista=lista;                                  // "marcar todos" vale para a lista à vista, não para a base inteira
+  const sel=Object.keys(DASH.sel||{}).filter(k=>lista.some(i=>dashKey(i)===k));
+  if(!sel.length) return '';
+  return `<div class="panel" style="margin:8px 0;background:#f0f7f3;border-color:#cfe3d8">
+    <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">
+      <b style="font-size:13px">${sel.length} item(ns) selecionado(s)</b>
+      <button class="btn-ghost" style="padding:5px 11px;font-size:12px" onclick="dashLoteStatus()">
+        <span class="material-icons" style="font-size:15px;vertical-align:-3px">flag</span> Mudar status em lote</button>
+      <button class="btn-ghost" style="padding:5px 11px;font-size:12px" onclick="dashLoteObs()">
+        <span class="material-icons" style="font-size:15px;vertical-align:-3px">sticky_note_2</span> Observação em lote</button>
+      <button class="btn-ghost" style="padding:5px 11px;font-size:12px;color:var(--pend)" onclick="dashSelLimpar()">✕ limpar seleção</button>
+      <span class="dmini" style="margin-left:auto">itens de outro responsável são pulados (só admin/gerente mexem em tudo)</span>
+    </div></div>`;
+}
+function dashSelItens(){ return Object.keys(DASH.sel||{}).map(dashItemPorKey).filter(Boolean); }
+function dashLoteStatus(){
+  const n=dashSelItens().length; if(!n){toast('Selecione ao menos um item');return;}
+  dashModal(`<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">
+      <span class="material-icons" style="font-size:18px;color:var(--verde)">flag</span>
+      <b style="font-size:14px">Mudar o status de ${n} item(ns)</b></div>
+    <select id="dashLoteSt" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">
+      ${STATUSES.map(s=>`<option>${esc(s)}</option>`).join('')}</select>
+    <div class="dmini" style="margin-top:6px">cada mudança entra no histórico do item, como no Radar</div>`,
+    `<button class="btn-prim" onclick="dashLoteAplicar('status')">Aplicar aos ${n}</button>`);
+}
+function dashLoteObs(){
+  const n=dashSelItens().length; if(!n){toast('Selecione ao menos um item');return;}
+  dashModal(`<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">
+      <span class="material-icons" style="font-size:18px;color:var(--verde)">sticky_note_2</span>
+      <b style="font-size:14px">Observação em ${n} item(ns)</b></div>
+    <textarea id="dashLoteObsTxt" rows="5" placeholder="Ex.: aguardando retorno do fornecedor até 20/08"
+      style="width:100%;resize:vertical;font-family:inherit;font-size:13px;padding:9px 11px;border:1px solid var(--line);border-radius:9px"></textarea>
+    <div style="margin-top:9px;display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px">
+      <label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="radio" name="dashObsModo" value="acrescentar" checked style="width:auto"> acrescentar ao que já existe</label>
+      <label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="radio" name="dashObsModo" value="substituir" style="width:auto"> substituir a observação</label>
+    </div>
+    <div class="dmini" style="margin-top:6px">acrescentar é o padrão: substituir apaga o que outra pessoa escreveu</div>`,
+    `<button class="btn-prim" onclick="dashLoteAplicar('observacoes')">Aplicar aos ${n}</button>`);
+}
+async function dashLoteAplicar(campo){
+  const itens=dashSelItens(); if(!itens.length) return;
+  let campos={}, modo='acrescentar';
+  if(campo==='status'){ campos={status:val('dashLoteSt')}; }
+  else {
+    const t=(val('dashLoteObsTxt')||'').trim(); if(!t){toast('Escreva a observação');return;}
+    const r=document.querySelector('input[name="dashObsModo"]:checked'); modo=r?r.value:'acrescentar';
+    campos={observacoes:t};
+    if(modo==='substituir' && !confirm('Substituir a observação de '+itens.length+' item(ns)? O que estiver escrito neles agora se perde.')) return;
+  }
+  const payload={me:EU&&EU.bitrix_id, obs_modo:modo, campos,
+    itens:itens.map(i=>({obra_id:Number(i.obra_id)||1, servico_id:dashSid(i)}))};
+  try{
+    const r=await (await fetch('actions/status_lote.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
+    if(r.error){ toast(r.error); return; }
+    dashFechaModal(); DASH.sel={};
+    toast(`${r.aplicados} aplicado(s)`+(r.sem_mudanca?` · ${r.sem_mudanca} já estavam assim`:'')+(r.sem_permissao?` · ${r.sem_permissao} de outro responsável`:''));
+    dashRefresh();     // o número dos cards muda junto com o status — recarrega para não mentir
+  }catch(e){ toast('Falha: '+e.message); }
+}
+/* Modalzinho genérico do dashboard (mesmo desenho dos outros overlays do sistema). */
+function dashModal(corpo, botoes){
+  let ov=document.getElementById('dashOv');
+  if(!ov){ ov=document.createElement('div'); ov.id='dashOv';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.onclick=e=>{ if(e.target===ov) dashFechaModal(); }; document.body.appendChild(ov); }
+  ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:18px 20px;max-width:560px;width:100%;box-shadow:0 12px 44px rgba(0,0,0,.22);max-height:86vh;overflow:auto" onclick="event.stopPropagation()">
+    ${corpo}<div style="margin-top:15px;display:flex;gap:9px">${botoes||''}<button class="btn-ghost" onclick="dashFechaModal()">Cancelar</button></div></div>`;
+}
+function dashFechaModal(){ const o=document.getElementById('dashOv'); if(o)o.remove(); }
 
 /* ---------- 2) GERENTE DE COMPRAS ---------- */
 function renderDashGerente(D){

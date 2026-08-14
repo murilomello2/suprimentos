@@ -17,7 +17,8 @@ require_once __DIR__ . '/../includes/db.php';
 if (!function_exists('sup_nome_limpo')) { function sup_nome_limpo($s) { return trim(preg_replace('/\s+/u', ' ', (string)$s)); } }   // resiliência a deploy parcial (db.php pode chegar depois)
 
 $STATUS_OK = ['Não Iniciado','Cotação Iniciada','Com Pendências','Em Andamento','Finalizado','Não se aplica'];
-$LOTE_LABEL = ['status'=>'Status (lote)', 'fornecedor'=>'Fornecedor (lote)', 'responsavel'=>'Responsável (lote)'];
+$LOTE_LABEL = ['status'=>'Status (lote)', 'fornecedor'=>'Fornecedor (lote)', 'responsavel'=>'Responsável (lote)',
+               'observacoes'=>'Observação (lote)'];
 
 try {
     $in    = json_decode(file_get_contents('php://input'), true) ?: [];
@@ -38,8 +39,14 @@ try {
 
     // valida o PACOTE (modo novo) antes de tocar em qualquer linha
     if ($campos !== null) {
-        $campos = array_intersect_key($campos, array_flip(['status','fornecedor','responsavel']));
-        if (!$campos) throw new Exception('campos vazio (status/fornecedor/responsavel)');
+        $campos = array_intersect_key($campos, array_flip(['status','fornecedor','responsavel','observacoes']));
+        if (!$campos) throw new Exception('campos vazio (status/fornecedor/responsavel/observacoes)');
+        // observação em lote: ACRESCENTAR é o padrão — substituir apaga o que outra pessoa escreveu,
+        // e num lote de 20 itens isso é perda silenciosa. Quem quiser substituir pede explicitamente.
+        if (array_key_exists('observacoes', $campos)) {
+            $campos['observacoes'] = trim((string)$campos['observacoes']);
+            if (strlen($campos['observacoes']) > 4000) throw new Exception('observação muito longa (máx. 4000)');
+        }
         if (array_key_exists('status', $campos) && !in_array((string)$campos['status'], $STATUS_OK, true))
             throw new Exception('status inválido: "' . $campos['status'] . '"');
         if (array_key_exists('responsavel', $campos)) {
@@ -59,7 +66,8 @@ try {
     $SN = [];
     foreach ($pdo->query("SELECT id, nome FROM servico")->fetchAll() as $s) $SN[(int)$s['id']] = $s['nome'];
 
-    $sel = $pdo->prepare("SELECT status, fornecedor, responsavel FROM radar_item WHERE obra_id=? AND servico_id=?");
+    $sel = $pdo->prepare("SELECT status, fornecedor, responsavel, observacoes FROM radar_item WHERE obra_id=? AND servico_id=?");
+    $obsModo = ((string)($in['obs_modo'] ?? 'acrescentar')) === 'substituir' ? 'substituir' : 'acrescentar';
     $now = date('c');
     $aplicados = 0; $inexistente = 0; $sem_mudanca = 0; $sem_permissao = 0; $log = [];
 
@@ -84,6 +92,12 @@ try {
         $set = []; $vals = []; $mud = [];
         foreach ($alvos as $c => $v) {
             $v = trim((string)$v);
+            // acrescentar: a nota nova entra ABAIXO da que já estava, nunca por cima
+            if ($c === 'observacoes' && $obsModo === 'acrescentar' && $v !== '') {
+                $antes = trim((string)($cur['observacoes'] ?? ''));
+                if ($antes !== '' && strpos($antes, $v) === false) $v = $antes . "\n" . $v;
+                elseif ($antes !== '') $v = $antes;           // já tinha exatamente esta nota — não repete
+            }
             if ((string)($cur[$c] ?? '') === $v) continue;   // já está no valor
             $set[] = "$c=?"; $vals[] = ($v === '' ? null : $v);
             $mud[$c] = ['de' => $cur[$c], 'para' => $v];

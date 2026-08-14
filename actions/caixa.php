@@ -61,7 +61,10 @@ try {
                 $res['diag'][$pasta] = $diag;          // marca de UID, quantas viu, quantas falharam
                 if (!empty($diag['falhas'])) $res['avisos'][] = $diag['falhas'] . ' mensagem(ns) em ' . $pasta
                     . ' não puderam ser lidas — a marca parou nelas e a próxima varredura tenta de novo.';
-                if ($tot > $n && $n > 0) $res['avisos'][] = 'Ainda há mensagens antigas em ' . $pasta . ' — varra de novo para continuar.';
+                // só avisa de backlog quando o LOTE encheu (a varredura de recuperação vê a janela
+                // inteira, então "total > novas" virou o normal — avisar ali seria mentira na tela)
+                if ($n > 0 && (int)($diag['vistas'] ?? 0) >= CAIXA_MAX_SYNC)
+                    $res['avisos'][] = 'Ainda há mensagens antigas em ' . $pasta . ' — varra de novo para continuar.';
             }
         } finally { inbox_fechar($mbox); }
         echo json_encode($res, JSON_UNESCAPED_UNICODE); exit;

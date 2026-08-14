@@ -572,9 +572,18 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
    </section>
 
    <section id="view-dashboards" style="display:none">
-    <div class="top">
-      <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">dashboard</span> Dashboards</h1>
-      <p class="sub" id="dsub">Visão consolidada das obras — cotações, riscos, exposição e oportunidades.</p>
+    <div class="top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <div>
+        <h1 class="h1"><span class="material-icons" style="color:var(--dourado)">dashboard</span> Dashboards</h1>
+        <p class="sub" id="dsub">Visão consolidada das obras — cotações, riscos, exposição e oportunidades.</p>
+      </div>
+      <!-- o painel não se atualiza sozinho: quem mexe no status pelo dashboard ficava vendo o
+           número velho até trocar de tela e voltar. O carimbo diz de quando é o que está na tela. -->
+      <button class="btn-ghost" id="dashBtnAtualizar" onclick="dashRefresh()" style="padding:7px 13px;white-space:nowrap"
+              title="recarrega os itens do servidor — o painel não se atualiza sozinho">
+        <span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--verde)">refresh</span> Atualizar
+        <span class="dmini" id="dashCarimbo" style="margin-left:6px"></span>
+      </button>
     </div>
     <div class="panel" style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">

@@ -77,14 +77,33 @@ function smtp_send($cfg, $to, $subject, $body, $attachments = [], $extraHeaders 
        aconteceu no primeiro teste que chegou na caixa do Murilo. */
     $tipo = !empty($opts['html']) ? 'text/html' : 'text/plain';
     if ($attachments) {
-        $h .= 'Content-Type: multipart/mixed; boundary="' . $bd . "\"\r\n\r\n";
-        $m  = '--' . $bd . "\r\n" . 'Content-Type: ' . $tipo . "; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode($body)) . "\r\n";
-        foreach ($attachments as $a) {
+        /* Anexo com 'cid' é IMAGEM EMBUTIDA (assinatura), não arquivo para baixar. Ela precisa
+           viver num multipart/RELATED junto do HTML — é isso que faz o cliente resolver o
+           src="cid:...". Imagem por URL não serve: Outlook e Gmail bloqueiam imagem remota de
+           remetente desconhecido por padrão, e a assinatura simplesmente sumiria. */
+        $inline = []; $arquivos = [];
+        foreach ($attachments as $a) { if (trim((string)($a['cid'] ?? '')) !== '') $inline[] = $a; else $arquivos[] = $a; }
+        $parte = function ($a, $comoInline) {
             $nome = preg_replace('/[^A-Za-z0-9 ._-]/', '_', (string)($a['nome'] ?? 'anexo'));
-            $m .= '--' . $bd . "\r\n" . 'Content-Type: ' . ($a['mime'] ?? 'application/octet-stream') . '; name="' . $nome . "\"\r\n"
-                . "Content-Transfer-Encoding: base64\r\n" . 'Content-Disposition: attachment; filename="' . $nome . "\"\r\n\r\n"
-                . chunk_split(base64_encode((string)($a['conteudo'] ?? ''))) . "\r\n";
+            $h = 'Content-Type: ' . ($a['mime'] ?? 'application/octet-stream') . '; name="' . $nome . "\"\r\n"
+               . "Content-Transfer-Encoding: base64\r\n";
+            $h .= $comoInline
+                ? ('Content-ID: <' . trim((string)$a['cid']) . ">\r\n" . 'Content-Disposition: inline; filename="' . $nome . "\"\r\n")
+                : ('Content-Disposition: attachment; filename="' . $nome . "\"\r\n");
+            return $h . "\r\n" . chunk_split(base64_encode((string)($a['conteudo'] ?? ''))) . "\r\n";
+        };
+        $corpoHtml = 'Content-Type: ' . $tipo . "; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode($body)) . "\r\n";
+        if ($inline) {
+            $bdr = '=_rel' . bin2hex(random_bytes(7));
+            $rel = 'Content-Type: multipart/related; boundary="' . $bdr . "\"\r\n\r\n"
+                 . '--' . $bdr . "\r\n" . $corpoHtml;
+            foreach ($inline as $a) $rel .= '--' . $bdr . "\r\n" . $parte($a, true);
+            $rel .= '--' . $bdr . "--\r\n";
+            $corpoHtml = $rel;
         }
+        $h .= 'Content-Type: multipart/mixed; boundary="' . $bd . "\"\r\n\r\n";
+        $m  = '--' . $bd . "\r\n" . $corpoHtml;
+        foreach ($arquivos as $a) $m .= '--' . $bd . "\r\n" . $parte($a, false);
         $m .= '--' . $bd . "--\r\n";
     } else {
         $h .= 'Content-Type: ' . $tipo . "; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n";

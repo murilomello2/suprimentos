@@ -1449,6 +1449,41 @@ function cfgAcessosRender(){
   h+=`<div class="note">Registro de <b>uso de tela</b>: guarda que a pessoa abriu a tela X no dia Y, quantas vezes e a que horas — não o que ela fez dentro. Fica ${180} dias e some. Só administrador vê esta aba.</div>`;
   w.innerHTML=h;
 }
+/* ===== Modelo do corpo do e-mail de cotação (admin) =====
+   O texto era código: mudar "Prezado fornecedor" exigia deploy. Agora é campo, com {{chaves}} que
+   o servidor troca na hora do disparo — as de fornecedor, uma por uma, para cada destinatário. */
+function cfgEmailModelo(cfg){
+  const usa=(cfg.modelo_corpo||'').trim()!=='';
+  const txt=usa?cfg.modelo_corpo:(cfg.modelo_padrao||'');
+  const chaves=(cfg.chaves||[]).map(c=>`<tr><td style="padding:2px 10px 2px 0;white-space:nowrap"><code style="background:#f0f4f2;padding:1px 5px;border-radius:4px;font-size:11.5px">{{${esc(c.k)}}}</code>${c.porforn?' <span class="dchip" style="background:#e8f0fb;color:#2b5fa8;font-size:9px">por fornecedor</span>':''}</td><td class="dmini">${esc(c.d)}</td></tr>`).join('');
+  return `<div style="margin-top:18px;border-top:1px solid var(--line);padding-top:12px">
+    ${cotSecHead('article','Modelo do corpo do e-mail de cotação','o texto que já vem escrito quando alguém abre o disparo — dá para editar antes de mandar',
+      '<span class="dchip" style="background:'+(usa?'var(--verde)':'#8a9299')+'">'+(usa?'personalizado':'padrão de fábrica')+'</span>')}
+    <textarea id="cemModelo" rows="14" style="width:100%;resize:vertical;font-family:inherit;font-size:12.5px;padding:9px 11px;border:1px solid var(--line);border-radius:9px">${esc(txt)}</textarea>
+    <div style="margin-top:9px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn-prim" onclick="cfgEmailModeloSalvar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar modelo</button>
+      <button class="btn-ghost" onclick="cfgEmailModeloPadrao()" title="descarta o texto personalizado e volta ao de fábrica">restaurar o padrão</button>
+      <span class="dmini">a assinatura entra sozinha no fim — não escreva o seu nome aqui</span>
+    </div>
+    <div style="margin-top:11px;background:#f8faf9;border:1px solid var(--line);border-radius:9px;padding:10px 12px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:5px">Campos entre chaves</div>
+      <table style="border-collapse:collapse">${chaves}</table>
+      <div class="dmini" style="margin-top:6px">Linha que fica só com o rótulo (o dado não existe naquela obra) é removida sozinha do e-mail.</div>
+    </div></div>`;
+}
+async function cfgEmailModeloSalvar(){
+  try{ const r=await (await fetch('actions/email.php',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({acao:'modelo',me:EU&&EU.bitrix_id,modelo_corpo:val('cemModelo')})})).json();
+    if(r.error){toast(r.error);return;} toast(r.padrao?'Voltou ao modelo padrão':'Modelo salvo'); cfgEmailLoad();
+  }catch(e){toast('Falha: '+e.message);}
+}
+async function cfgEmailModeloPadrao(){
+  if(!confirm('Descartar o texto personalizado e voltar ao modelo padrão?')) return;
+  try{ await fetch('actions/email.php',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({acao:'modelo',me:EU&&EU.bitrix_id,modelo_corpo:''})});
+    toast('Modelo padrão restaurado'); cfgEmailLoad(); }catch(e){toast('Falha: '+e.message);}
+}
+
 /* ===== Configurações › E-mail (disparo): conta SMTP + envio-teste ===== */
 async function cfgEmailLoad(){ const w=document.getElementById('cfgEmailWrap'); if(!w)return; w.innerHTML='<div class="dempty">Carregando…</div>';
   try{ const cfg=await (await fetch('actions/email.php?config=1&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
@@ -1460,6 +1495,7 @@ async function cfgEmailLoad(){ const w=document.getElementById('cfgEmailWrap'); 
       <div style="margin-top:8px">${cotFld('Usuário (e-mail remetente)','<input id="ceUser" value="'+esc(cfg.user||'')+'" style="width:100%">')}</div>
       <div style="margin-top:8px">${cotFld('Senha (vazio mantém a atual)','<input id="ceSenha" type="password" autocomplete="new-password" placeholder="••••••••" style="width:100%">')}</div>
       <div style="margin-top:10px"><button class="btn-prim" onclick="cfgEmailSalvar()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">save</span> Salvar conta</button></div>
+      ${cfg.is_admin?cfgEmailModelo(cfg):''}
       <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px">${cotSecHead('outbox','Enviar um teste (SMTP)','manda um e-mail de teste pra você conferir se o envio funciona','')}
         <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap"><div style="flex:1;min-width:220px">${cotFld('Para (seu e-mail)','<input id="ceTeste" placeholder="voce@email.com" style="width:100%">')}</div>
         <button class="btn-prim" onclick="cfgEmailTeste()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">send</span> Enviar teste</button></div></div>

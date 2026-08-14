@@ -1310,18 +1310,38 @@ async function cotEmailAbrir(cid){
     const close=`<span class="material-icons" onclick="document.getElementById('emailOverlay').remove()" style="cursor:pointer;color:var(--muted)">close</span>`;
     if(g.error){ ov.innerHTML=shell(`<div style="display:flex;justify-content:space-between"><b>E-mail de cotação</b>${close}</div><div class="empty" style="margin-top:10px">${esc(g.error)}</div>`); return; }
     const semEmail=(g.destinatarios||[]).filter(d=>!d.tem_email).length;
-    const dchips=(g.destinatarios||[]).map(d=>`<span class="dchip" style="background:${d.tem_email?'#eef4f0':'#fbeae8'};color:${d.tem_email?'var(--verde-d)':'var(--pend)'};font-weight:600;margin:2px 4px 2px 0"><span class="material-icons" style="font-size:12px;vertical-align:-2px">${d.tem_email?'check':'error'}</span> ${esc(d.fornecedor_nome)}${d.email?' · '+esc(d.email):' · sem e-mail'}</span>`).join('')||'<span class="dmini">Nenhum fornecedor convidado.</span>';
+    const jaEnv=(g.destinatarios||[]).filter(d=>d.enviado_em).length;
+    /* Quem JÁ recebeu chega desmarcado — foi o que fez o Murilo quase disparar a mesma cotação duas
+       vezes para 16 fornecedores. E qualquer um pode ser tirado da leva no quadradinho. */
+    COT.emailDest={}; (g.destinatarios||[]).forEach(d=>{ COT.emailDest[d.id]=!!(d.tem_email && !d.enviado_em); });
+    const dchips=(g.destinatarios||[]).map(d=>{
+      const cor=!d.tem_email?'#fbeae8':(d.enviado_em?'#f2f4f3':'#eef4f0');
+      const txt=!d.tem_email?'var(--pend)':(d.enviado_em?'#6b7671':'var(--verde-d)');
+      return `<label style="display:inline-flex;align-items:center;gap:5px;background:${cor};color:${txt};border-radius:20px;padding:3px 10px;margin:2px 4px 2px 0;font-size:11.5px;font-weight:600;cursor:${d.tem_email?'pointer':'not-allowed'}"
+        title="${d.enviado_em?('já recebeu em '+D(String(d.enviado_em).slice(0,10))):(d.tem_email?'vai receber':'sem e-mail — cadastre na Concorrência')}">
+        <input type="checkbox" ${COT.emailDest[d.id]?'checked':''} ${d.tem_email?'':'disabled'} onchange="cotEmailMarcar(${d.id},this.checked)" style="width:auto;margin:0">
+        ${esc(d.fornecedor_nome)}${d.email?' · '+esc(d.email):' · sem e-mail'}${d.enviado_em?' · <b>já enviado</b>':''}</label>`;
+    }).join('')||'<span class="dmini">Nenhum fornecedor convidado.</span>';
     ov.innerHTML=shell(`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><b style="font-size:15px"><span class="material-icons" style="font-size:17px;vertical-align:-3px;color:var(--verde-d)">mail</span> E-mail de cotação — prévia</b>${close}</div>
       <div class="muted" style="font-size:11.5px;margin-bottom:10px">Modelo <b>${g.variante==='radar'?'do radar (com carta anexa)':'de solicitação (itens no corpo)'}</b> · remetente <b>${esc(g.remetente)}</b> · assinatura de <b>${esc(g.remetente_nome||'—')}</b>. Cada fornecedor recebe <b>individualmente</b>.</div>
-      <div style="font-size:11px;font-weight:700;color:var(--muted)">DESTINATÁRIOS ${semEmail?`<span style="color:var(--pend)">· ${semEmail} sem e-mail (preencha na Concorrência)</span>`:'✓'}</div>
-      <div style="margin:5px 0 10px">${dchips}</div>
+      <div style="font-size:11px;font-weight:700;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span>DESTINATÁRIOS ${semEmail?`<span style="color:var(--pend)">· ${semEmail} sem e-mail (preencha na Concorrência)</span>`:'✓'}${jaEnv?`<span style="color:#6b7671"> · ${jaEnv} já receberam (vêm desmarcados)</span>`:''}</span>
+        <button class="btn-ghost" style="padding:2px 8px;font-size:10.5px;font-weight:600" onclick="cotEmailMarcarTodos(1)">marcar todos com e-mail</button>
+        <button class="btn-ghost" style="padding:2px 8px;font-size:10.5px;font-weight:600" onclick="cotEmailMarcarTodos(0)">desmarcar todos</button>
+      </div>
+      <div style="margin:5px 0 10px" id="emDest">${dchips}</div>
+      ${(g.obra&&(g.obra.endereco||g.obra.cnpj))?`<div class="dmini" style="margin:-4px 0 10px">📍 ${esc(g.obra.endereco||'sem endereço na ficha da obra')}${g.obra.cnpj?' · CNPJ '+esc(g.obra.cnpj):''}</div>`
+        :`<div class="dmini" style="margin:-4px 0 10px;color:var(--pend)">⚠ A obra não tem endereço nem CNPJ na ficha (Configurações › Obras) — o e-mail sai sem esses dados.</div>`}
       ${cotFld('Assunto','<input id="emAssunto" value="'+esc(g.assunto)+'" style="width:100%">')}
       ${cotFld('Corpo do e-mail (edite à vontade antes de disparar)','<textarea id="emCorpo" rows="9" style="width:100%;font-size:12.5px;font-family:inherit">'+esc(g.corpo)+'</textarea>','margin-top:8px')}
+      <div class="dmini" style="margin-top:5px">${(g.chaves_forn||[]).map(k=>'<code>{{'+esc(k)+'}}</code>').join(' e ')} viram o nome de cada fornecedor no disparo — o resto já está resolvido aqui. O modelo padrão se muda em Configurações › E-mail (disparo).</div>
       ${g.tem_carta?'<div class="dmini" style="margin-top:6px">📎 A carta de cotação vai anexada em PDF.</div>':''}
+      ${g.assinatura_img?'<div class="dmini" style="margin-top:4px">✒️ Vai com a sua imagem de assinatura.</div>':'<div class="dmini" style="margin-top:4px">✒️ Assina com seu nome e telefone — para usar imagem, suba a sua em Configurações › E-mail do pedido › Assinaturas.</div>'}
+      <div id="emProgresso"></div>
       <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap;margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
         <div style="flex:1;min-width:190px">${cotFld('Enviar um TESTE para (só você recebe)','<input id="emTeste" value="'+esc((EU&&EU.email)||'')+'" placeholder="seu@email.com" style="width:100%">')}</div>
         <button class="btn-ghost" style="padding:7px 13px" onclick="cotEmailTeste()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">outbox</span> Enviar teste</button>
-        <button class="btn-prim" style="padding:7px 15px;font-weight:700" onclick="cotEmailDisparar()" ${g.configurada?'':'disabled style=\"opacity:.5\" title=\"configure a conta em Configurações › E-mail\"'}><span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Disparar p/ ${(g.destinatarios||[]).filter(d=>d.tem_email).length} fornecedor(es)</button>
+        <button class="btn-prim" id="emBtnDisparar" style="padding:7px 15px;font-weight:700" onclick="cotEmailDisparar()" ${g.configurada?'':'disabled style=\"opacity:.5\" title=\"configure a conta em Configurações › E-mail\"'}><span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Disparar p/ ${(g.destinatarios||[]).filter(d=>d.tem_email&&!d.enviado_em).length} fornecedor(es)</button>
       </div>
       <div class="dmini" style="margin-top:6px">Cada fornecedor recebe individualmente (sem cópia). Faça o teste pra você antes de disparar.</div>
       ${cfg.is_admin?`<details style="margin-top:14px;border:1px solid var(--line);border-radius:10px;padding:8px 10px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)"><span class="material-icons" style="font-size:14px;vertical-align:-3px">settings</span> Conta de envio (admin) — ${cfg.configurada?'<b style="color:var(--ok)">configurada ✓</b>':'<b style="color:var(--pend)">falta a senha</b>'} <span class="muted">· também em Configurações › E-mail</span></summary>
@@ -1338,18 +1358,69 @@ async function cotEmailTeste(){ const to=((document.getElementById('emTeste')||{
   const b=cotEmailBody(); toast('Enviando teste…');
   try{ const r=await (await fetch('actions/email.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({acao:'enviar',me:EU&&EU.bitrix_id,teste:to},b))})).json();
     if(r.error){toast(r.error);return;} toast(r.msg||'Teste enviado'); }catch(e){toast('Falha: '+e.message);} }
-async function cotEmailDisparar(){ const b=cotEmailBody();
-  const conv=(COT.cur&&COT.cur.convidados)||[]; const comEmail=conv.filter(c=>c.email&&String(c.email).trim()).length;
-  if(!comEmail){ toast('Nenhum fornecedor com e-mail preenchido'); return; }
-  if(!confirm('Disparar este e-mail INDIVIDUALMENTE para '+comEmail+' fornecedor(es)?\nCada um recebe a sua própria cópia. Isso envia de verdade.')) return;
-  toast('Disparando…');
-  try{ const r=await (await fetch('actions/email.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({acao:'enviar',me:EU&&EU.bitrix_id},b))})).json();
-    if(r.error){toast(r.error);return;}
-    const ov=document.getElementById('emailOverlay'); if(ov)ov.remove();
-    toast(r.enviados+' enviado(s)'+((r.falhas&&r.falhas.length)?' · '+r.falhas.length+' falha(s)':''));
-    if(r.falhas&&r.falhas.length) setTimeout(()=>alert('Falhas:\n'+r.falhas.join('\n')),300);
-    cotOpen(b.cotacao_id);
-  }catch(e){toast('Falha: '+e.message);} }
+function cotEmailMarcar(id,on){ COT.emailDest=COT.emailDest||{}; COT.emailDest[id]=!!on; cotEmailBotao(); }
+function cotEmailMarcarTodos(on){
+  const box=document.getElementById('emDest'); if(!box) return;
+  box.querySelectorAll('input[type=checkbox]').forEach(c=>{ if(c.disabled) return; c.checked=!!on;
+    const m=String(c.getAttribute('onchange')||'').match(/cotEmailMarcar\((\d+)/); if(m) COT.emailDest[m[1]]=!!on; });
+  cotEmailBotao();
+}
+function cotEmailEscolhidos(){ return Object.keys(COT.emailDest||{}).filter(k=>COT.emailDest[k]).map(Number); }
+function cotEmailBotao(){
+  const b=document.getElementById('emBtnDisparar'); if(!b) return;
+  const n=cotEmailEscolhidos().length;
+  b.disabled=!n; b.style.opacity=n?'1':'.5';
+  b.innerHTML='<span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Disparar p/ '+n+' fornecedor(es)';
+}
+/* DISPARO EM LEVAS, com progresso na tela.
+   Antes era UMA requisição para 19 fornecedores: a tela ficava muda por quase um minuto, sem sinal
+   nenhum de que algo estava acontecendo — o Murilo quase clicou de novo e mandaria tudo em dobro.
+   Agora vai de 4 em 4: a barra anda, o botão diz em que ponto está, e cada e-mail que falha aparece
+   no fim com o motivo (e o fornecedor continua marcado como NÃO enviado, então a próxima leva o pega). */
+async function cotEmailDisparar(){
+  const b=cotEmailBody();
+  const ids=cotEmailEscolhidos();
+  if(!ids.length){ toast('Marque ao menos um fornecedor'); return; }
+  if(!confirm('Disparar este e-mail INDIVIDUALMENTE para '+ids.length+' fornecedor(es)?\nCada um recebe a sua própria cópia. Isso envia de verdade.')) return;
+  const btn=document.getElementById('emBtnDisparar'), prog=document.getElementById('emProgresso');
+  const trava=document.querySelectorAll('#emailOverlay button, #emailOverlay input, #emailOverlay textarea');
+  trava.forEach(el=>{ if(el!==btn) el.disabled=true; });
+  const ov=document.getElementById('emailOverlay'); if(ov) ov.onclick=null;   // não fecha por engano no meio do envio
+  const LOTE=4, todos=[]; let feitos=0;
+  const pinta=()=>{ const pct=Math.round(100*feitos/ids.length);
+    if(btn){ btn.disabled=true; btn.innerHTML='<span class="material-icons" style="font-size:16px;vertical-align:-3px">hourglass_top</span> Enviando… '+feitos+' de '+ids.length; }
+    if(prog) prog.innerHTML=`<div style="margin-top:10px"><div style="height:8px;background:#e8eeea;border-radius:6px;overflow:hidden">
+      <div style="height:100%;width:${pct}%;background:var(--verde);transition:width .25s"></div></div>
+      <div class="dmini" style="margin-top:4px">${feitos} de ${ids.length} · não feche esta janela</div></div>`; };
+  pinta();
+  try{
+    for(let i=0;i<ids.length;i+=LOTE){
+      const fatia=ids.slice(i,i+LOTE);
+      const r=await (await fetch('actions/email.php',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(Object.assign({acao:'enviar',me:EU&&EU.bitrix_id,destinos:fatia},b))})).json();
+      if(r.error){ todos.push(...fatia.map(id=>({id,nome:'(lote)',ok:false,erro:r.error}))); }
+      else todos.push(...(r.resultados||[]));
+      feitos+=fatia.length; pinta();
+    }
+  }catch(e){ todos.push({nome:'(interrompido)',ok:false,erro:e.message}); }
+  cotEmailResultado(todos, b.cotacao_id);
+}
+function cotEmailResultado(res, cid){
+  const ok=res.filter(r=>r.ok), ruins=res.filter(r=>!r.ok);
+  const prog=document.getElementById('emProgresso');
+  const btn=document.getElementById('emBtnDisparar');
+  if(btn){ btn.disabled=false; btn.innerHTML='<span class="material-icons" style="font-size:16px;vertical-align:-3px">check</span> Concluído'; }
+  if(prog) prog.innerHTML=`<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+    <b style="font-size:13.5px">${ok.length} enviado(s)${ruins.length?` · <span style="color:var(--pend)">${ruins.length} não saíram</span>`:''}</b>
+    ${ruins.length?`<div style="margin-top:7px;background:#fbeae8;border:1px solid #f2d2cd;border-radius:9px;padding:9px 11px">
+        <div style="font-size:12px;font-weight:700;color:#9c3b2e;margin-bottom:4px">Estes NÃO receberam — continuam marcados como não enviados:</div>
+        ${ruins.map(r=>`<div style="font-size:11.5px;color:#7a3227"><b>${esc(r.nome||'')}</b>${r.email?' &lt;'+esc(r.email)+'&gt;':''} — ${esc(r.erro||'falhou')}</div>`).join('')}
+        <div class="dmini" style="margin-top:5px">arrume o e-mail na Concorrência e dispare de novo: só eles virão marcados.</div></div>`:''}
+    ${ok.length?`<div class="dmini" style="margin-top:6px">${ok.map(r=>esc(r.nome)).join(' · ')}</div>`:''}
+    <div style="margin-top:10px"><button class="btn-prim" onclick="cotEmailFechar(${cid})">Fechar</button></div></div>`;
+  toast(ok.length+' enviado(s)'+(ruins.length?' · '+ruins.length+' falha(s)':''));
+}
+function cotEmailFechar(cid){ const ov=document.getElementById('emailOverlay'); if(ov)ov.remove(); if(cid) cotOpen(cid); }
 /* ===== ITEM B: cadastrar proposta a partir de um PDF/print SEM escolher fornecedor — IA lê, IDENTIFICA o fornecedor e preenche ===== */
 function cotPropIAAbrir(){ COT.propIA={files:[],busy:false}; let ov=document.getElementById('propiaOverlay');
   if(!ov){ ov=document.createElement('div'); ov.id='propiaOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }

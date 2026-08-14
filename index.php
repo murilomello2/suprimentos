@@ -349,10 +349,23 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
   @media(max-width:640px){.cvmast,.cvbody,.cvinfo>div{padding-left:18px;padding-right:18px}.cvgrid3{grid-template-columns:1fr}}
   .cvdoc,.cvdoc *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   @media print{ body *{visibility:hidden!important} #cvGerada,#cvGerada *{visibility:visible!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important} #cvGerada{position:absolute;left:0;top:0;width:100%} #cvGerada .cvdoc{border:none;max-width:none;box-shadow:none} .cv-noprint{display:none!important} .cvsec{break-inside:avoid} .cvmast{background:#1e3a2e!important} @page{size:A4;margin:10mm} }
-  /* Mapa em UMA PÁGINA (resumo imprimível) */
-  .up-tbl{width:100%;border-collapse:collapse;font-size:11px}
-  .up-tbl th,.up-tbl td{border:1px solid #e3e8e6;padding:5px 7px;text-align:center;vertical-align:top}
+  /* Mapa em UMA PÁGINA (resumo imprimível)
+     table-layout:fixed é o que impede o corte: sem ele a coluna cresce com o conteúdo (nome de
+     fornecedor comprido, observação longa) e a tabela passa da folha — 10 colunas chegaram a
+     2052px numa folha de 1062px. Com largura fixa a tabela nunca ultrapassa o container: o texto
+     quebra dentro da célula. A divisão em blocos (no JS) é o que mantém a coluna legível. */
+  .up-tbl{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}
+  /* box-sizing é indispensável aqui: sem ele a largura do <col> é só o CONTEÚDO e cada célula soma
+     padding + borda por cima — 10 colunas viravam ~128px a mais e a tabela vazava a folha de novo. */
+  /* white-space:normal anula o `thead th{white-space:nowrap}` global (linha ~110): era ele que
+     impedia o nome do fornecedor de quebrar linha — o texto saía 343px numa coluna de 123px e
+     vazava a folha mesmo com a tabela do tamanho certo. */
+  .up-tbl th,.up-tbl td{border:1px solid #e3e8e6;padding:5px 7px;text-align:center;vertical-align:top;
+    box-sizing:border-box;white-space:normal;word-break:break-word;overflow-wrap:anywhere}
   .up-tbl thead th{background:#f0f4f2;font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:#556}
+  /* Blocos do mapa impresso: na TELA ficam separados por um traço (a pessoa vê onde a folha vai
+     quebrar, antes de imprimir); no PAPEL, cada um começa em página nova. */
+  .up-bloco + .up-bloco{margin-top:20px;padding-top:16px;border-top:2px dashed #d8e2dc}
   @media print{
     body *{visibility:hidden!important}
     #cotUmaPagina, #cotUmaPagina *{visibility:visible!important}
@@ -360,9 +373,26 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
     #cotUmaPagina div{overflow:visible!important}   /* não clipar tabelas na impressão */
     .up-noprint{display:none!important}
     .up-tbl{font-size:9px} .up-tbl th,.up-tbl td{padding:3px 5px}
+    /* min-width serve à tela; no papel ele é justamente o que empurra a tabela para fora da folha */
+    .up-tbl th,.up-tbl td{min-width:0!important;max-width:none!important}
     .up-tbl tr,.up-tbl thead{break-inside:avoid}
-    #cotUmaPagina{page:upland}   /* SÓ a uma-página é paisagem (named page); o @page padrão (retrato) vale p/ carta e demais */
-    @page upland{size:A4 landscape;margin:8mm}
+    /* A divisão HORIZONTAL é feita no JS (o navegador não pagina para o lado, só corta). Aqui só
+       se garante que cada bloco começa em folha nova e que o cabeçalho da tabela se repete se um
+       bloco ainda assim transbordar — assim nada é cortado em nenhuma direção. */
+    .up-bloco{break-inside:auto}
+    .up-bloco + .up-bloco{break-before:page;margin-top:0;padding-top:0;border-top:none}
+    .up-tbl thead{display:table-header-group}   /* cabeçalho se repete se o bloco transbordar */
+    .up-faixa{break-after:avoid}
+    .up-rodape{break-before:avoid}
+    /* SEM ISTO O PDF SAI BRANCO E CINZA: por padrão o navegador descarta fundo e cor na impressão,
+       e era o que apagava o verde do melhor preço, o destaque da linha vencedora e as tarjas dos
+       cards. Aqui a cor é informação — é ela que diz qual proposta ganhou o item. */
+    #cotUmaPagina, #cotUmaPagina *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+    /* A ORIENTAÇÃO NÃO VEM DAQUI. `page: upland` + `@page upland{size:landscape}` (named page) é o
+       jeito "certo" pelo padrão, mas o Chrome ignorou e o PDF saía em RETRATO — com as colunas
+       espremidas, que é o que o Murilo viu. Quem manda a paisagem é o cotImprimirMapa() (app04.js),
+       que injeta `@page{size:A4 landscape}` só na hora de imprimir o mapa e retira depois — assim a
+       carta e o pedido continuam em retrato. */
   }
   .gantt-row{display:grid;grid-template-columns:130px 1fr;gap:8px;align-items:center;margin-bottom:7px;font-size:11.5px}
   .gantt-track{position:relative;height:16px;background:#f1f4f3;border-radius:8px}

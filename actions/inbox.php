@@ -28,7 +28,9 @@ define('INBOX_CLASS_BODY', 8000);           // corpo enviado ao classificador (m
 define('INBOX_ANEXO_DIR', __DIR__ . '/../data/anexos');
 define('INBOX_ANEXO_MAX', 25 * 1024 * 1024);
 
-function inbox_email_cfg() { $j = @json_decode(@file_get_contents(EMAIL_CFG_FILE_INBOX), true); return is_array($j) ? $j : []; }
+// a conta vive no banco (meta['email_cfg']) — o arquivo era apagado por todo deploy. Ver includes/email_conf.php
+require_once __DIR__ . '/../includes/email_conf.php';
+function inbox_email_cfg() { return email_conf_get(); }
 function meta_get($pdo, $k) { $q = $pdo->prepare("SELECT v FROM meta WHERE k=?"); $q->execute([$k]); $v = $q->fetchColumn(); return $v === false ? null : $v; }
 function meta_set($pdo, $k, $v) {
     $u = $pdo->prepare("UPDATE meta SET v=? WHERE k=?"); $u->execute([(string)$v, $k]);
@@ -87,26 +89,38 @@ function inbox_match($pdo, $parsed) {
     return [(int)$c['cotacao_id'], (int)$c['cfid'], $c['fornecedor_id'] !== null ? (int)$c['fornecedor_id'] : null, $c['fornecedor_nome'], 'heuristica', 'baixa'];
 }
 
-// salva um anexo inbound reusando o esquema do cotacao_anexo (magic bytes; nome de disco sempre gerado) -> id|null
-function inbox_salvar_anexo($pdo, $cid, $fid, $fnome, $bytes, $nomeOrig) {
-    if ($cid <= 0 || $bytes === '' || strlen($bytes) > INBOX_ANEXO_MAX) return null;
+/**
+ * Salva um anexo inbound reusando o esquema do cotacao_anexo (magic bytes; nome de disco sempre
+ * gerado) -> [id|null, embutido].
+ *
+ * $inline vem do parser (Content-ID / disposition inline). Imagem inline é LOGO/ASSINATURA do
+ * fornecedor, não arquivo para abrir: o e-mail da EConstrução chegou com 4 delas e o card do
+ * cockpit anunciou "4 anexos", afogando a proposta em PDF que era o que importava. Guardamos
+ * (ninguém perde nada, e um print de proposta colado no corpo continua alcançável), mas marcado
+ * como embutido — quem conta e quem lista trata diferente. Não-imagem inline (PDF marcado inline
+ * por cliente estranho) continua sendo anexo de verdade.
+ */
+function inbox_salvar_anexo($pdo, $cid, $fid, $fnome, $bytes, $nomeOrig, $inline = false) {
+    if ($cid <= 0 || $bytes === '' || strlen($bytes) > INBOX_ANEXO_MAX) return [null, 0];
     $head = substr($bytes, 0, 8); $ext = null; $mime = null;
     if (strncmp($head, '%PDF-', 5) === 0) { $ext = 'pdf'; $mime = 'application/pdf'; }
     elseif (strncmp($head, "\x89PNG\x0d\x0a\x1a\x0a", 8) === 0) { $ext = 'png'; $mime = 'image/png'; }
     elseif (strncmp($head, "\xFF\xD8\xFF", 3) === 0) { $ext = 'jpg'; $mime = 'image/jpeg'; }
     elseif (strncmp($head, "PK\x03\x04", 4) === 0) { $ext = 'xlsx'; $mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'; }
     elseif (strncmp($head, "\xD0\xCF\x11\xE0\xA1\xB1\x1a\xE1", 8) === 0) { $ext = 'xls'; $mime = 'application/vnd.ms-excel'; }
-    else return null;   // rejeita qualquer coisa fora de PDF/imagem/Excel (nada de .html/.svg/.exe)
+    else return [null, 0];   // rejeita qualquer coisa fora de PDF/imagem/Excel (nada de .html/.svg/.exe)
+    $embutido = ($inline && strncmp($mime, 'image/', 6) === 0) ? 1 : 0;
     $cnt = (int)$pdo->query("SELECT COUNT(*) FROM cotacao_anexo WHERE cotacao_id=" . (int)$cid)->fetchColumn();
-    if ($cnt >= 40) return null;
+    if ($cnt >= 40) return [null, 0];
     if (!is_dir(INBOX_ANEXO_DIR)) @mkdir(INBOX_ANEXO_DIR, 0775, true);
     $stored = 'anx_' . (int)$cid . '_' . bin2hex(random_bytes(10)) . '.' . $ext;
-    if (@file_put_contents(INBOX_ANEXO_DIR . '/' . $stored, $bytes) === false) return null;
+    if (@file_put_contents(INBOX_ANEXO_DIR . '/' . $stored, $bytes) === false) return [null, 0];
     $nome = trim((string)$nomeOrig); if ($nome === '') $nome = 'anexo.' . $ext; if (strlen($nome) > 240) $nome = substr($nome, -240);
-    $pdo->prepare("INSERT INTO cotacao_anexo (cotacao_id, proposta_id, fornecedor_id, fornecedor_nome, nome, arquivo, tamanho, mime, criado_por, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
-        ->execute([$cid, null, $fid ?: null, $fnome ?: null, $nome, $stored, strlen($bytes), $mime, '__INBOX__', date('c')]);
-    return (int)$pdo->lastInsertId();
+    $pdo->prepare("INSERT INTO cotacao_anexo (cotacao_id, proposta_id, fornecedor_id, fornecedor_nome, nome, arquivo, tamanho, mime, embutido, criado_por, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+        ->execute([$cid, null, $fid ?: null, $fnome ?: null, $nome, $stored, strlen($bytes), $mime, $embutido, '__INBOX__', date('c')]);
+    return [(int)$pdo->lastInsertId(), $embutido];
 }
+
 
 // PROMPT PADRÃO do classificador (editável via oracle_cfg['prompt_classifica']).
 function inbox_classificar_prompt() {
@@ -265,13 +279,19 @@ function inbox_sync($pdo, $me, $perms) {
                     $out['novas']++;
                     if ($cid) $out['casadas']++; else $out['sem_match']++;
 
-                    // anexos (só salvamos quando casou numa cotação; senão ficam pendentes de vínculo manual)
-                    $anexoIds = []; $anexoNomes = [];
+                    /* anexos (só salvamos quando casou numa cotação; senão ficam pendentes de vínculo manual).
+                       IMAGEM EMBUTIDA fica de fora das contas: ela é a assinatura do fornecedor, e o que
+                       a IA e o comprador precisam ver é a proposta. Os ids embutidos vão em campo separado,
+                       para o modal do e-mail poder mostrá-los sem poluir o resto. */
+                    $anexoIds = []; $embutidoIds = []; $anexoNomes = [];
                     foreach (($p['anexos'] ?? []) as $ax) {
-                        $anexoNomes[] = $ax['nome'];
-                        if ($cid) { $aid = inbox_salvar_anexo($pdo, $cid, $fid, $fnome ?: $p['from_nome'], $ax['bytes'], $ax['nome']); if ($aid) $anexoIds[] = $aid; }
+                        $ehEmb = !empty($ax['inline']);
+                        if ($cid) {
+                            [$aid, $emb] = inbox_salvar_anexo($pdo, $cid, $fid, $fnome ?: $p['from_nome'], $ax['bytes'], $ax['nome'], $ehEmb);
+                            if ($aid) { if ($emb) $embutidoIds[] = $aid; else { $anexoIds[] = $aid; $anexoNomes[] = $ax['nome']; } }
+                        } elseif (!$ehEmb) $anexoNomes[] = $ax['nome'];
                     }
-                    $temAnexo = count($p['anexos'] ?? []) > 0 ? 1 : 0;
+                    $temAnexo = ($cid ? count($anexoIds) : count($anexoNomes)) > 0 ? 1 : 0;
 
                     // classificação (passo 1). Sem chave da IA: fica como 'indefinido' com um trecho do corpo.
                     $cl = inbox_classificar($oracleCfg, $p['subject'], $p['corpo'], $anexoNomes);
@@ -291,7 +311,11 @@ function inbox_sync($pdo, $me, $perms) {
                     // UPDATE-LATE: preenche a classificação/anexos/rascunho na linha já gravada
                     $pdo->prepare("UPDATE cotacao_email_in SET tipo=?, resumo=?, tem_proposta=?, precisa_humano=?, ia_confianca=?, tem_anexo=?, ia_modelo=?, anexos_ids=?, draft_json=? WHERE id=?")
                         ->execute([$cl['tipo'], substr((string)$cl['resumo'], 0, 500), (int)$cl['tem_proposta'], (int)$cl['precisa_humano'], $cl['confianca'],
-                            $temAnexo, substr((string)($cl['modelo'] ?? ''), 0, 60), $anexoIds ? implode(',', $anexoIds) : null,
+                            /* anexos_ids guarda TODOS (reais primeiro, embutidos depois) — quem lê separa
+                               pela coluna `embutido`. Assim a assinatura continua alcançável no modal do
+                               e-mail sem precisar de outra coluna. */
+                            $temAnexo, substr((string)($cl['modelo'] ?? ''), 0, 60),
+                            ($anexoIds || $embutidoIds) ? implode(',', array_merge($anexoIds, $embutidoIds)) : null,
                             $draft ? json_encode($draft, JSON_UNESCAPED_UNICODE) : null, $inId]);
 
                     // marca o card do convidado na Concorrência (respondeu + tipo + resumo)
@@ -324,7 +348,7 @@ try {
     $perms = user_perms($pdo, $me);
     if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error' => 'Não autorizado.']); exit; }
 
-    $acao = $method === 'POST' ? ($in['acao'] ?? '') : (isset($_GET['sync']) ? 'varrer' : (isset($_GET['probe']) ? 'probe' : (isset($_GET['listar']) ? 'listar' : (isset($_GET['resumo']) ? 'resumo' : ''))));
+    $acao = $method === 'POST' ? ($in['acao'] ?? '') : (isset($_GET['sync']) ? 'varrer' : (isset($_GET['probe']) ? 'probe' : (isset($_GET['listar']) ? 'listar' : (isset($_GET['resumo']) ? 'resumo' : (isset($_GET['conversa']) ? 'conversa' : '')))));
 
     if ($acao === 'probe') {   // testa só a CONEXÃO/LOGIN IMAP — não lê conteúdo nem chama IA (admin)
         if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores.']); exit; }
@@ -384,21 +408,101 @@ try {
             if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Apenas administradores veem a caixa completa.']); exit; }
             $q = $pdo->query("SELECT * FROM cotacao_email_in ORDER BY id DESC LIMIT 100");
         }
-        $itens = array_map(function ($r) {
+        /* ANEXOS COM NOME, não só ids. O card mostrava quatro botões "anexo" idênticos — três eram a
+           assinatura do fornecedor — e para saber qual era a proposta só clicando um por um. Agora vai
+           nome, tamanho e tipo, e a assinatura vai separada (embutidos). */
+        $anexoInfo = function ($idsCsv) use ($pdo) {
+            $ids = array_values(array_filter(array_map('intval', explode(',', (string)$idsCsv))));
+            if (!$ids) return [[], []];
+            try {
+                $ph = implode(',', array_fill(0, count($ids), '?'));
+                $q = $pdo->prepare("SELECT id, nome, tamanho, mime, embutido, criado_por FROM cotacao_anexo WHERE id IN ($ph)");
+                $q->execute($ids); $rows = $q->fetchAll();
+            } catch (Throwable $e) { return [[], []]; }
+            $porId = []; foreach ($rows as $x) $porId[(int)$x['id']] = $x;
+            $reais = []; $emb = [];
+            foreach ($ids as $id) {                                  // preserva a ordem gravada
+                if (!isset($porId[$id])) continue;
+                $a = $porId[$id];
+                $item = ['id' => $id, 'nome' => (string)$a['nome'], 'tamanho' => (int)$a['tamanho'], 'mime' => (string)$a['mime']];
+                if (anexo_eh_embutido($a)) $emb[] = $item; else $reais[] = $item;
+            }
+            return [$reais, $emb];
+        };
+        $itens = array_map(function ($r) use ($anexoInfo) {
             $draft = $r['draft_json'] ? json_decode($r['draft_json'], true) : null;
+            [$axReais, $axEmb] = $anexoInfo($r['anexos_ids'] ?? '');
             return ['id' => (int)$r['id'], 'cotacao_id' => $r['cotacao_id'] !== null ? (int)$r['cotacao_id'] : null,
                 'cotacao_fornecedor_id' => $r['cotacao_fornecedor_id'] !== null ? (int)$r['cotacao_fornecedor_id'] : null,
                 'fornecedor_id' => $r['fornecedor_id'] !== null ? (int)$r['fornecedor_id'] : null, 'fornecedor_nome' => $r['fornecedor_nome'],
                 'from_email' => $r['from_email'], 'from_nome' => $r['from_nome'], 'assunto' => $r['assunto'], 'data_email' => $r['data_email'],
                 'match_metodo' => $r['match_metodo'], 'match_confianca' => $r['match_confianca'],
                 'tipo' => $r['tipo'], 'resumo' => $r['resumo'], 'tem_proposta' => (int)$r['tem_proposta'], 'precisa_humano' => (int)$r['precisa_humano'],
-                'ia_confianca' => $r['ia_confianca'], 'tem_anexo' => (int)$r['tem_anexo'], 'anexos_ids' => $r['anexos_ids'],
+                'ia_confianca' => $r['ia_confianca'], 'anexos_ids' => $r['anexos_ids'],
+                // tem_anexo do banco reflete o que valia na varredura; a verdade AGORA é a lista real
+                'tem_anexo' => count($axReais) > 0 ? 1 : 0,
+                'anexos' => $axReais, 'anexos_embutidos' => $axEmb,
                 'tem_rascunho' => $draft ? 1 : 0, 'draft' => $draft, 'corpo_preview' => $r['corpo_preview'], 'status' => $r['status'],
                 // colunas da resposta são ADITIVAS: antes da 1ª resposta elas nem existem na tabela
                 'respondido_em' => $r['respondido_em'] ?? null, 'respondido_nome' => $r['respondido_nome'] ?? null,
                 'resposta_texto' => $r['resposta_texto'] ?? null];
         }, $q->fetchAll());
         echo json_encode(['ok' => true, 'itens' => $itens], JSON_UNESCAPED_UNICODE); exit;
+    }
+
+    /**
+     * CONVERSA com UM fornecedor, dentro de UMA cotação — a troca de e-mails em ordem.
+     *
+     * Os três pedaços da conversa já existiam, cada um numa tabela, e nenhuma tela os juntava: o
+     * comprador via a última resposta e não o fio (mandamos a carta → ele pediu o projeto →
+     * respondemos com o anexo → ele mandou a proposta). Sem o fio, a pergunta "eu já respondi isso?"
+     * só se resolvia abrindo o webmail.
+     *   • cotacao_email_out  = os disparos da carta de cotação (assunto e quando)
+     *   • cotacao_email_in   = o que ele mandou (com resumo da IA, anexos e o corpo)
+     *   • a resposta que nós demos vive NA linha do recebido (resposta_texto/respondido_em)
+     * Nada de novo é gravado aqui: é leitura costurada.
+     */
+    if ($acao === 'conversa') {
+        $cid = (int)($_GET['cotacao'] ?? 0);
+        $email = strtolower(trim((string)($_GET['email'] ?? '')));
+        if (!$cid || $email === '') throw new Exception('cotacao e email obrigatórios');
+        if (!cot_pode_gerir($pdo, $me, $cid)) { http_response_code(403); echo json_encode(['error' => 'Sem acesso a esta cotação.']); exit; }
+
+        $eventos = [];
+        // 1) o que SAIU: disparos da carta
+        try {
+            $q = $pdo->prepare("SELECT fornecedor_nome, email, assunto, enviado_em FROM cotacao_email_out WHERE cotacao_id=? AND LOWER(email)=? ORDER BY id");
+            $q->execute([$cid, $email]);
+            foreach ($q->fetchAll() as $r) $eventos[] = ['dir' => 'out', 'tipo' => 'disparo', 'quando' => (string)$r['enviado_em'],
+                'assunto' => (string)$r['assunto'], 'texto' => '', 'quem' => '', 'anexos' => []];
+        } catch (Throwable $e) {}
+
+        // 2) o que CHEGOU + 3) o que respondemos (mora na mesma linha)
+        $q = $pdo->prepare("SELECT * FROM cotacao_email_in WHERE cotacao_id=? AND LOWER(from_email)=? ORDER BY id");
+        $q->execute([$cid, $email]);
+        foreach ($q->fetchAll() as $r) {
+            $ids = array_values(array_filter(array_map('intval', explode(',', (string)($r['anexos_ids'] ?? '')))));
+            $ax = [];
+            if ($ids) {
+                try {
+                    $ph = implode(',', array_fill(0, count($ids), '?'));
+                    $aq = $pdo->prepare("SELECT id, nome, tamanho, mime, embutido, criado_por FROM cotacao_anexo WHERE id IN ($ph)");
+                    $aq->execute($ids);
+                    foreach ($aq->fetchAll() as $a) if (!anexo_eh_embutido($a))     // assinatura não é anexo da conversa
+                        $ax[] = ['id' => (int)$a['id'], 'nome' => (string)$a['nome'], 'tamanho' => (int)$a['tamanho'], 'mime' => (string)$a['mime']];
+                } catch (Throwable $e) {}
+            }
+            $eventos[] = ['dir' => 'in', 'tipo' => (string)($r['tipo'] ?? ''), 'quando' => (string)$r['data_email'],
+                'assunto' => (string)$r['assunto'], 'texto' => (string)($r['corpo_preview'] ?? ''),
+                'resumo' => (string)($r['resumo'] ?? ''), 'quem' => (string)($r['from_nome'] ?? ''), 'anexos' => $ax,
+                'email_id' => (int)$r['id']];
+            if (!empty($r['respondido_em'])) $eventos[] = ['dir' => 'out', 'tipo' => 'resposta', 'quando' => (string)$r['respondido_em'],
+                'assunto' => 'Re: ' . (string)$r['assunto'], 'texto' => (string)($r['resposta_texto'] ?? ''),
+                'quem' => (string)($r['respondido_nome'] ?? ''), 'anexos' => []];
+        }
+
+        usort($eventos, function ($a, $b) { return strcmp((string)$a['quando'], (string)$b['quando']); });
+        echo json_encode(['ok' => true, 'email' => $email, 'eventos' => $eventos], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'resumo') {   // TERRENO do sininho/relatório diário (dados; sino é fase futura)

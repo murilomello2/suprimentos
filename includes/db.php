@@ -194,7 +194,7 @@ function db_schema_mysql($pdo) {
     ) $E");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_anexo (
         id INT NOT NULL AUTO_INCREMENT, cotacao_id INT NOT NULL, proposta_id INT, fornecedor_id INT, fornecedor_nome VARCHAR(191), nome VARCHAR(255),
-        arquivo VARCHAR(255), tamanho INT, mime VARCHAR(100), criado_por VARCHAR(64), created_at VARCHAR(40),
+        arquivo VARCHAR(255), tamanho INT, mime VARCHAR(100), embutido TINYINT DEFAULT 0, criado_por VARCHAR(64), created_at VARCHAR(40),
         PRIMARY KEY (id), KEY idx_anexo_cot (cotacao_id), KEY idx_anexo_prop (proposta_id)
     ) $E");
     // DICIONÁRIO DE COTAÇÃO: aprendizado dos itens/aspectos a cotar por serviço (ex.: GRUA → locação,
@@ -509,6 +509,8 @@ function db_schema_mysql($pdo) {
         if ($ac && !isset($ac['fornecedor_id'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN fornecedor_id INT");
         if ($ac && !isset($ac['fornecedor_nome'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN fornecedor_nome VARCHAR(191)");
         if ($ac && !isset($ac['url'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN url VARCHAR(500)");   // anexo por LINK (ex.: PDF importado do storage antigo) — sem arquivo local
+        // EMBUTIDO: imagem que vive DENTRO do corpo (logo/assinatura do fornecedor), não arquivo para abrir
+        if ($ac && !isset($ac['embutido'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN embutido TINYINT DEFAULT 0");
         $fc = []; foreach ($pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cot_fornecedor'") as $c) $fc[$c['COLUMN_NAME']] = true;
         if ($fc && !isset($fc['contatos_at'])) $pdo->exec("ALTER TABLE cot_fornecedor ADD COLUMN contatos_at TEXT");
         // qualidade do número p/ WhatsApp: E.164 normalizado + se é celular/fixo + por que + de onde veio
@@ -759,6 +761,7 @@ function db_schema($pdo) {
     if (!isset($acols['fornecedor_id'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN fornecedor_id INTEGER");
     if (!isset($acols['fornecedor_nome'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN fornecedor_nome TEXT");
     if (!isset($acols['url'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN url TEXT");
+    if (!isset($acols['embutido'])) $pdo->exec("ALTER TABLE cotacao_anexo ADD COLUMN embutido INTEGER DEFAULT 0");
     $fcols = []; foreach ($pdo->query("PRAGMA table_info(cot_fornecedor)") as $c) $fcols[$c['name']] = true;
     if (!isset($fcols['contatos_at'])) $pdo->exec("ALTER TABLE cot_fornecedor ADD COLUMN contatos_at TEXT");
     $cfcols = []; foreach ($pdo->query("PRAGMA table_info(cotacao_fornecedor)") as $c) $cfcols[$c['name']] = true;
@@ -937,6 +940,26 @@ function cot_pode_gerir($pdo, $me, $cotacao_id) {
     foreach ((array)(json_decode((string)($r['colaboradores'] ?? ''), true) ?: []) as $b) if (trim((string)$b) === trim((string)$me)) return true;
     return false;
 }
+/**
+ * ANEXO EMBUTIDO (logo/assinatura do fornecedor) × ANEXO DE VERDADE.
+ *
+ * O e-mail da EConstrução chegou com a proposta em PDF e 4 imagens da assinatura; o card anunciou
+ * "4 anexos" e, para achar a proposta, só clicando um por um. Imagem com Content-ID/inline é parte
+ * do CORPO, não arquivo para abrir — o parser IMAP já marcava isso e ninguém usava.
+ *
+ * A coluna `embutido` só vale para o que chegou DEPOIS de 17/08/2026. Para o histórico usa-se o
+ * fenômeno equivalente: imagem PEQUENA vinda da caixa (`__INBOX__`) é assinatura — proposta
+ * fotografada de celular não tem 30 KB. Uma regra, num lugar só, para o card, o modal do e-mail, o
+ * mapa e a IA concordarem sobre o que conta como anexo.
+ */
+define('ANEXO_EMBUTIDO_MAX', 200 * 1024);
+function anexo_eh_embutido($a) {
+    if (!empty($a['embutido'])) return true;
+    return strncmp((string)($a['mime'] ?? ''), 'image/', 6) === 0
+        && (string)($a['criado_por'] ?? '') === '__INBOX__'
+        && (int)($a['tamanho'] ?? 0) > 0 && (int)$a['tamanho'] <= ANEXO_EMBUTIDO_MAX;
+}
+
 /* ───────── DESQUALIFICAÇÃO DE PROPOSTA (catálogo de motivos) ─────────
    Desqualifica A PROPOSTA, nunca o fornecedor: ele continua na concorrência, continua convidado e
    pode mandar revisão nova (que nasce qualificada). A proposta desqualificada NÃO some do mapa —

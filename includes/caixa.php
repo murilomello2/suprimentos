@@ -18,10 +18,9 @@ define('CAIXA_PREVIEW', 1200);          // prévia guardada por mensagem (o corp
 define('CAIXA_MAX_SYNC', 60);           // mensagens por pasta por varredura — mantém a requisição curta
 define('CAIXA_JANELA', '-90 days');     // 1ª varredura de uma pasta: até onde voltar
 
-function caixa_cfg() {
-    $j = @json_decode(@file_get_contents(__DIR__ . '/../data/.email.json'), true);
-    return is_array($j) ? $j : [];
-}
+// mesma conta do disparo, agora no banco (o arquivo morria em todo deploy) — includes/email_conf.php
+require_once __DIR__ . '/email_conf.php';
+function caixa_cfg() { return email_conf_get(); }
 
 function caixa_meta_get($pdo, $k, $def = null) {
     try { $q = $pdo->prepare("SELECT v FROM meta WHERE k=?"); $q->execute([$k]); $v = $q->fetchColumn();

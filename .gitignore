@@ -47,3 +47,9 @@ data/.solic_atendidos.json
 # deploy -- ate 400 arquivos que so fazem sentido na maquina onde foram gerados.
 data/.ultp/
 data/.bp_base_ate.json
+
+# Conta de e-mail (host/usuário/SENHA/cron_token). Estava RASTREADO e cada deploy subia a cópia
+# local por cima da do servidor, APAGANDO a senha ("Conta de e-mail não configurada" logo depois
+# de todo deploy, 17/08/2026). A verdade agora é meta[email_cfg] no banco; o arquivo só é lido
+# como herança. Ver includes/email_conf.php.
+data/.email.json

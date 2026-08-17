@@ -47,18 +47,21 @@ async function cotInboxLoad(cid){ const CAN_EDIT=cotEditavel();
     if(col){ host.innerHTML=`<div class="panel" style="margin-bottom:10px">${head}<div style="font-size:12.5px;color:var(--muted)"><b>${its.length}</b> e-mail(s)${novos?` · <b style="color:var(--pend)">${novos}</b> não processada(s) — expanda p/ ver e incluir no mapa`:' · todas tratadas'}</div></div>`; return; }
     const tipoChip=t=>t==='cotacao'?'<span class="dchip" style="background:#1f7a44;color:#fff">COTAÇÃO</span>':(t==='duvida'?'<span class="dchip" style="background:var(--pend);color:#fff">DÚVIDA</span>':(t==='fora_de_escopo'?'<span class="dchip" style="background:#8a9299;color:#fff">FORA DE ESCOPO</span>':'<span class="dchip" style="background:#5b6b7a;color:#fff">'+esc(String(t||'?').toUpperCase())+'</span>'));
     // 1 e-mail = 1 card; AGRUPADOS por fornecedor (sequência), mais recente primeiro
-    const rowOf=(m,i)=>{ const anx=String(m.anexos_ids||'').split(',').filter(Boolean); const done=(m.status==='lido'||m.status==='convertido'||m.status==='ignorado'||m.status==='respondido');
+    /* Anexos com NOME. Antes eram N botões "anexo" idênticos e a assinatura do fornecedor entrava na
+       conta: no e-mail da EConstrução deu "4 anexos" para 1 proposta em PDF + 3 imagens de rodapé.
+       Agora o servidor separa (m.anexos × m.anexos_embutidos) e o botão diz o nome do arquivo. */
+    const rowOf=(m,i)=>{ const anx=m.anexos||[]; const done=(m.status==='lido'||m.status==='convertido'||m.status==='ignorado'||m.status==='respondido');
       return `<div style="${done?'opacity:.6;':''}">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           ${tipoChip(m.tipo)}
           <span class="muted" style="font-size:11px;flex:1;min-width:80px">${m.data_email?D(String(m.data_email).slice(0,10)):''}${m.match_metodo==='heuristica'?' · vínculo '+esc(m.match_confianca||''):''}</span>
-          ${m.tem_anexo?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d)"><span class="material-icons" style="font-size:11px;vertical-align:-2px">attach_file</span> ${anx.length||1}</span>`:''}
+          ${anx.length?`<span class="dchip" style="background:#eef4f0;color:var(--verde-d)" title="${anx.map(a=>a.nome).join(' · ')}"><span class="material-icons" style="font-size:11px;vertical-align:-2px">attach_file</span> ${anx.length}</span>`:''}
           ${done?`<span class="dchip" style="background:#8a9299;color:#fff">✓ ${esc(m.status)}</span>`:''}
         </div>
         ${m.resumo?`<div style="font-size:12.5px;margin-top:4px">${esc(m.resumo)}</div>`:''}
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
           ${m.tem_rascunho&&CAN_EDIT?`<button class="${done?'btn-ghost':'btn-prim'}" style="padding:3px 11px" onclick="cotInboxUsarRascunho(${i})" title="abre a proposta pré-preenchida pela IA (rascunho — confira e salve)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">auto_awesome</span> ${done?'usar de novo':'Usar rascunho'}</button>`:''}
-          ${anx.map(id=>`<a class="btn-ghost" style="padding:3px 9px;text-decoration:none" href="actions/cotacao_anexo.php?download=${id}&me=${encodeURIComponent(meB)}" target="_blank" rel="noopener"><span class="material-icons" style="font-size:13px;vertical-align:-2px">description</span> anexo</a>`).join('')}
+          ${anx.map(a=>`<a class="btn-ghost" style="padding:3px 9px;text-decoration:none;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" href="actions/cotacao_anexo.php?download=${a.id}&me=${encodeURIComponent(meB)}" target="_blank" rel="noopener" title="${esc(a.nome)}${a.tamanho?' · '+emAnxTam(a.tamanho):''}"><span class="material-icons" style="font-size:13px;vertical-align:-2px">${cotAnexoIcon(a.mime,a.nome)}</span> ${esc(a.nome)}</a>`).join('')}
           ${m.corpo_preview?`<button class="btn-ghost" style="padding:3px 9px" onclick="cotInboxVerCorpo(${i})">ver e-mail</button>`:''}
           ${CAN_EDIT&&m.from_email?`<button class="${(m.tipo==='duvida'&&!m.respondido_em)?'btn-prim':'btn-ghost'}" style="padding:3px 11px" onclick="cotInboxVerCorpo(${i},1)" title="responde ao fornecedor por e-mail, na mesma conversa — a cópia fica na aba Enviados"><span class="material-icons" style="font-size:13px;vertical-align:-2px">reply</span> ${m.respondido_em?'respondido':'Responder'}</button>`:''}
           ${!done?`<button class="btn-ghost" style="padding:3px 9px;color:var(--muted)" onclick="cotInboxMarcar(${m.id},'marcar_lido')">marcar lido</button>`:''}
@@ -70,6 +73,7 @@ async function cotInboxLoad(cid){ const CAN_EDIT=cotEditavel();
         <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:#f6f9f7;border-bottom:1px solid var(--line)">
           <span class="dgm" style="background:${latest.tipo==='cotacao'?'#1f7a44':(latest.tipo==='duvida'?'var(--pend)':'#8a9299')}"></span>
           <b style="flex:1;min-width:120px">${esc(k)}</b>
+          ${latest.from_email?`<button class="btn-ghost" style="padding:2px 9px;font-size:11px;font-weight:600" onclick="cotConversaAbrir('${esc(latest.from_email)}','${esc(k)}')" title="a troca de e-mails com este fornecedor, em ordem"><span class="material-icons" style="font-size:13px;vertical-align:-2px">forum</span> conversa</button>`:''}
           <span class="muted" style="font-size:11px">${arr.length} e-mail(s)</span>
           ${nn?`<span class="dchip" style="background:var(--pend);color:#fff">${nn} nova(s)</span>`:''}
         </div>
@@ -81,7 +85,76 @@ async function cotInboxLoad(cid){ const CAN_EDIT=cotEditavel();
 }
 function cotInboxUsarRascunho(i){ const m=(COT.inbox||[])[i]; if(!m||!m.draft){toast('Sem rascunho neste e-mail');return;}
   if(m.id) fetch('actions/inbox.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'converter',me:EU&&EU.bitrix_id,id:m.id})}).catch(()=>{});   // usei o rascunho → marca tratado
-  m.status='convertido'; cotIAAplicar(m.fornecedor_nome||'', m.draft, {}); }
+  // leva o id do e-mail: é ele que dá o botão "ver e-mail"/anexos na tela de cadastro da proposta
+  m.status='convertido'; cotIAAplicar(m.fornecedor_nome||'', m.draft, {emailId:m.id}); }
+/* ═════ A CONVERSA COM O FORNECEDOR ═════
+   Os três pedaços do fio (o que disparamos, o que ele mandou, o que respondemos) já existiam em
+   tabelas separadas e nenhuma tela os juntava — para saber "eu já respondi isso?" o comprador
+   abria o webmail. Aqui é leitura costurada, em ordem, com o que saiu de um lado e o que chegou do
+   outro. Não grava nada. */
+async function cotConversaAbrir(email,nome){
+  const c=(COT.cur||{}).cotacao; if(!c)return;
+  let ov=document.getElementById('convOv');
+  if(!ov){ ov=document.createElement('div'); ov.id='convOv';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.onclick=e=>{ if(e.target===ov) cotConversaFechar(); }; document.body.appendChild(ov); }
+  const shell=b=>`<div style="background:#fff;border-radius:14px;max-width:720px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 12px 44px rgba(0,0,0,.22)" onclick="event.stopPropagation()">
+    <div style="display:flex;align-items:center;gap:9px;padding:14px 18px;border-bottom:1px solid var(--line)">
+      <span class="material-icons" style="font-size:19px;color:var(--verde)">forum</span>
+      <div style="flex:1"><b style="font-size:14.5px">${esc(nome||email)}</b>
+        <div class="muted" style="font-size:11px">${esc(email)} · ${esc(c.titulo||'')}</div></div>
+      <span class="material-icons" style="cursor:pointer;color:var(--muted)" onclick="cotConversaFechar()">close</span></div>
+    <div style="padding:14px 18px;overflow:auto">${b}</div>
+    <div style="padding:11px 18px;border-top:1px solid var(--line);display:flex;gap:9px;align-items:center">
+      <span class="dmini" style="flex:1">o que saiu daqui aparece à direita · para responder, use o botão Responder no e-mail</span>
+      <button class="btn-ghost" onclick="cotConversaFechar()">Fechar</button></div></div>`;
+  ov.innerHTML=shell('<div class="dempty">Montando a conversa…</div>');
+  try{
+    const r=await (await fetch('actions/inbox.php?conversa=1&cotacao='+c.id+'&email='+encodeURIComponent(email)+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    if(r.error){ ov.innerHTML=shell('<div class="empty">'+esc(r.error)+'</div>'); return; }
+    const ev=r.eventos||[];
+    if(!ev.length){ ov.innerHTML=shell('<div class="empty">Nenhum e-mail registrado com este fornecedor nesta cotação.</div>'); return; }
+    const rot={disparo:'Carta de cotação enviada',resposta:'Nossa resposta',cotacao:'Proposta recebida',duvida:'Dúvida do fornecedor',fora_de_escopo:'Recusa / fora de escopo'};
+    const bolha=e=>{ const meu=e.dir==='out';
+      const corpo=(e.texto||'').trim(), resumo=(e.resumo||'').trim();
+      return `<div style="display:flex;justify-content:${meu?'flex-end':'flex-start'};margin-bottom:10px">
+        <div style="max-width:82%;border:1px solid ${meu?'#d6e6dc':'var(--line)'};background:${meu?'#f4faf6':'#fff'};border-radius:12px;padding:9px 12px">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px">
+            <span class="material-icons" style="font-size:14px;color:${meu?'var(--verde-d)':'#8a9299'}">${meu?(e.tipo==='disparo'?'outgoing_mail':'reply'):'mail'}</span>
+            <b style="font-size:11.5px;color:${meu?'var(--verde-d)':'#3d4b44'}">${esc(rot[e.tipo]||(meu?'Enviado':'Recebido'))}</b>
+            <span class="muted" style="font-size:10.5px">${e.quando?D(String(e.quando).slice(0,10)):''}${e.quem?' · '+esc(e.quem):''}</span>
+          </div>
+          <div style="font-size:12px;font-weight:600;color:#3d4b44">${esc(e.assunto||'')}</div>
+          ${resumo?`<div style="font-size:11.5px;color:var(--muted);margin-top:3px">🧠 ${esc(resumo)}</div>`:''}
+          ${corpo?`<div style="white-space:pre-wrap;font-size:12px;margin-top:5px;max-height:${meu?'120px':'150px'};overflow:auto;color:#4a5751">${esc(corpo.length>1200?corpo.slice(0,1200)+'…':corpo)}</div>`:''}
+          ${(e.anexos||[]).length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${e.anexos.map(a=>`<a href="actions/cotacao_anexo.php?download=${a.id}&me=${encodeURIComponent((EU&&EU.bitrix_id)||'')}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid var(--line);border-radius:7px;padding:2px 7px;font-size:11px;color:var(--verde-d);text-decoration:none;font-weight:600"><span class="material-icons" style="font-size:13px">${cotAnexoIcon(a.mime,a.nome)}</span> ${esc(a.nome)}</a>`).join('')}</div>`:''}
+        </div></div>`; };
+    ov.innerHTML=shell(ev.map(bolha).join(''));
+  }catch(e){ ov.innerHTML=shell('<div class="empty">Falha ao montar a conversa.</div>'); }
+}
+function cotConversaFechar(){ const o=document.getElementById('convOv'); if(o)o.remove(); }
+/* OS ANEXOS DO E-MAIL, embaixo do corpo — é o que faltava para "ler o que ele escreveu e abrir a
+   proposta" no mesmo lugar. A assinatura (imagem embutida) vai atrás de um <details>: não é arquivo
+   que alguém queira abrir, mas também não some, porque de vez em quando o fornecedor cola o print
+   da proposta no corpo. Reusado pelo modal do e-mail e pela tela da IA. */
+function cotAnexosDoEmail(m,titulo){
+  const meB=encodeURIComponent((EU&&EU.bitrix_id)||'');
+  const ax=m.anexos||[], emb=m.anexos_embutidos||[];
+  if(!ax.length&&!emb.length) return '';
+  const link=(a,peq)=>`<a href="actions/cotacao_anexo.php?download=${a.id}&me=${meB}" target="_blank" rel="noopener"
+      style="display:inline-flex;align-items:center;gap:5px;max-width:100%;background:#fff;border:1px solid var(--line);border-radius:8px;padding:${peq?'3px 8px':'6px 10px'};text-decoration:none;color:var(--verde-d);font-size:${peq?'11.5px':'12.5px'};font-weight:600"
+      title="abrir ${esc(a.nome)} em outra aba">
+      <span class="material-icons" style="font-size:${peq?'14px':'16px'}">${cotAnexoIcon(a.mime,a.nome)}</span>
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.nome)}</span>
+      ${a.tamanho?`<span class="muted" style="font-weight:400;font-size:10.5px">${emAnxTam(a.tamanho)}</span>`:''}</a>`;
+  return `<div style="margin-top:10px">
+    ${ax.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:5px">${esc(titulo||('Anexos do fornecedor · '+ax.length))}</div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap">${ax.map(a=>link(a,false)).join('')}</div>`
+      :'<div class="dmini">Este e-mail não trouxe anexo — a proposta pode estar no corpo.</div>'}
+    ${emb.length?`<details style="margin-top:7px"><summary style="cursor:pointer;font-size:11px;color:var(--muted)">${emb.length} imagem(ns) do rodapé/assinatura</summary>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:5px">${emb.map(a=>link(a,true)).join('')}</div></details>`:''}
+  </div>`;
+}
 /* Ver o e-mail e RESPONDER no mesmo lugar. Era um alert() — dava para ler a dúvida e mais nada:
    o comprador saía para o webmail, procurava a thread e respondia de lá, e o cockpit nunca ficava
    sabendo. A resposta daqui vai para o remetente gravado no banco (nunca um endereço tirado do
@@ -105,6 +178,7 @@ function cotInboxVerCorpo(i, focoResposta){
         De <b>${esc(m.from_nome||m.from_email||'')}</b> &lt;${esc(m.from_email||'')}&gt;${m.data_email?' · '+D(String(m.data_email).slice(0,10)):''}
       </div>
       <div style="white-space:pre-wrap;font-size:12.5px;background:#f8faf9;border:1px solid var(--line);border-radius:9px;padding:11px 13px;max-height:32vh;overflow:auto">${esc(m.corpo_preview||'(sem corpo)')}</div>
+      ${cotAnexosDoEmail(m)}
       ${resp?`<div style="margin-top:11px;background:#eef4f0;border:1px solid #d6e6dc;border-radius:9px;padding:10px 13px;font-size:12.5px">
           <b style="color:var(--verde-d)">Respondido</b> por ${esc(m.respondido_nome||'')} em ${D(String(resp).slice(0,10))}
           ${m.resposta_texto?`<div style="white-space:pre-wrap;margin-top:6px;color:#4a5751">${esc(m.resposta_texto)}</div>`:''}</div>`:''}
@@ -499,6 +573,25 @@ function cotFornPick(i){
   const drop=document.getElementById('prFDrop'); if(drop){ drop.style.display='none'; drop.innerHTML=''; }
 }
 function cotFornBlur(){ setTimeout(()=>{ const drop=document.getElementById('prFDrop'); if(drop) drop.style.display='none'; },160); }
+/* A FONTE, à mão, na hora de digitar. Preencher o unitário conferindo de memória é como o erro
+   entra: o comprador precisava do PDF e do corpo do e-mail abertos ENQUANTO cadastra — para bater o
+   preço e para anotar o que só está escrito lá (espessura, "por diária", frete por conta de quem).
+   Só aparece quando a proposta nasceu de um e-mail; digitação manual segue limpa. */
+function cotPropOrigem(pr){
+  if(!pr||!pr.emailId) return '';
+  const i=(COT.inbox||[]).findIndex(x=>String(x.id)===String(pr.emailId));
+  if(i<0) return '';
+  const m=COT.inbox[i];
+  return `<div style="max-width:860px;margin-bottom:11px;border:1px solid #d6e6dc;background:#f4faf6;border-radius:10px;padding:9px 12px">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span class="material-icons" style="font-size:16px;color:var(--verde-d)">mail</span>
+      <b style="font-size:12.5px">Confira na fonte</b>
+      <span class="muted" style="font-size:11.5px;flex:1;min-width:130px">e-mail de ${esc(m.from_nome||m.from_email||'')}${m.data_email?' · '+D(String(m.data_email).slice(0,10)):''}</span>
+      <button class="btn-ghost" style="padding:3px 10px;font-size:11.5px" onclick="cotInboxVerCorpo(${i})"><span class="material-icons" style="font-size:13px;vertical-align:-2px">visibility</span> ver e-mail</button>
+    </div>
+    ${cotAnexosDoEmail(m,'Anexos — abra para conferir preço, espessura e condições')}
+  </div>`;
+}
 function cotRenderProposta(){
   const d=COT.cur,c=d.cotacao,itens=d.itens||[],pr=COT.prop;
   const ehRev=!!pr.revisarDe, ehOpc=!!pr.novaOpcao;
@@ -511,6 +604,7 @@ function cotRenderProposta(){
   document.getElementById('cotwrap').innerHTML=`<div class="panel">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button class="btn-ghost" onclick="cotRenderDetalhe()"><span class="material-icons" style="font-size:16px;vertical-align:-3px">arrow_back</span> Voltar ao mapa</button><b style="font-size:15px">${titulo} · ${esc(c.titulo)}</b></div>
     ${banner}
+    ${cotPropOrigem(pr)}
     <div style="max-width:860px">
     <div style="display:grid;grid-template-columns:1fr 220px;gap:10px">
       ${cotFld('Fornecedor *','<div style="position:relative"><input id="prF" autocomplete="off" oninput="cotFornSearch(this)" onfocus="cotFornSearch(this)" onblur="cotFornBlur()" style="width:100%" value="'+esc(pr.fornecedor_nome||'')+'" placeholder="Digite o nome do fornecedor…"><div id="prFDrop" style="display:none;position:absolute;left:0;right:0;top:calc(100% + 3px);z-index:60;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.16);max-height:290px;overflow:auto"></div></div>')}
@@ -1394,9 +1488,16 @@ async function cotUploadAnexoFile(file,fornId,fornNome,propostaId){
 /* --- Motor de IA: lê os anexos do fornecedor e preenche a proposta (RASCUNHO p/ validação humana) --- */
 function cotIAForn(fornId,fornNome){ const d=COT.cur||{}, nz=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
   return (d.anexos||[]).filter(a=>((a.fornecedor_id&&fornId&&String(a.fornecedor_id)===String(fornId))||(a.fornecedor_nome&&nz(a.fornecedor_nome)===nz(fornNome)))); }
+/* De qual e-mail vieram estes anexos. A IA lê o arquivo, mas quem confere é gente: sabendo o e-mail
+   dá para abrir o corpo (prazo, condição, "preço sujeito a...") junto do PDF. */
+function cotIAEmailDosAnexos(ids){
+  const set=new Set((ids||[]).map(String));
+  return (COT.inbox||[]).find(m=>(m.anexos||[]).some(a=>set.has(String(a.id))))||null;
+}
 function cotIAPreencher(fornId,fornNome){ fornId=(fornId&&fornId!=='null')?fornId:null;
   const ax=cotIAForn(fornId,fornNome); if(!ax.length){ toast('Anexe um PDF, Excel ou print desse fornecedor primeiro'); return; }
-  COT.ia={fornId,fornNome,sel:ax.map(a=>a.id),anexos:ax,busy:false}; cotIARender(); }
+  const sel=ax.map(a=>a.id), em=cotIAEmailDosAnexos(sel);
+  COT.ia={fornId,fornNome,sel,anexos:ax,busy:false,emailId:em?em.id:null}; cotIARender(); }
 function cotIAFechar(){ const ov=document.getElementById('iaOverlay'); if(ov)ov.remove(); COT.ia=null; }
 function cotIAToggle(id,on){ const s=COT.ia; if(!s)return; s.sel=on?[...new Set([...s.sel,id])]:s.sel.filter(x=>x!==id); cotIARender(); }
 function cotIARender(){ const s=COT.ia; if(!s)return; let ov=document.getElementById('iaOverlay');
@@ -1405,20 +1506,26 @@ function cotIARender(){ const s=COT.ia; if(!s)return; let ov=document.getElement
   ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:18px;box-shadow:0 12px 44px rgba(0,0,0,.22);width:100%;max-width:470px" onclick="event.stopPropagation()">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:14px"><span class="material-icons" style="font-size:16px;vertical-align:-3px;color:var(--verde-d)">auto_awesome</span> Preencher proposta com IA</b><span onclick="cotIAFechar()" class="material-icons" style="cursor:pointer;color:var(--muted)">close</span></div>
     <div class="muted" style="font-size:11.5px;margin-bottom:10px">${esc(s.fornNome)||'fornecedor'} — escolha o(s) anexo(s) que a IA vai ler:</div>
-    <div style="display:flex;flex-direction:column;gap:4px;max-height:230px;overflow:auto">${s.anexos.map(a=>`<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;padding:4px 2px"><input type="checkbox" ${s.sel.includes(a.id)?'checked':''} onchange="cotIAToggle(${a.id},this.checked)"><span class="material-icons" style="font-size:16px;color:var(--muted)">${cotAnexoIcon(a.mime,a.nome)}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.nome)}</span></label>`).join('')}</div>
+    <div style="display:flex;flex-direction:column;gap:4px;max-height:230px;overflow:auto">${s.anexos.map(a=>`<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;padding:4px 2px"><input type="checkbox" ${s.sel.includes(a.id)?'checked':''} onchange="cotIAToggle(${a.id},this.checked)"><span class="material-icons" style="font-size:16px;color:var(--muted)">${cotAnexoIcon(a.mime,a.nome)}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.nome)}</span>
+      <a href="actions/cotacao_anexo.php?download=${a.id}&me=${encodeURIComponent((EU&&EU.bitrix_id)||'')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="abrir para conferir antes/depois da IA" style="color:var(--verde-d);text-decoration:none"><span class="material-icons" style="font-size:15px">open_in_new</span></a></label>`).join('')}</div>
+    ${s.emailId?(()=>{ const m=(COT.inbox||[]).find(x=>String(x.id)===String(s.emailId)), i=(COT.inbox||[]).findIndex(x=>String(x.id)===String(s.emailId));
+      return m?`<div style="margin-top:9px;border-top:1px solid var(--line);padding-top:8px;display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+        <span class="muted" style="font-size:11.5px;flex:1;min-width:110px">veio do e-mail de ${esc(m.from_nome||m.from_email||'')}${m.data_email?' · '+D(String(m.data_email).slice(0,10)):''}</span>
+        <button class="btn-ghost" style="padding:3px 10px;font-size:11.5px" onclick="cotIAFechar();cotInboxVerCorpo(${i})" title="ler o corpo do e-mail (prazo, condição, ressalvas)"><span class="material-icons" style="font-size:13px;vertical-align:-2px">mail</span> ver e-mail</button></div>`:''; })():''}
     <div style="background:#fbf7e8;border:1px solid #eadfb0;border-radius:8px;padding:7px 10px;margin-top:10px;font-size:11px;color:#6b5a1e">A IA gera um <b>rascunho</b> — você confere e ajusta os valores antes de salvar.</div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">${s.busy?'<span class="muted" style="font-size:12px;align-self:center">🧠 lendo os anexos…</span>':`<button class="btn-ghost" onclick="cotIAFechar()">Cancelar</button><button class="btn-prim" onclick="cotIAExecutar()" ${s.sel.length?'':'disabled style=\"opacity:.5\"'}><span class="material-icons" style="font-size:15px;vertical-align:-3px">auto_awesome</span> Preencher</button>`}</div>
   </div>`; }
 async function cotIAExecutar(){ const s=COT.ia; if(!s||!s.sel.length||s.busy)return; s.busy=true; cotIARender();
   try{ const r=await (await fetch('actions/cotacao_ia.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'preencher',me:EU&&EU.bitrix_id,cotacao_id:COT.cur.cotacao.id,fornecedor_id:s.fornId,fornecedor_nome:s.fornNome,anexo_ids:s.sel})})).json();
     if(r.error){ toast(r.error); s.busy=false; cotIARender(); return; }
-    const fn=s.fornNome; cotIAFechar(); cotIAAplicar(fn,r.draft,r,s.fornId);   // leva o id: a proposta da IA também tem que nascer vinculada
+    const fn=s.fornNome; r.emailId=s.emailId||null; cotIAFechar(); cotIAAplicar(fn,r.draft,r,s.fornId);   // leva o id: a proposta da IA também tem que nascer vinculada
   }catch(e){ toast('Falha: '+e.message); s.busy=false; cotIARender(); } }
 async function cotIAAplicar(fornNome,draft,meta,fornId){ const d=COT.cur; draft=draft||{}; const nz=s=>String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
   const ex=(d.propostas||[]).find(p=>nz(p.fornecedor_nome)===nz(fornNome));   // já tem proposta? edita; senão cria
   const fidIA = fornId || (ex&&ex.fornecedor_id) || null;
   COT.prop={id:ex?ex.id:0, precos:{}, fornecedor_id:fidIA,
-            _fornPick: fidIA?{id:fidIA, nome:fornNome}:null};
+            _fornPick: fidIA?{id:fidIA, nome:fornNome}:null,
+            emailId:(meta&&meta.emailId)||null};   // fonte da proposta: dá o "ver e-mail"/anexos no formulário
   COT.prop.opcao=ex?(ex.opcao||1):1; COT.prop.opcao_rotulo=ex?(ex.opcao_rotulo||''):'';
   (d.itens||[]).forEach(it=>{ COT.prop.precos[it.id]={preco_unit:'',preco_total:'',observacao:''}; });
   const byId={}; (draft.itens||[]).forEach(x=>{ if(x&&x.item_id!=null)byId[x.item_id]=x; });

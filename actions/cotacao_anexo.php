@@ -78,9 +78,14 @@ try {
         header('Content-Type: application/json; charset=utf-8');
         $perms = user_perms($pdo, $_GET['me'] ?? null);
         if (empty($perms['autorizado'])) { http_response_code(403); echo json_encode(['error'=>'sem acesso']); exit; }
-        $q = $pdo->prepare("SELECT id, cotacao_id, proposta_id, fornecedor_id, fornecedor_nome, nome, tamanho, mime, url, created_at FROM cotacao_anexo WHERE cotacao_id=? AND (fornecedor_nome IS NULL OR fornecedor_nome<>'__CARTA__') ORDER BY id");
+        $q = $pdo->prepare("SELECT id, cotacao_id, proposta_id, fornecedor_id, fornecedor_nome, nome, tamanho, mime, embutido, criado_por, url, created_at FROM cotacao_anexo WHERE cotacao_id=? AND (fornecedor_nome IS NULL OR fornecedor_nome<>'__CARTA__') ORDER BY id");
         $q->execute([(int)$_GET['cotacao']]);
-        echo json_encode(['anexos' => $q->fetchAll()], JSON_UNESCAPED_UNICODE); exit;
+        /* Assinatura/logo do fornecedor fica FORA desta lista: ela alimenta os chips de anexo do mapa
+           e o seletor da IA, e 4 "image001.png" por e-mail afogavam a proposta (ver anexo_eh_embutido).
+           Continuam alcançáveis no modal do e-mail, que mostra o que veio embutido em separado. */
+        $todos = $q->fetchAll();
+        $anexos = array_values(array_filter($todos, function ($a) { return !anexo_eh_embutido($a); }));
+        echo json_encode(['anexos' => $anexos, 'embutidos' => count($todos) - count($anexos)], JSON_UNESCAPED_UNICODE); exit;
     }
 
     // ---------- SET FORNECEDOR (JSON) — vincula anexos avulsos ao fornecedor identificado pela IA (item B) ----------

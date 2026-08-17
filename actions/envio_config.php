@@ -192,8 +192,9 @@ function ec_conta_efetiva() {
     if (trim((string)($c['user'] ?? '')) !== '' && trim((string)($c['senha'] ?? '')) !== '') {
         $c['fonte'] = 'pedidos'; return $c;
     }
-    $g = @json_decode(@file_get_contents(__DIR__ . '/../data/.email.json'), true);
-    if (is_array($g)) { $g['fonte'] = 'geral'; return $g; }
+    require_once __DIR__ . '/../includes/email_conf.php';   // conta geral: no banco, não mais no arquivo do deploy
+    $g = email_conf_get();
+    if ($g) { $g['fonte'] = 'geral'; return $g; }
     return ['fonte' => 'nenhuma'];
 }
 

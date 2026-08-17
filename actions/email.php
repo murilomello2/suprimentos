@@ -10,8 +10,11 @@ require_once __DIR__ . '/../includes/caixa.php';
 if (!function_exists('cot_pode_gerir')) { function cot_pode_gerir($pdo,$me,$cid){ $p=user_perms($pdo,$me); if(empty($p['autorizado']))return false; if(!empty($p['perm_admin'])||(($p['papel']??'')==='gerente'))return true; if($me===null||$me==='')return false; try{$r=$pdo->prepare('SELECT criado_por,colaboradores FROM cotacao WHERE id=?');$r->execute([(int)$cid]);$r=$r->fetch();}catch(Throwable $e){return false;} if(!$r)return false; if((string)($r['criado_por']??'')===(string)$me)return true; foreach((array)(json_decode((string)($r['colaboradores']??''),true)?:[]) as $b) if(trim((string)$b)===trim((string)$me))return true; return false; } }
 require_once __DIR__ . '/../includes/mailer.php';
 require_once __DIR__ . '/../includes/email_anexo.php';   // arquivos que o comprador anexa ao disparo (projeto, memorial, .zip)
-define('EMAIL_CFG_FILE', __DIR__ . '/../data/.email.json');
-function email_cfg() { $j = @json_decode(@file_get_contents(EMAIL_CFG_FILE), true); return is_array($j) ? $j : []; }
+require_once __DIR__ . '/../includes/email_conf.php';
+/* A conta vive no BANCO (meta['email_cfg']), não mais em data/.email.json: o arquivo estava
+   rastreado no git e cada deploy o sobrescrevia, apagando a senha. Ver includes/email_conf.php. */
+define('EMAIL_CFG_FILE', EMAIL_CONF_ARQUIVO_LEGADO);   // mantido: outros módulos citam a constante
+function email_cfg() { return email_conf_get(); }
 
 // telefone da assinatura por comprador (o Murilo passou; casar pelo nome do usuário logado)
 function email_fone($nome) {
@@ -183,12 +186,14 @@ try {
         $cfg = email_cfg();
         $isAdmin = !empty($perms['perm_admin']);
         // token do cron da varredura automática (Fase 4) — gera na 1ª visita do admin e guarda server-side
-        if ($isAdmin && empty($cfg['cron_token'])) { $cfg['cron_token'] = bin2hex(random_bytes(16)); @file_put_contents(EMAIL_CFG_FILE, json_encode($cfg)); @chmod(EMAIL_CFG_FILE, 0600); }
+        if ($isAdmin && empty($cfg['cron_token'])) { $cfg['cron_token'] = bin2hex(random_bytes(16)); email_conf_set(['cron_token' => $cfg['cron_token']]); }
         echo json_encode(['ok' => true, 'configurada' => !empty($cfg['senha']),
             'host' => $cfg['host'] ?? 'mail.capremconstrutora.com.br', 'port' => (int)($cfg['port'] ?? 465),
             'imap_port' => (int)($cfg['imap_port'] ?? 993),
             'user' => $cfg['user'] ?? 'suprimentos@capremconstrutora.com.br', 'from' => $cfg['from'] ?? ($cfg['user'] ?? 'suprimentos@capremconstrutora.com.br'),
             'is_admin' => $isAdmin, 'cron_token' => $isAdmin ? ($cfg['cron_token'] ?? '') : '',
+            // 'banco' = a senha está a salvo do deploy; 'arquivo' = ainda no data/.email.json (será migrada)
+            'fonte' => $isAdmin ? email_conf_fonte() : '',
             // modelo do corpo + o vocabulário de chaves, p/ a tela de administração
             'modelo_corpo' => (string)($cfg['modelo_corpo'] ?? ''), 'modelo_padrao' => email_modelo_padrao(),
             'chaves' => email_chaves()], JSON_UNESCAPED_UNICODE); exit;
@@ -204,27 +209,28 @@ try {
         /* MODELO DO CORPO (admin) — o texto do e-mail de cotação deixou de ser código. */
         if ($acao === 'modelo') {
             if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Só administradores mudam o modelo.']); exit; }
-            $cfg = email_cfg();
             $novo = (string)($in['modelo_corpo'] ?? '');
             if (strlen($novo) > 8000) throw new Exception('modelo muito longo');
             // vazio = volta ao padrão de fábrica (e não "e-mail sem corpo")
-            $cfg['modelo_corpo'] = trim($novo) === '' ? '' : $novo;
-            @file_put_contents(EMAIL_CFG_FILE, json_encode($cfg)); @chmod(EMAIL_CFG_FILE, 0600);
-            echo json_encode(['ok' => true, 'padrao' => $cfg['modelo_corpo'] === ''], JSON_UNESCAPED_UNICODE); exit;
+            $modelo = trim($novo) === '' ? '' : $novo;
+            email_conf_set(['modelo_corpo' => $modelo]);
+            echo json_encode(['ok' => true, 'padrao' => $modelo === ''], JSON_UNESCAPED_UNICODE); exit;
         }
 
         if ($acao === 'config') {   // admin grava host/porta/usuário/senha (a senha vem do CAMPO do admin, nunca do código)
             if (empty($perms['perm_admin'])) { http_response_code(403); echo json_encode(['error' => 'Só administradores configuram a conta.']); exit; }
             $cfg = email_cfg();
-            if (array_key_exists('host', $in)) $cfg['host'] = trim((string)$in['host']);
-            if (array_key_exists('port', $in)) $cfg['port'] = (int)$in['port'] ?: 465;
-            if (array_key_exists('imap_port', $in)) $cfg['imap_port'] = (int)$in['imap_port'] ?: 993;
-            if (array_key_exists('user', $in)) $cfg['user'] = trim((string)$in['user']);
-            if (array_key_exists('from', $in)) $cfg['from'] = trim((string)$in['from']);
-            if (array_key_exists('senha', $in) && trim((string)$in['senha']) !== '') $cfg['senha'] = (string)$in['senha']; // vazio mantém a atual
-            $cfg['from_name'] = $cfg['from_name'] ?? 'Departamento de Suprimentos · Caprem';
-            @file_put_contents(EMAIL_CFG_FILE, json_encode($cfg)); @chmod(EMAIL_CFG_FILE, 0600);
-            echo json_encode(['ok' => true, 'configurada' => !empty($cfg['senha'])], JSON_UNESCAPED_UNICODE); exit;
+            $patch = [];
+            if (array_key_exists('host', $in)) $patch['host'] = trim((string)$in['host']);
+            if (array_key_exists('port', $in)) $patch['port'] = (int)$in['port'] ?: 465;
+            if (array_key_exists('imap_port', $in)) $patch['imap_port'] = (int)$in['imap_port'] ?: 993;
+            if (array_key_exists('user', $in)) $patch['user'] = trim((string)$in['user']);
+            if (array_key_exists('from', $in)) $patch['from'] = trim((string)$in['from']);
+            if (array_key_exists('senha', $in) && trim((string)$in['senha']) !== '') $patch['senha'] = (string)$in['senha']; // vazio mantém a atual
+            if (trim((string)($cfg['from_name'] ?? '')) === '') $patch['from_name'] = 'Departamento de Suprimentos · Caprem';
+            if (!email_conf_set($patch)) throw new Exception('não consegui gravar a conta no banco');
+            $cfg = email_cfg();
+            echo json_encode(['ok' => true, 'configurada' => !empty($cfg['senha']), 'fonte' => email_conf_fonte()], JSON_UNESCAPED_UNICODE); exit;
         }
 
         if ($acao === 'enviar') {

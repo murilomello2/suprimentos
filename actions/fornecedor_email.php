@@ -31,7 +31,9 @@ define('FE_MAX_BODY', 20000);
 define('FE_ANEXO_DIR', __DIR__ . '/../data/anexos_fornecedor');
 define('FE_ANEXO_MAX', 15 * 1024 * 1024);
 
-function fe_email_cfg() { $j = @json_decode(@file_get_contents(FE_CFG_FILE), true); return is_array($j) ? $j : []; }
+// conta única, guardada no banco (o data/.email.json era sobrescrito por todo deploy) — includes/email_conf.php
+require_once __DIR__ . '/../includes/email_conf.php';
+function fe_email_cfg() { return email_conf_get(); }
 function fe_meta_get($pdo, $k) { $q = $pdo->prepare("SELECT v FROM meta WHERE k=?"); $q->execute([$k]); $v = $q->fetchColumn(); return $v === false ? null : $v; }
 function fe_meta_set($pdo, $k, $v) {
     $u = $pdo->prepare("UPDATE meta SET v=? WHERE k=?"); $u->execute([(string)$v, $k]);

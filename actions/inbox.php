@@ -438,6 +438,7 @@ try {
         define('EMAIL_LIB_ONLY', 1);
         require_once __DIR__ . '/email.php';                 // email_cfg() + email_fone(): mesma conta e mesma assinatura do convite
         require_once __DIR__ . '/../includes/caixa.php';     // caixa_msgid/caixa_log_saida/caixa_arquivar_enviado
+        require_once __DIR__ . '/../includes/email_anexo.php';
         $cfg = email_cfg();
         if (empty($cfg['senha'])) throw new Exception('A conta de e-mail não está configurada — o admin cadastra em Configurações › E-mail.');
 
@@ -463,8 +464,15 @@ try {
         $ref = trim((string)$m['message_id']);
         if ($ref !== '') { $hdr['In-Reply-To'] = $ref; $hdr['References'] = $ref; }   // é isto que mantém a thread no cliente do fornecedor
 
-        [$ok, $msgErr, $raw] = smtp_send($cfg, $para, $assunto, $corpo, [], $hdr);
+        /* ARQUIVOS que o comprador anexou a ESTA resposta — o caso que trouxe o pedido é o
+           fornecedor dizendo "me manda o projeto pra eu conseguir cotar". Presos à mensagem
+           (ref_id = id do e-mail recebido), e marcados como usados depois de enviados: sem isso
+           o mesmo projeto voltaria de carona na próxima resposta da mesma conversa. */
+        $anexos = emailanx_para_envio($pdo, 'resposta', (int)($m['cotacao_id'] ?? 0), $id);
+
+        [$ok, $msgErr, $raw] = smtp_send($cfg, $para, $assunto, $corpo, $anexos, $hdr);
         if (!$ok) throw new Exception('não consegui enviar: ' . $msgErr);
+        if ($anexos) emailanx_marcar_usados($pdo, 'resposta', (int)($m['cotacao_id'] ?? 0), $id);
 
         // colunas aditivas (o projeto não tem migration runner; cada módulo cria a sua)
         foreach ([['respondido_em', 'VARCHAR(40)'], ['respondido_por', 'VARCHAR(64)'],
@@ -479,7 +487,7 @@ try {
                             $assunto, $para, $m['cotacao_id'] ? (int)$m['cotacao_id'] : null);
             caixa_arquivar_enviado($cfg, $raw);   // sem isto a resposta não existe na pasta Enviados da conta
         } catch (Throwable $e) {}
-        echo json_encode(['ok' => true, 'para' => $para, 'assunto' => $assunto], JSON_UNESCAPED_UNICODE); exit;
+        echo json_encode(['ok' => true, 'para' => $para, 'assunto' => $assunto, 'anexos' => count($anexos)], JSON_UNESCAPED_UNICODE); exit;
     }
 
     if ($acao === 'marcar_lido' || $acao === 'ignorar' || $acao === 'converter') {

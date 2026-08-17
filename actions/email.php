@@ -9,6 +9,7 @@ require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/caixa.php';
 if (!function_exists('cot_pode_gerir')) { function cot_pode_gerir($pdo,$me,$cid){ $p=user_perms($pdo,$me); if(empty($p['autorizado']))return false; if(!empty($p['perm_admin'])||(($p['papel']??'')==='gerente'))return true; if($me===null||$me==='')return false; try{$r=$pdo->prepare('SELECT criado_por,colaboradores FROM cotacao WHERE id=?');$r->execute([(int)$cid]);$r=$r->fetch();}catch(Throwable $e){return false;} if(!$r)return false; if((string)($r['criado_por']??'')===(string)$me)return true; foreach((array)(json_decode((string)($r['colaboradores']??''),true)?:[]) as $b) if(trim((string)$b)===trim((string)$me))return true; return false; } }
 require_once __DIR__ . '/../includes/mailer.php';
+require_once __DIR__ . '/../includes/email_anexo.php';   // arquivos que o comprador anexa ao disparo (projeto, memorial, .zip)
 define('EMAIL_CFG_FILE', __DIR__ . '/../data/.email.json');
 function email_cfg() { $j = @json_decode(@file_get_contents(EMAIL_CFG_FILE), true); return is_array($j) ? $j : []; }
 
@@ -242,6 +243,9 @@ try {
                 $ca->execute([$cid]); $ca = $ca->fetch();
                 if ($ca) { $p = __DIR__ . '/../data/anexos/' . basename((string)$ca['arquivo']);
                     if (is_file($p)) $anexos[] = ['nome' => 'Carta de cotacao.pdf', 'mime' => ($ca['mime'] ?: 'application/pdf'), 'conteudo' => file_get_contents($p)]; }
+                /* ARQUIVOS DO COMPRADOR (projeto em DWG, memorial, .zip de pranchas). Lidos UMA vez,
+                   fora do laço: a mesma leva reusa os bytes em vez de reler o disco por fornecedor. */
+                foreach (emailanx_para_envio($pdo, 'disparo', $cid) as $a) $anexos[] = $a;
             }
 
             // ENVIO-TESTE: manda só para um endereço (o próprio comprador)
@@ -253,7 +257,10 @@ try {
                 $anexosT = $anexos; if ($assT['anexo']) $anexosT[] = $assT['anexo'];
                 $corpoT = email_html(email_aplica($corpo, ['fornecedor' => 'Fornecedor Exemplo Ltda', 'contato' => 'Fornecedor Exemplo Ltda']), $assT['html']);
                 [$ok, $msg] = smtp_send($cfg, $teste, '[TESTE] ' . $assunto, $corpoT, $anexosT, [], ['html' => true]);
-                echo json_encode($ok ? ['ok' => true, 'msg' => 'E-mail de teste enviado para ' . $teste . ($anexos ? ' (com a carta em PDF)' : '')] : ['error' => 'Falha: ' . $msg], JSON_UNESCAPED_UNICODE); exit;
+                // o teste diz QUANTOS anexos foram junto: é a única forma de conferir antes do disparo
+                echo json_encode($ok ? ['ok' => true, 'msg' => 'E-mail de teste enviado para ' . $teste
+                        . (count($anexos) ? ' (com ' . count($anexos) . ' anexo(s))' : '')]
+                    : ['error' => 'Falha: ' . $msg], JSON_UNESCAPED_UNICODE); exit;
             }
 
             // DISPARO real: individual por fornecedor convidado com e-mail

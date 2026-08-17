@@ -118,26 +118,32 @@ function cotInboxVerCorpo(i, focoResposta){
         <textarea id="inbxResp" rows="6" placeholder="Escreva a resposta ao fornecedor…"
           style="width:100%;resize:vertical;font-family:inherit;font-size:13px;padding:9px 11px;border:1px solid var(--line);border-radius:9px"></textarea>
         <div class="dmini" style="margin-top:5px">assinatura e conta de envio são as mesmas da carta de cotação · o original vai citado abaixo</div>
+        <div id="inbxAnx"></div>
       </div>`:'<div class="dmini" style="margin-top:12px">Você não tem permissão para responder nesta cotação.</div>'}
     </div>
     <div style="display:flex;gap:9px;align-items:center;padding:12px 18px;border-top:1px solid var(--line)">
       ${podeResp?`<button class="btn-prim" id="inbxBtn" onclick="cotInboxResponder(${i})"><span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Enviar resposta</button>`:''}
       <button class="btn-ghost" onclick="cotInboxFechar()">Fechar</button>
     </div></div>`;
-  if(podeResp&&focoResposta){ const t=document.getElementById('inbxResp'); if(t)t.focus(); }
+  if(podeResp){
+    // anexo desta RESPOSTA (o caso que motivou: "me manda o projeto pra eu conseguir cotar")
+    emAnxIniciar('inbxAnx','resposta',m.cotacao_id||0,m.id,'vão só nesta resposta, para '+(m.from_email||'o fornecedor'));
+    if(focoResposta){ const t=document.getElementById('inbxResp'); if(t)t.focus(); }
+  }
 }
-function cotInboxFechar(){ const o=document.getElementById('inbxOv'); if(o)o.remove(); }
+function cotInboxFechar(){ const o=document.getElementById('inbxOv'); if(o)o.remove(); delete EMANX['inbxAnx']; }
 async function cotInboxResponder(i){
   const m=(COT.inbox||[])[i]; if(!m)return;
   const texto=(val('inbxResp')||'').trim();
   if(!texto){ toast('Escreva a resposta'); return; }
-  if(!confirm('Enviar esta resposta para '+(m.from_email||'')+'?')) return;
+  const anx=((EMANX['inbxAnx']||{}).lista)||[];
+  if(!confirm('Enviar esta resposta para '+(m.from_email||'')+'?'+(anx.length?'\nVão junto '+anx.length+' anexo(s): '+anx.map(a=>a.nome).join(', '):''))) return;
   const b=document.getElementById('inbxBtn'); if(b){ b.disabled=true; b.textContent='Enviando…'; }
   try{
     const r=await (await fetch('actions/inbox.php',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({acao:'responder',me:EU&&EU.bitrix_id,id:m.id,texto})})).json();
     if(r.error){ toast(r.error); if(b){b.disabled=false;b.innerHTML='<span class="material-icons" style="font-size:16px;vertical-align:-3px">send</span> Enviar resposta';} return; }
-    toast('Resposta enviada para '+r.para);
+    toast('Resposta enviada para '+r.para+(r.anexos?' · '+r.anexos+' anexo(s)':''));
     cotInboxFechar();
     const c=(COT.cur||{}).cotacao; if(c) cotInboxLoad(c.id);
   }catch(e){ toast('Falha: '+e.message); if(b){b.disabled=false;b.textContent='Enviar resposta';} }
@@ -1441,6 +1447,82 @@ async function cotIAAplicar(fornNome,draft,meta,fornId){ const d=COT.cur; draft=
   }
   COT.mode='proposta'; cotRenderProposta();
   toast(preench+' item(ns) preenchido(s) pela IA'+(novos?' · '+novos+' ponto(s) de equalização novo(s)':'')+((meta&&meta.avisos&&meta.avisos.length)?' · '+meta.avisos.length+' aviso(s)':'')); }
+/* ═════ ANEXOS QUE SAEM NO E-MAIL ═════
+   O MESMO widget serve o disparo da cotação e a resposta a uma dúvida — o fornecedor que pede o
+   projeto para conseguir cotar pode receber por qualquer um dos dois, e duas telas diferentes um
+   dia divergiriam. Cada caixa guarda seu estado em EMANX[boxId]; o escopo diz ao servidor a que
+   e-mail o arquivo pertence ('disparo' fica na cotação e vale p/ todas as levas; 'resposta' fica
+   naquela mensagem e some depois de enviada). */
+const EMANX={}; let EMANX_LIM=null;
+async function emAnxLimite(){
+  if(EMANX_LIM) return EMANX_LIM;
+  try{ const r=await (await fetch('actions/email_anexo.php?limite=1')).json(); if(r&&r.max_arquivo) EMANX_LIM=r; }catch(e){}
+  if(!EMANX_LIM) EMANX_LIM={max_arquivo:25*1048576,max_arquivo_mb:25,max_total:18*1048576,max_total_mb:18,max_arquivos:15,accept:''};
+  return EMANX_LIM;
+}
+function emAnxTam(b){ b=Number(b)||0; return b>=1048576?(b/1048576).toFixed(1)+' MB':Math.max(1,Math.round(b/1024))+' KB'; }
+/* boxId = id do <div> onde o widget mora. cid/ref identificam o e-mail: na resposta o servidor
+   RESOLVE a cotação pela mensagem (ref), então o cid daqui é só informativo. */
+async function emAnxIniciar(boxId,escopo,cid,ref,nota){
+  EMANX[boxId]={escopo,cid:Number(cid)||0,ref:Number(ref)||0,nota:nota||'',lista:[],total:0,busy:0};
+  await emAnxLimite(); emAnxPintar(boxId); emAnxRecarregar(boxId);
+}
+async function emAnxRecarregar(boxId){ const s=EMANX[boxId]; if(!s)return;
+  try{ const r=await (await fetch('actions/email_anexo.php?listar=1&escopo='+encodeURIComponent(s.escopo)+'&cotacao='+s.cid+'&ref='+s.ref+'&me='+encodeURIComponent((EU&&EU.bitrix_id)||''))).json();
+    if(!r.error){ s.lista=r.anexos||[]; s.total=r.total||0; } }catch(e){}
+  emAnxPintar(boxId);
+}
+function emAnxPintar(boxId){
+  const s=EMANX[boxId], box=document.getElementById(boxId); if(!s||!box)return;
+  const L=EMANX_LIM||{}, meq=encodeURIComponent((EU&&EU.bitrix_id)||'');
+  const cheio=s.lista.length>=(L.max_arquivos||15);
+  const linha=a=>`<div style="display:flex;align-items:center;gap:7px;padding:3px 0">
+      <span class="material-icons" style="font-size:15px;color:var(--muted)">${cotAnexoIcon(a.mime,a.nome)}</span>
+      <a href="actions/email_anexo.php?download=${a.id}&me=${meq}" target="_blank" rel="noopener" title="conferir o arquivo antes de enviar"
+         style="flex:1;font-size:12px;color:var(--verde-d);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.nome)}</a>
+      <span class="muted" style="font-size:10.5px">${emAnxTam(a.tamanho)}</span>
+      <span onclick="emAnxExcluir(${a.id},'${boxId}')" class="material-icons" style="cursor:pointer;color:var(--pend);font-size:15px" title="tirar do e-mail">close</span></div>`;
+  box.innerHTML=`<div style="margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fafbfb">
+    <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+      <span class="material-icons" style="font-size:16px;color:var(--verde)">attach_file</span>
+      <b style="font-size:12.5px">Anexos${s.lista.length?` <span class="muted" style="font-weight:400">· ${s.lista.length} arquivo(s), ${emAnxTam(s.total)}</span>`:''}</b>
+      ${s.nota?`<span class="dmini" style="flex:1;min-width:120px">${esc(s.nota)}</span>`:''}
+    </div>
+    <div style="margin:6px 0 0">${s.lista.map(linha).join('')||'<div class="dmini">Nenhum arquivo — o e-mail vai só com o texto.</div>'}</div>
+    ${s.busy?`<div class="dmini" style="margin-top:7px"><span class="material-icons" style="font-size:13px;vertical-align:-2px">hourglass_top</span> enviando ${s.busy} arquivo(s)…</div>`
+      :`<label ondragover="event.preventDefault()" ondrop="emAnxDrop(event,'${boxId}')"
+         style="display:inline-flex;align-items:center;gap:5px;margin-top:8px;border:1px dashed ${cheio?'#ddd':'var(--verde)'};color:${cheio?'#aaa':'var(--verde-d)'};border-radius:8px;padding:5px 11px;font-size:12px;font-weight:600;cursor:${cheio?'not-allowed':'pointer'};background:#fff">
+         <span class="material-icons" style="font-size:15px">upload_file</span> Anexar arquivo${cheio?' (limite atingido)':''}
+         <input type="file" multiple ${cheio?'disabled':''} accept="${esc(L.accept||'')}" style="display:none" onchange="emAnxPick(this,'${boxId}')"></label>`}
+    <div class="dmini" style="margin-top:5px">Projeto (DWG/DXF), PDF, ZIP/RAR, Excel, Word ou imagem · até ${L.max_arquivo_mb||25} MB por arquivo e ${L.max_total_mb||18} MB somados (acima disso o servidor do fornecedor recusa).</div>
+  </div>`;
+}
+function emAnxDrop(e,boxId){ e.preventDefault(); emAnxSubir(((e.dataTransfer||{}).files)||[],boxId); }
+function emAnxPick(input,boxId){ const fs=Array.from(input.files||[]); input.value=''; emAnxSubir(fs,boxId); }
+async function emAnxSubir(files,boxId){
+  const s=EMANX[boxId]; if(!s)return; files=Array.from(files||[]); if(!files.length)return;
+  const L=EMANX_LIM||{};
+  s.busy=files.length; emAnxPintar(boxId);
+  let ok=0;
+  for(const f of files){
+    if(f.size>(L.max_arquivo||25*1048576)){ toast('"'+f.name+'" tem '+(f.size/1048576).toFixed(1)+' MB — o limite é '+(L.max_arquivo_mb||25)+' MB por arquivo'); continue; }
+    const fd=new FormData(); fd.append('arquivo',f); fd.append('escopo',s.escopo);
+    fd.append('cotacao_id',s.cid); fd.append('ref_id',s.ref); fd.append('me',(EU&&EU.bitrix_id)||'');
+    try{ const r=await (await fetch('actions/email_anexo.php',{method:'POST',body:fd})).json();
+      if(r.error) toast(f.name+': '+r.error); else ok++; }
+    catch(e){ toast('Falha em '+f.name+': '+e.message); }
+  }
+  s.busy=0;
+  if(ok) toast(ok+' anexo(s) prontos para ir no e-mail');
+  emAnxRecarregar(boxId);
+}
+async function emAnxExcluir(id,boxId){
+  if(!confirm('Tirar este arquivo do e-mail?')) return;
+  try{ const r=await (await fetch('actions/email_anexo.php',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao:'excluir',me:EU&&EU.bitrix_id,id})})).json();
+    if(r.error){ toast(r.error); return; } }catch(e){ toast('Falha: '+e.message); return; }
+  emAnxRecarregar(boxId);
+}
 /* ===== E-MAIL DE COTAÇÃO — Fase 2: compositor (prévia editável, individual por fornecedor; envio real na próxima fase) ===== */
 async function cotEmailAbrir(cid){
   let ov=document.getElementById('emailOverlay'); if(!ov){ ov=document.createElement('div'); ov.id='emailOverlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,25,20,.42);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(ov); }
@@ -1478,6 +1560,7 @@ async function cotEmailAbrir(cid){
       ${cotFld('Corpo do e-mail (edite à vontade antes de disparar)','<textarea id="emCorpo" rows="9" style="width:100%;font-size:12.5px;font-family:inherit">'+esc(g.corpo)+'</textarea>','margin-top:8px')}
       <div class="dmini" style="margin-top:5px">${(g.chaves_forn||[]).map(k=>'<code>{{'+esc(k)+'}}</code>').join(' e ')} viram o nome de cada fornecedor no disparo — o resto já está resolvido aqui. O modelo padrão se muda em Configurações › E-mail (disparo).</div>
       ${g.tem_carta?'<div class="dmini" style="margin-top:6px">📎 A carta de cotação vai anexada em PDF.</div>':''}
+      <div id="emAnx"></div>
       ${g.assinatura_img?'<div class="dmini" style="margin-top:4px">✒️ Vai com a sua imagem de assinatura.</div>':'<div class="dmini" style="margin-top:4px">✒️ Assina com seu nome e telefone — para usar imagem, suba a sua em Configurações › E-mail do pedido › Assinaturas.</div>'}
       <div id="emProgresso"></div>
       <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap;margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
@@ -1490,6 +1573,8 @@ async function cotEmailAbrir(cid){
         <div style="display:grid;grid-template-columns:1fr 90px;gap:8px;margin-top:8px">${cotFld('Servidor SMTP','<input id="emHost" value="'+esc(cfg.host||'')+'" style="width:100%">')}${cotFld('Porta','<input id="emPort" type="number" value="'+esc(cfg.port||465)+'" style="width:100%">')}</div>
         <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-top:6px">${cotFld('Usuário (e-mail)','<input id="emUser" value="'+esc(cfg.user||'')+'" style="width:100%">')}${cotFld('Senha (fica só no servidor; vazio mantém a atual)','<input id="emSenha" type="password" autocomplete="new-password" placeholder="••••••••" style="width:100%">')}</div>
         <div style="margin-top:8px"><button class="btn-prim" style="padding:5px 12px" onclick="cotEmailConfigSalvar()">Salvar conta</button></div></div></details>`:''}`);
+    // os anexos ficam na COTAÇÃO: sobem uma vez e acompanham toda leva desta cotação, inclusive o teste
+    emAnxIniciar('emAnx','disparo',cid,0,'vão junto para todos os fornecedores marcados');
   }catch(e){ ov.innerHTML=shell('<div class="empty">Falha ao montar o e-mail.</div>'); }
 }
 function cotEmailBody(){ return {cotacao_id:(COT.cur&&COT.cur.cotacao&&COT.cur.cotacao.id)||0, assunto:(document.getElementById('emAssunto')||{}).value||'', corpo:(document.getElementById('emCorpo')||{}).value||''}; }

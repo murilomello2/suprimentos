@@ -236,6 +236,17 @@ function db_schema_mysql($pdo) {
         status VARCHAR(20) DEFAULT 'novo', lido_por VARCHAR(64), lido_em VARCHAR(40), created_at VARCHAR(40),
         PRIMARY KEY (id), UNIQUE KEY uq_in_dedup (dedup_key), KEY idx_in_cot (cotacao_id), KEY idx_in_status (status)
     ) $E");
+    /* E-MAIL — ARQUIVOS QUE SAEM junto do e-mail (projeto em DWG, memorial em PDF, .zip de pranchas).
+       Tabela própria, e não `cotacao_anexo`: aquela guarda o que CHEGA do fornecedor (proposta, carta)
+       e alimenta a IA que lê proposta — misturar faria o arquivo que sai aparecer como se fosse
+       resposta de fornecedor. escopo='disparo' (ref_id=0, vale p/ toda leva da cotação) |
+       escopo='resposta' (ref_id = cotacao_email_in.id, some depois de enviado via usado_em). */
+    $pdo->exec("CREATE TABLE IF NOT EXISTS email_anexo (
+        id INT NOT NULL AUTO_INCREMENT, escopo VARCHAR(20) NOT NULL, cotacao_id INT, ref_id INT DEFAULT 0,
+        nome VARCHAR(255), arquivo VARCHAR(255), tamanho INT, mime VARCHAR(100),
+        criado_por VARCHAR(64), criado_nome VARCHAR(160), created_at VARCHAR(40), usado_em VARCHAR(40),
+        PRIMARY KEY (id), KEY idx_eanx_cot (cotacao_id), KEY idx_eanx_esc (escopo, ref_id)
+    ) $E");
     // Cartas convite — MODELO por serviço (camada 🔧) + CONFIG global Caprem (camada 🔒, 1 linha id=1)
     $pdo->exec("CREATE TABLE IF NOT EXISTS carta_modelo (
         id INT NOT NULL AUTO_INCREMENT, servico_id INT, servico_nome VARCHAR(191), tipo VARCHAR(60),
@@ -702,6 +713,9 @@ function db_schema($pdo) {
     // E-MAIL FASE 4 — enviados/recebidos (espelho do MySQL)
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_email_out (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER NOT NULL, cotacao_fornecedor_id INTEGER, fornecedor_id INTEGER, fornecedor_nome TEXT, email TEXT, message_id TEXT, token TEXT, assunto TEXT, enviado_em TEXT)");
     $pdo->exec("CREATE TABLE IF NOT EXISTS cotacao_email_in (id INTEGER PRIMARY KEY AUTOINCREMENT, cotacao_id INTEGER, cotacao_fornecedor_id INTEGER, fornecedor_id INTEGER, fornecedor_nome TEXT, imap_uid INTEGER, uidvalidity INTEGER, dedup_key TEXT, message_id TEXT, in_reply_to TEXT, from_email TEXT, from_nome TEXT, assunto TEXT, data_email TEXT, match_metodo TEXT, match_confianca TEXT, tipo TEXT DEFAULT 'indefinido', resumo TEXT, tem_proposta INTEGER DEFAULT 0, precisa_humano INTEGER DEFAULT 1, ia_confianca TEXT, tem_anexo INTEGER DEFAULT 0, ia_modelo TEXT, anexos_ids TEXT, draft_json TEXT, corpo_preview TEXT, status TEXT DEFAULT 'novo', lido_por TEXT, lido_em TEXT, created_at TEXT)");
+    // E-MAIL — arquivos que SAEM junto do e-mail (ver comentário no schema MySQL)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS email_anexo (id INTEGER PRIMARY KEY AUTOINCREMENT, escopo TEXT NOT NULL, cotacao_id INTEGER, ref_id INTEGER DEFAULT 0, nome TEXT, arquivo TEXT, tamanho INTEGER, mime TEXT, criado_por TEXT, criado_nome TEXT, created_at TEXT, usado_em TEXT)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_eanx_esc ON email_anexo(escopo, ref_id)");
     $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_in_dedup ON cotacao_email_in(dedup_key)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ceo_tok ON cotacao_email_out(token)");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_in_cot ON cotacao_email_in(cotacao_id)");

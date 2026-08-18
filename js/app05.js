@@ -1018,6 +1018,12 @@ async function t20Reseed(){ if(!confirm('Apagar TODOS os grupos e voltar aos 20 
 const MENUS=[['dashboard','Dashboard'],['radar','Radar de Aquisições'],['matriz','Matriz'],['cotacoes','Cotações'],['fechamentos','Fechamentos (apuração de ganhos)'],['solicitacoes','Solicitações'],['envio','Envio de Pedidos'],['buscaped','Busca Pedidos'],['buscanf','Buscar Notas'],['obras','Obras'],['oportunidades','Oportunidades'],['top20','Top 20'],['updates','Atualizações'],['audit','Auditoria'],['config','Configurações'],
   /* telas de CONSULTA da obra (papel 'obra') — leitura, sem nenhuma ação */
   ['ov_radar','Obra: Status - Curva A e B'],['ov_cotacoes','Obra: Cotações'],['ov_solicitacoes','Obra: Solicitações Totvs']];
+/* Chave do menu (como fica salva no cadastro do usuário) -> id da tela no showView(). Usado pelo
+   landing para abrir a 1ª tela PERMITIDA de quem não tem Dashboard. */
+const MENU_VIEW={dashboard:'dashboards',radar:'radar',matriz:'matriz',cotacoes:'cotacoes',fechamentos:'fechamentos',
+  solicitacoes:'solicitacoes',envio:'envio',buscaped:'buscaped',buscanf:'buscanf',obras:'obras',
+  oportunidades:'oportunidades',top20:'top20',updates:'updates',audit:'audit',config:'config',
+  ov_radar:'ovradar',ov_cotacoes:'ovcot',ov_solicitacoes:'ovsc'};
 const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',gerente:'Gerente de Suprimentos',comprador:'Suprimentos',coordenador:'Coordenador',obra:'Obra (consulta)',personalizado:'Personalizado'};
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},
@@ -1154,7 +1160,19 @@ function applyMenus(){
   // LANDING (pedido 23/jul): a TELA INICIAL é o DASHBOARD pra todo mundo que tem esse menu liberado — não o Radar.
   // O painel atribuído (EU.dashboard) segue definindo a ABA inicial; sem atribuição cai na 1ª aba permitida do papel.
   const dashVis = (adminSel ? allow.includes('dashboard') : (IS_ADMIN || allow.includes('dashboard')));
-  if(!window._dashLanded && EU && EU.autorizado && dashVis){ window._dashLanded=1; try{ showView('dashboards'); }catch(e){} }
+  if(!window._dashLanded && EU && EU.autorizado){
+    window._dashLanded=1;
+    /* Quem NÃO tem o menu Dashboard ficava olhando o Radar de Aquisições — a tela INTERNA, que nem
+       está no menu dele — só porque o view-radar é o único <section> que nasce visível no index.php.
+       Era o que acontecia com o papel 'obra'. Agora cai na primeira tela que ele pode ver. */
+    let alvo = dashVis ? 'dashboards' : '';
+    if(!alvo){ const m=(EU.menus||[]).find(k=>MENU_VIEW[k]); if(m) alvo=MENU_VIEW[m]; }
+    // Caixa e WhatsApp não são menu do cadastro, são permissão avulsa — quem só tem elas também precisa cair em algum lugar
+    if(!alvo && EU.perm_email) alvo='caixa';
+    if(!alvo && EU.perm_whats) alvo='whats';
+    if(alvo){ try{ showView(alvo); }catch(e){} }
+  }
+  accPingPendente();   // sessão em que ninguém clicou em nada também conta como acesso
 }
 function toggleSide(){
   const app=document.getElementById('app');
@@ -1304,13 +1322,32 @@ async function cfgApiRevogar(id,nome){
    1) NUNCA atrapalhar a navegação — é fire-and-forget, erro é engolido, ninguém espera resposta;
    2) não repetir a mesma tela em sequência (trocar de aba dentro da tela não conta de novo);
    3) o servidor agrega por (usuário × tela × dia), então o volume fica pequeno de propósito. */
-let ACC_ULTIMA='';
+let ACC_ULTIMA='', ACC_FILA='';
 function accPing(tela){
   if(!tela || tela===ACC_ULTIMA) return;
-  ACC_ULTIMA=tela;
-  const me=(EU&&EU.bitrix_id)||''; if(!me) return;
+  const me=(EU&&EU.bitrix_id)||'';
+  /* A IDENTIDADE CHEGA DEPOIS (18/08/2026) — o EU vem de uma chamada ao Bitrix, então o primeiro
+     showView() da sessão acontece com EU=null. Antes o ping morria aqui, calado: quem abria o cockpit,
+     olhava a tela que já estava aberta e saía não deixava rastro nenhum e era listado como "nunca
+     entrou". Agora a tela fica na FILA e sai assim que soubermos quem é a pessoa. */
+  if(!me){ ACC_FILA=tela; return; }
+  ACC_ULTIMA=tela; ACC_FILA='';
   try{ fetch('actions/acessos.php',{method:'POST',headers:{'Content-Type':'application/json'},
        body:JSON.stringify({acao:'ping',me,tela}),keepalive:true}).catch(()=>{}); }catch(e){}
+}
+/** Qual <section> de tela está aparecendo agora (o index.php nasce com o view-radar visível). */
+function accTelaVisivel(){
+  const secs=document.querySelectorAll('section[id^="view-"]');
+  for(let i=0;i<secs.length;i++){
+    try{ if(getComputedStyle(secs[i]).display!=='none') return secs[i].id.slice(5); }catch(e){}
+  }
+  return '';
+}
+/** Chamado quando a identidade fica pronta: fecha a conta da 1ª tela da sessão — a que ficou na fila
+    ou, se ninguém clicou em nada, a que está na frente da pessoa. Entrar já é um dado. */
+function accPingPendente(){
+  if(ACC_ULTIMA) return;                       // a sessão já registrou alguma tela
+  const t=ACC_FILA||accTelaVisivel(); if(t) accPing(t);
 }
 
 const ACC_DIAS_LBL={7:'últimos 7 dias',30:'últimos 30 dias',90:'últimos 90 dias'};
@@ -1370,7 +1407,10 @@ async function cfgAcessosLoad(){
   cfgAcessosRender();
 }
 function accDiasSel(n){ ACC.dias=n; cfgAcessosLoad(); }
-function accToggle(bid){ ACC.aberto=(ACC.aberto===bid?null:bid); cfgAcessosRender(); }
+/* bid SEMPRE como texto: o bitrix_id de quem tem registro volta do PHP como NÚMERO (chave de array
+   numérica vira int), e o onclick manda string. Com '20'===20 dando falso, clicar na linha não abria
+   nada — o detalhamento por tela existia e nunca aparecia para ninguém. */
+function accToggle(bid){ bid=String(bid); ACC.aberto=(ACC.aberto===bid?null:bid); cfgAcessosRender(); }
 function accQuando(iso){
   if(!iso) return '—';
   const d=new Date(iso); if(isNaN(d)) return '—';
@@ -1379,6 +1419,24 @@ function accQuando(iso){
   if(dias<=0) return 'hoje '+hora;
   if(dias===1) return 'ontem '+hora;
   return D(String(iso).slice(0,10))+' · há '+dias+'d';
+}
+/* DETALHE DA PESSOA (linha expandida) — tela por tela: quantas vezes, em quantos dias e quando foi a
+   última. Não custa consulta nova: o servidor já agrega por (usuário × tela × dia), então isto é só
+   deixar de jogar fora o que ele tem. A barra é proporcional à tela mais usada DA PESSOA. */
+function accDetalhe(u){
+  const L=u.telas||[];
+  if(!L.length) return `<div class="dmini">Abriu o app ${u.entradas_app||0} vez(es) no período, mas nenhuma tela foi registrada
+    — normalmente é quem entra, olha a tela inicial e sai sem clicar em nada.</div>`;
+  const max=Math.max(1,...L.map(t=>t.n));
+  return `<div class="dmini" style="margin-bottom:6px">${L.length} tela(s) diferente(s) · ${u.aberturas} abertura(s) no total</div>
+  <table class="dtable" style="width:100%"><thead><tr><th>Tela</th><th class="r">Vezes</th><th class="r">Dias</th><th>Última vez</th><th style="width:34%"></th></tr></thead><tbody>
+  ${L.map(t=>`<tr>
+    <td>${esc(t.label)}${t.conhecida===0?' <span class="dmini" title="tela sem rótulo cadastrado no relatório">(id)</span>':''}</td>
+    <td class="r"><b>${t.n}</b></td>
+    <td class="r">${t.dias||'—'}</td>
+    <td style="white-space:nowrap">${esc(accQuando(t.ultimo_em))}</td>
+    <td><div style="background:var(--line);border-radius:4px;height:8px;overflow:hidden"><div style="height:100%;width:${Math.max(2,Math.round(100*t.n/max))}%;background:${t.tela==='dashboards'?'var(--dourado)':'var(--verde)'}"></div></div></td>
+  </tr>`).join('')}</tbody></table>`;
 }
 function cfgAcessosRender(){
   const w=document.getElementById('cfgAcessosWrap'), d=ACC.data; if(!w||!d) return;
@@ -1393,7 +1451,6 @@ function cfgAcessosRender(){
     return;
   }
 
-  const dashUsa=U.filter(u=>u.usa_dashboard>0).length;
   const topTela=T[0]?T[0].label:'—';
   const kpi=(v,l,cor)=>`<div class="dkpi"><div class="v" ${cor?`style="color:${cor}"`:''}>${v}</div><div class="l">${l}</div></div>`;
 
@@ -1402,7 +1459,7 @@ function cfgAcessosRender(){
   <div class="dkpis">
     ${kpi(d.pessoas_ativas+' de '+d.cadastrados,'pessoas que entraram')}
     ${kpi(d.total_aberturas,'telas abertas')}
-    ${kpi(dashUsa+' de '+d.pessoas_ativas, 'abriram o Dashboard', dashUsa===d.pessoas_ativas?'var(--ok)':'var(--dourado)')}
+    ${kpi(d.total_entradas||0,'vezes que o app foi aberto')}
     ${kpi(N.length, 'nunca entraram', N.length?'var(--pend)':'var(--ok)')}
     ${kpi(esc(topTela),'tela mais usada')}
   </div>`;
@@ -1410,22 +1467,21 @@ function cfgAcessosRender(){
   // telas mais usadas
   h+=`<div class="dcard wide" style="margin-top:12px">${cotSecHead('bar_chart','Telas mais abertas','no período','')}
     ${dashBars(T.map(t=>({label:t.label, v:t.n, color:t.tela==='dashboards'?'var(--dourado)':'var(--verde)', sub:t.pct+'%'})))}
-    <div class="dmini" style="margin-top:8px">Em dourado o <b>Dashboards</b> — é a tela em que as pessoas caem ao entrar, então ela naturalmente aparece alto. O que diz se está sendo <i>usada</i> é a coluna "% no Dashboard" da tabela abaixo: se a pessoa abre o painel e sai direto pro Radar, o número dela fica baixo.</div></div>`;
+    <div class="dmini" style="margin-top:8px">Em dourado o <b>Dashboards</b> — é a tela em que as pessoas caem ao entrar, então ela aparece alto por construção, não por preferência. Para saber o que cada um usa de fato, abra a linha da pessoa na tabela abaixo.</div></div>`;
 
   // por pessoa
   h+=`<div class="dcard wide" style="margin-top:12px">${cotSecHead('person','Quem está usando','clique numa linha p/ ver as telas dela','')}
-    <div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Pessoa</th><th>Papel</th><th class="r">Telas abertas</th><th class="r">Dias ativos</th><th class="r">% no Dashboard</th><th>Último acesso</th></tr></thead><tbody>`;
+    <div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Pessoa</th><th>Papel</th><th class="r">Telas abertas</th><th class="r">Dias ativos</th><th class="r">Abriu o app</th><th>Último acesso</th></tr></thead><tbody>`;
   U.forEach(u=>{
-    const ab=ACC.aberto===u.bitrix_id;
+    const ab=ACC.aberto===String(u.bitrix_id);
     h+=`<tr style="cursor:pointer" onclick="accToggle('${esc(u.bitrix_id)}')">
       <td><span class="material-icons" style="font-size:14px;vertical-align:-3px;color:var(--muted)">${ab?'expand_more':'chevron_right'}</span> <b>${esc(u.nome)}</b></td>
       <td><span class="dchip" style="background:#eef4fb;color:#2b5fa8;font-size:10px">${esc(u.papel||'—')}</span></td>
-      <td class="r">${u.aberturas}</td>
+      <td class="r">${u.aberturas||'<span class="muted">—</span>'}</td>
       <td class="r">${u.dias_ativos}</td>
-      <td class="r"><b style="color:${u.pct_dashboard>=20?'var(--ok)':(u.usa_dashboard?'#c77f1a':'var(--pend)')}">${u.usa_dashboard?u.pct_dashboard+'%':'nunca abriu'}</b></td>
+      <td class="r">${u.entradas_app?u.entradas_app+'×':'<span class="muted" title="a medição de abertura do app é recente — ausência aqui não quer dizer que não entrou">—</span>'}</td>
       <td style="white-space:nowrap">${esc(accQuando(u.ultimo_em))}</td></tr>`;
-    if(ab) h+=`<tr><td colspan="6" style="background:#fbfdfb;padding:9px 16px">
-      ${dashBars((u.telas||[]).map(t=>({label:t.label, v:t.n, color:t.tela==='dashboards'?'var(--dourado)':'var(--verde)', sub:t.pct+'%'})))}</td></tr>`;
+    if(ab) h+=`<tr><td colspan="6" style="background:#fbfdfb;padding:9px 16px">${accDetalhe(u)}</td></tr>`;
   });
   h+=`</tbody></table></div></div>`;
 
@@ -1433,15 +1489,17 @@ function cfgAcessosRender(){
   if(N.length){
     h+=`<div class="dcard wide" style="margin-top:12px">${cotSecHead('person_off','Cadastrados que não entraram no período',N.length+' pessoa(s)','')}
       <div style="display:flex;gap:7px;flex-wrap:wrap">${N.map(u=>`<span class="dchip" style="background:${u.ativo?'var(--pend)':'#8a9299'};font-size:11px" title="${u.ativo?'usuário ativo que não usou o sistema':'usuário inativo'}">${esc(u.nome)}${u.ativo?'':' (inativo)'}</span>`).join('')}</div>
-      <div class="dmini" style="margin-top:8px">Usuário ativo que nunca abriu nenhuma tela: ou não sabe que o cockpit existe, ou não achou o link. Inativos aparecem em cinza e são esperados.</div></div>`;
+      <div class="dmini" style="margin-top:8px">Só entra aqui quem não aparece em <b>nenhuma</b> das duas medições: nem tela aberta, nem app aberto. Ou não sabe que o cockpit existe, ou não achou o link. Inativos aparecem em cinza e são esperados.</div></div>`;
   }
 
   // movimento por dia
   if(S.length>1){
     const max=Math.max(...S.map(x=>x.aberturas))||1;
     h+=`<div class="dcard wide" style="margin-top:12px">${cotSecHead('show_chart','Movimento por dia','telas abertas · pessoas distintas','')}
-      <div style="display:flex;align-items:flex-end;gap:3px;height:92px;overflow-x:auto;padding-top:4px">
-      ${S.map(x=>`<div title="${D(x.dia)} — ${x.aberturas} tela(s), ${x.pessoas} pessoa(s)" style="min-width:11px;flex:1;background:var(--verde);border-radius:3px 3px 0 0;height:${Math.max(3,Math.round(100*x.aberturas/max))}%"></div>`).join('')}
+      <div style="display:flex;align-items:flex-end;gap:3px;height:110px;overflow-x:auto;padding-top:4px">
+      ${S.map(x=>`<div title="${D(x.dia)} — ${x.aberturas} tela(s), ${x.pessoas} pessoa(s)" style="min-width:24px;flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center">
+        <div style="font-size:9.5px;color:var(--muted);line-height:1.1;margin-bottom:2px">${x.aberturas}</div>
+        <div style="width:100%;background:var(--verde);border-radius:3px 3px 0 0;height:${Math.max(3,Math.round(84*x.aberturas/max))}%"></div></div>`).join('')}
       </div>
       <div style="display:flex;justify-content:space-between" class="dmini"><span>${D(S[0].dia)}</span><span>${D(S[S.length-1].dia)}</span></div></div>`;
   }

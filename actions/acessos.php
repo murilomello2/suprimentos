@@ -19,15 +19,51 @@ require_once __DIR__ . '/../includes/db.php';
 
 define('ACC_RETENCAO_DIAS', 180);   // além disso a linha é descartada — não guardamos histórico eterno
 
-/** Telas conhecidas: rótulo p/ o relatório. Chave = o mesmo id usado no showView() do front. */
+/** Telas conhecidas: rótulo p/ o relatório. Chave = o mesmo id usado no showView() do front.
+ *
+ * ATENÇÃO (18/08/2026) — esta lista já foi a causa de um relatório MENTIROSO. Ela nasceu com 14 das
+ * 21 telas do showView(): faltavam envio, caixa, whats, fechamentos e as três telas de CONSULTA da
+ * obra (ovradar/ovcot/ovsc). Quem só usa tela de fora da lista tinha TODO ping descartado e caía em
+ * "nunca entraram" — foi o caso do papel 'obra' inteiro (Flávia, Beatriz, Cláudia, Guilherme), que
+ * só tem telas ov_*. Prova: o log de bilhetes de identidade (data/.auth_ok.log) mostrava a Flávia
+ * abrindo o app 12 vezes no mesmo período em que a aba Acessos dizia que ela nunca havia entrado.
+ * Por isso o ping deixou de EXIGIR a lista: tela desconhecida é gravada com o próprio id (ver
+ * acc_slug_ok). A lista virou só o dicionário de rótulos — esquecer de atualizar deixa o nome feio,
+ * não apaga o dado. Ao criar tela nova no showView(), acrescente aqui. */
 function acc_telas() {
     return ['dashboards'=>'Dashboards', 'radar'=>'Radar de Aquisições', 'matriz'=>'Matriz',
-            'cotacoes'=>'Cotações', 'solicitacoes'=>'Solicitações', 'buscaped'=>'Busca Pedidos',
-            'buscanf'=>'Buscar Notas',
+            'cotacoes'=>'Cotações', 'fechamentos'=>'Fechamentos', 'solicitacoes'=>'Solicitações',
+            'envio'=>'Envio de Pedidos', 'buscaped'=>'Busca Pedidos', 'buscanf'=>'Buscar Notas',
             'obras'=>'Obras', 'top20'=>'Top 20', 'oportunidades'=>'Oportunidades',
-            'oraculo'=>'Radar IA', 'config'=>'Configurações', 'audit'=>'Auditoria', 'updates'=>'Atualizações'];
+            'caixa'=>'Caixa de E-mail', 'whats'=>'WhatsApp',
+            'oraculo'=>'Radar IA', 'config'=>'Configurações', 'audit'=>'Auditoria', 'updates'=>'Atualizações',
+            // telas de CONSULTA do papel 'obra' — as que estavam faltando
+            'ovradar'=>'Obra: Status Curva A e B', 'ovcot'=>'Obra: Cotações', 'ovsc'=>'Obra: Solicitações Totvs'];
 }
 function acc_label($t) { $m = acc_telas(); return $m[$t] ?? $t; }
+/** Aceita qualquer id de tela com cara de id (o showView() só usa minúsculas sem acento). */
+function acc_slug_ok($t) { return (bool)preg_match('/^[a-z0-9_]{2,40}$/', $t); }
+
+/** ENTRADAS NO APP — a segunda fonte, independente da lista de telas.
+ *  Cada vez que alguém abre o cockpit pelo Bitrix, o includes/auth.php emite um bilhete assinado e
+ *  anota em data/.auth_ok.log. Isso é "abriu o app", sem depender de tela nenhuma — é a contraprova
+ *  que faltava para não repetir o erro de declarar "nunca entrou" quem entrou. O arquivo é reciclado
+ *  ao passar de 512 KB (auth_registrar_ok), então isto é medição recente, não histórico completo. */
+function acc_entradas($de) {
+    $f = __DIR__ . '/../data/.auth_ok.log';
+    $out = [];
+    if (!is_file($f)) return $out;
+    foreach (file($f, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $l) {
+        $j = json_decode($l, true); if (!$j) continue;
+        $q = (string)($j['q'] ?? ''); $dia = substr($q, 0, 10);
+        if ($dia === '' || $dia < $de) continue;
+        $id = trim((string)($j['id'] ?? '')); if ($id === '') continue;
+        if (!isset($out[$id])) $out[$id] = ['n'=>0, 'dias'=>[], 'ultimo'=>''];
+        $out[$id]['n']++; $out[$id]['dias'][$dia] = 1;
+        if ($q > $out[$id]['ultimo']) $out[$id]['ultimo'] = $q;
+    }
+    return $out;
+}
 
 /** Cria a tabela na primeira chamada (o projeto não tem migration runner; cada módulo se vira). */
 function acc_schema($pdo) {
@@ -69,8 +105,9 @@ try {
         // não autorizado não registra — e devolve ok assim mesmo: o ping NUNCA pode atrapalhar a navegação
         if (empty($perms['autorizado'])) { echo json_encode(['ok'=>true, 'ignorado'=>true]); exit; }
 
+        // grava QUALQUER tela com id válido — inclusive as que não estão no dicionário de rótulos
         $tela = trim((string)($in['tela'] ?? ''));
-        if ($tela === '' || !isset(acc_telas()[$tela])) { echo json_encode(['ok'=>true, 'ignorado'=>true]); exit; }
+        if ($tela === '' || !acc_slug_ok($tela)) { echo json_encode(['ok'=>true, 'ignorado'=>true]); exit; }
 
         $bid = trim((string)($in['me'] ?? ''));
         $nome = trim((string)($perms['nome'] ?? ''));
@@ -108,6 +145,9 @@ try {
         $st->execute([$de]); $linhas = $st->fetchAll();
     } catch (Throwable $e) { $linhas = []; }
 
+    /* Grão por (usuário × tela): além do contador, DIAS distintos e o último horário — é o que a linha
+       expandida da pessoa mostra ("usa Cotações 113 vezes, em 14 dias, a última hoje 10:12"). Sai de
+       graça: os dados já vinham por dia, era só não jogar o dia fora ao somar. */
     $porUsuario = []; $porTela = []; $porDia = [];
     foreach ($linhas as $l) {
         $b = trim((string)$l['bitrix_id']); $t = (string)$l['tela']; $n = (int)$l['n'];
@@ -115,7 +155,9 @@ try {
             'aberturas'=>0, 'dias'=>[], 'telas'=>[], 'ultimo_em'=>''];
         $u = &$porUsuario[$b];
         $u['aberturas'] += $n; $u['dias'][$l['dia']] = 1;
-        $u['telas'][$t] = ($u['telas'][$t] ?? 0) + $n;
+        if (!isset($u['telas'][$t])) $u['telas'][$t] = ['n'=>0, 'dias'=>[], 'ultimo'=>''];
+        $u['telas'][$t]['n'] += $n; $u['telas'][$t]['dias'][$l['dia']] = 1;
+        if ((string)$l['ultimo_em'] > $u['telas'][$t]['ultimo']) $u['telas'][$t]['ultimo'] = (string)$l['ultimo_em'];
         if ((string)$l['ultimo_em'] > $u['ultimo_em']) $u['ultimo_em'] = (string)$l['ultimo_em'];
         unset($u);
         $porTela[$t] = ($porTela[$t] ?? 0) + $n;
@@ -123,22 +165,39 @@ try {
         $porDia[$l['dia']]['aberturas'] += $n; $porDia[$l['dia']]['pessoas'][$b] = 1;
     }
 
+    $entradas = acc_entradas($de);          // abriu o app (bilhete) — independe de tela
+
     $out = [];
     foreach ($porUsuario as $b => $u) {
-        arsort($u['telas']);
+        uasort($u['telas'], fn($x, $y) => $y['n'] <=> $x['n']);
         $tot = max(1, $u['aberturas']);
-        $out[] = ['bitrix_id'=>$b, 'nome'=>$u['nome'],
+        $e   = $entradas[$b] ?? null;
+        $out[] = ['bitrix_id'=>(string)$b, 'nome'=>$u['nome'],
             'papel'=>$usuarios[$b]['papel'] ?? '', 'painel_atribuido'=>$usuarios[$b]['dashboard'] ?? '',
             'aberturas'=>$u['aberturas'], 'dias_ativos'=>count($u['dias']), 'ultimo_em'=>$u['ultimo_em'],
-            'telas'=>array_map(fn($k, $v)=>['tela'=>$k, 'label'=>acc_label($k), 'n'=>$v, 'pct'=>round(100*$v/$tot)],
+            'entradas_app'=>$e ? $e['n'] : 0, 'entrada_ultima'=>$e ? $e['ultimo'] : '',
+            'telas'=>array_map(fn($k, $v)=>['tela'=>$k, 'label'=>acc_label($k), 'n'=>$v['n'],
+                                            'dias'=>count($v['dias']), 'ultimo_em'=>$v['ultimo'],
+                                            'conhecida'=>isset(acc_telas()[$k]) ? 1 : 0,
+                                            'pct'=>round(100*$v['n']/$tot)],
                                array_keys($u['telas']), array_values($u['telas'])),
-            'usa_dashboard'=>(int)($u['telas']['dashboards'] ?? 0),
-            'pct_dashboard'=>round(100 * (int)($u['telas']['dashboards'] ?? 0) / $tot)];
+            'usa_dashboard'=>(int)($u['telas']['dashboards']['n'] ?? 0),
+            'pct_dashboard'=>round(100 * (int)($u['telas']['dashboards']['n'] ?? 0) / $tot)];
     }
-    usort($out, fn($a, $b) => $b['aberturas'] <=> $a['aberturas']);
+    /* Quem tem bilhete mas nenhuma tela: ENTROU. Aparece na tabela com 0 telas, em vez de virar
+       "nunca entrou" — a mentira que esta tela contava até hoje. */
+    foreach ($entradas as $b => $e) {
+        if (isset($porUsuario[$b])) continue;
+        if (!isset($usuarios[$b])) continue;                 // bilhete de quem não está no cadastro: ignora
+        $out[] = ['bitrix_id'=>(string)$b, 'nome'=>$usuarios[$b]['nome'], 'papel'=>$usuarios[$b]['papel'],
+            'painel_atribuido'=>$usuarios[$b]['dashboard'], 'aberturas'=>0, 'dias_ativos'=>count($e['dias']),
+            'ultimo_em'=>$e['ultimo'], 'entradas_app'=>$e['n'], 'entrada_ultima'=>$e['ultimo'],
+            'telas'=>[], 'usa_dashboard'=>0, 'pct_dashboard'=>0];
+    }
+    usort($out, fn($a, $b) => [$b['aberturas'], $b['entradas_app']] <=> [$a['aberturas'], $a['entradas_app']]);
 
     $nunca = [];
-    foreach ($usuarios as $b => $u) if (!isset($porUsuario[$b])) $nunca[] = $u;
+    foreach ($usuarios as $b => $u) if (!isset($porUsuario[$b]) && !isset($entradas[$b])) $nunca[] = $u;
 
     arsort($porTela);
     $totT = max(1, array_sum($porTela));
@@ -155,6 +214,7 @@ try {
         'ok'=>true, 'dias'=>$dias, 'de'=>$de, 'ate'=>date('Y-m-d'), 'medindo_desde'=>$desde,
         'usuarios'=>$out, 'nunca_entraram'=>$nunca, 'telas'=>$telas, 'serie'=>$dias_serie,
         'total_aberturas'=>array_sum($porTela), 'pessoas_ativas'=>count($out), 'cadastrados'=>count($usuarios),
+        'total_entradas'=>array_sum(array_map(fn($e)=>$e['n'], $entradas)),
     ], JSON_UNESCAPED_UNICODE);
 
 } catch (Throwable $e) {

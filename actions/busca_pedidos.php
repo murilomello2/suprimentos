@@ -375,16 +375,18 @@ try {
     // Antes o dropdown vinha da ficha de obras e sumia com tudo que não tinha de-para (faltava obra).
     // Aqui aparece exatamente o que existe em pedido — inclusive as áreas da sede da CAPRETZ.
     if (isset($_GET['obras'])) {
-        $cache = __DIR__ . '/../data/.bp_obras.json';   // varrer 15 mil linhas a cada abertura da tela é caro
+        // v2 no nome: a chave do rateio mudou de rótulo p/ centro de custo — o cache velho tem
+        // chaves que o filtro novo não entende. Varrer 15 mil linhas a cada abertura da tela é caro.
+        $cache = __DIR__ . '/../data/.bp_obras2.json';
         if (empty($_GET['recarregar']) && is_file($cache) && (time() - filemtime($cache)) < 1800) {
             echo file_get_contents($cache); exit;
         }
-        $mapaRazao = bp_mapa_razao($pdo);
-    $mapaObraCod = bp_mapa_obracod($pdo);
+        $mapaRazao   = bp_mapa_razao($pdo);
+        $mapaObraCod = bp_mapa_obracod($pdo);
         $agg = [];
-        bp_varrer('select=obra_efetiva_nome,obra_efetiva_fonte,coligada_cod,ccusto_cod,ccusto_nome'
+        bp_varrer('select=obra_efetiva_nome,obra_efetiva_fonte,coligada_cod,ccusto_cod,ccusto_nome,obra_cod'
                   . '&order=obra_efetiva_nome.asc,coligada_cod.asc,ccusto_cod.asc',
-            function (array $lote) use (&$agg, $mapaRazao) {
+            function (array $lote) use (&$agg, $mapaRazao, $mapaObraCod) {
                 foreach ($lote as $r) {
                     $cc    = trim((string)($r['coligada_cod'] ?? ''));
                     $razao = trim((string)($r['obra_efetiva_nome'] ?? ''));
@@ -397,11 +399,13 @@ try {
                     } else {
                         // A obra entra pelo NOME LIMPO: o filtro por razão social traz a compra direta E o
                         // rateio da CAPRETZ, então rotular "CAPRETZ/San Pietro" aqui mentiria sobre o conjunto.
-                        /* O rateio da CAPRETZ agora e resolvido pelo obra_cod, entao a CHAVE do filtro
-                           precisa ser o rotulo resolvido — usar so a razao social juntaria Prades e Licel
-                           num item so (ambas caem em centros de custo com razoes diferentes). */
-                        $ehRateio = ($cc === '1' && strpos($lbl, 'CAPRETZ/') === 0);
-                        $chave = $ehRateio ? ('O:' . $lbl) : ('R:' . $razao);
+                        /* O rateio da CAPRETZ é resolvido pelo obra_cod, então a CHAVE do filtro é o
+                           CENTRO DE CUSTO cru ("O:032") — só a razão social juntaria Prades e Licel num
+                           item só, e o rótulo não volta ao TOTVS como filtro (a opção aparecia no
+                           dropdown e escolher não filtrava nada). */
+                        $codObra  = trim((string)($r['obra_cod'] ?? ''));
+                        $ehRateio = ($cc === '1' && strpos($lbl, 'CAPRETZ/') === 0 && $codObra !== '');
+                        $chave = $ehRateio ? ('O:' . $codObra) : ('R:' . $razao);
                         if (!$ehRateio) $lbl = bp_obra_label($razao, 'COLIGADA', $mapaRazao);
                     }
                     if (!isset($agg[$chave])) $agg[$chave] = ['chave' => $chave, 'label' => $lbl, 'n' => 0];
@@ -456,6 +460,9 @@ try {
         if (strpos($obraKey, 'C:') === 0) {          // área da sede da CAPRETZ (Administrativo, Marketing…)
             $f[] = 'coligada_cod=eq.1';
             $f[] = 'ccusto_cod=eq.' . rawurlencode(substr($obraKey, 2));
+        } elseif (strpos($obraKey, 'O:') === 0) {    // obra que compra pela CAPRETZ — pelo centro de custo da SC
+            $f[] = 'coligada_cod=eq.1';
+            $f[] = 'obra_cod=eq.' . rawurlencode(substr($obraKey, 2));
         } elseif (strpos($obraKey, 'R:') === 0) {    // obra, pela razão social — pega direto e rateio
             $f[] = 'obra_efetiva_nome=eq.' . rawurlencode(substr($obraKey, 2));
             $soObraDeVerdade = true;
@@ -485,13 +492,17 @@ try {
     }
 
     $sel = 'select=pedido_numero,pedido_data,pedido_status,coligada_cod,coligada,ccusto_cod,fornecedor_cod,fornecedor_nome,fornecedor_fantasia,produto,qtd,und,preco_unit,valor_total,solic_numeros,solic_colidmov,pedido_usuario,item_observacao,obra_efetiva_nome,obra_efetiva_fonte,obra_cod,ccusto_nome,status_aprovacao,etapa_aprovacao,aprovador';
-    $mapaRazao = bp_mapa_razao($pdo);
-        $mapaObraCod = bp_mapa_obracod($pdo);
+    $mapaRazao   = bp_mapa_razao($pdo);
+    $mapaObraCod = bp_mapa_obracod($pdo);
 
     // ---- agrega item → PEDIDO (chave: coligada + número; o nº se repete entre coligadas) ----
     // A agregação roda A CADA PÁGINA que chega: nada de segurar as 15 mil linhas cruas na memória.
+    /* ⚠️ O use() PRECISA levar $mapaObraCod. Faltava — e como o PHP resolve variável não capturada
+       como null, o bp_obra_label caía no fallback da razão social sem reclamar: o PC 33744 da Licel
+       saía "CAPRETZ/San Pietro (cc 32?)" mesmo com o de-para certo carregado logo acima. O "(cc N?)"
+       no rótulo é justamente o sinal de que o mapa não chegou (ou que o centro de custo é novo). */
     $ped = []; $uSet = [];
-    $agrega = function (array $lote) use (&$ped, &$uSet, $mapaRazao) {
+    $agrega = function (array $lote) use (&$ped, &$uSet, $mapaRazao, $mapaObraCod) {
         foreach ($lote as $r) {
             $u = trim((string)($r['pedido_usuario'] ?? ''));
             if ($u !== '') $uSet[$u] = true;   // alimenta o filtro "quem criou" da tela

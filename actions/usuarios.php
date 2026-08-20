@@ -25,6 +25,11 @@ function preset($papel) {
         // sup_veta_leitor_em_post() no includes/db.php, que recusa POST deste papel em qualquer
         // endpoint (menos a telemetria) — esconder menu no cliente nunca foi trava.
         case 'obra':        return ['ver_escopo'=>'todas','editar_escopo'=>'nenhuma','menus'=>['ov_radar','ov_cotacoes','ov_solicitacoes'],'perm_admin'=>0];
+        /* ETR — auditoria do contrato de ganhos. Vê tudo o que precisa medir (cotação e apuração) e
+           não altera NADA: entra em sup_papeis_leitores() do db.php, que recusa POST em qualquer
+           endpoint. Nasce com "ver apuração de ganhos" ligada porque é a razão de ser do papel, e
+           SEM alçada de aprovar fechamento (homologar/assinar é da Caprem, não da auditoria). */
+        case 'etr':         return ['ver_escopo'=>'todas','editar_escopo'=>'nenhuma','menus'=>['cotacoes','fechamentos'],'perm_admin'=>0,'perms'=>['perm_ganhos']];
         default:            return $base;
     }
 }
@@ -152,7 +157,9 @@ try {
             'perm_dicionario' => (int)($in['perm_dicionario'] ?? 0),
             'perm_responsaveis' => (int)($in['perm_responsaveis'] ?? 0),
             'perm_fechamento' => (int)($in['perm_fechamento'] ?? 0),
-            'perm_ganhos' => (int)($in['perm_ganhos'] ?? 0),
+            /* perms do PRESET entram como default (o papel ETR nasce vendo a apuração de ganhos);
+               o que o admin marcar na tela continua mandando, campo a campo. */
+            'perm_ganhos' => (int)($in['perm_ganhos'] ?? (int)in_array('perm_ganhos', $p['perms'] ?? [], true)),
             'dashboard'     => (string)($in['dashboard'] ?? ''),
             'ativo'         => (int)($in['ativo'] ?? 1),
             'updated_at'    => date('c'),

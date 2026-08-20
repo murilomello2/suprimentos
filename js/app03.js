@@ -1340,6 +1340,11 @@ async function cotOpen(id){
 function cotNum(x){ return x!=null&&x!==''?Number(x).toLocaleString('pt-BR'):''; }
 // --- Itens a cotar: exibição (com observação = complemento) + edição (add/editar/excluir) ---
 function cotEditavel(){ const c=(COT.cur&&COT.cur.cotacao)||{}; if(IS_ADMIN) return true; if(!EU) return false;
+  /* papel de CONSULTA (obra, etr) não edita cotação NENHUMA — nem a que compartilharam com ele.
+     Sem esta linha, dois cliques de um comprador ("compartilhar cotação") transformavam a
+     auditoria em editora, sem passar por Configurações. O servidor recusa (sup_papeis_leitores);
+     aqui o botão nem aparece. */
+  if(typeof souLeitor==='function' && souLeitor()) return false;
   if(((EU.papel)||'')==='gerente') return true;   // GERENTE DE SUPRIMENTOS edita qualquer cotação (tudo no Histórico)
   if(c.criado_por!=null&&c.criado_por!==''&&String(c.criado_por)===String(EU.bitrix_id)) return true;
   return (c.colaboradores||[]).some(b=>String(b)===String(EU.bitrix_id));   // COLABORADOR compartilhado edita também (férias do criador)

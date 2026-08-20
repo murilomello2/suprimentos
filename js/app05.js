@@ -1024,13 +1024,22 @@ const MENU_VIEW={dashboard:'dashboards',radar:'radar',matriz:'matriz',cotacoes:'
   solicitacoes:'solicitacoes',envio:'envio',buscaped:'buscaped',buscanf:'buscanf',obras:'obras',
   oportunidades:'oportunidades',top20:'top20',updates:'updates',audit:'audit',config:'config',
   ov_radar:'ovradar',ov_cotacoes:'ovcot',ov_solicitacoes:'ovsc'};
-const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',gerente:'Gerente de Suprimentos',comprador:'Suprimentos',coordenador:'Coordenador',obra:'Obra (consulta)',personalizado:'Personalizado'};
+const PAPEL_LABEL={admin:'Administrador',diretor:'Diretor',gerente:'Gerente de Suprimentos',comprador:'Suprimentos',coordenador:'Coordenador',obra:'Obra (consulta)',etr:'ETR (consulta)',personalizado:'Personalizado'};
+/* ESPELHO de sup_papeis_leitores() no includes/db.php. A trava de verdade é lá — POST recusado em
+   qualquer endpoint. Aqui é só para não OFERECER um botão que o servidor vai recusar: botão que dá
+   403 é pior que botão ausente, porque parece defeito do sistema. Os dois lados andam juntos. */
+const PAPEIS_LEITORES=['obra','etr'];
+function souLeitor(){ return PAPEIS_LEITORES.includes((EU&&EU.papel)||''); }
 const PRESETS={
   admin:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','config'],adm:1},
   diretor:{ver:'todas',edit:'nenhuma',menus:['dashboard','radar','matriz','cotacoes'],adm:0},
   gerente:{ver:'todas',edit:'todas',menus:['dashboard','radar','matriz','cotacoes','solicitacoes','obras','oportunidades','top20'],adm:0},
   comprador:{ver:'todas',edit:'sel',menus:['radar','matriz','cotacoes'],adm:0},
   coordenador:{ver:'sel',edit:'nenhuma',menus:['radar','matriz'],adm:0},
+  /* ETR = auditoria do contrato de ganhos: vê a cotação e a apuração, não altera nada (a trava é no
+     servidor, em sup_papeis_leitores). Nasce com "ver apuração de ganhos" — é a razão do papel — e
+     SEM "aprovar fechamento": homologar e assinar é da Caprem. */
+  etr:{ver:'todas',edit:'nenhuma',menus:['cotacoes','fechamentos'],adm:0,perms:['pGanhos']},
   /* OBRA = consulta pura (engenheiro/coordenador de obra). Vê todas as obras; menus vazio até as 3
      telas de consulta existirem. A trava de escrita é no SERVIDOR (sup_veta_leitor_em_post no
      db.php) — esconder menu no cliente nunca foi trava. */
@@ -1110,11 +1119,16 @@ async function getCurrentUser(){
   // permissões específicas de vínculo/curadoria: valem pela PRÓPRIA flag (a permissão já É o grão fino) —
   // NÃO exigem "Edita obras" (decisão 23/jul: editar_escopo é só p/ o menu Obras/estrutura). Gerente e admin têm tudo.
   const _ger = ((EU&&EU.papel)||'')==='gerente';
-  CAN_CRONO = IS_ADMIN || _ger || !!(EU && EU.perm_crono);
-  CAN_ORC   = IS_ADMIN || _ger || !!(EU && EU.perm_orcamento);
-  CAN_QUANT = IS_ADMIN || _ger || !!(EU && EU.perm_quant);
-  CAN_DIC   = IS_ADMIN || _ger || !!(EU && EU.perm_dicionario);
-  CAN_RESP  = IS_ADMIN || _ger || !!(EU && EU.perm_responsaveis);
+  const _leitor = souLeitor();   // curadoria (vínculo/dicionário/responsável) é escrita: leitor não tem
+  CAN_CRONO = !_leitor && (IS_ADMIN || _ger || !!(EU && EU.perm_crono));
+  CAN_ORC   = !_leitor && (IS_ADMIN || _ger || !!(EU && EU.perm_orcamento));
+  CAN_QUANT = !_leitor && (IS_ADMIN || _ger || !!(EU && EU.perm_quant));
+  CAN_DIC   = !_leitor && (IS_ADMIN || _ger || !!(EU && EU.perm_dicionario));
+  CAN_RESP  = !_leitor && (IS_ADMIN || _ger || !!(EU && EU.perm_responsaveis));
+  /* PAPEL DE CONSULTA (obra, etr): zera TODA capacidade de escrita, mesmo que o cadastro tenha
+     ficado com "Edita obras: Todas" de um papel anterior — foi o caso do ETR, que estava como
+     gerente e por isso editava qualquer cotação. Quem manda é o papel, não o resíduo do cadastro. */
+  if(souLeitor()){ CAN_EDIT=false; CAN_FORN=false; CAN_COT=false; }
   CAN_EMAIL = IS_ADMIN || !!(EU && EU.perm_email);      // caixa do suprimentos@ (só leitura)
   CAN_WHATS = IS_ADMIN || !!(EU && EU.perm_whats);      // assistente de WhatsApp   // atribuir responsável em lote (independe de editar_escopo)
   applyMenus(); updateWhoami();
@@ -1141,7 +1155,7 @@ function applyMenus(){
      no app era de suprimentos; para um engenheiro ela entregava a tela INTERNA de Solicitações
      (que tem botões de ação), o cadastro de Obras e o Radar IA — nenhum deles marcado no cadastro
      dele. Para esse papel vale só o que o admin marcou. */
-  const ehLeitor = ((EU&&EU.papel)||'')==='obra';
+  const ehLeitor = souLeitor();
   document.querySelectorAll('.nav a[data-menu]').forEach(a=>{
     const m=a.getAttribute('data-menu');
     let show;

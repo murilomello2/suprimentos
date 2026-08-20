@@ -721,8 +721,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' && sup_etag_bate($SUP_ETAG)
         <div class="bar" style="flex-wrap:wrap;gap:14px;font-size:12.5px">
           <span><b>Administrador</b> — tudo + esta tela</span>
           <span><b>Diretor</b> — vê todas as obras (leitura)</span>
+          <span><b>Gerente de Suprimentos</b> — vê e edita tudo de suprimentos, inclusive cotação de outro comprador</span>
           <span><b>Suprimentos</b> — pode ser responsável por itens; vê todas, edita as obras liberadas</span>
           <span><b>Coordenador</b> — vê só as obras liberadas (leitura)</span>
+          <span><b>Obra (consulta)</b> — engenheiro acompanha o andamento; não altera nada</span>
+          <span><b>ETR (consulta)</b> — auditoria do contrato de ganhos: vê cotação e apuração; não altera nada</span>
           <span><b>Personalizado</b> — você define tudo</span>
         </div>
       </div>

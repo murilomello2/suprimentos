@@ -931,6 +931,10 @@ function can_edit_obra($perms, $obra_id) {
 function cot_pode_gerir($pdo, $me, $cotacao_id) {
     $perms = user_perms($pdo, $me);
     if (empty($perms['autorizado'])) return false;
+    /* PAPEL DE CONSULTA (obra, etr) nunca gere cotação — nem a que ele criou, nem a que
+       compartilharam com ele. Antes da trava, bastava um comprador marcá-lo como colaborador
+       (dois cliques, sem passar por Configurações) para a auditoria virar editora. */
+    if (in_array(($perms['papel'] ?? ''), sup_papeis_leitores(), true)) return false;
     if (!empty($perms['perm_admin']) || (($perms['papel'] ?? '') === 'gerente')) return true;
     if ($me === null || $me === '') return false;
     try { $r = $pdo->prepare("SELECT criado_por, colaboradores FROM cotacao WHERE id=?"); $r->execute([(int)$cotacao_id]); $r = $r->fetch(); }
@@ -1170,8 +1174,13 @@ function db_seed_if_empty() {
  * CONHECIDO grave, não autenticar ninguém — travar por dúvida derrubaria o app.
  * ==========================================================================*/
 
-/** Papéis que só consultam. Um papel novo entra aqui e herda a trava inteira. */
-function sup_papeis_leitores() { return ['obra']; }
+/** Papéis que só consultam. Um papel novo entra aqui e herda a trava inteira.
+ *  'obra' = engenheiro/coordenador de obra acompanhando o andamento.
+ *  'etr'  = auditoria do contrato ETR: precisa VER cotação e apuração de ganhos (é o que ela mede),
+ *           e não pode alterar nada — nem cotação alheia, nem cotação em que a compartilharam.
+ *           Quando a observação no fechamento for liberada, ela entra como exceção NOMEADA em
+ *           sup_post_liberado_para_leitor(), não afrouxando a trava inteira. */
+function sup_papeis_leitores() { return ['obra', 'etr']; }
 
 /** Scripts que um visualizador PODE chamar por POST (exceções conscientes). */
 function sup_post_liberado_para_leitor() {
@@ -1206,8 +1215,11 @@ function sup_veta_leitor_em_post() {
     } catch (Throwable $e) { return; }                // banco indisponível nunca vira bloqueio
     http_response_code(403);
     if (!headers_sent()) header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(['error' => 'Seu acesso ao Cockpit é de CONSULTA — você visualiza o andamento de '
-        . 'suprimentos, mas não altera. Se precisa mudar alguma coisa, fale com o comprador responsável.'],
+    echo json_encode(['error' => $papel === 'etr'
+        ? 'Seu acesso é de CONSULTA E AUDITORIA — você acompanha as cotações e a apuração de ganhos, '
+          . 'mas não altera nada no Cockpit. Qualquer correção passa pelo comprador responsável.'
+        : 'Seu acesso ao Cockpit é de CONSULTA — você visualiza o andamento de suprimentos, mas não '
+          . 'altera. Se precisa mudar alguma coisa, fale com o comprador responsável.'],
         JSON_UNESCAPED_UNICODE);
     exit;
 }

@@ -966,7 +966,8 @@ function userPreset(){
   const p=PRESETS[val('uPapel')]; if(!p)return; // 'personalizado' (null) mantém o que está marcado
   document.getElementById('uVer').value=p.ver; document.getElementById('uEdit').value=p.edit;
   document.getElementById('uAdmin').checked=!!p.adm;
-  ['pCrono','pOrc','pQuant','pDic','pRespLote','pEmail','pWhats','pFech','pGanhos'].forEach(id=>{const e=document.getElementById(id); if(e)e.checked=false;}); // presets definidos zeram as específicas
+  // presets zeram as específicas e religam só as que o papel exige (ETR nasce vendo a apuração de ganhos)
+  ['pCrono','pOrc','pQuant','pDic','pRespLote','pEmail','pWhats','pFech','pGanhos'].forEach(id=>{const e=document.getElementById(id); if(e)e.checked=(p.perms||[]).includes(id);});
   MENUS.forEach(m=>{const e=document.getElementById('mn-'+m[0]); if(e)e.checked=p.menus.includes(m[0]);});
   userToggleObras();
 }

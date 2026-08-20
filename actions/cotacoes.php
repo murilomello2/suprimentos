@@ -145,6 +145,8 @@ function cot_fechamentos($pdo, $cid) {
 function cot_can_edit($pdo, $me, $obra) {
     $perms = user_perms($pdo, $me);
     if (empty($perms['autorizado'])) return null;
+    // papel de CONSULTA (obra, etr) não cria nem edita cotação, tenha o escopo de obra que tiver
+    if (function_exists('sup_papeis_leitores') && in_array(($perms['papel'] ?? ''), sup_papeis_leitores(), true)) return null;
     // CRIAR cotação é dinâmica de comprador — liberado por PAPEL (admin/gerente/comprador), NÃO por edição de obra
     // (a maioria dos compradores tem editar_escopo='nenhuma'). can_edit_obra fica só p/ o menu Obras/estrutura.
     if (!empty($perms['perm_admin']) || in_array(($perms['papel'] ?? ''), ['gerente', 'comprador'], true)) return $perms;
@@ -165,6 +167,8 @@ function cot_can_manage($pdo, $me, $cid) {
     $q = $pdo->prepare("SELECT criado_por, colaboradores FROM cotacao WHERE id=?"); $q->execute([(int)$cid]); $r = $q->fetch();
     if (!$r) return false;
     $perms = user_perms($pdo, $me);
+    // papel de CONSULTA (obra, etr) não gere cotação nem quando compartilhada com ele — mesma regra do cot_pode_gerir()
+    if (function_exists('sup_papeis_leitores') && in_array(($perms['papel'] ?? ''), sup_papeis_leitores(), true)) return false;
     if (!empty($perms['perm_admin'])) return true;
     if (($perms['papel'] ?? '') === 'gerente') return true;   // GERENTE DE SUPRIMENTOS edita qualquer cotação (decisão 23/jul — tudo fica no Histórico)
     if ($me === null || $me === '') return false;

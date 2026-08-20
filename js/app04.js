@@ -2256,26 +2256,39 @@ function solRenderDash(){
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">${bkCard('r','0 a 7 dias')}${bkCard('a','8 a 14 dias')}${bkCard('l','15 a 30 dias')}${bkCard('c','+30 dias')}</div></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="panel"><b style="font-size:13px">Resumo por obra</b><div class="wrap" style="margin-top:6px;max-height:360px;overflow:auto"><table><thead><tr><th>Obra</th><th style="text-align:center">Total</th><th style="text-align:center;color:var(--ok)">Recentes</th><th style="text-align:center;color:var(--pend)">Críticos</th></tr></thead><tbody>
-        ${obras.map(([n,v])=>`<tr style="cursor:pointer" onclick="SOL.filt={obra:'${esc(n).replace(/'/g,"")}',comprador:'',status:'',bucket:'',busca:''};solTab('lista')"><td>${esc(n)}</td><td style="text-align:center"><b>${v.total}</b></td><td style="text-align:center;color:var(--ok)">${v.recentes||''}</td><td style="text-align:center;color:${v.criticos?'var(--pend)':'#bbb'}">${v.criticos||'0'}</td></tr>`).join('')}
+        ${obras.map(([n,v],i)=>`<tr style="cursor:pointer" onclick="solIrObra(${i})"><td>${esc(n)}</td><td style="text-align:center"><b>${v.total}</b></td><td style="text-align:center;color:var(--ok)">${v.recentes||''}</td><td style="text-align:center;color:${v.criticos?'var(--pend)':'#bbb'}">${v.criticos||'0'}</td></tr>`).join('')}
       </tbody></table></div></div>
       <div class="panel"><b style="font-size:13px">Resumo por comprador</b><div class="wrap" style="margin-top:6px;max-height:360px;overflow:auto"><table><thead><tr><th>Comprador</th><th style="text-align:center">Total</th><th style="text-align:center;color:var(--ok)">0-7</th><th style="text-align:center;color:#8a6d12">8-14</th><th style="text-align:center;color:#b5610f">15-30</th><th style="text-align:center;color:var(--pend)">+30</th></tr></thead><tbody>
-        ${comps.map(([n,v])=>`<tr style="cursor:pointer" onclick="SOL.filt={obra:'',comprador:'${esc(n).replace(/'/g,"")}',status:'',bucket:'',busca:''};solTab('lista')"><td>${esc(n)}</td><td style="text-align:center"><b>${v.total}</b></td><td style="text-align:center;color:var(--ok)">${v.r||''}</td><td style="text-align:center;color:#8a6d12">${v.a||''}</td><td style="text-align:center;color:#b5610f">${v.l||''}</td><td style="text-align:center;color:${v.c?'var(--pend)':'#bbb'}">${v.c||'0'}</td></tr>`).join('')}
+        ${comps.map(([n,v],i)=>`<tr style="cursor:pointer" onclick="solIrComp(${i})"><td>${esc(n)}</td><td style="text-align:center"><b>${v.total}</b></td><td style="text-align:center;color:var(--ok)">${v.r||''}</td><td style="text-align:center;color:#8a6d12">${v.a||''}</td><td style="text-align:center;color:#b5610f">${v.l||''}</td><td style="text-align:center;color:${v.c?'var(--pend)':'#bbb'}">${v.c||'0'}</td></tr>`).join('')}
       </tbody></table></div></div></div>`;
 }
+/* Clicar numa linha do painel leva à lista JÁ FILTRADA. Duas armadilhas moram aqui:
+   · "(sem comprador)" é um RÓTULO do resumo, não um nome — na lista essas SCs têm comprador_nome vazio,
+     então a igualdade nunca casava e as 35 sumiam (ficavam no limbo: sem linha no painel e sem opção no filtro).
+     O sentinel SOL_SEM atravessa o filtro e vira "está vazio?".
+   · o filtro precisa ser zerado por COMPLETO (inclusive cobertura), senão um filtro esquecido da visita
+     anterior continua cortando a lista e o clique parece "não ter levado a nada". */
+const SOL_SEM='__sem__';
+function solFiltZero(){ return {obra:'',comprador:'',status:'',bucket:'',busca:'',cobertura:''}; }
+function solIrObra(i){ const n=Object.keys(((SOL.data||{}).dashboard||{}).por_obra||{})[i]; if(n==null)return;
+  SOL.filt=Object.assign(solFiltZero(),{obra:n}); solTab('lista'); }
+function solIrComp(i){ const n=Object.keys(((SOL.data||{}).dashboard||{}).por_comprador||{})[i]; if(n==null)return;
+  SOL.filt=Object.assign(solFiltZero(),{comprador:n==='(sem comprador)'?SOL_SEM:n}); solTab('lista'); }
 function solRenderLista(){
   const w=document.getElementById('solwrap'), all=SOL.data.solicitacoes||[], f=SOL.filt, qn=(f.busca||'').toLowerCase();
   const obras=[...new Set(all.map(s=>s.nome_obra))].sort(), comps=[...new Set(all.map(s=>s.comprador_nome).filter(Boolean))].sort();
-  let rows=all.filter(s=>(!f.obra||s.nome_obra===f.obra)&&(!f.comprador||s.comprador_nome===f.comprador)&&(!f.status||s.status===f.status)&&(!f.bucket||s.bucket===f.bucket)&&(!f.cobertura||(s.cobertura||'vazio')===f.cobertura)&&(!qn||((s.numero+' '+s.primeiro+' '+(s.cotacoes||[]).map(x=>'#'+x.id+' '+(x.titulo||'')).join(' ')).toLowerCase().includes(qn))));
+  const nSem=all.filter(s=>!(s.comprador_nome||'').trim()).length;
+  let rows=all.filter(s=>(!f.obra||s.nome_obra===f.obra)&&(!f.comprador||(f.comprador===SOL_SEM?!(s.comprador_nome||'').trim():s.comprador_nome===f.comprador))&&(!f.status||s.status===f.status)&&(!f.bucket||s.bucket===f.bucket)&&(!f.cobertura||(s.cobertura||'vazio')===f.cobertura)&&(!qn||((s.numero+' '+s.primeiro+' '+(s.cotacoes||[]).map(x=>'#'+x.id+' '+(x.titulo||'')).join(' ')).toLowerCase().includes(qn))));
   rows.sort((a,b)=>(b.dias||0)-(a.dias||0));
   let html=`<div class="panel" style="margin-bottom:10px"><div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">
      <div class="search" style="min-width:180px"><span class="material-icons" style="color:var(--muted)">search</span><input id="solBusca" placeholder="Buscar nº ou item…" value="${esc(f.busca)}" oninput="SOL.filt.busca=this.value;solRenderLista()"></div>
      <select onchange="SOL.filt.obra=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todas as obras</option>${obras.map(o=>`<option value="${esc(o)}" ${o===f.obra?'selected':''}>${esc(o)}</option>`).join('')}</select>
-     <select onchange="SOL.filt.comprador=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todos compradores</option>${comps.map(c=>`<option value="${esc(c)}" ${c===f.comprador?'selected':''}>${esc(c)}</option>`).join('')}</select>
+     <select onchange="SOL.filt.comprador=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todos compradores</option>${comps.map(c=>`<option value="${esc(c)}" ${c===f.comprador?'selected':''}>${esc(c)}</option>`).join('')}${nSem?`<option value="${SOL_SEM}" ${f.comprador===SOL_SEM?'selected':''}>⚠ (sem comprador) · ${nSem}</option>`:''}</select>
      <select onchange="SOL.filt.bucket=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todos prazos</option><option value="r" ${f.bucket==='r'?'selected':''}>No prazo (0-7)</option><option value="a" ${f.bucket==='a'?'selected':''}>Atenção (8-14)</option><option value="l" ${f.bucket==='l'?'selected':''}>Atrasado (15-30)</option><option value="c" ${f.bucket==='c'?'selected':''}>Crítico (+30)</option></select>
      <select onchange="SOL.filt.status=this.value;solRenderLista()" style="font-size:12px;padding:6px"><option value="">Todos status</option>${Object.entries(SOL_ST).map(([k,v])=>`<option value="${k}" ${f.status===k?'selected':''}>${v[1]}</option>`).join('')}</select>
      <select onchange="SOL.filt.cobertura=this.value;solRenderLista()" style="font-size:12px;padding:6px" title="cobertura de cotação"><option value="">Toda cobertura</option><option value="vazio" ${f.cobertura==='vazio'?'selected':''}>⚪ Sem cotação</option><option value="parcial" ${f.cobertura==='parcial'?'selected':''}>🟡 Parcial</option><option value="total" ${f.cobertura==='total'?'selected':''}>🟢 Cotada</option></select>
      <span class="muted" style="font-size:11.5px">${rows.length} de ${all.length}</span>
-     <button class="btn-ghost" style="margin-left:auto;padding:5px 10px" onclick="SOL.data=null;SOL.filt={obra:'',comprador:'',status:'',bucket:'',busca:''};solLoad()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">refresh</span> Atualizar fila</button>
+     <button class="btn-ghost" style="margin-left:auto;padding:5px 10px" onclick="SOL.data=null;SOL.filt=solFiltZero();solLoad()"><span class="material-icons" style="font-size:15px;vertical-align:-3px">refresh</span> Atualizar fila</button>
    </div></div><div class="wrap"><table><thead><tr><th style="width:26px;text-align:center"><input type="checkbox" title="selecionar todas do filtro" onchange="solSelAll(this.checked)"></th><th>Pedido</th><th style="text-align:center">Itens</th><th>Descrição</th><th>Obra</th><th>Emissão</th><th style="text-align:center">Dias</th><th>Status</th><th>Comprador</th><th>Observações</th><th>Ações</th></tr></thead><tbody>`;
   SOL.sel=SOL.sel||{}; SOL._rowsKeys=rows.map(s=>s.coligada+'|'+s.numero);
   for(const s of rows){ const key=s.coligada+'|'+s.numero, ex=SOL.exp[key];
@@ -2285,7 +2298,7 @@ function solRenderLista(){
       <td class="muted" style="font-size:11.5px">${esc(s.nome_obra)}</td><td class="muted" style="font-size:11.5px;white-space:nowrap">${s.emissao?D(s.emissao):'—'}</td>
       <td style="text-align:center">${solPill(s)}</td>
       <td style="background:${st[2]};border-left:3px solid ${st[0]}">${CAN_COT?`<select onchange="solStatus('${esc(key)}',this.value,this)" style="font-size:11px;padding:3px 4px;font-weight:700;color:${st[0]};background:${st[2]};border:1px solid ${st[0]};border-radius:6px;cursor:pointer">${Object.entries(SOL_ST).map(([k,v])=>`<option value="${k}" ${s.status===k?'selected':''}>${v[1]}</option>`).join('')}</select>`:`<span class="dchip" style="background:${st[0]};color:#fff;font-weight:700">${st[1]}</span>`}</td>
-      <td class="muted" style="font-size:11.5px">${esc(s.comprador_nome||'—')}</td>
+      <td class="muted" style="font-size:11.5px">${(s.comprador_nome||'').trim()?esc(s.comprador_nome):`<span class="dchip" style="background:var(--pend);color:#fff;font-weight:700;font-size:9.5px;cursor:pointer" title="A obra desta solicitação não tem comprador atribuído — clique para atribuir em Obras & compradores" onclick="solTab('obras')">sem comprador</span>`}</td>
       <td>${CAN_COT?`<input value="${esc(obs)}" title="${esc(obs)}" oninput="this.title=this.value" onchange="solObs('${esc(key)}',this.value,this)" placeholder="anotação…" style="width:150px;font-size:11px;padding:3px 5px">`:`<span title="${esc(obs)}">${esc(obs.slice(0,32))}${obs.length>32?'…':''}</span>`}</td>
       <td style="white-space:nowrap"><button class="btn-ghost" style="padding:2px 6px" title="Copiar mensagem para orçamento" onclick="solCopiar('${esc(key)}')"><span class="material-icons" style="font-size:15px">content_copy</span></button>
         ${(s.cotacoes&&s.cotacoes.length)

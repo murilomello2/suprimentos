@@ -236,6 +236,19 @@ try {
         $dadosObra = solic_dados_obra($pdo);
         $atendidos = solic_atendidos(!empty($_GET['recarregar']));
         if (!$obraMap) { foreach ($pdo->query("SELECT * FROM solic_obra") as $o) $obraMap[$o['coligada'].'|'.$o['obra_cod']] = $o; }
+
+        /* NOME DO COMPRADOR — quem manda é o cadastro atual (usuario.nome pelo bitrix_id), não o
+           SNAPSHOT gravado em solic_obra no dia da atribuição. Enquanto o snapshot valia, a mesma
+           pessoa aparecia duas vezes no resumo ("Natalia  Antunes" com espaço duplo × "Natalia
+           Antunes"), cada linha com uma fatia da fila. O snapshot só entra se o id não existir mais. */
+        $compNomes = [];
+        foreach ($pdo->query("SELECT bitrix_id, nome FROM usuario") as $u)
+            $compNomes[trim((string)$u['bitrix_id'])] = preg_replace('/\s+/u', ' ', trim((string)$u['nome']));
+        $solCompNome = function ($o) use ($compNomes) {
+            $id = trim((string)($o['comprador_id'] ?? ''));
+            if ($id !== '' && ($compNomes[$id] ?? '') !== '') return $compNomes[$id];
+            return preg_replace('/\s+/u', ' ', trim((string)($o['comprador_nome'] ?? '')));
+        };
         $ovMap = []; foreach ($pdo->query("SELECT * FROM solic_overlay") as $v) $ovMap[$v['coligada'].'|'.$v['numero']] = $v;
 
         if (isset($_GET['obras'])) {
@@ -249,7 +262,7 @@ try {
                 $out[] = ['coligada'=>$p['coligada'],'obra_cod'=>$p['obra_cod'],'n'=>$p['n'],
                     'nome_comercial'=>$o['nome_comercial'] ?? sol_nome_default($p['coligada'],$p['obra_cod']),
                     'cnpj'=>$o['cnpj'] ?? '', 'endereco'=>$o['endereco'] ?? '',
-                    'comprador_id'=>$o['comprador_id'] ?? '','comprador_nome'=>$o['comprador_nome'] ?? '',
+                    'comprador_id'=>$o['comprador_id'] ?? '','comprador_nome'=>$solCompNome($o),
                     'radar_obra_id'=>$o['radar_obra_id'] ?? null]; }
             usort($out, fn($a,$b)=>$b['n']-$a['n']);
             $usuarios = $pdo->query("SELECT bitrix_id, nome FROM usuario WHERE ativo=1 ORDER BY nome")->fetchAll();
@@ -279,7 +292,7 @@ try {
             $k = $s['coligada'].'|'.$s['obra_cod'];
             $o = function_exists('solic_obra_de') ? solic_obra_de($obraMap,$s['coligada'],$s['obra_cod']) : ($obraMap[$k] ?? null);
             $nomeObra = $o['nome_comercial'] ?? sol_nome_default($s['coligada'], $s['obra_cod']);
-            $compNome = $o['comprador_nome'] ?? ''; $compId = $o['comprador_id'] ?? '';
+            $compNome = $solCompNome($o); $compId = $o['comprador_id'] ?? '';
             $ov = $ovMap[$s['coligada'].'|'.$s['numero']] ?? null;
             $status = $ov['status'] ?? 'pendente';
             $dias = sol_dias($s['emissao']);
